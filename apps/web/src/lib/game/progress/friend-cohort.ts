@@ -5,7 +5,7 @@ import { getPrisma } from "../../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { isHiddenBy, readGameBlocks } from "../blocks";
 import { labelTarget, openGameTexts } from "../crypto";
-import { departedLabels } from "../account-deletion";
+import { departedLabels } from "../row";
 import { gameMediaUrl } from "../views";
 import { gameHttpError } from "../http/errors";
 import type { FriendSeries } from "./friends";

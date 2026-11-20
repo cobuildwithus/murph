@@ -1,4 +1,5 @@
-import type { Game, GameEntry, GameInvitee, GamePlayer } from "@prisma/client";
+import { isRecord } from "../primitives";
+import type { Prisma, Game, GameEntry, GameInvitee, GamePlayer } from "@prisma/client";
 import { GAME_ENTRY_KINDS, type GameEntryKind, type GameStatus } from "./contract";
 import { hasGameIdentity } from "./roster";
 import { parseStoredTerms, type RuleState } from "./rules";
@@ -62,3 +63,15 @@ export function fromDbDate(date: Date | null): string | null {
   return date ? date.toISOString().slice(0, 10) : null;
 }
 
+
+/** Each viewer keeps only their own encrypted name for a deleted person. */
+export type DepartedLabel = { ownerMemberId: string; nameEncrypted: string | null };
+export function departedLabels(value: Prisma.JsonValue | null): DepartedLabel[] {
+  if (value === null) return [];
+  if (!Array.isArray(value) || value.length > 9) throw new Error("Stored departure labels are malformed.");
+  return value.map(label => {
+    if (!isRecord(label) || typeof label.ownerMemberId !== "string"
+      || (label.nameEncrypted !== null && typeof label.nameEncrypted !== "string")) throw new Error("Stored departure label is malformed.");
+    return { ownerMemberId: label.ownerMemberId, nameEncrypted: label.nameEncrypted };
+  });
+}

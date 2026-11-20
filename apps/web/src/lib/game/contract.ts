@@ -283,6 +283,7 @@ export interface GamePendingChange {
 }
 
 export interface GameChangeControls {
+  requiresGroupChat?: boolean;
   canStartNow: boolean;
   canEdit: boolean;
   canEditSchedule: boolean;
@@ -331,6 +332,7 @@ export type GameCommand =
   | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean; credit?: true; text?: string }
   /** DELETE /games/:id cancels an unstarted invite. */
   | { type: "cancelInvite"; gameId: string }
+  | { type: "dismissInvite"; gameId: string }
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
   | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
   | ({ type: "setProfile" } & SetProfileBody)
@@ -543,6 +545,7 @@ export interface GameView {
 }
 
 export interface GameHomeView {
+  groupInvitations?: { gameId: string; token: string }[];
   canStartGroups?: boolean;
   me: { notForMe: string[]; memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
     /** Caller-only verified NANP area-code hint. Missing means unknown. */
@@ -659,7 +662,7 @@ export type GameInvitePreview =
       expiresAt: string | null;
     }
   | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
-  | { status: "expired"; reason?: "cancelled"; talkDelivery?: "pending" | "sent" | "failed" };
+  | { status: "expired"; reason?: "cancelled"; noPlayableDay?: true; talkDelivery?: "pending" | "sent" | "failed" };
 
 export type GameErrorCode =
   | "REPLY_USED"
@@ -691,6 +694,8 @@ export type GameErrorCode =
   | "CHANGE_PENDING"
   | "CHANGE_EXPIRED"
   | "CHAT_UNAVAILABLE"
+  | "GAME_CHAT_REQUIRED"
+  | "GAME_CHAT_CHANGED"
   /** One of you blocked the other: no invite or rematch between you. */
   | "PLAYER_UNAVAILABLE"
   /** The write-time content check refused these words. */

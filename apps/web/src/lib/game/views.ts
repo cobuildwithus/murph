@@ -102,6 +102,7 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  completedDays?: Map<string, Set<number>>;
   /** Request-local verified phones, loaded only for eligible ticket counterparties. */
   verifiedPhones?: ReadonlyMap<string, string>;
   entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
@@ -361,6 +362,16 @@ function canShowHistoryRoster(input: GameViewInput, other: RulePlayer | undefine
   return input.state.game.seats === 10 ? input.multiplayer === true : !!other && isPairRoster(input.state.players) && !input.hiddenMemberIds?.has(other.memberId);
 }
 
+function viewerChangeControls(input: GameViewInput) {
+  const { state, viewerId } = input;
+  const controls = gameChangeControls(state, input.now, input.pendingChange ?? null, viewerId);
+  const player = playerFor(state, viewerId);
+  if (state.game.seats === 10 && state.game.status === "live" && !state.game.chatContainerMemberId && player && !player.leftAt) {
+    return { ...controls, requiresGroupChat: true };
+  }
+  return controls;
+}
+
 export function buildGameView(input: GameViewInput): GameView {
   const { state, viewerId } = input;
   const { game } = state;
@@ -371,7 +382,7 @@ export function buildGameView(input: GameViewInput): GameView {
     ...(input.multiplayer ? { maxPlayers: game.seats === 10 ? 10 as const : 2 as const, invitedCount: game.invitees?.length ?? 1,
       permissions: permissions(input), ...(game.seats === 10 ? { group: groupView(input) } : {}) } : {}),
     // Live groups share pending asks across app and chat; controls belong to the viewer.
-    changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null, input.viewerId),
+    changeControls: viewerChangeControls(input),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
     ...recapView(input),
@@ -478,7 +489,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today, entries).score : 0),
     seat: player.seat,
-    streak: playerStreak(input.state, player, now),
+    streak: playerStreak(input.state, player, now, input.completedDays?.get(player.memberId)),
   };
 }
 
