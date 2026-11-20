@@ -227,12 +227,15 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
   it("serializes opposite native rematch requests through the create route over three rounds", async () => {
     const { actor, peer, id } = await livePair();
     let previousGameId: string = id;
+    const rematchIds: string[] = [];
+    const detail = (gameId: string) => game(read(request(peer, undefined, "GET"), { params: Promise.resolve({ id: gameId }) }));
     const terms = {
       tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }],
       schedule: { count: 3 }, stakes: [{ kind: "prize", item: "Lunch" }],
     };
     for (let round = 0; round < 3; round += 1) {
       await game(settle(request(actor), { params: Promise.resolve({ id: previousGameId }) }));
+      expect(await detail(previousGameId)).toHaveProperty("rematchGameId", null);
       const gameIds = [randomUUID(), randomUUID()];
       const responses = await Promise.all([actor, peer].map((token, index) => create(request(token, {
         gameId: gameIds[index], previousGameId, inviteeFirstName: "Friend", terms,
@@ -247,8 +250,16 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
         .toEqual([{ id: rematch.id, status: "invited" }]);
       expect(await game(accept(request([actor, peer][1 - winner], { termsVersion: rematch.terms.n, timeZone: "UTC" }),
         { params: Promise.resolve({ token: rematch.inviteToken! }) }))).toMatchObject({ id: rematch.id, status: "live" });
+      expect(await detail(previousGameId)).toHaveProperty("rematchGameId", rematch.id);
+      rematchIds.push(rematch.id);
       previousGameId = rematch.id;
     }
+    await game(settle(request(actor), { params: Promise.resolve({ id: previousGameId }) }));
+    const [firstRematch] = rematchIds;
+    await getPrisma().game.update({ where: { id: firstRematch }, data: { settledAt: new Date(0) } });
+    const feed: GameHomeView = await (await home(request(peer, undefined, "GET"))).json();
+    expect(feed.games.map(shown => shown.id)).not.toContain(firstRematch);
+    expect(await detail(id)).toHaveProperty("rematchGameId", firstRematch);
   });
 
   it("refuses a second rematch ask and lets the phone read Home before accepting the offer", async () => {

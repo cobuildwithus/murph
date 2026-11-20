@@ -309,6 +309,22 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect((await readHome(self)).me).not.toHaveProperty("areaCode");
   });
 
+  it("keeps every unexpired wallet ticket when newer redeemed tickets fill the history window", async () => {
+    const holder = await member("Nora", "UTC"), debtor = await member("Sam", "UTC");
+    const now = new Date();
+    const { gameId } = await seedSettledGame({ challenger: holder, opponent: debtor, settledAt: now });
+    const ticket = { gameId, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0] };
+    const open = Array.from({ length: 203 }, () => ({ ...ticket, id: randomUUID(), createdAt: new Date(now.getTime() - 86_400_000) }));
+    const redeemed = Array.from({ length: 205 }, () => ({ ...ticket, id: randomUUID(), createdAt: now, status: "redeemed", redeemedAt: now }));
+    await getPrisma().gameTicket.createMany({ data: [...open, ...redeemed] });
+    const wallet = (await readHome(holder)).wallet;
+    expect(wallet.held.map(row => row.id).sort()).toEqual(open.map(row => row.id).sort());
+    expect(wallet.redeemed).toHaveLength(200);
+    expect((await readHome(debtor)).wallet.owed).toHaveLength(open.length);
+    await ok(holder, { type: "redeem", ticketId: open[0].id });
+    expect((await readHome(holder)).wallet.held).toHaveLength(open.length - 1);
+  });
+
   it("batch reads distinct verified ticket debtors once for Home and skips the read with no eligible tickets", async () => {
     const db = getPrisma();
     const holder = await member("Holder", "UTC");

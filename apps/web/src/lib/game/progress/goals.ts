@@ -65,8 +65,23 @@ export function rungFor(definition: RungDefinition, total: number, on: string | 
     where: entry.where, on, shareAwardId: null, toGo: on === null ? toGo : null };
 }
 
+function rungKind(unit: MeasureSeries["unit"]) {
+  return unit === "reps" ? "height" : unit === "seconds" ? "time" : null;
+}
+
+function earnedRungs(measureId: string, awards: readonly StoredAward[]) {
+  return awards.filter(award => award.measureId === measureId && ["landmark", "time"].includes(award.kind));
+}
+
+function goalEligibility(measure: MeasureSeries, awards: readonly StoredAward[], total: number) {
+  const earned = earnedRungs(measure.id, awards).map(award => award.data.rung as RungDefinition);
+  const highest = Math.max(total, ...earned.map(rung => rung.at));
+  const passed = new Set(earned.map(rung => rungEntry(rung).id));
+  return (entry: BankEntry | FoundEntry) => !passed.has(entry.id) && rungDefinition(entry, measure).at > highest;
+}
+
 export function measureRungs(measure: MeasureSeries, state: MeasureState): RungDefinition[] {
-  const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
+  const kind = rungKind(measure.unit);
   if (kind === null || measure.pending) return [];
   const entries: (BankEntry | FoundEntry)[] = ladder(kind, measure.id === "sleep" ? "sleep" : "plank");
   if (state.goal && "rungId" in state.goal) {
@@ -79,7 +94,7 @@ export function measureRungs(measure: MeasureSeries, state: MeasureState): RungD
 export function measureLadder(measure: MeasureSeries, state: MeasureState, awards: readonly StoredAward[], units: ClientUnits): Ladder | null {
   if (measure.pending || !["reps", "seconds"].includes(measure.unit)) return null;
   const total = measure.amounts.reduce((sum, day) => sum + day.amount, 0);
-  const passed = awards.filter(award => award.measureId === measure.id && ["landmark", "time"].includes(award.kind))
+  const passed = earnedRungs(measure.id, awards)
     .map(award => ({ ...rungFor(award.data.rung as RungDefinition, total, award.on, units), shareAwardId: award.id })).sort((a, b) => b.at - a.at);
   const highest = Math.max(total, ...passed.map(rung => rung.at));
   const rungs = measureRungs(measure, state).map(rung => rungFor(rung, total, null, units));
@@ -166,27 +181,29 @@ export async function readGoals(memberId: string, query: GoalsQuery, units: Clie
   const total = cumulativePoints(measure.amounts).at(-1)?.[1] ?? 0;
   if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, total, units,
     { measureId: measure.id, legs: snapshot.states.get(measure.id)?.legs ?? [], awards: snapshot.awards }, memberPlaceFixer(memberId));
-  const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
+  const kind = rungKind(measure.unit);
   if (!kind) return { tiles: [], match: null, suggestions: [], note: null, route: null };
-  const passed = new Set(snapshot.awards.filter(award => award.measureId === measure.id && ["landmark", "time"].includes(award.kind))
-    .map(award => rungEntry(award.data.rung as RungDefinition).id));
-  const eligible = BANK.filter(entry => entry.kind === kind && !passed.has(entry.id) && rungDefinition(entry, measure).at > total);
+  const canPick = goalEligibility(measure, snapshot.awards, total);
+  const eligible = BANK.filter(entry => entry.kind === kind && canPick(entry));
   const eligibleIds = new Set(eligible.map(entry => entry.id));
   const render = (entry: BankEntry | FoundEntry) => rungFor(rungDefinition(entry, measure), total, null, units);
   const tiles = ladder(kind, "plank").filter(entry => eligibleIds.has(entry.id)).slice(0, 6).map(render);
   if (!query.q) return { tiles, match: null, suggestions: [], note: null, route: null };
   if (!query.find) {
-    const matches = search(query.q).filter(entry => entry.kind === kind);
+    const matches = search(query.q).filter(entry => eligibleIds.has(entry.id));
     return { tiles, match: matches.length ? render(matches[0]) : null, suggestions: matches.slice(1, 5).map(render), note: null, route: null };
   }
   const budget = await hostedAuthRateLimitStorage(getPrisma()).consume(`progress-goal-lookup:member:${memberId}`, { max: 20, window: 86400 });
   if (!budget.allowed) throw hostedOnboardingError({ code: "AUTH_RATE_LIMITED", httpStatus: 429,
     message: "You've used today's goal lookups. Try again tomorrow.", retryable: true });
   const result = await lookupGoal(kind, query.q, eligible);
+  if (result.found && !canPick(result.found)) return { tiles, match: null, suggestions: [], note: reachedGoalMessage, route: null };
   if (result.found) await patchMeasureState(memberId, measure.id, { found: result.found }, beforeMutationTx);
   return { tiles, match: result.found ? render(result.found) : null,
     suggestions: result.closest.map(id => render(eligible.find(entry => entry.id === id)!)), note: result.note, route: null };
 }
+
+const reachedGoalMessage = "You’ve already reached this goal. Choose one further ahead.";
 
 export async function setMeasure(memberId: string, measureId: string, body: SetMeasureBody, beforeMutationTx: BeforeProgressMutation): Promise<string> {
   const snapshot = await readOwnSeries(memberId, new Date());
@@ -207,15 +224,20 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
   }
   if ("from" in body.goal) throw invalidGameRequest("Choose a route for a distance measure.");
   const id = body.goal.rungId;
-  const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
+  const kind = rungKind(measure.unit);
+  const total = measure.amounts.reduce((sum, day) => sum + day.amount, 0);
+  const canPick = goalEligibility(measure, snapshot.awards, total);
   if (id.startsWith("found:")) {
     await patchMeasureState(memberId, measureId, previous => {
       if (previous.found?.id !== id || previous.found.kind !== kind) throw invalidGameRequest("Look up this goal again before choosing it.");
+      if (!canPick(previous.found)) throw invalidGameRequest(reachedGoalMessage);
       return { goal: { found: previous.found } };
     }, beforeMutationTx);
     return measureId;
   }
-  if (!BANK.some(entry => entry.id === id && entry.kind === kind)) throw invalidGameRequest("Choose a goal for this measure.");
+  const entry = BANK.find(entry => entry.id === id && entry.kind === kind);
+  if (!entry) throw invalidGameRequest("Choose a goal for this measure.");
+  if (!canPick(entry)) throw invalidGameRequest(reachedGoalMessage);
   await patchMeasureState(memberId, measureId, { goal: { rungId: id } }, beforeMutationTx);
   return measureId;
 }
