@@ -4807,6 +4807,7 @@ function shouldRetainWhoopProviderRevision(input: {
   incoming: EventRecord;
   externalRef: ExternalRef;
   indexedExternalRef: ExternalRef;
+  indexedRecord: EventRecord;
   matchedEntries: ResolvedDeviceEventIdentity["matchedEntries"];
 }): boolean {
   const { index, refKey, latest, incoming, externalRef, indexedExternalRef, matchedEntries } = input;
@@ -4820,6 +4821,11 @@ function shouldRetainWhoopProviderRevision(input: {
   if (comparison !== 0) {
     return false;
   }
+  // Recovery placement used to follow the cycle end. On an equal recovery revision
+  // retain the stored placement if every provider-owned measurement field agrees.
+  if (externalRef.resourceType === "recovery" && incoming.kind === "observation"
+    && deviceEventContentKey({ ...input.indexedRecord, occurredAt: incoming.occurredAt, dayKey: incoming.dayKey })
+      === deviceEventContentKey(incoming)) return true;
   const baselineRevision = whoopSleepTypeProviderBaselineRevision(index, refKey, latest.id, incoming);
   if (baselineRevision === null) {
     throw new VaultError(
@@ -5332,6 +5338,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
           incoming: entry.record,
           externalRef,
           indexedExternalRef: indexedProviderMatch.indexedExternalRef,
+          indexedRecord: indexedProviderMatch.indexedRecord,
           matchedEntries,
         })
       )
