@@ -12,6 +12,7 @@ import {
   ComputerHandoffManagedRetryScreen,
   ComputerHandoffManagedWaitingScreen,
   ComputerHandoffSavingScreen,
+  ComputerHandoffUnavailableScreen,
 } from "@/src/components/computer-use/computer-handoff-screens";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
@@ -81,6 +82,9 @@ export function ComputerHandoffStudy() {
       </LinkPageStudyState>
       <LinkPageStudyState label="Expired">
         <ComputerHandoffExpiredScreen contactOption={STUDY_CONTACT} />
+      </LinkPageStudyState>
+      <LinkPageStudyState id="computer-handoff-unavailable" label="Missing or someone else’s">
+        <ComputerHandoffUnavailableScreen />
       </LinkPageStudyState>
     </div>
   );

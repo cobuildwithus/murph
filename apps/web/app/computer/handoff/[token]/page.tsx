@@ -9,11 +9,10 @@ import {
   ComputerHandoffManagedRetryScreen,
   ComputerHandoffManagedWaitingScreen,
   ComputerHandoffSavingScreen,
+  ComputerHandoffUnavailableScreen,
 } from "@/src/components/computer-use/computer-handoff-screens";
 import {
-  LINK_PAGE_PILL_CLASS,
   LinkPageFrame,
-  LinkPageScreen,
   LinkPageNightGround,
 } from "@/src/components/link-page/link-page-shell";
 import {
@@ -57,11 +56,7 @@ export default async function ComputerHandoffPage({
   if (!state) {
     return (
       <LinkPageFrame>
-        <LinkPageScreen
-          actions={<a className={LINK_PAGE_PILL_CLASS} href="/home">Return to Murph</a>}
-          detail="Return to Murph and ask for a new link."
-          title="This link isn’t available."
-        />
+        <ComputerHandoffUnavailableScreen />
       </LinkPageFrame>
     );
   }
