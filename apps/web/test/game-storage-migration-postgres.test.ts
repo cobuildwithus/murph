@@ -71,7 +71,7 @@ function expectedPair(id: string, viewerId: string) {
     // Both players posted days 0 to 2; live and early-settled replies stay open until the natural end.
     entryReplies: new Map(), replyEligibleEntryIds: new Set(id !== "waiting" ? state.entries.filter(entry => entry.memberId !== viewerId).map(entry => entry.id) : []),
     tickets: id === "settled" ? [{ id: "ticket", gameId: id, stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], players, status: "open", createdAt: at, redeemedAt: null }] : [] };
-  return buildGameView(input);
+  return { ...buildGameView(input), ...(id === "settled" ? { rematchGameId: "waiting" } : {}) };
 }
 
 describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", () => {

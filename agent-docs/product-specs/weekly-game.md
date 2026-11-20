@@ -933,6 +933,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   never agrees to one. The refused player reads the offer on Home and answers
   with Shake on it or Suggest changes. Repeating your own create with the same
   game id returns that game.
+  A settled game's detail includes `rematchGameId`, the ID of its direct open
+  or settled rematch visible to the viewer, or null if none exists. An expired
+  invitation or a void game leaves the chain available for a new offer.
   Independent games and their rematches do not conflict. The pair's ten-open-game
   cap still applies, including to addressed rematches.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,

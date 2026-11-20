@@ -3233,6 +3233,17 @@ export async function readGame(gameId: string, memberId: string, multiplayer = f
   const { clock, games: [loaded] } = await loadCurrent([gameId], multiplayer, memberId);
   if (!loaded || !canView(loaded, memberId)) return null;
   const [view] = await buildViews([loaded], memberId, clock, undefined, multiplayer);
+  if (view.status === "settled") {
+    const rematch = await getPrisma().game.findFirst({
+      where: { previousGameId: gameId, maxPlayers: loaded.row.maxPlayers, AND: [
+        { OR: [{ status: { in: ["settled", "live"] } },
+          { status: { in: ["invited", "negotiating"] }, OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: clock } }] }] },
+        { OR: [{ players: { some: { memberId, leftAt: null } } }, { status: "invited", invitees: { some: { memberId } } }] },
+      ] },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true },
+    });
+    view.rematchGameId = rematch?.id ?? null;
+  }
   return view;
 }
 
