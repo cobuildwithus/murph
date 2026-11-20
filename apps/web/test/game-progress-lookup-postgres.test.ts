@@ -71,6 +71,21 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("Progress found-goal PostgreSQL journeys", () => {
+  it("removes a newly reached goal from search and refuses the stale selection", async () => {
+    const { memberId, entryId } = await fixture();
+    const search = async () => goalsSchema.parse(await (await goals(request(memberId, "/goals?measure=pushups.reps&q=great-blue-hole"))).json());
+    const goal = (await search()).match!;
+    expect(goal.id).toBe("great-blue-hole");
+    await db.gameEntry.update({ where: { id: entryId }, data: { payloadEncrypted: await sealGameText(
+      { memberId, table: "game_entry", rowId: entryId, field: "payload" },
+      JSON.stringify({ exercise: "pushups", count: goal.at, reps: [] })) } });
+    expect(await search()).toMatchObject({ match: null, suggestions: [] });
+    const refused = await pick(memberId, goal.id);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: { code: "INVALID_REQUEST", message: expect.stringContaining("already reached") } });
+    expect((await state(memberId)).goal).toBeUndefined();
+  });
+
   it("earns A, replaces cache and goal with B, withdraws the last post and renders A in every system", async () => {
     const { memberId, entryId } = await fixture();
     const a = goalsSchema.parse(await (await lookup(memberId)).json()).match!;
@@ -80,6 +95,7 @@ describe.skipIf(!enabled)("Progress found-goal PostgreSQL journeys", () => {
     expect((await progress(request(memberId))).status).toBe(200);
     const saved = (await readAwards(memberId)).find(award => award.key === `rung:pushups.reps:${a.id}`)!;
     expect(saved.on).toBe("2026-11-14");
+    expect((await pick(memberId, a.id)).status).toBe(400);
     mocks.provider.mockResolvedValue(responseB());
     const b = goalsSchema.parse(await (await lookup(memberId)).json()).match!;
     expect(b.id).not.toBe(a.id); expect((await pick(memberId, b.id)).status).toBe(200);
@@ -92,6 +108,9 @@ describe.skipIf(!enabled)("Progress found-goal PostgreSQL journeys", () => {
       expect(view.medals.find(medal => medal.id === saved.id)).toMatchObject({ face: { generic: true }, title: "Synthetic Tower", earnedOn: "2026-11-14" });
     }
     expect(await readAwards(memberId)).toEqual(original);
+    const lowerGoal = await goals(request(memberId, "/goals?measure=pushups.reps&q=great-blue-hole"));
+    expect(goalsSchema.parse(await lowerGoal.json()).match).toBeNull();
+    expect((await pick(memberId, "great-blue-hole")).status).toBe(400);
     expect((await pick(memberId, a.id)).status).toBe(400);
     expect((await state(memberId)).goal).toMatchObject({ found: { id: b.id } });
   });
