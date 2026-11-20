@@ -97,11 +97,11 @@ describe("today's check-ins", () => {
     const source = pullups();
     post(source, 3, "photo", null);
     const [before] = read(source);
-    expect(before).toMatchObject({ gameId: "pullups", measureId: "pullups.reps",
+    expect(before).toMatchObject({ gameId: "pullups", dayIndex: 4, measureId: "pullups.reps", entryId: null,
       after: { total: { value: 40, text: "40" }, today: { value: 20, text: "20" } } });
     post(source, 4, "photo", null);
     expect(before.after).toEqual(measureView(gameSeries([source], memberId, new Map())[0], {}, [], "2026-11-05", "us"));
-    expect(read(source)).toEqual([{ gameId: "pullups", measureId: "pullups.reps", after: null }]);
+    expect(read(source)).toEqual([{ gameId: "pullups", dayIndex: 4, measureId: "pullups.reps", entryId: "pullups:4:1", after: null }]);
   });
 
   it("starts a measure no post has added to yet, as its first read will show it", () => {
@@ -114,15 +114,16 @@ describe("today's check-ins", () => {
   it("names the measure a counted post went to, not the task's", () => {
     const source = game("move", task("Move", null));
     post(source, 4, "reps", { exercise: "pushups", count: 25, reps: [] });
-    expect(read(source)).toEqual([{ gameId: "move", measureId: "pushups.reps", after: null }]);
+    expect(read(source)).toEqual([{ gameId: "move", dayIndex: 4, measureId: "pushups.reps", entryId: "move:4:0", after: null }]);
   });
 
-  it("promises nothing for a task Murph is still reading, a day off, a game that's over, one you left or Running with vault runs", () => {
+  it("promises nothing for a task Murph is still reading, a post you didn't finish, a day off, a game that's over, one you left or Running with vault runs", () => {
+    const unfinished = pullups(); post(unfinished, 4, "words", null); unfinished.state.entries[0].incomplete = true;
     const off = pullups(); off.state.game.terms.versions[0].schedule = { days: [0] };
     const settled = pullups(); settled.state.game.status = "settled";
     const left = pullups(); left.state.players[0].leftAt = new Date("2026-11-04T12:00:00Z");
     const run = game("run", task("2 miles run", { quantity: 2, unit: "miles", name: "run" }));
-    for (const source of [game("pending", task("Move", null)), off, settled, left]) expect(read(source)).toEqual([]);
+    for (const source of [game("pending", task("Move", null)), unfinished, off, settled, left]) expect(read(source)).toEqual([]);
     expect(read(run, true)).toEqual([]);
     expect(read(run)).toMatchObject([{ measureId: "run.meters", after: { today: { value: 3218.688 } } }]);
   });
