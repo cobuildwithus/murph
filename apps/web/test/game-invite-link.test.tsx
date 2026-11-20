@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
+import { inviteShareCopy } from "@/app/g/[token]/invite-copy";
 import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
 import { isOtherMobileUserAgent } from "@/src/lib/apple-mobile";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
@@ -55,19 +56,32 @@ describe("weekly game invite link", () => {
     const { default: sharp } = await import("sharp");
     const { loadMurphHeroOgAssets, OG_SIZE } = await import("@/app/_og/og-shared");
     const { fonts } = await loadMurphHeroOgAssets();
-    const preview = { ...OPEN, terms: { ...OPEN.terms,
+    const longTerms = { ...OPEN, terms: { ...OPEN.terms,
       tasks: [0, 1].map(seat => ({ seat, text: "Practice a different balance exercise every morning before breakfast." })),
       stakes: OPEN.terms.stakes.map(stake => ({ ...stake, item: "Choose a weekend activity for everyone to enjoy together outside." })),
     } };
-    const image = new ImageResponse(createElement(GameInviteShareCard, { preview }), { ...OG_SIZE, fonts });
-    const pixels = sharp(Buffer.from(await image.arrayBuffer()));
-    for (const top of [0, OG_SIZE.height - 1]) {
-      const row = await pixels.clone().extract({ left: 0, top, width: OG_SIZE.width, height: 1 }).removeAlpha().raw().toBuffer();
-      // Allow the soft ticket shadow on the ground, but no cream or gold ticket pixels.
-      for (const channel of [0, 1, 2]) {
-        expect(Math.abs(row[600 * 3 + channel]! - row[channel]!)).toBeLessThan(8);
+    // A group's word can be as long as any game text: the prize still fits.
+    const longGroup = { ...longTerms, maxPlayers: 10 as const, lengthDays: 28, startsOn: "2026-11-23",
+      group: { id: "grp_synthetic", word: "early morning neighborhood walking and stretching club" },
+      terms: { ...longTerms.terms, tasks: [], defaultTask: "Walk two miles before work, then stretch for ten minutes on the porch." },
+    };
+    for (const preview of [longTerms, longGroup]) {
+      const image = new ImageResponse(createElement(GameInviteShareCard, { preview }), { ...OG_SIZE, fonts });
+      const pixels = sharp(Buffer.from(await image.arrayBuffer()));
+      for (const top of [0, OG_SIZE.height - 1]) {
+        const row = await pixels.clone().extract({ left: 0, top, width: OG_SIZE.width, height: 1 }).removeAlpha().raw().toBuffer();
+        // Allow the soft ticket shadow on the ground, but no cream or gold ticket pixels.
+        for (const channel of [0, 1, 2]) {
+          expect(Math.abs(row[600 * 3 + channel]! - row[channel]!)).toBeLessThan(8);
+        }
       }
     }
+  });
+
+  it("names a group challenge with the article its word takes", () => {
+    const group = (word: string) => inviteShareCopy({ ...OPEN, maxPlayers: 10, group: { id: "grp_synthetic", word } }).title;
+    expect(group("office")).toBe("Leo started an office challenge");
+    expect(group("family")).toBe("Leo started a family challenge");
   });
 
   it("opens the Murph app by default, or the configured scheme", () => {

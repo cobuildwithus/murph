@@ -70,12 +70,14 @@ export function describeStartDate(date: string): string {
 export function inviteShareCopy(preview: GameInvitePreview | null): { title: string; description: string } {
   if (preview?.status !== "open") return { description: "Ask for a new link.", title: CLOSED_INVITE_TITLE };
   if (preview.maxPlayers === 10) {
+    const word = preview.group?.word || "group";
     return {
       description: [
         describeGroupTask(preview),
         ...preview.terms.stakes.map((stake) => `Winner gets ${stake.item}.`),
       ].join(" "),
-      title: `${preview.inviterFirstName} started a ${preview.group?.word || "group"} challenge`,
+      // "an office challenge": by the first letter, which reads right for the words groups use.
+      title: `${preview.inviterFirstName} started ${/^[aeiou]/iu.test(word) ? "an" : "a"} ${word} challenge`,
     };
   }
   return {
