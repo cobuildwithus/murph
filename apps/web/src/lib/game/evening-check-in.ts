@@ -63,11 +63,17 @@ async function gamesInNearbyZones(candidates: Games, db: Prisma.TransactionClien
   const memberIds = [...new Set(candidates.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
   const profiles = await db.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, timeZone: true } });
   const zonesByMember = new Map(profiles.map(profile => [profile.memberId, normalizeIanaTimeZone(profile.timeZone)]));
-  const games = candidates.filter(game => {
-    const zones = remainingPlayers(game.state).map(player => zonesByMember.get(player.memberId));
-    return zones.length > 0 && zones.every(Boolean) && gameZoneSpreadHours(zones, now) < GAME_ROOM_FAR_APART_HOURS;
-  });
-  return { games, zonesByMember };
+  // One room message has one evening, so every game it covers needs its players close together, across games
+  // too. Games join in ID order while they fit; the rest keep their private reminders.
+  const admitted = new Set<string>();
+  let zones: (string | null | undefined)[] = [];
+  for (const game of [...candidates].sort((a, b) => a.row.id.localeCompare(b.row.id))) {
+    const own = remainingPlayers(game.state).map(player => zonesByMember.get(player.memberId));
+    if (!own.length || !own.every(Boolean) || gameZoneSpreadHours([...zones, ...own], now) >= GAME_ROOM_FAR_APART_HOURS) continue;
+    admitted.add(game.row.id);
+    zones = [...zones, ...own];
+  }
+  return { games: candidates.filter(game => admitted.has(game.row.id)), zonesByMember };
 }
 
 /** A private check-in is only eligible when the room's own check-in cannot cover this game. */

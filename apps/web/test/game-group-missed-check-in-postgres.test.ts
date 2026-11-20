@@ -12,7 +12,7 @@ import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissed
 import { drainGameChatLifecycle, readOldestReceiptPerChat } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
-import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn } from "@/src/lib/game/evening-check-in";
+import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn, roomCoversEveningGame } from "@/src/lib/game/evening-check-in";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { advanceHostedMailboxConsumedSeqByLane, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
@@ -317,6 +317,20 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     events.push(gameEveningEventId(room.roomId, date));
     expect(await reserveGameEveningCheckIn(room.roomId, [pair, group], eveningAt)).toBe(1);
     expect((await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId)).toEqual([pair]);
+  });
+
+  it("covers only one of two distant cohorts in a shared room and leaves the other its private reminders", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4), [ava, leo, sam, maya] = room.people.map(person => person.id) as [string, string, string, string];
+    await db.gameProfile.updateMany({ where: { memberId: { in: [sam, maya] } }, data: { timeZone: "Asia/Tokyo" } });
+    const near = await room.addGame(10, [], 2);
+    const far = await room.addGame(10, ["UTC", "UTC", "Asia/Tokyo", "Asia/Tokyo"], 4);
+    await db.gamePlayer.updateMany({ where: { gameId: far, memberId: { in: [ava, leo] } }, data: { leftAt: now } });
+    const covered = await Promise.all([near, far].map(id => roomCoversEveningGame(room.roomId, id, eveningAt)));
+    // One room evening can't address both cohorts: one stays on private reminders.
+    expect(covered.filter(Boolean)).toHaveLength(1);
+    const batch = (await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId) ?? [];
+    expect(batch).not.toContain([near, far][covered.indexOf(false)]);
   });
 
   it("keeps a bound pair visible alongside ten group games", async () => {
