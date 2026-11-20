@@ -88,10 +88,13 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     expect((await remindersRoute.PUT(request(sessions[0]!, "PUT", legacy(refreshed)))).status).toBe(200);
     expect((await remindersRoute.PATCH(request(sessions[1]!, "PATCH", { push: true }))).status).toBe(200);
     const patch = (body: object) => remindersRoute.PATCH(request(sessions[1]!, "PATCH", body));
-    expect((await patch({ minutes: 600 })).status).toBe(200);
-    expect(await readGameReminders(owner)).toMatchObject({ push: true, minutes: 600, offGameIds: [gameId], gameMinutes: { [gameId]: 985 } });
     expect((await patch({ gameId, minutes: null })).status).toBe(200);
-    expect(await readGameReminders(owner)).toMatchObject({ offGameIds: [gameId], gameMinutes: {} });
+    expect(await readGameReminders(owner)).toMatchObject({ push: true, offGameIds: [gameId], gameMinutes: {} });
+    expect((await patch({ gameId, minutes: 700 })).status).toBe(200);
+    expect(await readGameReminders(owner)).toMatchObject({ gameMinutes: { [gameId]: 700 } });
+    // The top time moves every game, its own time included, as in the app and chat.
+    expect((await patch({ minutes: 600 })).status).toBe(200);
+    expect(await readGameReminders(owner)).toMatchObject({ minutes: 600, offGameIds: [gameId], gameMinutes: {} });
     expect((await patch({ gameId, on: true })).status).toBe(200);
     expect((await readGameReminders(owner)).offGameIds).toEqual([]);
   });

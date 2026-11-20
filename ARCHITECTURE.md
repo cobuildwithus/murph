@@ -8052,7 +8052,8 @@ authority; Web returns only that member's live tasks, schedule, status, peer
 first names and reminder settings. Native clients PATCH `/api/game/v1/me/reminders`
 with one changed preference: `{push}`, `{text}`, or `{minutes}` for the profile,
 `{gameId, on}` or `{gameId, minutes}` for one live seat. Times are local minutes
-since midnight; a null seat time restores the profile default. Build 120 reads
+since midnight; a null seat time restores the profile default. A profile
+`{minutes}` moves every live seat to that time, as the app's top time and chat do. Build 120 reads
 the full model with GET and saves it with PUT. The server stores a digest of the
 returned preferences per authenticated session. A missing or stale read returns
 409 and requires a fresh GET before editing again. A successful replacement
