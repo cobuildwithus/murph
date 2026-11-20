@@ -319,6 +319,16 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(await run(third, { termsVersion: 1, timeZone: "America/New_York", token: rematch.inviteToken ?? "missing", type: "join" })).toMatchObject({ ok: false });
   });
 
+  it("keeps the earned pair result and ticket when deletion is the first read after the deadline", async () => {
+    const survivor = await member("Maya"), leaver = await member("Priya");
+    const gameId = await live(survivor, leaver);
+    await words(survivor, gameId, "Finished my circuit");
+    await getPrisma().game.update({ where: { id: gameId }, data: { devClockOffsetMs: 14n * 86_400_000n } });
+    expect(await deleteAccount(leaver)).toMatchObject({ calledOff: 0 });
+    expect(await readGame(gameId, survivor)).toMatchObject({ status: "settled", result: { outcome: "won" },
+      tickets: [{ youHold: true, left: true }] });
+  });
+
   it.each(["winner deletes (creator)", "loser deletes (invitee)"] as const)("keeps a finished game and its tickets as history when the %s", async (label) => {
     const leo = await member("Leo");
     const ava = await member("Ava");
