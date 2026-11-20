@@ -132,7 +132,7 @@ it("freezes pre-join health and earns both exercise passes after the response, v
   expect(progressSchema.parse(await response.json()).medals).toEqual([]);
   expect(states).toEqual([]); expect(awards).toEqual([]); expect(mocks.raw).not.toHaveBeenCalled();
   await drain();
-  expect((await healthState())?.baseline).toEqual({ value: 74, from: "2026-09-23", to: "2026-10-20" });
+  expect((await healthState())?.baseline).toEqual({ value: 74, source: "Apple Watch", from: "2026-09-23", to: "2026-10-20" });
   expect(mocks.raw.mock.calls[0].slice(2)).toEqual([["restingHeartRate", "steps", "sleep"], { browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" }]);
   const earned = await readAwards("ava");
   expect(earned.filter(award => award.kind === "health").map(award => award.data.level).sort()).toEqual([1, 2, 3]);

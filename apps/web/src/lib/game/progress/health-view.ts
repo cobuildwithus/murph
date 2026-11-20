@@ -4,12 +4,13 @@ import type { Amount, Health, HealthMetric, Measure, SavedHealth } from "./contr
 import type { StoredAward } from "./awards";
 import { HEALTH_RECS, healthAgeTitle, healthMean14, healthMedalFace, healthWinText } from "./health";
 import { formatAmount, formatNumber } from "./format";
-import { rankAge, agePercentile, type AgeProfile } from "./norms";
+import { heartRateWindowSource, rankAge, agePercentile, type AgeProfile } from "./norms";
 
 export interface HealthMetricInput {
   id: HealthMetric["id"];
   daily: RawHealthPoint[];
   baseline: number | null;
+  baselineSource?: string | null;
   step: number;
   direction: number;
   wins: StoredAward[];
@@ -49,7 +50,7 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   const direction = change === null || change === 0 ? "flat" : change * metric.direction > 0 ? "better" : "worse";
   const highest = Math.max(0, ...metric.wins.filter(award => award.kind === "health").map(award => award.data.level as number));
   const target = metric.baseline === null ? null : metric.baseline + metric.direction * (highest + 1) * metric.step;
-  const source = metric.daily.at(-1)?.source ?? null;
+  const source = metric.id === "restingHeartRate" ? heartRateWindowSource(metric.daily, addDaysToIsoDate(today, -13), today) : null;
   const daily: HealthMetric["daily"] = [];
   const values = new Map(metric.daily.map(point => [point.date, point.value]));
   // Every day of the replica's one-year window, gaps explicit, so a chart's whole span has its history.
@@ -77,7 +78,7 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
     next: target === null ? null : { title: metric.wins.length ? "Next" : "Next win", detail:
       `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}`,
       face: healthMedalFace(metric.id, (highest + 1) * metric.step) },
-    age: healthAgeView(metric.id, metric.baseline, current, source, profile, joinedOn) };
+    age: healthAgeView(metric.id, metric.baseline, current, source, metric.baselineSource ?? null, profile, joinedOn) };
 }
 
 export function savedHealthView(joinedOn: string, today: string, metrics: HealthMetricInput[]): SavedHealth {
@@ -118,9 +119,9 @@ function usualNight(daily: HealthMetric["daily"], today: string): number | null 
 }
 
 function healthAgeView(metric: HealthMetric["id"], baseline: number | null, current: number | null,
-  source: string | null, profile: AgeProfile, joinedOn: string): HealthMetric["age"] {
+  source: string | null, baselineSource: string | null, profile: AgeProfile, joinedOn: string): HealthMetric["age"] {
   if (current === null || baseline === null) return null;
-  const rank = rankAge(metric, current, profile, source), previous = rankAge(metric, baseline, profile, source);
+  const rank = rankAge(metric, current, profile, source), previous = rankAge(metric, baseline, profile, baselineSource);
   if (!rank || !previous) return null;
   const percentile = agePercentile(metric, rank), who = profile.sex === "female" ? "women" : "men";
   return { percentile,

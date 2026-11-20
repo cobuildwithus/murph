@@ -6,7 +6,7 @@ import { rankAge } from "../src/lib/game/progress/norms";
 
 const joinedOn = "2026-10-21", today = "2026-11-16";
 const profile = { age: 35, sex: "female" as const };
-const metric: HealthMetricInput = { id: "restingHeartRate", baseline: 70.51, step: 1, direction: -1, wins: [],
+const metric: HealthMetricInput = { id: "restingHeartRate", baseline: 70.51, baselineSource: "Apple Watch", step: 1, direction: -1, wins: [],
   daily: Array.from({ length: 14 }, (_, index) => ({ date: addDaysToIsoDate(today, index - 13), value: 69.53,
     source: "Apple Watch", observedAt: `${today}T12:00:00Z` })) };
 

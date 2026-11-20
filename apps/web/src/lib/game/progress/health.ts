@@ -45,6 +45,7 @@ export interface HealthAchievementContext {
   metric: HealthMetric["id"];
   joinedOn: string;
   baseline: number;
+  baselineSource?: string | null;
   means: RawHealthPoint[];
   profile: AgeProfile;
   step: number;
@@ -72,13 +73,13 @@ export function healthSteps(context: HealthAchievementContext): Candidate[] {
 }
 
 export function healthAgeShare(context: HealthAchievementContext): Candidate[] {
-  if (context.metric === "sleep") return [];
+  const baseline = rankAge(context.metric, context.baseline, context.profile, context.baselineSource ?? null);
+  if (!baseline) return [];
   const candidates: Candidate[] = [];
   for (const threshold of [25, 100 / 3, 50]) {
     const levels = context.means.flatMap(point => {
-      const baseline = rankAge(context.metric, context.baseline, context.profile, point.source);
       const current = rankAge(context.metric, point.value, context.profile, point.source);
-      if (!baseline || !current) return [];
+      if (!current) return [];
       return [{ date: point.date, value: agePercentile(context.metric, baseline) < threshold
         && agePercentile(context.metric, current) >= threshold ? 1 : 0 }];
     });
@@ -141,5 +142,8 @@ export function heldHealthLevels(levels: readonly HealthDay[], joinedOn: string)
 
 function coveredMean(daily: readonly HealthDay[], from: string, through: string, minimum: number): number | null {
   const values = daily.filter(point => point.date >= from && point.date <= through).map(point => point.value);
-  return values.length < minimum ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+  if (values.length < minimum) return null;
+  // Center the sum so identical readings exactly on a percentile cut stay on it.
+  const first = values[0];
+  return first + values.reduce((sum, value) => sum + (value - first), 0) / values.length;
 }

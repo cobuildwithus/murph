@@ -94,7 +94,7 @@ it("keeps the normal saved win tiles, headline and next target when the live rea
   const context = { metric: "restingHeartRate" as const, joinedOn, baseline: 74, step: 1, direction: -1,
     profile: { age: 35, sex: "female" as const }, means: snapshot().numbers.restingHeartRate.daily
       .filter(point => point.date >= joinedOn).map(point => ({ ...point, value: 72 })) };
-  const wins: StoredAward[] = [...healthSteps(context), ...healthAgeShare({ ...context, baseline: 100,
+  const wins: StoredAward[] = [...healthSteps(context), ...healthAgeShare({ ...context, baseline: 100, baselineSource: "Apple Watch",
     means: context.means.map(point => ({ ...point, value: 20 })) })].map((award, index) => ({ ...award,
     id: `saved-${index}`, createdAt: new Date(`${today}T12:00:00Z`), seenAt: null }));
   mocks.measures.mockResolvedValue([{ lookup: "restingHeartRate", stateEncrypted: "synthetic-sealed" }]);
@@ -150,7 +150,7 @@ it("returns private uncached health with raw baseline and all crossed levels", a
       age: expect.objectContaining({ typical: expect.objectContaining({ unit: "bpm", value: expect.any(Number) }) }) }),
       expect.any(Object), expect.any(Object)] });
   expect(mocks.patch).toHaveBeenCalledWith("ava", "restingHeartRate",
-    { baseline: { value: 74, from: "2026-09-23", to: "2026-10-20" } }, expect.any(Function));
+    { baseline: { value: 74, from: "2026-09-23", to: "2026-10-20", source: "Apple Watch" } }, expect.any(Function));
   const candidates = mocks.settle.mock.calls[0][1];
   expect(candidates.filter((award: { kind: string }) => award.kind === "health").map((award: { data: { level: number } }) => award.data.level))
     .toEqual([1, 2, 3]);
@@ -210,7 +210,7 @@ it.each([
   const metric = healthSchema.parse(await response.json()).metrics.find(metric => metric.id === id)!;
   expect(metric.baseline?.value).toBe(baseline);
   expect(mocks.patch).toHaveBeenCalledWith("ava", id,
-    { baseline: { value: baseline, from: "2026-09-23", to: "2026-10-20" } }, expect.any(Function));
+    { baseline: { value: baseline, from: "2026-09-23", to: "2026-10-20", ...(id === "restingHeartRate" && { source: "Apple Watch" }) } }, expect.any(Function));
   expect(mocks.settle.mock.calls[0][1]).toEqual([]);
 });
 
@@ -427,4 +427,27 @@ it.each([
   expect(body.today).toBe("2026-11-15");
   expect(body.metrics.find(metric => metric.id === "sleep")!.access).toBe(access);
   expect(body.metrics.find(metric => metric.id === "steps")!.access).toBe("missing");
+});
+
+it("ranks the frozen heart-rate baseline with its own device after a switch", async () => {
+  const raw = snapshot();
+  const daily = raw.numbers.restingHeartRate.daily;
+  for (const point of daily) {
+    point.source = point.date < joinedOn ? "Apple Watch" : "Oura";
+    point.value = point.date < joinedOn ? 68.4 : 59.3;
+  }
+  mocks.raw.mockResolvedValue(raw);
+  const result = healthSchema.parse(await (await GET(request())).json());
+  const age = result.metrics[0].age;
+  expect(age?.previous.percentile).toBeCloseTo(50);
+  expect(age?.percentile).toBeCloseTo(50);
+  expect(mocks.settle.mock.calls[0][1].filter((award: StoredAward) => award.kind === "healthAge")).toEqual([]);
+});
+
+it("keeps legacy baselines with unknown device methods out of heart-rate percentile awards", async () => {
+  mocks.measures.mockResolvedValue([{ lookup: "restingHeartRate", stateEncrypted: "sealed" }]);
+  mocks.open.mockResolvedValue([{ baseline: { value: 100, from: "2026-09-23", to: "2026-10-20" } }]);
+  const result = healthSchema.parse(await (await GET(request())).json());
+  expect(result.metrics[0]).toMatchObject({ baseline: { value: 100 }, age: null });
+  expect(mocks.settle.mock.calls[0][1].filter((award: StoredAward) => award.kind === "healthAge")).toEqual([]);
 });

@@ -26,7 +26,7 @@ export interface MeasureState {
   found?: FoundEntry;
   legs?: RouteLeg[];
   perDay?: number;
-  baseline?: { value: number; from: Day; to: Day };
+  baseline?: { value: number; from: Day; to: Day; source?: string };
   healthSettlement?: { savedAt: string; checkedAt: string; timeZone: string; profileTimeZone: string };
   /** Running only: the vault's run meters per day, from the replica saved at savedAt. */
   vaultRuns?: { savedAt: string; days: [Day, number][] };
