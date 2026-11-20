@@ -373,12 +373,8 @@ export async function startHostedConnectedAppConnection(input: {
     });
     return { redirectUrl: link.redirectUrl };
   } catch (error) {
-    if (!providerLinkAttempted) {
-      await releaseHostedConnectedAppIntent({
-        claimHash: intent.claimHash,
-        prisma,
-      });
-    }
+    if (providerLinkAttempted) throw invalidConnectedAppIntent();
+    await releaseHostedConnectedAppIntent({ claimHash: intent.claimHash, prisma });
     throw mapConnectedAppsError(error);
   }
 }

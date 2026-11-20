@@ -350,6 +350,20 @@ test("stays on the page with an alert and retries only by reloading when the sta
   }
 });
 
+test("opens the used-link recovery immediately when the claim is consumed", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 410 })));
+  const rendered = await renderClientComponent(createElement(IntegrationsConnectLauncher, LAUNCHER_PROPS), {
+    location: { href: "https://example.test/integrations/connect/synthetic" },
+  });
+  try {
+    await act(async () => rendered.button.click());
+    expect(rendered.reload).toHaveBeenCalledOnce();
+    expect(rendered.container.textContent).not.toContain("Try again");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("aborts an in-flight start and ignores its late success after unmount", async () => {
   vi.useFakeTimers();
   const initialHref = "https://example.test/integrations/connect/test-claim";
