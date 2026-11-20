@@ -29,9 +29,10 @@ export function gameChatProgress(state: RuleState, now: Date, asOf: Date = now):
         : "count" in schedule || state.game.seats === 10 ? "not_posted" : closed ? "missed" : "due";
       return { dayIndex, date, status };
     }) : [];
+    const fullScore = scorePlayer(state, player, state.game.lengthDays - 1, entries);
     return { memberId: player.memberId, currentDayIndex: current,
       score: scorePlayer(state, player, state.game.status === "settled" ? state.game.lengthDays - 1 : today ?? -1, entries).score,
-      target: "count" in schedule ? schedule.count : Array.from({ length: state.game.lengthDays }, (_, day) => isScheduledDay(state, day)).filter(Boolean).length,
+      target: fullScore.score + fullScore.misses,
       currentEntryId: current === null ? null : liveEntry(entries, player.memberId, current)?.id ?? null,
       attemptsRemaining: current === null ? 0 : Math.max(0, 2 - attemptsUsed(entries, player.memberId, current)), days };
   }) };
