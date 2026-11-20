@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
   game: { findUnique: vi.fn(), findFirst: vi.fn() },
   gameBlock: { findMany: vi.fn<() => Promise<{ blockerMemberId: string; blockedMemberId: string }[]>>(async () => []) },
   gameEntry: { findMany: vi.fn(async () => []) },
+  gameProfile: { findMany: vi.fn<() => Promise<{ memberId: string; timeZone: string | null }[]>>(async () => []) },
   $queryRaw: vi.fn(async () => [{ now: new Date("2026-11-12T12:00:00Z") }]),
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => db }));
@@ -120,6 +121,14 @@ describe("public invite preview privacy", () => {
     expect(await readInvitePreview("synthetic-invite")).toMatchObject({ earliestStart: "2026-11-13" });
     db.game.findUnique.mockResolvedValue({ ...row, startsOn: new Date("2026-11-20T00:00:00Z") });
     expect(await readInvitePreview("synthetic-invite")).not.toHaveProperty("earliestStart");
+  });
+
+  it("projects Day 1 from the challenger's zone now, as accepting does", async () => {
+    // Leo's seat still says Los Angeles, but his profile says New York, where 20:01 UTC is past 3pm.
+    db.game.findUnique.mockResolvedValue({ ...await invite(), players: [{ ...player, timeZone: "America/Los_Angeles" }] });
+    db.gameProfile.findMany.mockResolvedValueOnce([{ memberId: "member_leo", timeZone: "America/New_York" }]);
+    db.$queryRaw.mockResolvedValueOnce([{ now: new Date("2026-11-12T20:01:00Z") }]);
+    expect(await readInvitePreview("synthetic-invite")).toMatchObject({ earliestStart: "2026-11-13" });
   });
 
   it("signs the current inviter photo only for a signed-in open pair preview", async () => {
