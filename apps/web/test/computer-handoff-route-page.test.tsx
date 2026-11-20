@@ -115,6 +115,23 @@ describe("computer handoff route and page", () => {
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
+  it("rechecks a reopened checkpoint until it completes", async () => {
+    const params = Promise.resolve({ token: "synthetic" });
+    mocks.service.readHandoffPageState.mockResolvedValueOnce({ kind: "checkpointing" });
+    expect(renderToStaticMarkup(await computerHandoffPage.default({ params }))).toMatch(/http-equiv="refresh"/i);
+    expect(renderToStaticMarkup(await computerHandoffPage.default({ params }))).not.toMatch(/http-equiv="refresh"/i);
+  });
+
+  it("offers the same way back for an absent or unowned handoff", async () => {
+    mocks.service.readHandoffPageState.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_COMPUTER_NOT_FOUND", httpStatus: 404, message: "Missing handoff.",
+    }));
+    const markup = renderToStaticMarkup(await computerHandoffPage.default({ params: Promise.resolve({ token: "synthetic" }) }));
+    expect(markup).toContain("Return to Murph and ask for a new link");
+    expect(markup).toContain('href="/home"');
+    expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
+  });
+
   it("renders an auth-required handoff state without reading handoff details", async () => {
     mocks.requireActiveHostedAppSession.mockRejectedValueOnce(
       hostedOnboardingError({

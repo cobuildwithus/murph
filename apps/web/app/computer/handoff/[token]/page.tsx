@@ -11,7 +11,9 @@ import {
   ComputerHandoffSavingScreen,
 } from "@/src/components/computer-use/computer-handoff-screens";
 import {
+  LINK_PAGE_PILL_CLASS,
   LinkPageFrame,
+  LinkPageScreen,
   LinkPageNightGround,
 } from "@/src/components/link-page/link-page-shell";
 import {
@@ -48,7 +50,21 @@ export default async function ComputerHandoffPage({
   const state = await service.readHandoffPageState({
     memberId: session.member.id,
     token,
+  }).catch((error: unknown) => {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_COMPUTER_NOT_FOUND") return null;
+    throw error;
   });
+  if (!state) {
+    return (
+      <LinkPageFrame>
+        <LinkPageScreen
+          actions={<a className={LINK_PAGE_PILL_CLASS} href="/home">Return to Murph</a>}
+          detail="Return to Murph and ask for a new link."
+          title="This link isn’t available."
+        />
+      </LinkPageFrame>
+    );
+  }
 
   const managedEndpoint =
     `/api/computer/handoff/${encodeURIComponent(token)}/managed-login`;
@@ -83,6 +99,7 @@ export default async function ComputerHandoffPage({
   if (state.kind === "checkpointing") {
     return (
       <LinkPageFrame>
+        <meta httpEquiv="refresh" content="5" />
         <ComputerHandoffSavingScreen />
       </LinkPageFrame>
     );
