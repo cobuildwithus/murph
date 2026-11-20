@@ -93,6 +93,21 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await reserveDuePrivateEveningCheckIns(one)).toBe(0);
   });
 
+  it("continues private reminders past an unreadable room", async () => {
+    const [first, second] = [await member(), await member()].sort();
+    const room = await member();
+    await game(first!, room);
+    await game(second!);
+    m.covered.mockImplementation(async (roomId: string | null) => {
+      if (roomId === room) throw new Error("Roster unavailable");
+      return false;
+    });
+
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(first!) } })).toBeNull();
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(second!) } })).toBeTruthy();
+  });
+
   it("names the games that get the private text: no group chat, or players hours apart", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const owner = await member(), near = await member(), far = await member(), room = await member();

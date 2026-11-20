@@ -39,7 +39,8 @@ async function currentEvening(memberId: string, date: string, minutes: number, n
   for (const game of loaded) {
     const seat = seats.find(seat => seat.gameId === game.row.id);
     const player = game.state.players.find(player => player.memberId === memberId && !player.leftAt);
-    if (!seat || !player || !isGameEnabled() || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now)) continue;
+    // An unreadable room cannot authorize a private fallback for this game.
+    if (!seat || !player || !isGameEnabled() || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now).catch(() => true)) continue;
     const dayIndex = reminderOpenDay(game.state, player, new Date(now.getTime() + Number(game.row.devClockOffsetMs)), seat.reminderEveryDay);
     if (dayIndex !== null) batch.push({ gameId: game.row.id, termsVersion: currentTerms(game.state.game.terms).n, dayIndex });
   }
