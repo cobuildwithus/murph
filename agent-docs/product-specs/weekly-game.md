@@ -159,7 +159,10 @@ match that contact's own unbound invitation key, even after registration.
 Bound invitations grant only their member; their old contact keys grant nothing.
 Adding anyone outside the original audience or losing a still-playing person
 from the text detaches the game. Creation and Same again still require the exact
-audience. Leaving a waiting invitation voids it, as does an active game falling
+audience. When the previous room no longer matches, Same again returns a non-retryable
+409 `GAME_CHAT_CHANGED`. Offer a fresh game with recipient selection. When partial
+recipient discovery exceeds its room budget, a fresh game opens the Messages composer.
+Leaving a waiting invitation voids it, as does an active game falling
 below two remaining players. Group blocks mask content symmetrically without
 changing scores or ending the game. The game keeps its chat, and nothing is sent
 there while the block stands. Waiting notices and the recap send once it lifts

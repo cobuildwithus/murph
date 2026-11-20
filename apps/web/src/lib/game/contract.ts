@@ -689,6 +689,7 @@ export type GameErrorCode =
   | "CHANGE_PENDING"
   | "CHANGE_EXPIRED"
   | "CHAT_UNAVAILABLE"
+  | "GAME_CHAT_CHANGED"
   /** One of you blocked the other: no invite or rematch between you. */
   | "PLAYER_UNAVAILABLE"
   /** The write-time content check refused these words. */

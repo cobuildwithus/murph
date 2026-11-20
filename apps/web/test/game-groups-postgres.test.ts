@@ -172,6 +172,43 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("refuses a rematch in a changed room and allows it once the roster matches", async () => {
+    const { people, context, game } = await majorityGame(3);
+    const room = context.chatContainerMemberId;
+    const spectator = await person();
+    chatProof.rooms.set(room, [...people.map(p => p.email), spectator.email]);
+    await settle(game.id, people[0].id);
+    expect(await readGame(game.id, people[0].id, true)).toMatchObject({ status: "settled" });
+    const { POST } = await import("@/app/api/game/v1/games/route");
+    const childId = randomUUID();
+    const command = { type: "createGame" as const, gameId: childId, maxPlayers: 10 as const, previousGameId: game.id, terms };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await POST(await httpGame(people[0].id, "/games", "POST", command));
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toMatchObject({ code: "GAME_CHAT_CHANGED", retryable: false });
+    }
+    expect(await db.game.count({ where: { previousGameId: game.id } })).toBe(0);
+    chatProof.rooms.set(room, people.map(p => p.email));
+    expect((await POST(await httpGame(people[0].id, "/games", "POST", command))).status).toBe(200);
+  });
+
+  it("offers the composer when room discovery exceeds its budget", async () => {
+    const ava = await person();
+    const targets = ["Sam", "Maya"].map((firstName, index) => ({ seat: index + 1, firstName,
+      recipient: { kind: "email" as const, value: `${randomUUID()}@example.test` } }));
+    const command = { type: "createGame" as const, gameId: randomUUID(), maxPlayers: 10 as const, groupWord: "Balance",
+      invitees: targets, terms: { ...terms, startsOn: undefined } };
+    for (let i = 0; i < 20; i++) await exactRoom([ava, await person()]);
+    const { POST } = await import("@/app/api/game/v1/games/route");
+    expect((await POST(await httpGame(ava.id, "/games", "POST", command))).status).toBe(200);
+    await exactRoom([ava, await person()]);
+    const fresh = { ...command, gameId: randomUUID() };
+    const response = await POST(await httpGame(ava.id, "/games", "POST", fresh));
+    expect(response.status).toBe(200);
+    expect((await response.json()).game.composer.murphPhoneNumber).toBeTruthy();
+    expect((await gameRow(fresh.gameId)).chatContainerMemberId).toBeNull();
+  });
+
   it.each([false, true])("refuses bearer admission to a group without member identities (retained seats: %s)", async (retained) => {
     const starter = await person(), invited = await person(), stranger = await person();
     const game = await create(starter, [invited]);
@@ -2115,7 +2152,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(material?.players).toEqual(["Alex", "Sam"]);
     if (exited) {
       const rematchId = randomUUID();
-      await expect(run(g.people[0].id, { type: "createGame", gameId: rematchId, maxPlayers: 10, previousGameId: g.game.id, terms })).rejects.toThrow("participants have changed");
+      expect(await run(g.people[0].id, { type: "createGame", gameId: rematchId, maxPlayers: 10, previousGameId: g.game.id, terms })).toMatchObject({ ok: false, error: { code: "GAME_CHAT_CHANGED" } });
       expect(await db.game.findUnique({ where: { id: rematchId } })).toBeNull();
     }
     expect(material?.entries.map(e => e.entryId)).toEqual([kept.id]);
