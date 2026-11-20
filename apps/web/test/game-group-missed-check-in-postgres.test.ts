@@ -295,6 +295,15 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
   });
 
+  it("keeps the pair evening check-in when only another game spans distant zones", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(), pair = await room.addGame(2, [], 2), group = await room.addGame();
+    await db.gameProfile.update({ where: { memberId: room.people[2]!.id }, data: { timeZone: "Asia/Tokyo" } });
+    events.push(gameEveningEventId(room.roomId, date));
+    expect(await reserveGameEveningCheckIn(room.roomId, [pair, group], eveningAt)).toBe(1);
+    expect((await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId)).toEqual([pair]);
+  });
+
   it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
