@@ -108,6 +108,14 @@ export function GameInviteStudy() {
           <GameInviteView appUrl={DESIGN_APP_URL} inviteUrl={DESIGN_INVITE_URL} onComputer preview={OPEN_PREVIEW} />
         </div>
       </figure>
+      <figure className="flex max-w-[402px] flex-col gap-3">
+        <figcaption className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
+          Open, on an Android phone
+        </figcaption>
+        <div className="flex min-h-[760px] flex-col overflow-hidden rounded-3xl" data-design-state="open-other-phone" id="game-invite-open-other-phone" inert>
+          <GameInviteView appUrl={DESIGN_APP_URL} inviteUrl={DESIGN_INVITE_URL} onComputer={false} onOtherPhone preview={OPEN_PREVIEW} />
+        </div>
+      </figure>
       <div className="grid items-start gap-6 md:grid-cols-2">
         {STATES.map((state) => (
           <figure className="flex flex-col gap-3" key={state.id}>
