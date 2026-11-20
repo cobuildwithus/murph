@@ -22,7 +22,7 @@ import { patchMeasureState, type MeasureState, type BeforeProgressMutation } fro
 import { saveVaultRuns } from "./vault-runs";
 import { HEALTH, type Candidate } from "./registry";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
-import type { AgeProfile } from "./norms";
+import { heartRateWindowSource, type AgeProfile } from "./norms";
 import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
 import { cumulativePoints } from "./series";
 import { readRouteGoals, routeLegs, routeProgressIncomplete, routeView, setRouteGoal } from "./routes";
@@ -186,13 +186,14 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   if (healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, ref.generatedAt, profile.timeZone, now)) return;
   const snapshot = await readCompanionHealthSeries(auth, new AbortController().signal, metricIds, workspace);
   if (!snapshot) return;
-  await settleProgressHealth(auth, snapshot, profile, states, now);
+  const { journeys } = await settleProgressHealth(auth, snapshot, profile, states, now);
   const authority: BeforeProgressMutation = async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
   };
   // Totals and its goals read Running's saved vault runs; this is their one replica read.
   await saveVaultRuns(memberId, snapshot.savedAt, snapshot.runs, authority);
+  if (journeys.measures.some(measure => measure.id === "steps") && !states.get("steps")?.legs?.length) return;
   await patchMeasureState(memberId, "restingHeartRate", previous => {
     const receipt = previous.healthSettlement;
     if (receipt && (Date.parse(receipt.savedAt) > Date.parse(snapshot.savedAt)
@@ -249,14 +250,19 @@ async function freezeAndScoreMetric(input: {
   const daily = input.daily.filter(point => inRange(point.value));
   let state = input.state;
   const proposed = state.baseline?.value ?? healthBaseline(daily, joinedOn);
-  if (!state.baseline && proposed !== null) state = await patchMeasureState(memberId, id,
-    { baseline: { value: proposed, from: addDaysToIsoDate(joinedOn, -28), to: addDaysToIsoDate(joinedOn, -1) } }, beforeMutationTx);
+  if (!state.baseline && proposed !== null) {
+    const from = addDaysToIsoDate(joinedOn, -28), to = addDaysToIsoDate(joinedOn, -1);
+    const source = id === "restingHeartRate" ? heartRateWindowSource(daily, from, to) : null;
+    state = await patchMeasureState(memberId, id, { baseline: { from, to, value: proposed, ...(source && { source }) } }, beforeMutationTx);
+  }
   const savedBaseline = state.baseline?.value ?? null;
   const baseline = savedBaseline !== null && inRange(savedBaseline) ? savedBaseline : null;
-  const model: HealthMetricInput = { id, daily, baseline, ...HEALTH[id], wins: [] };
+  const baselineSource = state.baseline?.source ?? null;
+  const model: HealthMetricInput = { id, daily, baseline, baselineSource, ...HEALTH[id], wins: [] };
   if (baseline === null) return { model, state, candidates: [] };
   const byDate = new Map(daily.map(point => [point.date, point]));
-  const means = healthMeans(daily).map(point => ({ ...byDate.get(point.date)!, value: point.value }));
-  const context = { metric: id, joinedOn, baseline, means, profile, ...HEALTH[id] };
+  const means = healthMeans(daily).map(point => ({ ...byDate.get(point.date)!, value: point.value,
+    source: id === "restingHeartRate" ? heartRateWindowSource(daily, addDaysToIsoDate(point.date, -13), point.date) : null }));
+  const context = { metric: id, joinedOn, baseline, baselineSource, means, profile, ...HEALTH[id] };
   return { model, state, candidates: [...healthSteps(context), ...healthAgeShare(context)] };
 }

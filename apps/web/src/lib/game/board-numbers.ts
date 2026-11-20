@@ -49,7 +49,7 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
 }
 
 /** The same selected, grant-authorized series before the board's display rounding. */
-export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
+function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
   if (projection.state === "not_granted") return { state: "not_shared" };
   if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
@@ -76,7 +76,9 @@ export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoard
     const points = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
     const latest = points.at(-1)!;
     if (latest.date < window.from) return [];
-    const currentFrom = laterDate(addDays(latest.date, -(intermittent?.latestWindowDays ?? 7) + 1), firstGameOn);
+    // Retain dated historical comparisons, but use the actual board week for a live daily metric.
+    const currentThrough = intermittent || latest.date < freshThrough ? latest.date : window.through;
+    const currentFrom = laterDate(addDays(currentThrough, -(intermittent?.latestWindowDays ?? 7) + 1), firstGameOn);
     // The days before Day 1, with VO2's median and two-reading minimum, unless
     // there are too few (a device connected on game day). Then the first week
     // from the first real reading, where intermittent VO2 keeps its up-to-90-day
@@ -89,7 +91,7 @@ export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoard
       : addDays(firstWeekFrom, 6);
     const result = selectMetricWindowComparison({ metricKey: policy.key, points,
       baselineWindow: { start: baselineFrom, end: baselineThrough },
-      comparisonWindow: { start: currentFrom, end: latest.date },
+      comparisonWindow: { start: currentFrom, end: currentThrough },
       minimumPoints, statistic: intermittent?.aggregation ?? "mean" });
     const comparable = Boolean(source) && result.status === "ready" && baselineThrough < currentFrom;
     const dates = points.filter(point => point.date >= baselineFrom && point.date <= baselineThrough
@@ -97,7 +99,7 @@ export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoard
     // Worn this week, not merely owned: a spare device's older history must not outrank the one on the wrist.
     const worn = metric === "steps" && Boolean(source) && !NOT_WORN_STEP_SOURCES.has(source)
       && points.filter(point => point.date >= addDays(window.through, -6)).length >= minimumPoints;
-    return [{ source, points, latest, result, comparable, dates, worn, fresh: latest.date >= freshThrough, baselineFrom, baselineThrough, currentFrom,
+    return [{ source, points, latest, result, comparable, dates, worn, fresh: latest.date >= freshThrough, baselineFrom, baselineThrough, currentFrom, currentThrough,
       sinceFirstGame: usesPreGame || baselineFrom === firstGameOn }];
   });
   candidates.sort((a, b) => Number(b.fresh) - Number(a.fresh) || Number(b.worn) - Number(a.worn) || Number(b.comparable) - Number(a.comparable) || b.dates - a.dates
@@ -112,7 +114,7 @@ export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoard
     stale: !selected.fresh,
     comparison: selected.comparable && delta !== null && result.baseline.value !== null && result.comparison.value !== null ? {
       baseline: { from: selected.baselineFrom, through: selected.baselineThrough, value: result.baseline.value, days: result.baseline.daysWithData },
-      current: { from: selected.currentFrom, through: selected.latest.date, value: result.comparison.value, days: result.comparison.daysWithData },
+      current: { from: selected.currentFrom, through: selected.currentThrough, value: result.comparison.value, days: result.comparison.daysWithData },
       delta, improvement: delta * policy.direction, sinceFirstGame: selected.sinceFirstGame,
     } : null };
 }
@@ -138,6 +140,22 @@ function numericPoint(record: HostedRuntimeGroupSharedRecord, key: string, windo
   return { date: data.date, metricKey: key, unit: normalized.canonicalUnit, value: normalized.canonicalValue };
 }
 
+/** A total can span devices. Keep one grant-authorized value on each observed date. */
+export function sharedHealthDays(metric: "steps" | "sleep", projection: HostedGroupBoardProjection,
+  window: PairBoard["window"]): BoardDayValue[] | null {
+  if (projection.state !== "available") return null;
+  const byDate = new Map<string, BoardDayValue>();
+  const worn = (record: HostedRuntimeGroupSharedRecord) => metric === "steps" && !!record.source?.source
+    && !NOT_WORN_STEP_SOURCES.has(record.source.source);
+  const records = [...projection.records].sort((a, b) => Number(worn(a)) - Number(worn(b))
+    || a.occurredAt.localeCompare(b.occurredAt) || a.recordKey.localeCompare(b.recordKey));
+  for (const record of records) {
+    const point = numericPoint(record, POLICY[metric].key, window);
+    if (point && point.value !== null) byDate.set(point.date, { date: point.date, value: point.value });
+  }
+  return byDate.size ? [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)) : null;
+}
+
 export function boardCrowns(people: readonly BoardPerson[]): PairBoard["crowns"] {
   const winner = (value: (person: BoardPerson) => number | null) => {
     const ranked = people.map(person => ({ memberId: person.memberId, value: value(person) ?? 0 }))
@@ -145,11 +163,17 @@ export function boardCrowns(people: readonly BoardPerson[]): PairBoard["crowns"]
     return ranked[0] && ranked[0].value !== ranked[1]?.value ? ranked[0].memberId : null;
   };
   // A crown needs a change its row can show: the app hides one that rounds to zero.
-  const metricWinner = (metric: BoardMetric) => winner(person => {
-    const number = person.numbers[metric];
-    const improvement = number.state === "available" ? number.comparison?.improvement ?? null : null;
-    return improvement !== null && improvement * 10 ** POLICY[metric].precision > 0.5 ? improvement : null;
-  });
+  const metricWinner = (metric: BoardMetric) => {
+    if (!people.every(person => {
+      const number = person.numbers[metric];
+      return number.state === "available" && !number.stale && number.comparison !== null;
+    })) return null;
+    return winner(person => {
+      const number = person.numbers[metric];
+      const improvement = number.state === "available" ? number.comparison?.improvement ?? 0 : 0;
+      return improvement * 10 ** POLICY[metric].precision > 0.5 ? improvement : null;
+    });
+  };
   return { restingHeartRate: metricWinner("restingHeartRate"), sleep: metricWinner("sleep"),
     steps: metricWinner("steps"), vo2Max: metricWinner("vo2Max"), inARow: winner(person => person.inARow) };
 }

@@ -5,7 +5,7 @@ import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
 import { readCompanionHealthSeries } from "../../device-sync/companion-numbers";
 import { readHostedGroupBoardData } from "../../hosted-groups/group-store";
 import { lastSettledStepDay } from "../../settled-step-day";
-import { rawBoardNumber } from "../board-numbers";
+import { sharedHealthDays } from "../board-numbers";
 import { healthSums, progressHealthDays } from "./health";
 import { readFriendRooms, type FriendRoom } from "./friend-sharing";
 import type { FriendSeries } from "./friends";
@@ -25,10 +25,9 @@ export async function readFriendHealthSeries(input: {
     timing.counts.boards++;
     const shared = await readHostedGroupBoardData({ ...room, viewerId: memberId, otherId: person.memberId, otherMetric: input.metric, now });
     const projection = shared?.people.find(entry => entry.memberId === person.memberId)?.projections[input.metric === "steps" ? 2 : 1];
-    const number = projection ? rawBoardNumber(input.metric, projection,
-      { from: [person.joinedOn!, addDaysToIsoDate(today, -364)].sort().at(-1)!, through }, person.joinedOn!) : null;
-    return { ...person, daily: number?.state === "available"
-      ? number.daily.map(day => ({ date: day.date, amount: input.metric === "sleep" ? day.value * 60 : day.value })) : null };
+    const days = projection && sharedHealthDays(input.metric, projection,
+      { from: [person.joinedOn!, addDaysToIsoDate(today, -364)].sort().at(-1)!, through });
+    return { ...person, daily: days?.map(day => ({ date: day.date, amount: input.metric === "sleep" ? day.value * 60 : day.value })) ?? null };
   };
   // Your replica and friends' boards are independent: read them together, six boards at a time.
   // Drawer totals use one friend. Sharing and the room-cap recheck still use the full cohort.

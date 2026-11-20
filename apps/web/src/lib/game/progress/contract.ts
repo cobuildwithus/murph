@@ -100,6 +100,8 @@ const healthMetric = z.object({
   access: z.enum(["ok", "off", "missing"]), direction: z.enum(["better", "worse", "flat"]), headline: z.string(),
   /** Under a headline that is the number itself (sleep's "7h 52m a night"): "Up 45 min since joining". */
   change: z.string().nullable(),
+  /** Raw current mean in the metric unit used for the change since joining. */
+  comparisonValue: z.number().nullable().optional(),
   daily: z.array(z.tuple([day, z.number().nullable()])), baseline: amount.nullable(),
   wins: z.array(z.object({ medalId: z.string(), on: day, text: z.string(), face: medalFace, title: z.string(), detail: z.string() })),
   next: z.object({ title: z.string(), detail: z.string(), face: medalFace }).nullable(),

@@ -624,7 +624,8 @@ function emitOuraWorkout(
   workout: PlainObject,
 ): void {
   const workoutId = stringId(workout.id) ?? `workout-${events.length + 1}`;
-  const startAt = firstIso(workout.start_datetime, workout.start_time, workout.start);
+  const startTime = [workout.start_datetime, workout.start_time, workout.start].find(value => firstIso(value) !== undefined);
+  const startAt = firstIso(startTime);
   const endAt = firstIso(workout.end_datetime, workout.end_time, workout.end);
   const recordedAt =
     firstIso(workout.timestamp, workout.updated_at, workout.updatedAt, endAt, startAt) ?? importedAt;
@@ -632,6 +633,7 @@ function emitOuraWorkout(
   const dayKey = firstDayKey(
     stringId(workout.day),
     stringId(workout.date),
+    startTime,
     occurredAt,
     recordedAt,
   );

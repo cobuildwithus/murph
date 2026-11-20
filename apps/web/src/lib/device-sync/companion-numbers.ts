@@ -178,6 +178,7 @@ export function readRawHealthNumber(
   // Series rows end each date on its highest-priority source, so the last stands;
   // do not average multiple observations or manufacture missing dates.
   for (const row of rows) {
+    if (metric.key === "total-sleep-minutes" && row.context.sleepType === "nap") continue;
     if (row.statistic !== "value" || row.comparator != null) continue;
     const normalized = normalizeMetricValue({ metricKey: metric.key, unit: row.unit, value: row.value });
     if (normalized.canonicalValue === null || normalized.canonicalValue < minValue || normalized.canonicalValue > maxValue) continue;

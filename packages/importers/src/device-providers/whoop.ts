@@ -665,15 +665,11 @@ function emitWhoopRecovery(
   const recoverySleepEndAt = toIso(recoverySleep?.end);
   const recoverySleepStartAt = toIso(recoverySleep?.start);
   const occurredAt =
-    recoveryCycleEndAt
-    ?? recoveryCycleStartAt
-    ?? recoverySleepEndAt
-    ?? recoverySleepStartAt
-    ?? recordedAt;
+    recoverySleepEndAt ?? recoveryCycleStartAt ?? recoverySleepStartAt ?? version ?? recoveryCycleEndAt ?? recordedAt;
   const dayKey =
-    firstWhoopLocalDayKey(recoveryCycle, recoveryCycleEndAt, recoveryCycleStartAt) ??
-    firstWhoopLocalDayKey(recoverySleep, recoverySleepEndAt, recoverySleepStartAt) ??
-    firstWhoopLocalDayKey(recovery, recordedAt);
+    firstWhoopLocalDayKey(recoverySleep, occurredAt) ??
+    firstWhoopLocalDayKey(recoveryCycle, occurredAt) ??
+    firstWhoopLocalDayKey(recovery, occurredAt);
   const score = asPlainObject(recovery.score);
 
   pushEvidencePart(

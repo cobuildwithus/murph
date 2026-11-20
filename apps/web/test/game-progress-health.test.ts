@@ -6,7 +6,7 @@ import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, h
 const joinedOn = "2026-10-21";
 const days = (from: string, count: number, value: number) => Array.from({ length: count }, (_, i) => ({ date: addDaysToIsoDate(from, i), value }));
 const context = (baseline: number, current: number): HealthAchievementContext => ({
-  metric: "restingHeartRate", joinedOn, baseline, step: 1, direction: -1,
+  metric: "restingHeartRate", joinedOn, baseline, baselineSource: "Apple Watch", step: 1, direction: -1,
   profile: { age: 35, sex: "female" },
   means: days(joinedOn, 14, current).map(point => ({ ...point, source: "Apple Watch", observedAt: `${point.date}T12:00:00Z` })),
 });

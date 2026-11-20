@@ -4569,7 +4569,7 @@ test("WHOOP record emitters preserve event-count ids and evidence-only records",
   assert.equal(payload.events?.at(-1)?.fields?.distanceKm, 0);
 });
 
-test("WHOOP record emitters retain last-id recovery joins and cycle-day precedence", () => {
+test("WHOOP record emitters retain last-id recovery joins and use the linked sleep day", () => {
   const payload = normalizeWhoopSnapshot({
     importedAt: "2026-04-24T12:00:00.000Z",
     sleeps: [
@@ -4589,7 +4589,7 @@ test("WHOOP record emitters retain last-id recovery joins and cycle-day preceden
   assert.deepEqual(recoveries?.map((event) => [
     event.externalRef?.resourceId, event.occurredAt, event.dayKey, event.fields?.value,
   ]), [
-    ["7", "2026-04-23T02:00:00.000Z", "2026-04-22", 0],
+    ["7", "2026-04-21T02:00:00.000Z", "2026-04-21", 0],
     ["7", "2026-04-21T02:00:00.000Z", "2026-04-21", 0],
   ]);
 });
@@ -4676,6 +4676,57 @@ test("a provider deletion and a new activity commit in one canonical batch", asy
       },
     }, { corePort: coreRuntime });
     assert.equal(result.events.length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("closing a WHOOP cycle keeps the original recovery and admits a new workout on replay", async () => {
+  const vaultRoot = await makeTempDirectory("whoop-cycle-replay");
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, timezone: "UTC" });
+    const cycle = { id: 73, start: "2026-04-18T06:15:00Z", timezone_offset: "Z" };
+    const recovery = { cycle_id: cycle.id, updated_at: "2026-04-18T07:40:00Z", score: { resting_heart_rate: 57 } };
+    const next = { ...cycle, end: "2026-04-19T06:24:00Z" };
+    const workout = { id: "trail-run", start: "2026-04-19T10:15:00Z", end: "2026-04-19T10:46:00Z", sport_name: "running" };
+    const write = (cycles: typeof cycle[], workouts: typeof workout[]) => importDeviceProviderSnapshot<CoreDeviceImportResult>({
+      provider: "whoop", vaultRoot, snapshot: { cycles, workouts, recoveries: [recovery] },
+    }, { corePort: coreRuntime });
+    const first = await write([cycle], []);
+    const original = first.events.find(event => event.externalRef?.resourceType === "recovery")!;
+    for (let replay = 0; replay < 2; replay++) {
+      const result = await write([next], [workout]);
+      const saved = result.events.find(event => event.externalRef?.resourceType === "recovery")!;
+      assert.equal(saved.id, original.id);
+      assert.equal(saved.occurredAt, original.occurredAt);
+      assert.equal(saved.dayKey, "2026-04-18");
+      assert.ok(result.events.some(event => event.kind === "activity_session"));
+    }
+    recovery.score.resting_heart_rate++;
+    await assert.rejects(write([next], []), /conflicting content for source revision/);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("replaying a legacy closed-cycle recovery preserves its placement and verifies its value", async () => {
+  const vaultRoot = await makeTempDirectory("whoop-legacy-cycle");
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, timezone: "UTC" });
+    const cycle = { id: 47, start: "2026-05-04T07:00:00Z", end: "2026-05-05T06:00:00Z", timezone_offset: "Z" };
+    const recovery = { cycle_id: cycle.id, updated_at: "2026-05-04T08:00:00Z", score: { resting_heart_rate: 62 } };
+    const input = { vaultRoot, provider: "whoop", snapshot: { cycles: [cycle], recoveries: [recovery] } };
+    const payload = await prepareDeviceProviderSnapshotImport(input);
+    const legacy = await coreRuntime.importDeviceBatch({
+      vaultRoot, provider: payload.provider, evidenceParts: payload.evidenceParts?.map(part => ({ ...part })),
+      events: payload.events?.map(event => ({ ...event, occurredAt: cycle.end, dayKey: "2026-05-05" })),
+    });
+    const replay = () => importDeviceProviderSnapshot<CoreDeviceImportResult>(input, { corePort: coreRuntime });
+    await replay();
+    const records = await coreRuntime.readJsonlRecords({ vaultRoot, relativePath: legacy.eventShardPaths[0]! });
+    assert.deepEqual(records.filter(row => row.id === legacy.events[0]?.id).map(row => row.dayKey), ["2026-05-05"]);
+    recovery.score.resting_heart_rate++;
+    await assert.rejects(replay(), /conflicting content for source revision/);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

@@ -132,7 +132,7 @@ it("freezes pre-join health and earns both exercise passes after the response, v
   expect(progressSchema.parse(await response.json()).medals).toEqual([]);
   expect(states).toEqual([]); expect(awards).toEqual([]); expect(mocks.raw).not.toHaveBeenCalled();
   await drain();
-  expect((await healthState())?.baseline).toEqual({ value: 74, from: "2026-09-23", to: "2026-10-20" });
+  expect((await healthState())?.baseline).toEqual({ value: 74, source: "Apple Watch", from: "2026-09-23", to: "2026-10-20" });
   expect(mocks.raw.mock.calls[0].slice(2)).toEqual([["restingHeartRate", "steps", "sleep"], { browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" }]);
   const earned = await readAwards("ava");
   expect(earned.filter(award => award.kind === "health").map(award => award.data.level).sort()).toEqual([1, 2, 3]);
@@ -464,4 +464,18 @@ it("logs the aggregate request once for Prizes and Health, including invalid req
   for (const row of entries) expect(row).toMatchObject({ event: "game.progress.read.timing", pill: "all",
     totalMs: expect.any(Number), phaseMs: { auth: expect.any(Number), awards: expect.any(Number), render: expect.any(Number) } });
   expect(JSON.stringify(entries)).not.toMatch(/ava|leo|birthYear|memberId/i);
+});
+
+it("retries a missing Steps map on the same replica after settling other awards", async () => {
+  const snapshot = healthSnapshot();
+  mocks.raw.mockResolvedValue({ ...snapshot, numbers: { ...snapshot.numbers,
+    steps: { daily: snapshot.numbers.restingHeartRate.daily.map(point => ({ ...point, value: 5900 })) } } });
+  mocks.resolve.mockRejectedValueOnce(new Error("Map unavailable")).mockResolvedValue({
+    from: "A", to: "B", distanceM: 1000, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [], straightLine: false });
+  await GET(request()); await drain();
+  expect((await readAwards("ava")).some(award => award.measureId === "restingHeartRate")).toBe(true);
+  expect((await healthState())?.healthSettlement).toBeUndefined();
+  await GET(request()); await drain();
+  expect((await healthState())?.healthSettlement).toBeDefined();
+  expect(mocks.resolve).toHaveBeenCalledTimes(2);
 });

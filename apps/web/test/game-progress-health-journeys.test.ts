@@ -104,3 +104,13 @@ it("new health, friend and route awards decode through the shared medal view", a
   const routes = (await prepare([metric("steps", 1000)])).candidates;
   for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);
 });
+
+it("keeps health journeys and earned milestones available while the first Steps route retries", async () => {
+  const metrics = [metric("steps", 1600), metric("sleep", 27000)];
+  mocks.resolve.mockRejectedValueOnce(new Error("Map unavailable"));
+  const pending = await prepare(metrics);
+  expect(pending.states.has("steps")).toBe(false);
+  expect(pending.candidates.some(candidate => candidate.measureId === "sleep")).toBe(true);
+  expect(pending.candidates.some(candidate => candidate.measureId === "steps")).toBe(true);
+  expect((await prepare(metrics, pending.states)).states.get("steps")?.legs).toHaveLength(1);
+});

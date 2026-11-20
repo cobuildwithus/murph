@@ -14,15 +14,28 @@ export interface AgeRank {
   source: string;
 }
 
+function heartRateMethod(source: string | null) {
+  const device = source?.trim().toLowerCase();
+  if (device === "apple watch") return "appleWatch";
+  return ["whoop", "oura", "garmin"].includes(device ?? "") ? "sleep" : null;
+}
+
+/** A mean can use a device reference table only if every contributing day used that method. */
+export function heartRateWindowSource(daily: readonly { date: string; source: string | null }[], from: string, to: string) {
+  const points = daily.filter(point => point.date >= from && point.date <= to);
+  const source = points[0]?.source ?? null;
+  const method = heartRateMethod(source);
+  return method && points.every(point => heartRateMethod(point.source) === method) ? source : null;
+}
+
 /** Port of iOS AgeRankEngine.rank, including its original-device requirement. */
 export function rankAge(metric: Metric, value: number, profile: AgeProfile, source: string | null): AgeRank | null {
   if (metric === "sleep" || !Number.isFinite(value) || profile.age === null || profile.age < 18 || profile.sex === null) return null;
-  const device = source?.trim().toLowerCase();
-  const overnight = metric === "restingHeartRate" && ["whoop", "oura", "garmin"].includes(device ?? "");
-  if (metric === "restingHeartRate" && !overnight && device !== "apple watch") return null;
+  const method = metric === "restingHeartRate" ? heartRateMethod(source) : null;
+  if (metric === "restingHeartRate" && !method) return null;
   const matches = tables.filter(table => table.metric === metric && table.sex === profile.sex
     && table.ageFrom <= profile.age! && profile.age! <= table.ageTo
-    && table.measured === (overnight ? "sleep" : undefined));
+    && table.measured === (method === "sleep" ? "sleep" : undefined));
   if (matches.length !== 1 || !matches[0].source.trim()) return null;
   const table = matches[0];
   const cuts = publishedCuts(table);

@@ -24,8 +24,10 @@ export function scoreMetricPolicy(
   candidates: readonly WearableMetricCandidate[],
 ): number {
   if (metric === "steps") {
-    const dailyTotals = selectDailyStepsTotals(candidates);
-    return !dailyTotals || dailyTotals.some((total) => total.candidateId === candidate.candidateId)
+    // Keep every source as evidence, but only let plausible counts compete for the day.
+    const eligible = candidates.filter(point => point.value > 0 && point.value <= 1_000_000);
+    const dailyTotals = selectDailyStepsTotals(eligible) ?? eligible;
+    return dailyTotals.length === 0 || dailyTotals.some((total) => total.candidateId === candidate.candidateId)
       ? 0
       : PASSED_OVER_STEPS_PENALTY;
   }

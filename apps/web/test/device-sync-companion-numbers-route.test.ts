@@ -685,3 +685,12 @@ it("keeps the latest eligible Steps and Sleep when newer values exceed daily bou
   expect(numbers.steps.latest.date).toBe(from);
   expect(numbers.sleep.latest.date).toBe(from);
 });
+
+it("excludes explicit naps from overnight sleep history", async () => {
+  shards = await splitBrowserVaultReplica(fixture([
+    row("total-sleep-minutes", from, 438, "minutes"),
+    row("total-sleep-minutes", through, 28, "minutes", { context: { sleepType: "nap" } }),
+  ]));
+  const body = await (await GET(request())).json();
+  expect(body.numbers.sleep.daily).toEqual([{ date: from, value: 438 }]);
+});

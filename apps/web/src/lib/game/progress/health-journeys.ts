@@ -44,9 +44,8 @@ export async function healthJourneys(input: {
     // Only the derived region leaves this read. An unreadable identity falls back to the time zone.
     const identity = await readHostedMemberIdentity({ memberId: input.memberId, prisma: getPrisma() }).catch(() => null);
     const places = firstRoutePlaces(input.timeZone, phoneRouteRegion(identity), recentMilesPerDay(steps.amounts));
-    const leg = await resolveRoute(places.from, places.to);
-    const state = await setFirstRoute(input.memberId, "steps", leg, input.beforeMutationTx);
-    input.states.set("steps", state);
+    const leg = await resolveRoute(places.from, places.to).catch(() => null);
+    if (leg) input.states.set("steps", await setFirstRoute(input.memberId, "steps", leg, input.beforeMutationTx));
   }
   const context = achievementContext(measures, input.states);
   // Hours slept is no medal; sleep counts only on its journeys.
