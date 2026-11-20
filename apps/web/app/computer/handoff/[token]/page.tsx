@@ -9,6 +9,7 @@ import {
   ComputerHandoffManagedRetryScreen,
   ComputerHandoffManagedWaitingScreen,
   ComputerHandoffSavingScreen,
+  ComputerHandoffUnavailableScreen,
 } from "@/src/components/computer-use/computer-handoff-screens";
 import {
   LinkPageFrame,
@@ -48,7 +49,17 @@ export default async function ComputerHandoffPage({
   const state = await service.readHandoffPageState({
     memberId: session.member.id,
     token,
+  }).catch((error: unknown) => {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_COMPUTER_NOT_FOUND") return null;
+    throw error;
   });
+  if (!state) {
+    return (
+      <LinkPageFrame>
+        <ComputerHandoffUnavailableScreen />
+      </LinkPageFrame>
+    );
+  }
 
   const managedEndpoint =
     `/api/computer/handoff/${encodeURIComponent(token)}/managed-login`;
@@ -83,6 +94,7 @@ export default async function ComputerHandoffPage({
   if (state.kind === "checkpointing") {
     return (
       <LinkPageFrame>
+        <meta httpEquiv="refresh" content="5" />
         <ComputerHandoffSavingScreen />
       </LinkPageFrame>
     );

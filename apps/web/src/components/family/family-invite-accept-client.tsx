@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
+import { JoinInviteSignOutButtonIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
+import { JoinInviteSignedInMismatchScreen } from "@/src/components/hosted-onboarding/join-invite-signed-in-mismatch-view";
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import {
@@ -35,7 +37,7 @@ export function FamilyInviteWebAcceptScreen(props: {
   title: string;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<"accepted" | "idle" | "submitting">("idle");
+  const [status, setStatus] = useState<"accepted" | "idle" | "mismatch" | "submitting">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [recoveryPath, setRecoveryPath] = useState<string | null>(
     props.initialState === "draft_conflict"
@@ -54,6 +56,14 @@ export function FamilyInviteWebAcceptScreen(props: {
       });
       setStatus("accepted");
     } catch (error) {
+      if (error instanceof HostedOnboardingApiError && [
+        "HOSTED_FAMILY_INVITE_PHONE_MISMATCH",
+        "HOSTED_FAMILY_INVITE_EMAIL_MISMATCH",
+        "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+      ].includes(error.code ?? "")) {
+        setStatus("mismatch");
+        return;
+      }
       setStatus("idle");
       if (
         error instanceof HostedOnboardingApiError
@@ -68,6 +78,12 @@ export function FamilyInviteWebAcceptScreen(props: {
 
   if (status === "accepted") {
     return <FamilyInviteJoinedScreen onOpenMurph={() => router.push("/home")} />;
+  }
+
+  if (status === "mismatch") {
+    return <JoinInviteSignedInMismatchScreen signOutAction={
+      <JoinInviteSignOutButtonIsland appearance="pill" idleLabel="Sign out and continue" />
+    } />;
   }
 
   if (recoveryPath) {

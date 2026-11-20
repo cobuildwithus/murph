@@ -15,6 +15,7 @@ const VOICE_TEST_MESSAGE =
   "just picked a new voice for you! send me a voice memo so I can hear it";
 
 const mocks = vi.hoisted(() => ({
+  getHostedAccountDeletionPageSession: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
 
   isHostedBillingPlanSelectionAvailable: vi.fn(),
@@ -173,6 +174,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.routerRefresh,
   }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  getHostedAccountDeletionPageSession: mocks.getHostedAccountDeletionPageSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
@@ -581,6 +586,20 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
     }),
     undefined,
   );
+});
+
+test("a suspended owner can reopen deletion without enabling export", async () => {
+  const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+  mocks.getHostedPageAuthSnapshot.mockRejectedValueOnce(hostedOnboardingError({
+    code: "HOSTED_MEMBER_SUSPENDED", httpStatus: 403, message: "Suspended.",
+  }));
+  mocks.getHostedAccountDeletionPageSession.mockResolvedValueOnce({ member: { suspendedAt: new Date() } });
+  const { default: Page } = await import("../app/settings/data-privacy/page");
+  renderToStaticMarkup(await Page());
+  expect(mocks.getHostedAccountDeletionPageSession).toHaveBeenCalledOnce();
+  expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+    authenticated: true, authorizationEnabled: false,
+  }, undefined);
 });
 
 test.each(["active", "checkout"])(

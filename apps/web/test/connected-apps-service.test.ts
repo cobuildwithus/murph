@@ -635,8 +635,8 @@ describe("connected-app service", () => {
       fetchImpl: failedLinkFetch,
       memberId: "hbm_member",
     })).rejects.toMatchObject({
-      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
-      httpStatus: 503,
+      code: "CONNECTED_APPS_INTENT_UNAVAILABLE",
+      httpStatus: 410,
     });
 
     expect(failedLinkFetch).toHaveBeenCalledTimes(2);

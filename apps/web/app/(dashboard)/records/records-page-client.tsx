@@ -121,6 +121,7 @@ export function RecordsPageClient({
         ...current,
         disconnected.connectionId,
       ]);
+      router.refresh();
       setDisconnectTarget(null);
       setDisconnectNotice(
         `${target.displayName} was disconnected. Results already copied into Murph stay there.`,

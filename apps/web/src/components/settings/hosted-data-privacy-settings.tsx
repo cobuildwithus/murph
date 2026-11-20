@@ -210,7 +210,6 @@ function HostedDataPrivacySettingsContent(props: {
         requestError instanceof HostedOnboardingApiError
         && requestError.code
           === "ACCOUNT_DELETION_DEVICE_TOKEN_REFRESH_RECOVERY_REQUIRED";
-      // A suspended account cannot reload this page, so these retries stay in the dialog.
       const dialogRetry =
         requestError instanceof HostedOnboardingApiError
         && requestError.retryable;

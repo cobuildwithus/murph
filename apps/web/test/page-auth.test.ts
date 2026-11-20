@@ -279,6 +279,15 @@ describe("hosted public layout auth", () => {
     });
   });
 
+  it("allows the deletion page to render inside the public shell during suspension", async () => {
+    const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+    mocks.getHostedAppSession.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED", httpStatus: 403, message: "Suspended.",
+    }));
+    const { getHostedPublicLayoutAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+    expect(await getHostedPublicLayoutAuthSnapshot()).toEqual({ status: "unavailable" });
+  });
+
   it("preserves a session-store outage as unavailable instead of anonymous", async () => {
     mocks.getHostedAppSession.mockRejectedValue(Object.assign(
       new Error("Connection refused while opening a database connection."),

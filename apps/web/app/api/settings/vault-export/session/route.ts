@@ -28,6 +28,7 @@ import {
   readHostedWorkspaceBrowserVaultSourceStateHash,
 } from "@/src/lib/hosted-workspace/store";
 import {
+  assertHostedConsentScopeGranted,
   assertHostedLaunchRequiredConsentGranted,
   readHostedHealthDataConsentState,
 } from "@/src/lib/legal/consent";
@@ -48,17 +49,7 @@ export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
-  const healthDataConsentState = await readHostedHealthDataConsentState({
-    memberId: auth.member.id,
-    prisma,
-  });
-  let healthDataProcessingRevoked = healthDataConsentState === "revoked";
-  if (!healthDataProcessingRevoked) {
-    await assertHostedLaunchRequiredConsentGranted({
-      memberId: auth.member.id,
-      prisma,
-    });
-  }
+  await readExportProcessingAllowed(auth.member.id, prisma);
   const body = await readHostedOnboardingJsonObject(request, {
     limitBytes: SETTINGS_VAULT_EXPORT_BODY_LIMIT_BYTES,
     tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
@@ -95,17 +86,7 @@ export const POST = withJsonError(async (request: Request) => {
 
   // Consent may change while the member completes the slow sensitive-action
   // proof. Re-read it before any freshness decision can wake processing.
-  const latestHealthDataConsentState = await readHostedHealthDataConsentState({
-    memberId: auth.member.id,
-    prisma,
-  });
-  healthDataProcessingRevoked = latestHealthDataConsentState === "revoked";
-  if (!healthDataProcessingRevoked) {
-    await assertHostedLaunchRequiredConsentGranted({
-      memberId: auth.member.id,
-      prisma,
-    });
-  }
+  const processingAllowed = await readExportProcessingAllowed(auth.member.id, prisma);
 
   // Re-read the workspace AFTER the approval verification. Export the
   // newest retained replica even when newer source changes are still being
@@ -138,7 +119,7 @@ export const POST = withJsonError(async (request: Request) => {
   const refreshPending = freshness.shouldRefresh || deviceSyncImportPending;
 
   if (!replicaRef) {
-    if (healthDataProcessingRevoked) {
+    if (!processingAllowed) {
       throw browserVaultRetainedReplicaUnavailableError();
     }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -168,7 +149,7 @@ export const POST = withJsonError(async (request: Request) => {
       : await client.createBrowserVaultSession(sessionInput);
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-      if (healthDataProcessingRevoked) {
+      if (!processingAllowed) {
         throw browserVaultRetainedReplicaUnavailableError();
       }
       scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -186,7 +167,7 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 
-  if (!healthDataProcessingRevoked && refreshPending) {
+  if (processingAllowed && refreshPending) {
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
   }
 
@@ -218,6 +199,16 @@ export const POST = withJsonError(async (request: Request) => {
     async cancel() { await records.return(); },
   }), { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
 });
+
+async function readExportProcessingAllowed(memberId: string, prisma: ReturnType<typeof getPrisma>) {
+  const state = await readHostedHealthDataConsentState({ memberId, prisma });
+  if (state === "granted") {
+    await assertHostedLaunchRequiredConsentGranted({ memberId, prisma });
+  } else if (state === "missing") {
+    await assertHostedConsentScopeGranted({ memberId, prisma, scope: "launch.legal" });
+  }
+  return state === "granted";
+}
 
 function browserVaultSessionNotFreshError() {
   return hostedOnboardingError({

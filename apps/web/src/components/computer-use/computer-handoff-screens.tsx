@@ -100,6 +100,17 @@ export function ComputerHandoffExpiredScreen({
   );
 }
 
+/** A link that's missing, or someone else's: the same words either way. */
+export function ComputerHandoffUnavailableScreen() {
+  return (
+    <LinkPageScreen
+      actions={<a className={LINK_PAGE_PILL_CLASS} href="/home">Return to Murph</a>}
+      detail="Return to Murph and ask for a new link."
+      title="This link isn’t available."
+    />
+  );
+}
+
 function HandoffReplyBody({ children }: { children: ReactNode }) {
   return (
     <div className="flex flex-col gap-2">

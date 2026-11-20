@@ -70,6 +70,10 @@ export function IntegrationsConnectLauncher({
       if (controller.signal.aborted) {
         return;
       }
+      if (response.status === 410) {
+        window.location.reload();
+        return;
+      }
       if (!response.ok) {
         setState("failed");
         return;

@@ -7,15 +7,18 @@ import { cn } from "@/src/lib/utils";
 export function LinkPageStudyState({
   children,
   fit = false,
+  id,
   label,
 }: {
   children: ReactNode;
   /** Exactly one phone screen tall, like a page in a one-screen frame, so long lists scroll inside it. */
   fit?: boolean;
+  /** The anchor a PR's design proof links to. */
+  id?: string;
   label: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3" id={id}>
       <p className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </p>

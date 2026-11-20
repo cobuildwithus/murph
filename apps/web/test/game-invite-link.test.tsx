@@ -49,6 +49,27 @@ describe("weekly game invite link", () => {
       .toBe(renderToStaticMarkup(createElement(GameInviteShareCard, { preview: OPEN })));
   });
 
+  it("keeps both ends of the ticket inside the shared image for long terms", async () => {
+    if (OPEN.status !== "open") throw new Error("Expected open fixture");
+    const { ImageResponse } = await import("next/og");
+    const { default: sharp } = await import("sharp");
+    const { loadMurphHeroOgAssets, OG_SIZE } = await import("@/app/_og/og-shared");
+    const { fonts } = await loadMurphHeroOgAssets();
+    const preview = { ...OPEN, terms: { ...OPEN.terms,
+      tasks: [0, 1].map(seat => ({ seat, text: "Practice a different balance exercise every morning before breakfast." })),
+      stakes: OPEN.terms.stakes.map(stake => ({ ...stake, item: "Choose a weekend activity for everyone to enjoy together outside." })),
+    } };
+    const image = new ImageResponse(createElement(GameInviteShareCard, { preview }), { ...OG_SIZE, fonts });
+    const pixels = sharp(Buffer.from(await image.arrayBuffer()));
+    for (const top of [0, OG_SIZE.height - 1]) {
+      const row = await pixels.clone().extract({ left: 0, top, width: OG_SIZE.width, height: 1 }).removeAlpha().raw().toBuffer();
+      // Allow the soft ticket shadow on the ground, but no cream or gold ticket pixels.
+      for (const channel of [0, 1, 2]) {
+        expect(Math.abs(row[600 * 3 + channel]! - row[channel]!)).toBeLessThan(8);
+      }
+    }
+  });
+
   it("opens the Murph app by default, or the configured scheme", () => {
     expect(gameInviteAppUrl("tok_1", {})).toBe("ai.withmurph.app://invite/tok_1");
     expect(gameInviteAppUrl("tok_1", { MURPH_GAME_APP_URL_SCHEME: " ai.withmurph.app.dev " }))

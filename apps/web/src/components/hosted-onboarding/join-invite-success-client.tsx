@@ -19,7 +19,6 @@ import {
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
 
-import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import { requestHostedBillingSuccess } from "./client-api";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
@@ -149,15 +148,7 @@ export function JoinInviteSuccessClient({
     && Boolean(sessionId)
     && shouldPoll
     && delayedSetupSupportStage === status.stage;
-  const shouldShowSuccessUi = shouldShowHostedInviteSuccessUi({
-    errorMessage,
-    preview,
-    sessionId,
-    showSetupDelaySupport,
-    status,
-  });
-
-  if (!shouldShowSuccessUi) {
+  if (!preview && shouldRedirectToHome && sessionId && errorMessage === null) {
     return null;
   }
 
@@ -165,6 +156,7 @@ export function JoinInviteSuccessClient({
     <LinkPageFrame>
       <JoinInviteSuccessScreen
         errorMessage={errorMessage}
+        hasCheckoutSession={Boolean(sessionId)}
         onAction={() => {
           if (!preview && shouldRedirectToHome) {
             router.replace(resolveHostedInviteSuccessRedirectPath());
@@ -183,18 +175,20 @@ export function JoinInviteSuccessClient({
 
 export function JoinInviteSuccessScreen({
   errorMessage = null,
+  hasCheckoutSession = true,
   onAction,
   onEmailSupport,
   showSetupDelaySupport = false,
   status,
 }: {
   errorMessage?: string | null;
+  hasCheckoutSession?: boolean;
   onAction?: () => void;
   onEmailSupport?: () => void;
   showSetupDelaySupport?: boolean;
   status: HostedInviteStatusPayload;
 }) {
-  const successState = resolveHostedInviteSuccessState(status);
+  const successState = resolveHostedInviteSuccessState(status, hasCheckoutSession);
   const setupDelayed = showSetupDelaySupport && successState.pending;
   const ActionControl = successState.pending ? LinkPageLink : LinkPagePill;
 
@@ -234,26 +228,6 @@ function shouldRedirectHostedInviteSuccessToHome(input: {
     && input.status.session.matchesInvite;
 }
 
-function shouldShowHostedInviteSuccessUi(input: {
-  errorMessage: string | null;
-  preview: boolean;
-  sessionId: string | null;
-  showSetupDelaySupport: boolean;
-  status: HostedInviteStatusPayload;
-}): boolean {
-  return input.preview
-    || input.errorMessage !== null
-    || isHostedInviteSuccessTerminalStage(input.status.stage)
-    || input.sessionId === null
-    || !input.status.session.authenticated
-    || !input.status.session.matchesInvite
-    || input.showSetupDelaySupport;
-}
-
-function isHostedInviteSuccessTerminalStage(stage: HostedInviteStatusPayload["stage"]): boolean {
-  return stage === "blocked" || stage === "expired" || stage === "invalid";
-}
-
 function buildHostedCheckoutSuccessSupportMailto(input: {
   inviteCode: string;
   stage: HostedInviteStatusPayload["stage"];
@@ -273,7 +247,18 @@ function buildHostedCheckoutSuccessSupportMailto(input: {
   return `mailto:${HOSTED_CHECKOUT_SUCCESS_SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): HostedInviteSuccessState {
+function resolveHostedInviteSuccessState(
+  status: HostedInviteStatusPayload,
+  hasCheckoutSession: boolean,
+): HostedInviteSuccessState {
+  if (status.stage === "checkout" && !hasCheckoutSession) {
+    return {
+      buttonLabel: "Back to invite",
+      description: "Head back to your invite for next steps.",
+      pending: false,
+      title: "Finish setting up Murph.",
+    };
+  }
   switch (status.stage) {
     case "active":
       return {
@@ -282,19 +267,13 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         pending: false,
         title: "You’re all set.",
       };
+    case "checkout":
     case "verify":
       return {
         buttonLabel: "Back to invite",
         description: "Checking your signup status.",
         pending: true,
         title: "Finishing verification.",
-      };
-    case "checkout":
-      return {
-        buttonLabel: "Back to invite",
-        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle,
-        pending: true,
-        title: "Payment received.",
       };
     case "expired":
       return {
