@@ -215,6 +215,42 @@ afterEach(async () => {
 });
 
 describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
+  it("invalidates a prepared evening when room-wide admission moves cohorts", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4);
+    const people = room.people.map(person => person.id);
+    const [other, original] = [await room.addGame(), await room.addGame()].sort();
+    await db.gamePlayer.updateMany({ where: { gameId: other, memberId: { in: people.slice(0, 2) } }, data: { leftAt: eveningAt } });
+    await db.gamePlayer.updateMany({ where: { gameId: original, memberId: { in: people.slice(2) } }, data: { leftAt: eveningAt } });
+    const move = (memberId: string) => db.gameProfile.update({ where: { memberId }, data: { timeZone: "Asia/Tokyo" } });
+    await move(people[3]!);
+    const prepared = await prepareGameEveningCheckIn(room.roomId, date, eveningAt);
+    expect(prepared?.policy.batch.map(slot => slot.gameId)).toEqual([original]);
+    expect(await roomCoversEveningGame(room.roomId, original!, eveningAt)).toBe(true);
+    await move(people[2]!);
+    expect(await roomCoversEveningGame(room.roomId, original!, eveningAt)).toBe(false);
+    expect(await roomCoversEveningGame(room.roomId, other!, eveningAt)).toBe(true);
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(false);
+  });
+
+  it("describes the private reminder for the cohort excluded from the room", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4);
+    const ids = room.people.map(person => person.id);
+    await db.gameProfile.updateMany({ where: { memberId: { in: ids.slice(2) } }, data: { timeZone: "Asia/Tokyo" } });
+    const first = await room.addGame(10, [], 2);
+    const second = await room.addGame(10, ["UTC", "UTC", "Asia/Tokyo", "Asia/Tokyo"], 4);
+    await db.gamePlayer.updateMany({ where: { gameId: second, memberId: { in: ids.slice(0, 2) } }, data: { leftAt: now } });
+    const { readPrivatelyTextedGameIds } = await import("@/src/lib/game/evening-check-in");
+    const { gameReminderReach } = await import("@/src/lib/game/reminders");
+    const coverage = await Promise.all([first, second].map(id => roomCoversEveningGame(room.roomId, id, eveningAt)));
+    expect(coverage.filter(Boolean)).toHaveLength(1);
+    const excluded = [first, second][coverage.indexOf(false)];
+    const described = await readPrivatelyTextedGameIds([excluded], eveningAt);
+    expect(described.has(excluded)).toBe(true);
+    expect(gameReminderReach({ push: false, text: true, canText: true }, { on: true, textedPrivately: described.size > 0 }, false)).toBe("text");
+  });
+
   it("keeps the room result ahead of newer results in another room", async () => {
     const local = await fixture(2), foreign = await fixture(2, undefined, local.people);
     const actors = local.people.map(person => person.id);
