@@ -12,7 +12,6 @@ import { useSensitiveActionAuthorization } from "@/src/components/sensitive-acti
 import { JoinInviteSignOutButtonIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
-import { cn } from "@/src/lib/utils";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import {
   Dialog,
@@ -94,6 +93,26 @@ function HostedDataPrivacySettingsWithSecureApproval(props: { accountHint: strin
   const { authorize } = useSensitiveActionAuthorization();
 
   return <HostedDataPrivacySettingsContent accountHint={props.accountHint} authorize={authorize} />;
+}
+
+/** Whose account: the browser the app opens may hold someone else's session. */
+function HostedSignedInAccountRow(props: { accountHint: string | null }) {
+  if (!props.accountHint) return null;
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+      <UserRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+      <span className="font-serif text-base tracking-tight text-foreground">
+        Signed in as {props.accountHint}
+      </span>
+      <JoinInviteSignOutButtonIsland appearance="ghost" idleLabel="Sign out" />
+    </div>
+  );
+}
+
+function deletionDescription(accountHint: string | null) {
+  return accountHint
+    ? `Deletes the account for ${accountHint}, with its data, subscription, and login, permanently. This cannot be undone.`
+    : "Deletes your account, data, subscription, and login permanently. This cannot be undone.";
 }
 
 function HostedDataPrivacySettingsContent(props: {
@@ -328,16 +347,8 @@ function HostedDataPrivacySettingsContent(props: {
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
-        {accountHint ? (
-          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
-            <UserRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-            <span className="font-serif text-base tracking-tight text-foreground">
-              Signed in as {accountHint}
-            </span>
-            <JoinInviteSignOutButtonIsland appearance="ghost" idleLabel="Sign out" />
-          </div>
-        ) : null}
-        <div className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3", accountHint ? "py-4" : "pb-4")}>
+        <HostedSignedInAccountRow accountHint={accountHint} />
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0">
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           <span className={authorize === null
             ? "font-serif text-base tracking-tight text-muted-foreground"
@@ -400,9 +411,7 @@ function HostedDataPrivacySettingsContent(props: {
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {dialogStep === "reason"
                 ? "Could you let us know why you're leaving? This is optional and it won't hold up your deletion."
-                : accountHint
-                  ? `Deletes the account for ${accountHint}, with its data, subscription, and login, permanently. This cannot be undone.`
-                  : "Deletes your account, data, subscription, and login permanently. This cannot be undone."}
+                : deletionDescription(accountHint)}
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
