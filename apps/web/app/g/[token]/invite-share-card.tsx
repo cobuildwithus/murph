@@ -17,6 +17,13 @@ const SAGE = "#5A6E32";
 const TICKET_INK = "#3B2A12";
 const WIDTH = 520;
 const PLAYER_WIDTH = 190;
+const twoLinePreview = {
+  display: "-webkit-box",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+} as const;
 // The link reaches the invitee, and anyone they forward it to: name them as the page does.
 const INVITEE_NAME = "You";
 
@@ -82,7 +89,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
             <div style={{ color: INK, display: "flex", fontFamily: "Fraunces", fontSize: 44, fontWeight: 600, lineHeight: 1.15 }}>
               {inviteShareCopy(preview).title}
             </div>
-            <div style={{ color: MUTED, display: "flex", fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3 }}>
+            <div style={{ color: MUTED, ...twoLinePreview, fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3 }}>
               {preview.terms.defaultTask}
             </div>
           </div>
@@ -117,7 +124,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
           <div
             style={{
               color: TICKET_INK,
-              display: "flex",
+              ...twoLinePreview,
               fontFamily: "Fraunces",
               fontSize: stake.item.length > 22 ? 34 : 44,
               fontWeight: 600,
@@ -174,7 +181,7 @@ function Player(props: { bar: string; name: string; size: number; task: string }
         {props.name}
       </div>
       <div style={{ background: props.bar, borderRadius: 2, display: "flex", height: 4, width: 40 }} />
-      <div style={{ color: MUTED, display: "flex", fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3, textAlign: "center" }}>
+      <div style={{ color: MUTED, ...twoLinePreview, fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3, textAlign: "center" }}>
         {props.task}
       </div>
     </div>
