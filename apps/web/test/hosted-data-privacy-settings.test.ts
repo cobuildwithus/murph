@@ -99,6 +99,11 @@ vi.mock("@/src/components/ui/alert", () => ({
   AlertTitle: createPassthrough("div"),
 }));
 
+vi.mock("@/src/components/hosted-onboarding/join-invite-islands", () => ({
+  JoinInviteSignOutButtonIsland: ({ idleLabel }: { idleLabel: string }) =>
+    createElement("button", { type: "button" }, idleLabel),
+}));
+
 vi.mock("@/src/components/ui/button", () => ({
   Button: createPassthrough("button"),
 }));
@@ -445,6 +450,35 @@ describe("HostedDataPrivacySettings", () => {
     expect(
       mocks.publishBrowserVaultSessionEnding.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
+  });
+
+  test("names the signed-in account, with a way out, and the account the confirmation deletes", async () => {
+    mockHostedDataPrivacyDeleteFlowState({ confirmationPhrase: "" });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { accountHint: "*** 0731", authenticated: true }));
+    });
+
+    expect(container.textContent).toContain("Signed in as *** 0731.");
+    expect(container.textContent).toContain("Not you? Sign out");
+    expect(document.body.textContent).toContain(
+      "Deletes the account for *** 0731, with its data, subscription, and login, permanently.",
+    );
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
   test("keeps deletion available when secure approval is unavailable", async () => {

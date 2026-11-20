@@ -9,6 +9,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
+import { JoinInviteSignOutButtonIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
@@ -68,6 +69,8 @@ type SensitiveActionAuthorizer =
   ReturnType<typeof useSensitiveActionAuthorization>["authorize"];
 
 export function HostedDataPrivacySettings(props: {
+  /** "*** 0731": the account a deletion here removes. */
+  accountHint?: string | null;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -80,21 +83,23 @@ export function HostedDataPrivacySettings(props: {
     );
   }
 
+  const accountHint = props.accountHint ?? null;
   return props.authorizationEnabled === false
-    ? <HostedDataPrivacySettingsContent authorize={null} />
-    : <HostedDataPrivacySettingsWithSecureApproval />;
+    ? <HostedDataPrivacySettingsContent accountHint={accountHint} authorize={null} />
+    : <HostedDataPrivacySettingsWithSecureApproval accountHint={accountHint} />;
 }
 
-function HostedDataPrivacySettingsWithSecureApproval() {
+function HostedDataPrivacySettingsWithSecureApproval(props: { accountHint: string | null }) {
   const { authorize } = useSensitiveActionAuthorization();
 
-  return <HostedDataPrivacySettingsContent authorize={authorize} />;
+  return <HostedDataPrivacySettingsContent accountHint={props.accountHint} authorize={authorize} />;
 }
 
 function HostedDataPrivacySettingsContent(props: {
+  accountHint: string | null;
   authorize: SensitiveActionAuthorizer | null;
 }) {
-  const { authorize } = props;
+  const { accountHint, authorize } = props;
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
@@ -310,6 +315,12 @@ function HostedDataPrivacySettingsContent(props: {
 
   return (
     <div className="flex flex-col gap-4">
+      {accountHint ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">Signed in as {accountHint}.</p>
+          <JoinInviteSignOutButtonIsland idleLabel="Not you? Sign out" />
+        </div>
+      ) : null}
       {authorize === null ? (
         <Alert role="status">
           <AlertTitle>Secure approval unavailable</AlertTitle>
@@ -385,7 +396,9 @@ function HostedDataPrivacySettingsContent(props: {
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {dialogStep === "reason"
                 ? "Could you let us know why you're leaving? This is optional and it won't hold up your deletion."
-                : "Deletes your account, data, subscription, and login permanently. This cannot be undone."}
+                : accountHint
+                  ? `Deletes the account for ${accountHint}, with its data, subscription, and login, permanently. This cannot be undone.`
+                  : "Deletes your account, data, subscription, and login permanently. This cannot be undone."}
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (

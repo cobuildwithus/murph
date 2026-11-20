@@ -59,8 +59,11 @@ export function AccountDeletionRecoveryStudy() {
           </h3>
           <p className="text-sm leading-6 text-muted-foreground">
             When secure approval cannot run, export stays unavailable while the
-            signed-in member keeps the normal delete-account entry point. These
-            inert previews mount the production Settings component.
+            signed-in member keeps the normal delete-account entry point. The
+            page names the signed-in account, with a way to sign out, because
+            the app opens it in a browser that may hold someone else&apos;s
+            session. These inert previews mount the production Settings
+            component.
           </p>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
@@ -68,6 +71,7 @@ export function AccountDeletionRecoveryStudy() {
             <DialogFrame label="Desktop" width="max-w-md">
               <div inert>
                 <HostedDataPrivacySettings
+                  accountHint="*** 0731"
                   authenticated
                   authorizationEnabled={false}
                 />
@@ -78,6 +82,7 @@ export function AccountDeletionRecoveryStudy() {
             <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
               <div inert>
                 <HostedDataPrivacySettings
+                  accountHint="*** 0731"
                   authenticated
                   authorizationEnabled={false}
                 />
