@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({ games: vi.fn(), blocks: vi.fn(), profiles: vi.fn(), open: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
-  gameBlock: { findMany: mocks.blocks }, gameProfile: { findMany: mocks.profiles } }) }));
+  gamePlayer: { findFirst: async () => null }, gameBlock: { findMany: mocks.blocks }, gameProfile: { findMany: mocks.profiles } }) }));
 vi.mock("@/src/lib/game/crypto", async importOriginal => ({ ...await importOriginal<typeof import("@/src/lib/game/crypto")>(), openGameTexts: mocks.open }));
 import { readFriendCohort } from "@/src/lib/game/progress/friend-cohort";
 
