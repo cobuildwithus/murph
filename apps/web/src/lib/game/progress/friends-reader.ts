@@ -15,7 +15,7 @@ import { friendCohortIds, readFriendCohort } from "./friend-cohort";
 import { friendMeasure, readFriendGameSeries, type FriendGameSeries } from "./friend-games";
 import { readFriendHealthSeries } from "./friend-health";
 import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sharing";
-import { friendChallenge, friendPasses, friendsView, type FriendSeries } from "./friends";
+import { friendChallenge, friendPasses, friendRangeStart, friendsView, type FriendSeries } from "./friends";
 import { settleAwards } from "./awards";
 import type { Candidate, DayAmount } from "./registry";
 import { scheduleInference } from "./series";
@@ -29,7 +29,10 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     assertSelectedFriend(query.with, ids);
     const metric = query.measure;
     const health = metric === "steps" || metric === "sleep";
-    const gameRead = timing.measure("gameSeries", () => readFriendGameSeries(ids, timing));
+    const today = toLocalDayKey(new Date(), cohort.timeZone);
+    const { players, period } = exerciseScope(cohort.people, query, today, health);
+    const gameMemberIds = players.map(person => person.memberId);
+    const gameRead = timing.measure("gameSeries", () => readFriendGameSeries(gameMemberIds, timing, { viewer: memberId, period }));
     const roomRead = readFriendsHealth(auth, cohort, query, signal, timing);
     // Drain both branches in the request scope, then inspect errors in their original order.
     await Promise.all([gameRead, roomRead].map(read => read.catch(() => undefined)));
@@ -39,19 +42,19 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     let incomplete = series.incomplete || (!health && games.incomplete);
     let people = series.people;
     if (!health && !incomplete) {
-      people = cohort.people.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
+      people = players.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
     }
     // Recheck once after the private reads. A departure or block must remove the friend before rendering.
     const current = await timing.measure("cohort", () => friendCohortIds(memberId, db));
     incomplete ||= current.incomplete;
     const currentIds = new Set(current.ids);
     people = incomplete ? [] : people.filter(person => currentIds.has(person.memberId));
-    const visibleIds = ids.filter(id => currentIds.has(id));
+    const visibleIds = gameMemberIds.filter(id => currentIds.has(id));
     const visiblePending = games.pending.filter(task => currentIds.has(task.memberId));
     const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
     if (!current.incomplete) assertSelectedFriend(query.with, visibleIds);
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-    if (people.length > 1 && !health && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
+    if (people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
       after(async () => {
         try {
           await runWithFreshHostedDomainRootUnwrapCache(() =>
@@ -63,7 +66,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     }
     scheduleFriendInference(auth, visiblePending);
     const shareAudience = incomplete ? [] : sharingPreview(people, series.rooms.filter(room => currentIds.has(room.otherMemberId)), query.measure);
-    return await timing.measure("render", () => friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
+    return await timing.measure("render", () => friendsView({ people, measure, pills, query, units, today,
       shareAudience, incomplete, departureNotice: cohort.departure?.nameEncrypted === current.departure?.nameEncrypted ? cohort.departureNotice : null,
       challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) }));
   } catch (error) {
@@ -71,6 +74,12 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     throw hostedOnboardingError({ code: "PROGRESS_FRIENDS_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Friends progress is temporarily unavailable." });
   }
+}
+
+function exerciseScope(people: FriendSeries[], query: FriendsQuery, today: string, health: boolean) {
+  const players = !health && query.with ? people.filter(person => person.me || person.memberId === query.with) : people;
+  const period = !health && query.range !== "all" ? { from: friendRangeStart(query.range, today), to: today } : null;
+  return { players, period };
 }
 
 function assertSelectedFriend(selected: string | undefined, ids: readonly string[]) {
@@ -148,7 +157,7 @@ function friendExerciseIds(games: FriendGameSeries, memberId: string, ids: strin
 function friendPills(games: FriendGameSeries, memberId: string, ids: string[], selected: string): Friends["pills"] {
   const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
   if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.incomplete && !games.pending.length) throw gameNotFound();
-  const exercises = friendExerciseIds(games, memberId, ids);
+  const exercises = games.windowed || games.incomplete ? [...mine] : friendExerciseIds(games, memberId, ids);
   return [...exercises.map(id => games.measures.get(id)!),
     { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
     .map(({ id, label, icon }) => ({ id, label, icon }));

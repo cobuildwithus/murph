@@ -6026,7 +6026,7 @@ inference. The following classification covers every column of exactly
 | --- | --- | --- | --- |
 | `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
 | `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline, health settlement receipt | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
-| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
+| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `staging_since`: outstanding upload reservation time; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `storage_key`: primary key, the random Progress object identity of one picture attempt; `member_id`: owner FK; `status`: generating, ready, failed or retired; `created_at`: admission time, also the public attempt id (base 36); `failure_code`: nullable generation_failed, timeout or refused |
 | `game_progress_share_photo` | None in the row; the prepared medal photo JPEG is sealed in the Progress store | None | `storage_key`: primary key, random Progress object identity; `member_id`: owner FK; `status`: pending, current or retired; `created_at`: pick time |
@@ -6259,8 +6259,11 @@ performs one `createMany` with `skipDuplicates` in one transaction. Its only
 later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
 award. Awards strictly older than seven member-local calendar days at insertion
 start seen. `readAwards` opens a single owner-scoped ordered result, newest by
-`(earned_on, created_at, lookup)` descending. View owners filter health awards
-under live authority before choosing one gold medal. Moment ids resolve to
+`(earned_on, created_at, lookup)` descending. Running medals retain independent game crossing evidence. If vault runs reached
+the threshold first, the encrypted `gameEarnedOn` date supplies the crossing
+visible without health access. An existing health-tagged medal gains this proof
+under the member fence while retaining its ID, earned date and acknowledgement.
+View owners filter health awards under live authority before choosing one gold medal. Moment ids resolve to
 award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
 unseen rows and preserves the first acknowledgement time.
 
@@ -6279,7 +6282,8 @@ terms revision and the seat override or group default. Retakes contribute once;
 withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
 are pending days; the games read settles no awards until all credited tasks have
 classifications, while still scheduling inference. A per-day choice applies to all
-completed history while previously earned day medals remain stored.
+completed history. The task lookup connects its original days ID to the current
+measure for picture pins, upload retries and navigation from earned day medals.
 
 `game-days.ts` owns credited game dates: each game's frozen clock, join,
 departure, settlement and end bound its contributions. Void games end at their
@@ -6552,7 +6556,13 @@ returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
 500 games / 10,000 entries as limit-plus-one batches, including each friend's
-other games, and exposes only exercise aggregates. Typed quantities use the
+other games, and exposes only exercise aggregates. Individual exercise comparisons admit the
+viewer and the selected friend. If lifetime entries exceed the budget on a week
+or month board, one more bounded entry query keeps the viewer's exercise catalog
+and peers' credited days in the requested period. The catalog then shows the
+viewer's known exercises. All-time overflow reads the viewer's catalog alone
+and returns incomplete rankings. Windowed peer data cannot settle lifetime passes.
+Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
 Only typed quantity payloads are decrypted; untyped photos/text stay sealed.
@@ -7188,7 +7198,11 @@ at most 10,000 serial object retirements and one bulk row deletion, all outside
 database transactions; failures preserve the rows and block account deletion.
 There is no pagination recovery or automatic retry. Upload admission
 rechecks native auth under the member lock before registering the random key,
-so account cleanup also fences uploads still in flight. Live picture lists read
+so account cleanup also fences uploads still in flight. Registration reserves the
+key as pending. A successful stage publishes the pin and canonical UUID-bound
+metadata while the row is live. Older rows remain visible. Legacy uppercase
+metadata opens under its original spelling. Unreadable rows mark the read
+incomplete while other pins remain available. Live picture lists read
 10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
 pins or award evidence.
 

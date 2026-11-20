@@ -14,7 +14,7 @@ const request = (params: Record<string, string>, contentType = 'image/jpeg') => 
   { method: 'POST', headers: { 'Content-Type': contentType }, body: new Uint8Array(bytes) });
 beforeEach(() => {
   vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'owner' } });
-  mocks.series.mockResolvedValue({ incomplete: false, measures: [{ id: 'pushups.reps', amounts: [
+  mocks.series.mockResolvedValue({ incomplete: false, successors: new Map([['old.days', 'pushups.reps']]), measures: [{ id: 'pushups.reps', amounts: [
     { date: '2026-11-01', amount: 40 }, { date: '2026-11-02', amount: 20 }, { date: '2026-11-03', amount: 50 },
   ] }] });
   mocks.put.mockImplementation(async (_member, _input, _bytes, authorize) => authorize({ synthetic: true }));
@@ -26,6 +26,12 @@ describe('Progress JPEG upload HTTP contract', () => {
     expect(await response.json()).toEqual({ ok: true, pic: { id, takenOn: '2026-11-02', at: 60 } });
     expect(mocks.put).toHaveBeenCalledWith('owner', query, expect.any(Uint8Array), expect.any(Function));
     expect(mocks.current).toHaveBeenCalledWith({ member: { id: 'owner' } }, { synthetic: true });
+  });
+  it('retries the registered measure spelling after a conversion', async () => {
+    const input = { ...query, measureId: 'old.days' };
+    const response = await POST(request(input));
+    expect(response.status).toBe(200);
+    expect(mocks.put).toHaveBeenCalledWith('owner', input, expect.any(Uint8Array), expect.any(Function));
   });
   it('does not upload against an incomplete series', async () => {
     mocks.series.mockResolvedValue({ incomplete: true, measures: [] });

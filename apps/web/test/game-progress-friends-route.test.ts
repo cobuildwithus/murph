@@ -165,6 +165,39 @@ it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders ranked distance in requ
   expect(body.chart.find(line => line.memberId === "ava")?.points).toEqual([["2026-11-01", 1609.344]]);
 });
 
+it.each([true, false])("keeps the requested exercise board when combined lifetime history is over the cap (pair=%s)", async pair => {
+  const cohort = await mocks.cohort();
+  const people = [...cohort.people, { ...cohort.people[1], memberId: "sam", firstName: "Sam" }];
+  mocks.cohort.mockResolvedValue({ ...cohort, people });
+  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId), incomplete: false });
+  mocks.games.mockResolvedValue([game("shared", ["ava", "leo", "sam"])]);
+  const posts = people.map(person => entry(person.memberId, "shared", person.memberId, 15, 9));
+  const overflow = Array.from({ length: 10001 }, () => posts[0]);
+  mocks.entries.mockImplementation(({ where }) => {
+    const ids: string[] = where.memberId.in;
+    const scoped = where.AND !== undefined;
+    return ids.length === 3 && !scoped ? overflow : posts.filter(post => ids.includes(post.memberId));
+  });
+  const response = await GET(request("measure=pushups.reps&range=week" + (pair ? "&with=leo" : "")));
+  expect(response.status).toBe(200);
+  const board = friendsSchema.parse(await response.json());
+  expect(board.incomplete).toBe(false);
+  expect(board.rows.map(row => [row.memberId, row.total?.value])).toEqual(
+    (pair ? ["ava", "leo"] : ["ava", "leo", "sam"]).map(id => [id, 9]));
+  expect(board.pills.map(pill => pill.id)).toContain("pushups.reps");
+  if (!pair) expect(mocks.after).not.toHaveBeenCalled();
+});
+
+it("keeps the viewer's exercise pills on an incomplete all-time group board", async () => {
+  const own = entry("own", "shared", "ava", 0, 9);
+  mocks.entries.mockImplementation(({ where }) => where.AND?.memberId === "ava"
+    ? [own] : Array.from({ length: 10001 }, () => own));
+  const board = friendsSchema.parse(await (await GET(request("measure=pushups.reps&range=all"))).json());
+  expect(board).toMatchObject({ incomplete: true, rows: [], chart: [] });
+  expect(board.pills.map(pill => pill.id)).toContain("pushups.reps");
+  expect(mocks.after).not.toHaveBeenCalled();
+});
+
 it.each(["games", "entries"])("marks a capped %s input incomplete and settles nothing", async cap => {
   if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, () => game("shared", ["ava", "leo"])));
   else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, () => entry("one", "shared", "ava", 0, 1)));

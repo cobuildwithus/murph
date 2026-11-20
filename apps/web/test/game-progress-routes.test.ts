@@ -372,6 +372,38 @@ describe("Progress HTTP contracts", () => {
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].total.value).toBe(80);
   });
+  it.each(["per-day choice", "inference"])("opens earlier pins and day medals on the measure resolved by %s", async mode => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), kind: "photo", payloadEncrypted: null }]);
+    const oldId = progressSchema.parse(await (await GET(request())).json()).measures[0].id;
+    const takenAt = new Date("2026-11-01T14:00:00Z"), id = "abc00001-0000-4000-8000-000000000001";
+    mocks.pictures.mockResolvedValue([{ id, takenAt, metaEncrypted: await sealProgress({
+      memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: oldId }) }]);
+    const key = `total:${oldId}:10`, lookup = progressLookup(memberId, "award", [key]);
+    awards.push({ memberId, lookup, earnedOn: takenAt, createdAt: takenAt, seenAt: null,
+      dataEncrypted: await sealProgress({ memberId, table: "game_progress_award", rowId: lookup, field: "data" }, {
+        key, kind: "days", measureId: oldId, subjectMemberId: null, on: "2026-11-01",
+        data: { value: 10, unit: "days", noun: "lunges", page: "totals" },
+      }) });
+    const taskLookup = progressLookup(memberId, "task", ["40 pushups", "photo"]);
+    const inferred = mode === "inference" ? { name: "lunges", quantity: 8, unit: "reps" } : { name: "lunges", quantity: null, unit: "days" };
+    mocks.tasks.mockResolvedValue([{ lookup: taskLookup, measureEncrypted: await sealProgress({
+      memberId, table: "game_progress_task_measure", rowId: taskLookup, field: "measure" }, inferred) }]);
+    if (mode === "per-day choice") {
+      const stateLookup = progressLookup(memberId, "measure", [oldId]);
+      mocks.states.mockResolvedValue([{ lookup: stateLookup, stateEncrypted: await sealProgress({
+        memberId, table: "game_progress_measure", rowId: stateLookup, field: "state" }, { perDay: 8 }) }]);
+    }
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.measures).toMatchObject([{ id: "lunges.reps", pics: [{ id, at: 8 }] }]);
+    expect(view.medals).toMatchObject([{ id: lookup, title: "10 days", open: { measureId: "lunges.reps" } }]);
+    expect(view.moments).toMatchObject([{ measureId: "lunges.reps" }]);
+    if (mode === "per-day choice") {
+      const replay = await PUT(request(`/measures/${oldId}`, { perDay: 8 }), { params: Promise.resolve({ id: oldId }) });
+      expect(await replay.json()).toMatchObject({ ok: true, measure: { id: "lunges.reps" } });
+      expect(mocks.patch).not.toHaveBeenCalled();
+    }
+  });
+
   it("schedules only unresolved untyped phrases after the response, with member and kind bound lookups", async () => {
     mocks.entries.mockResolvedValue([0, 1].map(day => ({ ...entryRow(day), kind: "photo", payloadEncrypted: null })));
     const response = await GET(request());
@@ -390,6 +422,25 @@ describe("Progress HTTP contracts", () => {
     expect((await GET(request())).status).toBe(401);
     expect(mocks.createAwards).not.toHaveBeenCalled();
   });
+  it("keeps game-proven Running medals when a larger vault total loses consent", async () => {
+    const distanceM = 1800;
+    mocks.entries.mockResolvedValue([{ ...entryRow(), kind: "route", payloadEncrypted: JSON.stringify({
+      activity: "run", distanceM, durationSec: 720,
+    }) }]);
+    const lookup = progressLookup(memberId, "measure", ["run.meters"]);
+    mocks.states.mockResolvedValue([{ lookup, stateEncrypted: await sealProgress({
+      memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, {
+      legs: [], vaultRuns: { savedAt: "2026-11-03T18:00:00Z", days: [["2026-11-01", 800], ["2026-11-03", 5000]] },
+    }) }]);
+    const read = async () => progressSchema.parse(await (await GET(request())).json());
+    const combined = await read();
+    expect(combined.medals.length).toBeGreaterThan(1);
+    mocks.health.mockRejectedValue(hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." }));
+    const gameOnly = await read();
+    expect(gameOnly.medals).toMatchObject([{ title: "1 mi", earnedOn: "2026-11-01" }]);
+    expect(gameOnly.measures[0].total.value).toBe(distanceM);
+  });
+
   it("filters stored health medals and moments when current Postgres authority denies access", async () => {
     mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
     const lookup = progressLookup(memberId, "award", ["health:one"]);

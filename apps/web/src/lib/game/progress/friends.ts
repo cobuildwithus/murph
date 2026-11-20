@@ -16,6 +16,11 @@ export interface FriendSeries {
 }
 export type FriendMeasure = Pick<Measure, "id" | "label" | "icon" | "format" | "noun">;
 
+export function friendRangeStart(range: FriendsQuery["range"], today: string) {
+  return range === "month" ? `${today.slice(0, 7)}-01`
+    : range === "week" ? addDaysToIsoDate(today, -6) : "0000-01-01";
+}
+
 export function friendsView(input: {
   people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
@@ -23,8 +28,7 @@ export function friendsView(input: {
   units: ClientUnits; challenge: Friends["challenge"];
 }): Friends {
   const { measure, query, today } = input;
-  const from = query.range === "month" ? `${today.slice(0, 7)}-01`
-    : query.range === "week" ? addDaysToIsoDate(today, -6) : "0000-01-01";
+  const from = friendRangeStart(query.range, today);
   const people = input.people.filter(person => !query.with || person.me || person.memberId === query.with);
   const series = people.map(person => {
     let total = 0;

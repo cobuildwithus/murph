@@ -190,6 +190,8 @@ export async function readGoals(memberId: string, query: GoalsQuery, units: Clie
 
 export async function setMeasure(memberId: string, measureId: string, body: SetMeasureBody, beforeMutationTx: BeforeProgressMutation): Promise<string> {
   const snapshot = await readOwnSeries(memberId, new Date());
+  const successor = snapshot.successors.get(measureId);
+  if (successor && "perDay" in body && body.perDay === snapshot.states.get(measureId)?.perDay) return successor;
   const measure = snapshot.measures.find(measure => measure.id === measureId);
   if (!measure) throw gameNotFound();
   if ("perDay" in body) {

@@ -29,10 +29,12 @@ export const GAME_LIMIT = 500;
 export const ENTRY_LIMIT = 10_000;
 const factors = { reps: 1, seconds: 1, minutes: 60, hours: 3600, meters: 1, km: 1000, miles: 1609.344, steps: 1, days: 1 };
 
+const taskDaysId = (task: ProgressTask) => `h${task.lookup.slice(-12)}.days`;
+
 export function taskMeasureId(task: ProgressTask): string {
   const inferred = task.inferred;
   const name = inferred?.name ?? `h${task.lookup.slice(-12)}`;
-  if (!inferred || inferred.unit === "days" || inferred.quantity === null) return `h${task.lookup.slice(-12)}.days`;
+  if (!inferred || inferred.unit === "days" || inferred.quantity === null) return taskDaysId(task);
   const unit = ["minutes", "hours"].includes(inferred.unit) ? "seconds" : ["km", "miles"].includes(inferred.unit) ? "meters" : inferred.unit;
   return `${name}.${unit}`;
 }
@@ -221,7 +223,19 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
     const name = id.split(".")[0];
     measures.push({ ...describeMeasure(id, name, name), pending: false, gameOn: false, needsPerDay: false, amounts: [] });
   }
-  return { states, measures, awards, incomplete, pending, checkIns: todayCheckIns(facts, memberId, states) };
+  const successors = measureSuccessors(tasks.values(), states, measures);
+  return { states, measures, successors, awards, incomplete, pending, checkIns: todayCheckIns(facts, memberId, states) };
+}
+
+function measureSuccessors(tasks: Iterable<ProgressTask>, states: ReadonlyMap<string, MeasureState>, measures: readonly MeasureSeries[]) {
+  const successors = new Map<string, string>();
+  const shown = new Set(measures.map(measure => measure.id));
+  for (const task of tasks) {
+    const previous = taskDaysId(task);
+    const current = taskContribution(task, states).id;
+    if (current !== previous && shown.has(current)) successors.set(previous, current);
+  }
+  return successors;
 }
 
 /** Deduplicated, sequential provider work after the response; one batched cache insert. */

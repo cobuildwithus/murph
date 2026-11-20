@@ -3,7 +3,6 @@ import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { getPrisma } from "../../prisma";
 import type { Day } from "./contract";
-import type { Candidate } from "./registry";
 import { describeMeasure, readGameSeries, type MeasureSeries } from "./series";
 import { ProgressReadTiming } from "./read-timing";
 import { patchMeasureState, type BeforeProgressMutation } from "./state";
@@ -38,9 +37,11 @@ export async function saveVaultRuns(memberId: string, savedAt: string,
 /** The member's own Progress input: game series, with vault runs in Running while health consent holds. */
 export async function readOwnSeries(memberId: string, clock: Date, timing = new ProgressReadTiming()) {
   const snapshot = await readGameSeries(memberId, clock, timing, [RUN_MEASURE_ID]);
+  const running = snapshot.measures.find(measure => measure.id === RUN_MEASURE_ID);
+  const gameRunning = running && { ...running };
   const days = snapshot.states.get(RUN_MEASURE_ID)?.vaultRuns?.days ?? [];
   const vaultRunsMerged = days.length > 0 && await hasHealthAuthority(memberId) && mergeVaultRuns(snapshot.measures, days);
-  return { ...snapshot, vaultRunsMerged };
+  return { ...snapshot, vaultRunsMerged, gameRunning };
 }
 
 /** Each day's Running is the larger of its game check-ins and its vault runs, so one run never counts twice. */
@@ -57,10 +58,4 @@ export function mergeVaultRuns(measures: MeasureSeries[], days: readonly (readon
   measure.amounts = [...new Set([...game.keys(), ...vault.keys()])].sort()
     .map(date => ({ measureId: RUN_MEASURE_ID, date, amount: Math.max(game.get(date) ?? 0, vault.get(date) ?? 0) }));
   return true;
-}
-
-/** A Running award earned while vault runs counted is a health fact: it follows health consent. */
-export function markVaultRunAwards(candidates: Candidate[], merged: boolean): Candidate[] {
-  return merged ? candidates.map(candidate => candidate.measureId === RUN_MEASURE_ID
-    ? { ...candidate, data: { ...candidate.data, health: true } } : candidate) : candidates;
 }
