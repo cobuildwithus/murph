@@ -1216,17 +1216,19 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */
 async function withCurrentTimeZones(tx: Tx, state: RuleState): Promise<RuleState> {
+  return { ...state, players: await currentTimeZones(tx, state.players) };
+}
+
+/** Each player with their profile's time zone as of now, or their seat's when they have no profile. */
+async function currentTimeZones<Player extends { memberId: string | null; timeZone: string | null }>(tx: Tx, players: Player[]): Promise<Player[]> {
   const zones = await tx.gameProfile.findMany({
     select: { memberId: true, timeZone: true },
-    where: { memberId: { in: state.players.map((player) => player.memberId) } },
+    where: { memberId: { in: players.flatMap((player) => player.memberId ? [player.memberId] : []) } },
   });
-  return {
-    ...state,
-    players: state.players.map((player) => ({
-      ...player,
-      timeZone: zones.find((zone) => zone.memberId === player.memberId)?.timeZone ?? player.timeZone,
-    })),
-  };
+  return players.map((player) => ({
+    ...player,
+    timeZone: zones.find((zone) => zone.memberId === player.memberId)?.timeZone ?? player.timeZone,
+  }));
 }
 
 /** Writes each player's frozen time zone and Day 1. */
@@ -3776,7 +3778,7 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     inviterFirstName: inviterFirstName ?? "",
     ...(memberId !== undefined && row.maxPlayers === 2 ? { inviterAvatarUrl: await inviterAvatar(row, memberId) } : {}),
     startsOn: game.startsOn,
-    ...(row.maxPlayers === 2 && !game.startsOn ? { earliestStart: earliestPairStart(row, now) } : {}),
+    ...(row.maxPlayers === 2 && !game.startsOn ? { earliestStart: await earliestPairStart(row, now) } : {}),
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
     ...(row.maxPlayers === 2 ? { supportsTalk: true } : {}),
@@ -3790,8 +3792,10 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
  * own start days (`decideJoin`). The reader's phone takes the later of this
  * and its own, so a challenger past 3pm makes "Starts tomorrow".
  */
-function earliestPairStart(row: PreviewGame, now: Date): string | null {
-  const starts = row.players.flatMap(player => !player.leftAt && player.timeZone ? [acceptanceStartDate(now, player.timeZone)] : []).sort();
+async function earliestPairStart(row: PreviewGame, now: Date): Promise<string | null> {
+  // Accepting reads each zone from the profile (`withCurrentTimeZones`), so a challenger who has travelled counts from where they are.
+  const players = await currentTimeZones(getPrisma(), row.players);
+  const starts = players.flatMap(player => !player.leftAt && player.timeZone ? [acceptanceStartDate(now, player.timeZone)] : []).sort();
   return starts.at(-1) ?? null;
 }
 

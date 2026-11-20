@@ -89,6 +89,19 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, at))).toBe(false);
   });
 
+  it("sends one private follow-up on each night around the clocks going back", async () => {
+    const owner = await member(), id = await game(owner), zone = "America/New_York", from = new Date("2026-10-27T12:00:00Z");
+    await db.gameProfile.update({ where: { memberId: owner }, data: { reminderMinutes: 75, timeZone: zone } });
+    await db.game.update({ where: { id }, data: { startedAt: from } });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: owner } },
+      data: { timeZone: zone, dayOne: new Date("2026-10-27T00:00:00Z"), joinedAt: from } });
+    // 01:15 happens twice on November 1; its follow-up at 02:15 happens once each night.
+    for (const [at, on] of [["2026-10-31T06:15:00Z", "2026-10-31"], ["2026-11-01T07:15:00Z", "2026-11-01"], ["2026-11-02T07:15:00Z", "2026-11-02"]] as const) {
+      expect(await reserveDuePrivateEveningCheckIns(new Date(at)), on).toBe(1);
+      expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner, on, 75) } })).toMatchObject({ sourceRef: `${owner}:${on}:75` });
+    }
+  });
+
   it("finds a private reminder after twenty already posted games", async () => {
     const owner = await member(), ids = [];
     for (let i = 0; i < 21; i++) ids.push(await game(owner));

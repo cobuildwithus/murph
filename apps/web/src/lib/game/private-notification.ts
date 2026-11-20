@@ -1,6 +1,6 @@
 import "server-only";
 
-import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
+import { formatTimeZoneDateTimeParts, resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 import { Prisma } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { buildGamePrivateEveningInstructions, gamePrivateEveningCheckInPolicySchema, type HostedGamePrivateEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
@@ -20,6 +20,7 @@ import { addDays } from "./time";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 
 const enabled = () => process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED === "true";
+const HOUR_MS = 3_600_000;
 /** One text a day for each reminder time: the games at that time, an hour after it. */
 export const privateEveningEventId = (memberId: string, date: string, minutes: number) => `game-evening-private:${memberId}:${date}:${minutes}`;
 const eventMinutes = (eventId: string) => Number(eventId.slice(eventId.lastIndexOf(":") + 1));
@@ -30,16 +31,28 @@ async function currentEvening(memberId: string, date: string, minutes: number, n
   if (!profile?.reminderText) return null;
   const window = gameReminderWindow(now, profile.timeZone, (minutes + 60) % 1440);
   if (!window || window.day !== date) return null;
-  const slotDate = minutes >= 23 * 60 ? addDays(date, -1) : date;
-  const slotClock = new Date(minutes * 60_000).toISOString().slice(11, 19);
-  const slot = resolveFloatingIsoTimestampInTimeZone(`${slotDate}T${slotClock}`, profile.timeZone);
+  const slot = reminderSlot(minutes >= 23 * 60 ? addDays(date, -1) : date, minutes, profile.timeZone);
   if (!slot) return null;
   const covered = privateRoomCheck(db, now, evidence, prepare);
   const batch = await collectReminderGames(after => db.gamePlayer.findMany({
     where: reminderSeatsAt(memberId, minutes, profile.reminderMinutes, after), select: { gameId: true, reminderEveryDay: true },
     orderBy: { gameId: "asc" }, take: REMINDER_GAME_LIMIT,
-  }), seats => privateSubjects(db, memberId, seats, now, new Date(slot.timestamp), covered));
+  }), seats => privateSubjects(db, memberId, seats, now, slot, covered));
   return batch.length ? { batch, expiresAt: window.expiresAt } : null;
+}
+
+/**
+ * The reminder's own instant. When the clocks go back its local time happens twice, both on the same game
+ * day, so take the first: an hour after the hour before. A time the clocks skip still has none.
+ */
+function reminderSlot(date: string, minutes: number, timeZone: string): Date | null {
+  const clock = `${date}T${new Date(minutes * 60_000).toISOString().slice(11, 19)}`;
+  const once = resolveFloatingIsoTimestampInTimeZone(clock, timeZone);
+  if (once) return new Date(once.timestamp);
+  const before = resolveFloatingIsoTimestampInTimeZone(new Date(Date.parse(`${clock}Z`) - HOUR_MS).toISOString().slice(0, 19), timeZone);
+  const first = before && new Date(Date.parse(before.timestamp) + HOUR_MS);
+  const local = first && formatTimeZoneDateTimeParts(first, timeZone);
+  return local && local.dayKey === date && local.hour * 60 + local.minute === minutes ? first : null;
 }
 
 async function privateSubjects(db: Prisma.TransactionClient, memberId: string, seats: { gameId: string; reminderEveryDay: boolean }[], now: Date, slot: Date, covered: ReturnType<typeof privateRoomCheck>) {
