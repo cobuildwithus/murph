@@ -14,7 +14,8 @@ import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/reca
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { after } from "next/server";
-import { fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
+import { GAME_GRACE_MS } from "./time";
+import { departedLabels, fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
@@ -102,6 +103,7 @@ import {
   GAME_INVITE_TTL_MS,
   GAME_MAX_LENGTH_DAYS,
   GameRuleError,
+  hasPlayableGroupDay,
   gameOffDayMessage,
   isGameDue,
   isGameDecided,
@@ -158,7 +160,6 @@ import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
-import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
@@ -168,6 +169,7 @@ export { mediaKeyPrefixFor } from "./access";
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
 interface LoadedGame {
+  completedDays?: Map<string, Set<number>>;
   row: GameRow;
   entries: GameEntry[];
   state: RuleState;
@@ -553,18 +555,12 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
     case "editTerms": return editTerms(context, command);
     case "setDayCompletion":
       return setDayCompletion(context, command);
-    case "cancelInvite":
-      return cancelInvite(context, command.gameId);
     case "proposeChange":
       return proposeChange(context, command);
     case "respondChange":
       return respondChange(context, command);
     case "createGame":
       return createGame(context, command);
-    case "join":
-      return join(context, command);
-    case "negotiate":
-      return negotiate(context, command);
     case "post":
       return post(context, command);
     case "withdraw":
@@ -579,6 +575,17 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
       return setPlayerPhoto(context, command);
     case "unblock":
       return unblock(context, command.memberId);
+    default:
+      return respondToInvite(context, command);
+  }
+}
+
+function respondToInvite(context: CommandContext, command: Extract<GameCommand, { type: "join" | "negotiate" | "cancelInvite" | "dismissInvite" }>) {
+  switch (command.type) {
+    case "join": return join(context, command);
+    case "negotiate": return negotiate(context, command);
+    case "cancelInvite": return cancelInvite(context, command.gameId);
+    case "dismissInvite": return dismissGroupInvitation(context, command.gameId);
   }
 }
 
@@ -603,7 +610,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -1200,6 +1207,20 @@ async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: nu
       updated_at = EXCLUDED.updated_at`;
 }
 
+async function dismissGroupInvitation(context: CommandContext, gameId: string): Promise<null> {
+  const contacts = await readGameVerifiedContacts(context.actor);
+  await runLocked(gameId, context, async ({ loaded: { row }, tx }) => {
+    if (row.maxPlayers !== 10 || !areGameGroupsEnabled()) reject("GAME_NOT_FOUND", "Group invitation not found.");
+    const keys = await verifiedGameContactKeys(tx, context.actor, contacts);
+    if (!addressedGameInvite(row.invitees, context.actor, keys) || row.players.some(player => player.memberId === context.actor)) {
+      reject("NOT_A_PLAYER", "Only an unanswered invitation can be dismissed.");
+    }
+    const prior = await tx.gameEvent.findFirst({ where: { gameId, actor: context.actor, type: "invite_dismissed" }, select: { id: true } });
+    return prior ? [] : [{ type: "invite_dismissed", payload: {} }];
+  });
+  return null;
+}
+
 async function cancelInvite(context: CommandContext, gameId: string): Promise<string> {
   await runLocked(gameId, context, async locked => {
     if (decideCancelInvite(locked.loaded.state, context.actor, locked.now) === "already-void") return [];
@@ -1386,7 +1407,8 @@ async function assertGroupProposalPreparedTx(locked: LockedStep,
   prepared: (PreparedGameChangeWords & { rosterBasis?: string }) | null,
   groupContext: { before: LoadedGame; audience: GameChatAudience | null | undefined } | undefined): Promise<void> {
   const { loaded, tx } = locked;
-  if (!groupContext?.audience || !loaded.row.chatContainerMemberId
+  if (!loaded.row.chatContainerMemberId) reject("GAME_CHAT_REQUIRED", "Share the game invitation in a group text with the invited players and Murph before proposing a change.");
+  if (!groupContext?.audience
     || !await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, groupContext.audience, tx)) reject("NOT_A_PLAYER", "Open this game’s bound group chat before requesting a change.");
   if (!prepared || loaded.row.wordsOwnerMemberId !== groupContext.before.row.wordsOwnerMemberId
     || prepared.rosterBasis !== groupChangeRosterBasis(loaded.state)) reject("TERMS_CHANGED", "The game changed. Take another look.");
@@ -2112,6 +2134,18 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR, morningClock?: D
   });
 }
 
+/** Caller holds the game lock. Freeze scores before erasing any of their evidence. */
+export async function settleGroupBeforeDeletionTx(tx: Tx, row: GameRow, clock: Date): Promise<GameRow> {
+  if (row.maxPlayers !== 10 || row.status !== "live") return row;
+  const now = gameNow(clock, row);
+  // Empty final days carry the maximum grace. Before that last day ends, no settlement is possible.
+  if (now.getTime() < settleDueAt(toRuleState(row, [])).getTime() - GAME_GRACE_MS) return row;
+  const [loaded] = await loadGames(tx, [row.id]);
+  if (!await settleLoaded({ tx, loaded, clock, now }, SYSTEM_ACTOR)) return row;
+  const settled = await tx.game.findUniqueOrThrow({ where: { id: row.id }, select: { result: true, status: true, pendingChange: true } });
+  return { ...row, ...settled };
+}
+
 /** Reused by reads, join and leave, after the same game row lock. */
 async function settleLoaded({ loaded: { row, state }, tx, clock, now }: LockedStep, actor: string): Promise<boolean> {
   if (!isGameDue(state, now)) return false;
@@ -2716,7 +2750,10 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
         : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
           ? { progress: gameChatProgress(state, gameNow(clock, row), settledGameEnd(state, clock, gameNow(clock, row))) } : {}),
-      result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
+      result: result ? { scores: result.scores.flatMap(score => {
+        if (row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)) return [score];
+        return score.memberId === "" && score.eligible !== false ? [{ ...score, memberId: `departed-seat-${score.seat}` }] : [];
+      }), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(calendarPlayers(state)) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: gameNames.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
@@ -3131,9 +3168,9 @@ async function loadGames(db: Db, gameIds: readonly string[], multiplayer = true)
 }
 
 /** Loads only visible, non-withdrawn, unreported posts that can appear in history previews. */
-async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
+async function loadHistoryGames(db: Db, gameIds: readonly string[], groupIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
   if (gameIds.length === 0) return [];
-  const [rows, entries] = await Promise.all([
+  const [rows, entries, postedDays] = await Promise.all([
     db.game.findMany({ include: { invitees: true, players: true }, where: { id: { in: [...gameIds] } } }),
     db.$queryRaw<GameEntry[]>(Prisma.sql`
       WITH ranked_entry AS (
@@ -3176,7 +3213,21 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
       WHERE preview_rank <= ${GAME_HISTORY_PREVIEW_LIMIT}
       ORDER BY game_id, preview_rank
     `),
+    // One bounded list of credited days per group seat, independent of preview selection.
+    groupIds.length === 0 ? [] : db.$queryRaw<{ gameId: string; memberId: string; days: number[] }[]>(Prisma.sql`
+      SELECT entry.game_id AS "gameId", entry.member_id AS "memberId", array_agg(DISTINCT entry.day_index) AS days
+      FROM game_entry entry
+      WHERE entry.game_id IN (${Prisma.join(groupIds)})
+        AND entry.attempt > 0 AND entry.withdrawn_at IS NULL AND entry.incomplete IS NOT TRUE
+      GROUP BY entry.game_id, entry.member_id
+    `),
   ]);
+  const daysByGame = new Map<string, Map<string, Set<number>>>();
+  for (const { gameId, memberId, days } of postedDays) {
+    const players = daysByGame.get(gameId) ?? new Map<string, Set<number>>();
+    players.set(memberId, new Set(days));
+    daysByGame.set(gameId, players);
+  }
   const byId = new Map(rows.map((row) => [row.id, row]));
   const entriesByGame = new Map<string, GameEntry[]>();
   for (const entry of entries) {
@@ -3188,7 +3239,7 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
     const row = byId.get(id);
     if (!row) return [];
     const gameEntries = entriesByGame.get(id) ?? [];
-    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries) }];
+    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries), completedDays: daysByGame.get(id) }];
   });
 }
 
@@ -3258,7 +3309,7 @@ function canView(game: LoadedGame, memberId: string): boolean {
   if (player) return !player.leftAt;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.invitees.some(invitee => invitee.memberId === memberId)
-    && (game.row.status === "invited" || game.row.players.some(player => player.leftAt !== null));
+    && (game.row.status === "invited" || game.row.status === "void" && game.row.players.some(player => player.leftAt !== null));
 }
 
 /**
@@ -3317,6 +3368,31 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
   }
 }
 
+async function readOpenGroupInvitationIds(memberId: string, multiplayer: boolean) {
+  if (!multiplayer || !areGameGroupsEnabled()) return { games: [], keys: [] };
+  const db = getPrisma();
+  const keys = await verifiedGameContactKeys(db, memberId, await readGameVerifiedContacts(memberId));
+  const games = await db.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, orderBy: [{ createdAt: "desc" }, { id: "asc" }], where: {
+    AND: [gameOnWhere()], maxPlayers: 10, status: { in: ["invited", "live"] }, players: { none: { memberId } },
+    invitees: { some: { OR: [{ memberId }, { memberId: null, recipientLookupKey: { in: keys } }] } },
+    events: { none: { actor: memberId, type: "invite_dismissed" } },
+  } });
+  return { games, keys };
+}
+
+/** Keep unseated readers on the invite preview, which owns the pre-join disclosure rules. */
+async function homeGroupInvitationLinks(games: LoadedGame[], ids: Set<string>, keys: string[], viewer: string, zone: string | null, clock: Date, blocks: GameBlocks) {
+  const open = games.filter(({ row, state }) => {
+    if (!ids.has(row.id) || row.createdBy && isHiddenBy(blocks, row.createdBy)) return false;
+    const invitation = addressedGameInvite(row.invitees, viewer, keys);
+    if (!invitation || row.players.some(player => player.memberId === viewer || player.seat === invitation.seat)) return false;
+    return row.status === "invited" || row.status === "live" && row.players.length < 10
+      && (!zone || hasPlayableGroupDay(state, zone, gameNow(clock, row)));
+  });
+  const tokens = await openGameTexts(open.map(({ row }) => ({ ...gameTarget(row, "invite_token"), value: row.inviteTokenEncrypted })));
+  return open.flatMap(({ row }, i) => tokens[i] ? [{ gameId: row.id, token: tokens[i] }] : []);
+}
+
 /** Open obligations outlive the history window. Expiry uses each game's own clock. */
 async function readWalletTickets(memberId: string, multiplayer: boolean, clock: Date) {
   const prisma = getPrisma();
@@ -3367,7 +3443,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
         seat.joined_at DESC, seat.game_id DESC
       LIMIT ${HOME_CANDIDATE_LIMIT}
     `),
-    prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } },
+    prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } }, events: { none: { actor: memberId, type: "invite_dismissed" } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
@@ -3375,12 +3451,14 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     // leaves it unknown instead of failing home.
     readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
-  const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
+  const invitations = await readOpenGroupInvitationIds(memberId, multiplayer);
+  const invitationIds = new Set(invitations.games.map(game => game.id));
+  const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id), ...invitationIds])], true, memberId);
   const tickets = await readWalletTickets(memberId, multiplayer, current.clock);
   const visible = current.games.filter((game) => canView(game, memberId));
   const counterpartyOf = (ticket: (typeof tickets)[number]) => ticket.game.players.find(player => player.memberId !== memberId)?.memberId;
   const blocks = await readGameBlocks(prisma, memberId, [
-    ...visible.flatMap(participantsOf), ...tickets.flatMap(ticket => gameMemberIds(ticket.game.players)),
+    ...current.games.flatMap(participantsOf), ...tickets.flatMap(ticket => gameMemberIds(ticket.game.players)),
   ]);
   // Someone you blocked is gone from your Home: their games and tickets too.
   const shown = visible.filter((game) => game.row.maxPlayers === 10 || !participantsOf(game).some((id) => blocks.blocked.has(id)));
@@ -3404,7 +3482,8 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     blocked,
     games: views,
     canStartGames: isGameEnabled(),
-    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
+    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled(),
+      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, profile?.timeZone ?? null, current.clock, blocks) } : {}),
     me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
@@ -3422,7 +3501,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
  */
 export async function readHistory(memberId: string, multiplayer = false): Promise<GameHistoryView> {
   const prisma = getPrisma();
-  const candidates = await prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
+  const candidates = await prisma.$queryRaw<Array<{ gameId: string; maxPlayers: number }>>(Prisma.sql`
     WITH settled_games AS (
       SELECT game.id AS game_id, game.max_players,
         CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END AS opponent_id,
@@ -3453,7 +3532,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
       FROM settled_games
       GROUP BY max_players, opponent_id
     )
-    SELECT settled_games.game_id AS "gameId"
+    SELECT settled_games.game_id AS "gameId", settled_games.max_players AS "maxPlayers"
     FROM settled_games
     JOIN recent_audiences USING (max_players, opponent_id)
     WHERE recent_audiences.audience_rank <= CASE WHEN max_players = 10 THEN ${HISTORY_GROUP_LIMIT}::int ELSE ${HISTORY_PEOPLE_LIMIT}::int END
@@ -3467,7 +3546,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
 
   const gameIds = candidates.map((candidate) => candidate.gameId);
   const [games, clock] = await Promise.all([
-    loadHistoryGames(prisma, gameIds, memberId),
+    loadHistoryGames(prisma, gameIds, candidates.filter(game => game.maxPlayers === 10).map(game => game.gameId), memberId),
     databaseNow(prisma),
   ]);
   const built = await buildHistoryViews(games, memberId, clock, multiplayer);
@@ -3555,7 +3634,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const closed = await closedInvitePreview(row, now);
+  const closed = await closedInvitePreview(row, now, memberId);
   if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
@@ -3591,7 +3670,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
-async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
+async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: string): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
   if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
@@ -3602,6 +3681,10 @@ async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInv
     return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
+  if (groupOpen && memberId && !row.players.some(player => player.memberId === memberId)) {
+    const profile = await getPrisma().gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
+    if (profile && !hasPlayableGroupDay(toRuleState(row, []), profile.timeZone, now)) return { status: "expired", noPlayableDay: true };
+  }
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
   return null;
 }
@@ -4006,7 +4089,7 @@ async function buildViewInputs(
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return {
-      multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
+      completedDays: game.completedDays, multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
       challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
       talkDelivery: talkViews.get(game.row.id),

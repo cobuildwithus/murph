@@ -10,7 +10,7 @@ import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
 import { lockGamePair } from "./blocks";
 import { isGameMemberSet, sameGameMembers } from "./roster";
-import { GAME_MAX_OPEN_PER_PAIR } from "./rules";
+import { GAME_MAX_OPEN_PER_PAIR, reject } from "./rules";
 import { isGameEnabled } from "./access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { normalizeHostedEmailAddress } from "../hosted-onboarding/contact-privacy";
@@ -208,7 +208,10 @@ export async function findExistingGameChat(playerMemberIds: readonly string[], p
       },
       orderBy: [{ createdAt: "desc" }, { memberId: "asc" }], take: CANDIDATE_LIMIT + 1,
     });
-    if (candidates.length > CANDIDATE_LIMIT) throw new Error("Game chat discovery needs a narrower existing conversation.");
+    if (candidates.length > CANDIDATE_LIMIT) {
+      if (partial) return null;
+      throw new Error("Game chat discovery needs a narrower existing conversation.");
+    }
     // Message receipts are conversation activity; roster refreshes and system
     // notifications are not. Read one indexed receipt per bounded candidate.
     candidates.sort((a, b) => {
@@ -356,14 +359,22 @@ export async function prepareGameChat(input: { actor: string; members: readonly 
   const room = input.room ?? (input.handles && members.length
     ? await findExistingGameChat(members, input.handles) : null);
   if (room) {
-    const audience = await readGameChatAudience(room);
-    if (!audience.keys.candidates.some(key => input.audienceKeys.includes(key))) throw new Error("The game's chat participants have changed.");
+    const audience = await readGameChatAudience(room).catch(error => {
+      const reason = readGameChatAudienceRefusal(error);
+      if (reason === "route_removed" || reason === "participants_changed") refuseChangedGameChat();
+      throw error;
+    });
+    if (!audience.keys.candidates.some(key => input.audienceKeys.includes(key))) refuseChangedGameChat();
     return preparedGameRoom(room, audience, input.audienceKeys);
   }
   const contact = await readHostedMurphContactContextForMember({ memberId: input.actor, prisma: getPrisma() });
   const murphPhoneNumber = contact.murphPhoneNumber ?? (await listHostedLinqHealthyProactiveLines({ prisma: getPrisma() }))[0]?.phoneNumber;
   if (!murphPhoneNumber) throw new Error("Messages setup is unavailable. Try again shortly.");
   return { room: null, composer: { murphPhoneNumber } };
+}
+
+function refuseChangedGameChat(): never {
+  reject("GAME_CHAT_CHANGED", "This chat can no longer host this group. Start a new game and choose who to invite.");
 }
 
 function preparedGameRoom(room: string, audience: Awaited<ReturnType<typeof readGameChatAudience>>, audienceKeys: readonly string[]) {

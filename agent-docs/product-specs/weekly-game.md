@@ -91,12 +91,17 @@ A second acceptance activates it; until then it waits without expiry. Addressed
 invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
-the common schedule. While invited, the starter alone can edit full terms
+the common schedule. A live group accepts a new seat only while a scheduled
+day remains in the joining time zone. A signed-in preview uses the profile time
+zone and returns `status: "expired"` with `noPlayableDay: true` after that cutoff.
+While invited, the starter alone can edit full terms
 directly. Waiting invitations retain only their latest terms and encrypted words;
 version numbers still increase, so stale acceptance remains invalid. Once live,
 played-day history remains available and any remaining seated player can ask for a change from the
 app or bound group chat with full terms, the current terms version and a new
-proposal ID. New app asks require a proven bound room for their announcement.
+proposal ID. New app asks require a proven bound room for their announcement. When
+`changeControls.requiresGroupChat` is true, offer to share the invitation in the
+matching group text. A write before binding returns 409 `GAME_CHAT_REQUIRED`.
 More than half of the remaining players must say yes, including
 the proposer. Each person can answer only for themselves; their yes or no is
 final for that ask. Repeating the same answer is a no-op, even after resolution.
@@ -159,12 +164,20 @@ match that contact's own unbound invitation key, even after registration.
 Bound invitations grant only their member; their old contact keys grant nothing.
 Adding anyone outside the original audience or losing a still-playing person
 from the text detaches the game. Creation and Same again still require the exact
-audience. Leaving a waiting invitation voids it, as does an active game falling
+audience. When the previous room no longer matches, Same again returns a non-retryable
+409 `GAME_CHAT_CHANGED`. Offer a fresh game with recipient selection. When partial
+recipient discovery exceeds its room budget, a fresh game opens the Messages composer.
+Leaving a waiting invitation voids it, as does an active game falling
 below two remaining players. Group blocks mask content symmetrically without
 changing scores or ending the game. The game keeps its chat, and nothing is sent
 there while the block stands. Waiting notices and the recap send once it lifts
 if they are still current. Explicit player reports identify their subject;
 posts remain counted when their reporter hides them.
+
+Account deletion settles a due group before removing the player's entries. The chat
+keeps the erased seat's frozen score under an anonymous seat reference. Survivors
+of a live group retain its share link. Deleting someone who already left preserves
+a subsequent vote among the remaining players.
 
 Exactly one winner's prize is shared by a proper subset tied for the highest
 numeric score. An all-way tie has no ticket. Eligibility and scores freeze at
@@ -208,6 +221,12 @@ rosters contain admitted players and retained departures; legacy pair rosters
 keep the pending invitee placeholder. Group ticket scalar member fields are
 empty strings; clients render `parties`. Player reports name `reportedMemberId`;
 post reports derive their author and terms reports target the starter.
+
+Multiplayer Home includes `groupInvitations` with `gameId` and `token` for
+outstanding addressed invitations. Open the token's invite preview. A waiting
+game can also appear in `games`, so display one item per game ID.
+`POST /api/game/v1/games/:id/dismiss-invite` hides the invitation on that
+member's Home. The original link still works while admission is open.
 
 `POST /api/game/v1/games/:id/leave` and
 `PUT /api/game/v1/games/:id/terms` use the existing locked commands. Invited
@@ -257,7 +276,8 @@ renders sparse seat overrides, authenticated preview extras, private labels or
 other players' names. Pair rendering, app links and closed/cancelled copy stay
 unchanged.
 
-Group history keeps each round's roster, frozen standings and previews, plus
+Group history computes each seat's streak from its completed scheduled days across
+the full round. It keeps each round's roster, frozen standings and previews, plus
 the shared default `task` and `prize` from the latest round's final terms at group
 level. The task is the same for every viewer, including players with a seat override.
 It returns at most twenty groups with the twenty-five most recent rounds each. Pair history independently

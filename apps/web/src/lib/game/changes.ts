@@ -24,9 +24,9 @@ function changeFromDay(state: RuleState, change: GameChange, now: Date, canMoveS
 export function gameChangeControls(state: RuleState, now: Date, pending: Pick<GamePendingChange, "id"> | null, viewerId?: string): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
   const live = canRequestGameChange(state, viewerId);
-  // Once either player's last day is over, the game is done for changes.
-  const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
-  const enabled = editable && day < GAME_MAX_LENGTH_DAYS;
+  const editable = live && !pending && !isGameDue(state, now)
+    && (state.game.seats === 10 || day <= state.game.lengthDays);
+  const enabled = editable && day <= state.game.lengthDays && day < GAME_MAX_LENGTH_DAYS;
   return {
     canStartNow: enabled && day === 0 && startNowMovesDayOne(state, now),
     canEdit: editable,
@@ -44,7 +44,7 @@ export function gameChangeControls(state: RuleState, now: Date, pending: Pick<Ga
 function canRequestGameChange(state: RuleState, viewerId?: string): boolean {
   if (state.game.seats === 10) {
     const players = remainingPlayers(state);
-    return state.game.status === "live" && players.length >= 2 && (viewerId === undefined || players.some(player => player.memberId === viewerId));
+    return state.game.status === "live" && players.length >= 2 && (viewerId === undefined || Boolean(state.game.chatContainerMemberId) && players.some(player => player.memberId === viewerId));
   }
   return state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
 }
@@ -188,6 +188,7 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   assertEditableWords(state, change, controls, now, sealedWords);
   // A prize change covers the whole game, so it needs no future day.
   if (isStakesOnlyChange(change, sealedWords)) return { change, effectiveFromDay: Math.min(effectiveFromDay, state.game.lengthDays), startsOn: null };
+  if (effectiveFromDay > state.game.lengthDays) reject("GAME_NOT_LIVE", "Only the prize can change while the last day finishes.");
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
   if ((change.lengthDays !== undefined && lengthDays < GAME_MIN_LENGTH_DAYS) || lengthDays <= effectiveFromDay || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 365 days.");
   const oldSchedule = currentTerms(state.game.terms).schedule;

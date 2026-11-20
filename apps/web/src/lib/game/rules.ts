@@ -177,6 +177,8 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   CHANGE_PENDING: 409,
   CHANGE_EXPIRED: 409,
   CHAT_UNAVAILABLE: 503,
+  GAME_CHAT_REQUIRED: 409,
+  GAME_CHAT_CHANGED: 409,
   CHALLENGE_USED: 409,
   REPLY_USED: 409,
   CONTENT_NOT_ALLOWED: 422,
@@ -693,10 +695,23 @@ export function decideJoin(
   assertJoinOpen(state, input, claimed);
   const seat = admissionSeat(state, input, claimed);
   const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(calendarPlayers(state)), joinedAt: input.now };
-  if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  if (group && game.status === "live") {
+    if (!hasPlayableGroupDay(state, input.timeZone, input.now)) reject("INVITE_EXPIRED", "Your last scheduled day has ended.");
+    return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  }
   return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
     ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
       player => acceptanceStartDate(input.now, player.timeZone), game.startsOn) };
+}
+
+export function hasPlayableGroupDay(state: RuleState, timeZone: string, now: Date): boolean {
+  const dayOne = gameDayOne(calendarPlayers(state));
+  if (!dayOne) return true;
+  const first = Math.max(0, daysBetween(dayOne, gameLocalDate(now, timeZone)));
+  for (let day = first; day < state.game.lengthDays; day++) {
+    if (isScheduledDay(state, day)) return true;
+  }
+  return false;
 }
 
 type JoinInput = Parameters<typeof decideJoin>[1];
@@ -963,10 +978,10 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
 }
 
 /** Consecutive scheduled posts, ignoring an unposted current day and off days. */
-export function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
+export function playerStreak(state: RuleState, player: RulePlayer, now: Date, completedDays?: ReadonlySet<number>): number {
   const today = dayIndexAt(player, now);
   if (today === null) return 0;
-  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
+  const posted = completedDays ?? new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
   let streak = 0;
   for (let day = Math.min(today, state.game.lengthDays - 1); day >= eligibleFromDay(state, player); day -= 1) {
     if (!isScheduledDay(state, day)) continue;
