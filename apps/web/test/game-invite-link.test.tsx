@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { GameInviteView } from "@/app/g/[token]/game-invite-view";
 import { GameInviteShareCard } from "@/app/g/[token]/invite-share-card";
+import { isOtherMobileUserAgent } from "@/src/lib/apple-mobile";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import type { GameInvitePreview } from "@/src/lib/game/contract";
 
@@ -125,6 +126,18 @@ describe("weekly game invite link", () => {
     expect(html).not.toContain("Scan to play.");
     // No width rule hides a working button or shows the code.
     expect(html).not.toMatch(/@5xl:hidden|hidden[^"]*@5xl:flex/u);
+  });
+
+  it("tells a phone the app doesn't run on to open the link on an iPhone, with no code to scan on itself", () => {
+    const html = renderToStaticMarkup(createElement(GameInviteView, { appUrl: "ai.withmurph.app://invite/synthetic", inviteUrl: INVITE_URL, onComputer: false, onOtherPhone: true, preview: OPEN }));
+    expect(html).toContain("Open this link on an iPhone to play.");
+    expect(html).not.toContain("Scan to play.");
+    expect(html).not.toContain("Get the app");
+    expect(html).not.toContain("ai.withmurph.app://invite/synthetic");
+    const android = "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36";
+    const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1";
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Safari/605.1.15";
+    expect([android, iphone, mac].map(isOtherMobileUserAgent)).toEqual([true, false, false]);
   });
 
   it("puts a dare on the loser's pink slip", () => {
