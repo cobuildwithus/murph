@@ -599,15 +599,11 @@ test("DashboardCriticalLoadError refreshes the unavailable dashboard layout", as
   }
 });
 
-test("DashboardError gives non-home dashboard child failures a route-group reset", async () => {
-  const reset = vi.fn();
+test("DashboardError reloads the current page to retry a failed server render", async () => {
   const { default: DashboardError } = await import(
     "../app/(dashboard)/error"
   );
-  const rendered = await renderClientComponent(createElement(DashboardError, {
-    error: new Error("records data unavailable"),
-    reset,
-  }));
+  const rendered = await renderClientComponent(createElement(DashboardError));
 
   try {
     assert.match(
@@ -633,8 +629,7 @@ test("DashboardError gives non-home dashboard child failures a route-group reset
       }));
     });
 
-    assert.equal(reset.mock.calls.length, 1);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.equal(rendered.reload.mock.calls.length, 1);
   } finally {
     await rendered.cleanup();
   }
