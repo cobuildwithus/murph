@@ -180,9 +180,9 @@ async function assertAndDispatch(authority: NonNullable<Awaited<ReturnType<typeo
     deliveryIdempotencyKey: authority.policy.eventId, groupMissedPolicy: authority.policy, now: at });
   return recordHostedLinqRuntimeProviderDispatchFenceTx({ prisma: tx, idempotencyKey: authority.policy.eventId, linqChatId: authority.policy.roomId, targetKind: "thread", attemptedAt: at });
 }
-async function conversation(f: Awaited<ReturnType<typeof fixture>>, text: string) {
+async function conversation(f: Awaited<ReturnType<typeof fixture>>, text: string, at = now) {
   const eventId = randomUUID(), person = f.people[0]!;
-  const envelope = parseHostedExecutionWake({ eventId, kind: "conversation.message", userId: f.roomId, occurredAt: now.toISOString(),
+  const envelope = parseHostedExecutionWake({ eventId, kind: "conversation.message", userId: f.roomId, occurredAt: at.toISOString(),
       message: { channel: "linq", contactKind: "email", contactLookupKey: createHostedEmailLookupKey(person.email),
         routeAuthority: { channel: "linq", containerMemberId: f.roomId, threadId: f.roomId },
         linqMessage: { chatId: f.roomId, from: person.email, isFromMe: false, threadIsDirect: false, messageId: eventId, parts: [{ type: "text", value: text }] } } });
@@ -272,6 +272,21 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   const eveningAt = new Date("2030-03-04T20:05:00Z");
+  it("uses the speaker's own game-day boundary for the evening transcript", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(), id = await f.addGame(10, ["UTC", "Europe/Paris", "UTC"]);
+    const at = new Date("2030-03-04T02:30:00Z");
+    await conversation(f, "Earlier chapter finished", at);
+    await conversation({ ...f, people: f.people.slice(1) }, "Morning chapter finished", at);
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    await drainGameChatLifecycle({ now: eveningAt });
+    const wake = await readHostedMailboxWakeByDedupeKey({ userId: f.roomId, dedupeKey: eventId });
+    if (wake?.kind !== "assistant.notification.requested") throw new Error("Missing evening check-in");
+    expect(wake.notification.instructions).toContain("Morning chapter finished");
+    expect(wake.notification.instructions).not.toContain("Earlier chapter finished");
+  });
+
   it("reserves one evening per room and date, and freezes the addressed batch", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();

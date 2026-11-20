@@ -361,12 +361,18 @@ export async function readGameRecapChatMessages(input: {
   });
 }
 
-export async function readGameChatTranscript(input: {
+type TranscriptInput = {
   containerMemberId: string;
   playerNamesByMemberId: readonly { memberId: string; name: string }[];
   since: Date;
   until?: Date;
-}): Promise<GameRecapChatMessage[]> {
+};
+
+export async function readGameChatTranscript(input: TranscriptInput): Promise<GameRecapChatMessage[]> {
+  return (await readTimedGameChatTranscript(input)).map(({ playerName, text }) => ({ playerName, text }));
+}
+
+export async function readTimedGameChatTranscript(input: TranscriptInput) {
   const prisma = getPrisma();
   const availableAt = new Date();
   const rows = await prisma.hostedMailboxItem.findMany({
@@ -383,7 +389,7 @@ export async function readGameChatTranscript(input: {
   })) });
   const names = new Map(input.playerNamesByMemberId.map((player) => [player.memberId, player.name]));
   const senderIds = new Map<string, Promise<string | null>>();
-  const messages: GameRecapChatMessage[] = [];
+  const messages: { playerName: string; memberId: string; occurredAt: string; text: string }[] = [];
   for (const payload of decoded.reverse()) {
     if (!payload) continue;
     const wake = parseHostedExecutionWake(payload);
@@ -406,8 +412,7 @@ export async function readGameChatTranscript(input: {
     if (!existing) senderIds.set(senderKey, pending);
     const senderMemberId = await pending;
     const playerName = senderMemberId ? names.get(senderMemberId) : undefined;
-    if (!playerName) continue;
-    if (text) messages.push({ playerName, text });
+    if (senderMemberId && playerName && text) messages.push({ playerName, memberId: senderMemberId, occurredAt: wake.occurredAt, text });
   }
   return messages;
 }
