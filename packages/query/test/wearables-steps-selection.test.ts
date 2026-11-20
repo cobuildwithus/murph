@@ -217,3 +217,9 @@ test("a total is a partial count only when recorded before a day end the vault h
     dayEndMs, evidenceThroughMs: Number.NEGATIVE_INFINITY, recordedAt: "2026-05-03T19:00:00.000Z",
   }), false);
 });
+
+test.each([0, 1_000_001])("keeps the device day when a phone reports %i steps", (invalid) => {
+  for (const [phone, watch] of [["", ""], ["multiple_sources", "watch"]] as const) {
+    assert.equal(selected(steps("apple-health-kit", phone, invalid), steps("garmin", watch, 3456)), 3456);
+  }
+});
