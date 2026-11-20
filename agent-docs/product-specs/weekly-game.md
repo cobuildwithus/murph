@@ -169,6 +169,11 @@ there while the block stands. Waiting notices and the recap send once it lifts
 if they are still current. Explicit player reports identify their subject;
 posts remain counted when their reporter hides them.
 
+Account deletion settles a due group before removing the player's entries. The chat
+keeps the erased seat's frozen score under an anonymous seat reference. Survivors
+of a live group retain its share link. Deleting someone who already left preserves
+a subsequent vote among the remaining players.
+
 Exactly one winner's prize is shared by a proper subset tied for the highest
 numeric score. An all-way tie has no ticket. Eligibility and scores freeze at
 settlement, after the last remaining competitor's local final day and applicable

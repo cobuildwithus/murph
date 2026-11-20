@@ -172,6 +172,78 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("preserves the winning seat when deletion is the first action after the deadline", async () => {
+    const outcomes = [];
+    for (const readFirst of [true, false]) {
+      const people = await Promise.all([person(), person(), person(), person()]);
+      const game = await create(people[0], people.slice(1));
+      for (const player of people.slice(1)) await ok(player.id, join(game.token));
+      for (const [seat, total] of [3, 2, 1, 0].entries()) {
+        for (let day = 0; day < total; day++) await entry(game.id, people[seat].id, day);
+      }
+      // Reconstruct the same past calendar for both orderings without shifting the deletion clock.
+      await db.gamePlayer.updateMany({ where: { gameId: game.id }, data: {
+        dayOne: new Date("2022-06-01"), joinedAt: new Date("2022-05-31T12:00:00Z"),
+      } });
+      await db.game.update({ where: { id: game.id }, data: { startsOn: new Date("2022-06-01"), startedAt: new Date("2022-05-31T12:00:00Z") } });
+      for (let day = 0; day < 3; day++) await db.gameEntry.updateMany({ where: { gameId: game.id, dayIndex: day },
+        data: { receivedAt: new Date(Date.UTC(2022, 5, day + 1, 12)) } });
+      if (readFirst) await readGame(game.id, people[1].id, true);
+      const memberIds = [people[0].id];
+      const prepared = await prepareGameAccountDeletion({ memberIds, prisma: db });
+      await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds, prepared, tx, now: new Date() }));
+      await db.hostedMember.delete({ where: { id: people[0].id } });
+      const view = await readGame(game.id, people[1].id, true);
+      outcomes.push({ winners: view?.result?.winnerSeats, score: view?.result?.scores.find(s => s.seat === 0)?.score,
+        recipients: (await gameRow(game.id)).tickets[0]?.owedToSeats });
+    }
+    expect(outcomes).toEqual([{ winners: [0], score: 3, recipients: [0] }, { winners: [0], score: 3, recipients: [0] }]);
+  });
+
+  it.each([0, 3])("preserves a vote opened after seat %i left when that account is erased", async departedSeat => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    await exactRoom([people[1], people[2], people[3], people[0]]);
+    const game = await create(people[0], people.slice(1));
+    for (const player of people.slice(1)) await ok(player.id, join(game.token));
+    await ok(people[departedSeat].id, { type: "leave", gameId: game.id });
+    const proposalId = randomUUID();
+    await ok(people[1].id, { type: "editTerms", gameId: game.id, proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose the park" }] } });
+    await erase(people[departedSeat].id);
+    expect((await gameRow(game.id)).pendingChange).toMatchObject({ id: proposalId });
+    const decided = await ok(people[2].id, { type: "respondChange", gameId: game.id, proposalId, decision: "approve" });
+    expect(decided?.terms.stakes).toMatchObject([{ item: "Choose the park" }]);
+    expect(decided?.pendingChange).toBeNull();
+  });
+
+  it("preserves the invitation for survivors after the starter deletes", async () => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1, 3)) await ok(p.id, join(game.token));
+    const linkFor = async (p: Person) => (await readGame(game.id, p.id, true))?.inviteToken === game.token;
+    expect(await Promise.all(people.slice(1, 3).map(linkFor))).toEqual([true, true]);
+    await erase(people[0].id);
+    expect(await Promise.all(people.slice(1, 3).map(linkFor))).toEqual([true, true]);
+    expect((await run(people[3].id, join(game.token))).ok).toBe(true);
+  });
+
+  it("preserves the anonymous winning score in the surviving chat", async () => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    const room = await exactRoom([...people.slice(1), people[0]]);
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    for (const [seat, total] of [3, 2, 1, 0].entries()) for (let day = 0; day < total; day++) await entry(game.id, people[seat].id, day);
+    await settle(game.id, people[1].id);
+    await erase(people[0].id);
+    chatProof.rooms.set(room, people.slice(1).map(p => p.email));
+    const app = await readGame(game.id, people[1].id, true);
+    expect(app?.result).toMatchObject({ winnerSeats: [0], outcome: "lost" });
+    const chat = (await readGameChatState(room, people.slice(1).map(p => p.id), people[1].id)).games.find(g => g.id === game.id);
+    expect(chat?.result?.scores.map(s => s.score).sort()).toEqual([0, 1, 2, 3]);
+    expect(chat?.result?.scores.find(s => s.seat === 0)?.memberId).not.toBe(people[0].id);
+    expect(chat?.result?.tickets[0].owedToSeats).toEqual([0]);
+  });
+
   it("refuses a rematch in a changed room and allows it once the roster matches", async () => {
     const { people, context, game } = await majorityGame(3);
     const room = context.chatContainerMemberId;
@@ -2882,7 +2954,7 @@ describe.skipIf(!enabled)("surviving group authority", () => {
     await erase(f.people[0].id);
     const context = { ...f.context, chatPlayerMemberIds: f.people.slice(1).map(p => p.id),
       chatAudience: await readGameChatAudience(f.context.chatContainerMemberId) };
-    expect(await gameRow(f.group.id)).toMatchObject({ status: "live", createdBy: null, inviteTokenEncrypted: null });
+    expect(await gameRow(f.group.id)).toMatchObject({ status: "live", createdBy: null, inviteTokenEncrypted: expect.any(String) });
     return { ...f, context, actor: f.people[3] };
   }
 

@@ -14,7 +14,8 @@ import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/reca
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { after } from "next/server";
-import { fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
+import { GAME_GRACE_MS } from "./time";
+import { departedLabels, fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
@@ -157,7 +158,6 @@ import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
-import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
@@ -2111,6 +2111,18 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR, morningClock?: D
   });
 }
 
+/** Caller holds the game lock. Freeze scores before erasing any of their evidence. */
+export async function settleGroupBeforeDeletionTx(tx: Tx, row: GameRow, clock: Date): Promise<GameRow> {
+  if (row.maxPlayers !== 10 || row.status !== "live") return row;
+  const now = gameNow(clock, row);
+  // Empty final days carry the maximum grace. Before that last day ends, no settlement is possible.
+  if (now.getTime() < settleDueAt(toRuleState(row, [])).getTime() - GAME_GRACE_MS) return row;
+  const [loaded] = await loadGames(tx, [row.id]);
+  if (!await settleLoaded({ tx, loaded, clock, now }, SYSTEM_ACTOR)) return row;
+  const settled = await tx.game.findUniqueOrThrow({ where: { id: row.id }, select: { result: true, status: true, pendingChange: true } });
+  return { ...row, ...settled };
+}
+
 /** Reused by reads, join and leave, after the same game row lock. */
 async function settleLoaded({ loaded: { row, state }, tx, clock, now }: LockedStep, actor: string): Promise<boolean> {
   if (!isGameDue(state, now)) return false;
@@ -2715,7 +2727,10 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
         : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
           ? { progress: gameChatProgress(state, gameNow(clock, row), settledGameEnd(state, clock, gameNow(clock, row))) } : {}),
-      result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
+      result: result ? { scores: result.scores.flatMap(score => {
+        if (row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)) return [score];
+        return score.memberId === "" && score.eligible !== false ? [{ ...score, memberId: `departed-seat-${score.seat}` }] : [];
+      }), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(calendarPlayers(state)) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: gameNames.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
