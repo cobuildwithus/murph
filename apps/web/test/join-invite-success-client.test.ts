@@ -37,7 +37,6 @@ vi.mock("next/link", () => ({
   },
 }));
 
-import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "@/src/components/hosted-onboarding/join-invite-copy";
 import { JoinInviteSuccessClient } from "@/src/components/hosted-onboarding/join-invite-success-client";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import {
@@ -94,7 +93,7 @@ test("blocked success page does not pretend setup is still running", () => {
   assert.doesNotMatch(markup, /data-slot="link-page-dots"/);
 });
 
-test("a payment still setting up says the same ten seconds as the invite page", () => {
+test("an unpaid checkout visit links back to the invite without a receipt", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("checkout"),
@@ -103,10 +102,9 @@ test("a payment still setting up says the same ten seconds as the invite page", 
     }),
   );
 
-  assert.match(markup, /Payment received\./);
-  assert.match(markup, new RegExp(JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle.replace(".", "\\.")));
-  assert.doesNotMatch(markup, /about a minute/);
-  assert.match(markup, /data-slot="link-page-dots"/);
+  assert.doesNotMatch(markup, /Payment received|Setup finishes|link-page-dots/);
+  assert.match(markup, /Finish setting up Murph/);
+  assert.match(markup, /Back to invite/);
 });
 
 test("a dead link on the return page never claims nothing changed", () => {
@@ -126,7 +124,7 @@ test("a dead link on the return page never claims nothing changed", () => {
   }
 });
 
-test("checkout-stage success page stays blank while the returned session is being verified", () => {
+test("checkout-stage success page shows progress while the returned session is being verified", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
       initialStatus: createStatus("checkout"),
@@ -135,7 +133,8 @@ test("checkout-stage success page stays blank while the returned session is bein
     }),
   );
 
-  assert.equal(markup, "");
+  assert.match(markup, /Checking your signup status/);
+  assert.doesNotMatch(markup, /Email support/);
   assert.doesNotMatch(markup, /Payment received/);
   assert.doesNotMatch(markup, /Private by default/);
 });
@@ -182,7 +181,7 @@ test("checkout-stage success page waits for returned session reconciliation befo
 
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view.routerReplace).not.toHaveBeenCalled();
-  expect(view.container.textContent ?? "").toBe("");
+  expect(view.container.textContent).toContain("Checking your signup status");
 
   resolveFetch(
     new Response(JSON.stringify(createStatus("active")), {
