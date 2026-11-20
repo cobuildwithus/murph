@@ -3422,6 +3422,11 @@ async function readWalletTickets(memberId: string, multiplayer: boolean, clock: 
       JOIN game_ticket ticket ON ticket.game_id = game.id
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL AND ${gameOnSql()}
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+        AND (game.max_players <> 2 OR NOT EXISTS (
+          SELECT 1 FROM game_player opponent JOIN game_block block
+            ON block.blocked_member_id = opponent.member_id AND block.blocker_member_id = seat.member_id
+          WHERE opponent.game_id = game.id AND opponent.member_id <> seat.member_id
+        ))
     ), wallet AS (
       SELECT id FROM visible WHERE actionable
       UNION ALL
@@ -3446,19 +3451,21 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   const prisma = getPrisma();
   const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
-    // Apply active-game priority before the bounded history window, so new
-    // invitations and completed games cannot displace an older live game.
+    // Only finished seats have a history window.
     prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
-      SELECT seat.game_id AS "gameId" FROM game_player seat
-      JOIN game ON game.id = seat.game_id
-      WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
-        AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
-        AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
-        AND ${gameOnSql()}
-        AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
-      ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
-        seat.joined_at DESC, seat.game_id DESC
-      LIMIT ${HOME_CANDIDATE_LIMIT}
+      WITH seats AS (
+        SELECT seat.game_id, seat.joined_at, game.status FROM game_player seat
+        JOIN game ON game.id = seat.game_id
+        WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
+          AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+          AND ${gameOnSql()}
+          AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
+      )
+      SELECT game_id AS "gameId" FROM seats WHERE status IN ('invited', 'negotiating', 'live')
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'settled' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'void' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
     `),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } }, events: { none: { actor: memberId, type: "invite_dismissed" } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),
