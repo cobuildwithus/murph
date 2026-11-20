@@ -75,6 +75,18 @@ const GROUP_PREVIEW: OpenPreview = {
   },
 };
 
+const LONG_GROUP_PREVIEW: OpenPreview = {
+  ...GROUP_PREVIEW,
+  group: { id: "design-group-long", word: "early morning neighborhood walking and stretching club" },
+  lengthDays: 28,
+  startsOn: "2026-11-23",
+  terms: {
+    ...GROUP_PREVIEW.terms,
+    defaultTask: "Walk two miles before work, then stretch for ten minutes on the porch",
+    stakes: [{ item: "The others cook a big pancake breakfast for the winner on Sunday", key: "stake_design_group", kind: "prize" }],
+  },
+};
+
 const STATES: ReadonlyArray<{ id: string; label: string; preview: GameInvitePreview | null }> = [
   { id: "group", label: "Open group, shared task", preview: GROUP_PREVIEW },
   { id: "any-artifact", label: "Open, free artifact choice", preview: { ...OPEN_PREVIEW, terms: { ...OPEN_PREVIEW.terms, checkInKind: "any", schedule: { days: [0, 1, 2, 3, 4] } } } },
@@ -94,6 +106,7 @@ const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInv
   { id: "link-dare", label: "Link preview, 75 days, dare", preview: DARE_PREVIEW },
   { id: "link-open", label: "Link preview, open", preview: OPEN_PREVIEW },
   { id: "link-long-terms", label: "Link preview, long tasks and prize", preview: LONG_TERMS_PREVIEW },
+  { id: "link-group-long-name", label: "Group link preview, long name, task and prize", preview: LONG_GROUP_PREVIEW },
   { id: "link-open-any-days", label: "Link preview, any days, picked start", preview: { ...ANY_DAYS_PREVIEW, startsOn: "2026-10-19" } },
   { id: "link-closed", label: "Link preview, used, expired, or missing", preview: { status: "used" } },
 ];
