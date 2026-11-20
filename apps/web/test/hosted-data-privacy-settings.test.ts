@@ -473,8 +473,8 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { accountHint: "*** 0731", authenticated: true }));
     });
 
-    expect(container.textContent).toContain("Signed in as *** 0731.");
-    expect(container.textContent).toContain("Not you? Sign out");
+    expect(container.textContent).toContain("Signed in as *** 0731");
+    expect(container.textContent).toContain("Sign out");
     expect(document.body.textContent).toContain(
       "Deletes the account for *** 0731, with its data, subscription, and login, permanently.",
     );

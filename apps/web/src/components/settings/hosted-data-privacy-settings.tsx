@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -12,6 +12,7 @@ import { useSensitiveActionAuthorization } from "@/src/components/sensitive-acti
 import { JoinInviteSignOutButtonIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { cn } from "@/src/lib/utils";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import {
   Dialog,
@@ -315,12 +316,6 @@ function HostedDataPrivacySettingsContent(props: {
 
   return (
     <div className="flex flex-col gap-4">
-      {accountHint ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">Signed in as {accountHint}.</p>
-          <JoinInviteSignOutButtonIsland idleLabel="Not you? Sign out" />
-        </div>
-      ) : null}
       {authorize === null ? (
         <Alert role="status">
           <AlertTitle>Secure approval unavailable</AlertTitle>
@@ -333,7 +328,16 @@ function HostedDataPrivacySettingsContent(props: {
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+        {accountHint ? (
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+            <UserRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+            <span className="font-serif text-base tracking-tight text-foreground">
+              Signed in as {accountHint}
+            </span>
+            <JoinInviteSignOutButtonIsland appearance="ghost" idleLabel="Sign out" />
+          </div>
+        ) : null}
+        <div className={cn("grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3", accountHint ? "py-4" : "pb-4")}>
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           <span className={authorize === null
             ? "font-serif text-base tracking-tight text-muted-foreground"

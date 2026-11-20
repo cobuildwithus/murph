@@ -158,8 +158,9 @@ export function JoinInviteSignOutButtonIsland({
   idleLabel = "Use this invite instead",
   pendingLabel = "Signing out...",
 }: {
-  /** The night control on a link page; other pages keep the outline button. */
-  appearance?: "link" | "pill";
+  /** The night control on a link page, or a settings row's quiet button;
+   * other pages keep the outline button. */
+  appearance?: "ghost" | "link" | "pill";
   idleLabel?: string;
   pendingLabel?: string;
 } = {}) {
@@ -179,7 +180,7 @@ export function JoinInviteSignOutButtonIsland({
 
   const label = signOutPending ? pendingLabel : idleLabel;
 
-  if (appearance) {
+  if (appearance === "link" || appearance === "pill") {
     const LinkPageControl = appearance === "pill" ? LinkPagePill : LinkPageLink;
     return (
       <LinkPageControl disabled={signOutPending} onClick={handleSignOut}>
@@ -193,8 +194,8 @@ export function JoinInviteSignOutButtonIsland({
       type="button"
       onClick={handleSignOut}
       disabled={signOutPending}
-      variant="outline"
-      size="lg"
+      variant={appearance === "ghost" ? "ghost" : "outline"}
+      size={appearance === "ghost" ? "default" : "lg"}
     >
       {label}
     </Button>
