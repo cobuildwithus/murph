@@ -222,6 +222,12 @@ keep the pending invitee placeholder. Group ticket scalar member fields are
 empty strings; clients render `parties`. Player reports name `reportedMemberId`;
 post reports derive their author and terms reports target the starter.
 
+Multiplayer Home includes `groupInvitations` with `gameId` and `token` for
+outstanding addressed invitations. Open the token's invite preview. A waiting
+game can also appear in `games`, so display one item per game ID.
+`POST /api/game/v1/games/:id/dismiss-invite` hides the invitation on that
+member's Home. The original link still works while admission is open.
+
 `POST /api/game/v1/games/:id/leave` and
 `PUT /api/game/v1/games/:id/terms` use the existing locked commands. Invited
 starter edits use `{expectedTermsVersion, terms}` and remain immediate. Live

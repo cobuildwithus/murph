@@ -332,6 +332,7 @@ export type GameCommand =
   | { type: "setDayCompletion"; gameId: string; date: string; incomplete: boolean; credit?: true; text?: string }
   /** DELETE /games/:id cancels an unstarted invite. */
   | { type: "cancelInvite"; gameId: string }
+  | { type: "dismissInvite"; gameId: string }
   | ({ type: "proposeChange"; gameId: string } & ProposeGameChangeBody)
   | { type: "respondChange"; gameId: string; proposalId: string; decision: "approve" | "decline" | "cancel" }
   | ({ type: "setProfile" } & SetProfileBody)
@@ -542,6 +543,7 @@ export interface GameView {
 }
 
 export interface GameHomeView {
+  groupInvitations?: { gameId: string; token: string }[];
   canStartGroups?: boolean;
   me: { notForMe: string[]; memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
     /** Caller-only verified NANP area-code hint. Missing means unknown. */

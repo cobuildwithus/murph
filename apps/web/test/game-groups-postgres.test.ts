@@ -172,6 +172,33 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("keeps a live invitation on Home without exposing player detail", async () => {
+    const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
+    const game = await create(starter, [joined, invited]);
+    await ok(joined.id, join(game.token));
+    expect(await readGame(game.id, invited.id, true)).toBeNull();
+    expect((await readHome(invited.id, true)).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    await ok(invited.id, join(game.token));
+    expect((await readHome(invited.id, true)).groupInvitations).toEqual([]);
+  });
+
+  it("dismisses only the addressed member's Home invitation", async () => {
+    const [starter, invited, other] = await Promise.all([person(), person(), person()]);
+    const game = await create(starter, [other, invited]);
+    const dismiss = { type: "dismissInvite", gameId: game.id } as const;
+    expect(await run(starter.id, dismiss)).toMatchObject({ ok: false });
+    const { POST } = await import("@/app/api/game/v1/games/[id]/dismiss-invite/route");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await POST(await httpGame(invited.id, `/games/${game.id}/dismiss-invite`, "POST"), { params: Promise.resolve({ id: game.id }) });
+      expect(response.status).toBe(200);
+    }
+    expect((await readHome(invited.id, true)).games.some(view => view.id === game.id)).toBe(false);
+    await ok(other.id, join(game.token));
+    expect((await readHome(invited.id, true)).groupInvitations).toEqual([]);
+    await ok(invited.id, join(game.token));
+    expect((await gameRow(game.id)).players).toHaveLength(3);
+  });
+
   it("explains the room requirement before a seated player edits", async () => {
     const people = await Promise.all([person(), person(), person()]);
     const g = await create(people[0], people.slice(1));
@@ -2479,7 +2506,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: row.wordsOwnerMemberId, value: row.termsWordsEncrypted }]);
     expect(plain).toContain("Private invitation task");
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
-    expect(await readGame(g.game.id, g.people[3].id, true)).toMatchObject({ changeControls: { canEdit: false, canStartNow: false } });
+    expect(await readGame(g.game.id, g.people[3].id, true)).toBeNull();
   });
 
   it.each([false, true])("retains historical attempts after account deletion, withdrawn=%s", async withdrawn => {

@@ -128,6 +128,7 @@ function idOnlyCommand(input: Record<string, unknown>): GameCommand | null {
       return { type: "deleteReply", gameId: clientId(input.gameId, "gameId"), replyId: clientId(input.replyId, "replyId") };
     case "withdraw":
       return { type: "withdraw", gameId: clientId(input.gameId, "gameId"), entryId: clientId(input.entryId, "entryId") };
+    case "dismissInvite": return { type: "dismissInvite", gameId: clientId(input.gameId, "gameId") };
     case "cancelInvite":
       return { type: "cancelInvite", gameId: clientId(input.gameId, "gameId") };
     default: return null;
