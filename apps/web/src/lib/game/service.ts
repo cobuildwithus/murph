@@ -1051,7 +1051,7 @@ async function assertLatestInChain(actor: string, otherId: string, previousGameI
 /** An unaddressed link cannot occupy a pair's slot until someone joins it. */
 function openPairWhere(first: string, second: string, now: Date): Prisma.GameWhereInput {
   const unexpired = { OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] };
-  return { OR: [
+  return { maxPlayers: 2, OR: [
     { ...gamePairWhere([first, second]), OR: [{ status: "live" }, { status: "negotiating", ...unexpired }] },
     { status: "invited", AND: [unexpired, { OR: [{ createdBy: first, invitees: { some: { memberId: second } } }, { createdBy: second, invitees: { some: { memberId: first } } }] }] },
   ] };
@@ -1068,7 +1068,7 @@ async function assertPairCapacity(tx: Tx, first: string, second: string, now: Da
 
 async function maintainPair(first: string, second: string): Promise<void> {
   const games = await getPrisma().game.findMany({
-    where: { ...gamePairWhere([first, second]), status: { in: ["live", "negotiating"] } },
+    where: { ...gamePairWhere([first, second]), maxPlayers: 2, status: { in: ["live", "negotiating"] } },
     select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR,
   });
   await loadCurrent(games.map((game) => game.id), true, first);

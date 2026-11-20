@@ -352,7 +352,7 @@ error, Messages opens with no recipient.
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
-Two people can have up to ten open games together. Unexpired addressed rematch
+Two people can have up to ten open one-on-one games together. Group games count toward their own audience cap. Unexpired addressed rematch
 invites, unexpired negotiations and live games count; unclaimed link invites do
 not count until joined. An eleventh is refused with `TOO_MANY_GAMES` (409). Each
 game keeps its own schedule, days, posts, unlocks, prize, changes, recap and
