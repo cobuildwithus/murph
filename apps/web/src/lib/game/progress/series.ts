@@ -4,7 +4,7 @@ import { ProgressReadTiming } from "./read-timing";
 import { after } from "next/server";
 import type { GameEntryData, GameEntryKind, GameRepsData, GameRouteData } from "../contract";
 import { openGameTexts } from "../crypto";
-import { effectiveTermWords, completedEntry, dayIndexAt, indexGameEntries, termsForDay, type StoredTerms, type TermWords } from "../rules";
+import { effectiveTermWords, completedEntry, dayIndexAt, indexGameEntries, liveEntry, termsForDay, type StoredTerms, type TermWords } from "../rules";
 import { hasGameIdentity } from "../roster";
 import { getPrisma } from "../../prisma";
 import { runWithFreshHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
@@ -101,13 +101,16 @@ export function gameSeries(games: readonly ProgressGame[], memberId: string, sta
   return [...measures.values()].map(measure => ({ ...measure, gameOn: measure.gameOn || live.has(measure.id) }));
 }
 
-export interface TodayCheckIn { gameId: string; measureId: string; name: string; text: string; date: string; needsPerDay: boolean;
+export interface TodayCheckIn { gameId: string; dayIndex: number; measureId: string; name: string; text: string; date: string;
+  needsPerDay: boolean;
+  /** The entry it counted, once it's in. */
+  entryId: string | null;
   /** What the check-in will add; null once it's in. */
   adds: number | null }
 
 /** Each live game's check-in today and the measure it adds to. Before it's in, `adds` is what a photo or
  * words post adds; one that brings its own count (reps, a route) adds that instead, which only the app knows.
- * A task Murph is still reading promises nothing. */
+ * A task Murph is still reading promises nothing, and nor does a post its player said they didn't finish. */
 export function todayCheckIns(games: readonly ProgressGame[], memberId: string, states: ReadonlyMap<string, MeasureState>): TodayCheckIn[] {
   return games.flatMap(game => {
     const player = game.state.players.find(player => player.memberId === memberId)!;
@@ -115,11 +118,13 @@ export function todayCheckIns(games: readonly ProgressGame[], memberId: string, 
     const day = game.state.game.status === "live" && !player.leftAt ? gameDays(game, memberId)?.find(day => day.dayIndex === today) : undefined;
     if (!day) return [];
     const task = game.tasks.get(termsForDay(game.state.game.terms, today).n)!;
-    const entry = completedEntry(indexGameEntries(game.state.entries), memberId, today);
+    const entries = indexGameEntries(game.state.entries);
+    const entry = completedEntry(entries, memberId, today);
+    if (!entry && liveEntry(entries, memberId, today)) return [];
     const contribution = entry ? entryContribution(entry.kind, game.payloads.get(entry.id), task, states) : taskContribution(task, states);
     if (contribution.pending) return [];
-    return [{ gameId: game.state.game.id, measureId: contribution.id, name: contribution.name, text: task.text, date: day.date,
-      needsPerDay: contribution.needsPerDay, adds: entry ? null : contribution.amount }];
+    return [{ gameId: game.state.game.id, dayIndex: today, measureId: contribution.id, name: contribution.name, text: task.text,
+      date: day.date, needsPerDay: contribution.needsPerDay, entryId: entry?.id ?? null, adds: entry ? null : contribution.amount }];
   });
 }
 

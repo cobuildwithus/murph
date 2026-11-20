@@ -154,7 +154,7 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
 export function checkInView(checkIn: TodayCheckIn, snapshot: { measures: readonly MeasureSeries[]; states: ReadonlyMap<string, MeasureState>; vaultRunsMerged: boolean },
   measures: readonly Progress["measures"][number][], awards: readonly StoredAward[], today: string, units: ClientUnits): Progress["checkIns"] {
   const shown = measures.find(measure => measure.id === checkIn.measureId);
-  const entry = { gameId: checkIn.gameId, measureId: checkIn.measureId };
+  const entry = { gameId: checkIn.gameId, dayIndex: checkIn.dayIndex, measureId: checkIn.measureId, entryId: checkIn.entryId };
   if (checkIn.adds === null) return shown ? [{ ...entry, after: null }] : [];
   if (checkIn.measureId === RUN_MEASURE_ID && snapshot.vaultRunsMerged) return [];
   const series = snapshot.measures.find(measure => measure.id === checkIn.measureId)
