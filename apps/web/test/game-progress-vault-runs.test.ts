@@ -5,7 +5,8 @@ vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({}) }));
 vi.mock('../src/lib/game/progress/state', () => ({ patchMeasureState: mocks.patch }));
 vi.mock('../src/lib/browser-vault/authority', () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock('../src/lib/game/progress/series', async original => ({ ...await original<typeof import('../src/lib/game/progress/series')>(), readGameSeries: mocks.series }));
-import { markVaultRunAwards, mergeVaultRuns, readOwnSeries, RUN_MEASURE_ID, saveVaultRuns } from '../src/lib/game/progress/vault-runs';
+import { mergeVaultRuns, readOwnSeries, RUN_MEASURE_ID, saveVaultRuns } from '../src/lib/game/progress/vault-runs';
+import { withGameEarnedDay } from '../src/lib/game/progress/awards';
 import { visibleAwards } from '../src/lib/game/progress/view';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 import type { MeasureState } from '../src/lib/game/progress/state';
@@ -49,11 +50,8 @@ describe('vault runs in Running', () => {
 
   it('marks Running awards earned with vault runs as health, and hides them without consent', () => {
     const award: Candidate = { key: 'k', kind: 'route', measureId: RUN_MEASURE_ID, subjectMemberId: null, on: '2026-11-12', data: { from: 'A' } };
-    const pushups = { ...award, key: 'p', measureId: 'pushups.reps' };
-    expect(markVaultRunAwards([award, pushups], false)).toEqual([award, pushups]);
-    const [marked, untouched] = markVaultRunAwards([award, pushups], true);
+    const marked = withGameEarnedDay(award, undefined);
     expect(marked.data).toEqual({ from: 'A', health: true });
-    expect(untouched).toBe(pushups);
     const stored = (candidate: Candidate) => ({ ...candidate, id: candidate.key, createdAt: new Date(), seenAt: null });
     expect(visibleAwards([stored(marked), stored(award)], false).map(a => a.key)).toEqual(['k']);
     expect(visibleAwards([stored(marked), stored(award)], false)[0].data.health).toBeUndefined();

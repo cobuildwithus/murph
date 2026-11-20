@@ -422,6 +422,25 @@ describe("Progress HTTP contracts", () => {
     expect((await GET(request())).status).toBe(401);
     expect(mocks.createAwards).not.toHaveBeenCalled();
   });
+  it("keeps game-proven Running medals when a larger vault total loses consent", async () => {
+    const distanceM = 1800;
+    mocks.entries.mockResolvedValue([{ ...entryRow(), kind: "route", payloadEncrypted: JSON.stringify({
+      activity: "run", distanceM, durationSec: 720,
+    }) }]);
+    const lookup = progressLookup(memberId, "measure", ["run.meters"]);
+    mocks.states.mockResolvedValue([{ lookup, stateEncrypted: await sealProgress({
+      memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, {
+      legs: [], vaultRuns: { savedAt: "2026-11-03T18:00:00Z", days: [["2026-11-01", 800], ["2026-11-03", 5000]] },
+    }) }]);
+    const read = async () => progressSchema.parse(await (await GET(request())).json());
+    const combined = await read();
+    expect(combined.medals.length).toBeGreaterThan(1);
+    mocks.health.mockRejectedValue(hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." }));
+    const gameOnly = await read();
+    expect(gameOnly.medals).toMatchObject([{ title: "1 mi", earnedOn: "2026-11-01" }]);
+    expect(gameOnly.measures[0].total.value).toBe(distanceM);
+  });
+
   it("filters stored health medals and moments when current Postgres authority denies access", async () => {
     mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
     const lookup = progressLookup(memberId, "award", ["health:one"]);

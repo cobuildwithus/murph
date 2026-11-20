@@ -5,12 +5,12 @@ import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import { gameHttpError } from "../http/errors";
 import { getPrisma } from "../../prisma";
 import type { Medal, Moment, Progress } from "./contract";
-import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./awards";
+import { readAwards, settleAwards, markAwardsSeen, withGameEarnedDay, type StoredAward } from "./awards";
 import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
 import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, describeMeasure, scheduleInference, type MeasureSeries, type TodayCheckIn } from "./series";
-import { hasHealthAuthority, markVaultRunAwards, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
+import { hasHealthAuthority, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
 import type { BeforeProgressMutation, MeasureState } from "./state";
 import { routeAwardName } from "./route-progress";
 import { BANK, type RungDefinition } from "./bank";
@@ -35,8 +35,28 @@ export function achievementContext(measures: readonly MeasureSeries[], states: R
   }) };
 }
 
+function gameCandidates(snapshot: Awaited<ReturnType<typeof readOwnSeries>>) {
+  const evaluate = (measures: MeasureSeries[]) => {
+    const context = achievementContext(measures, snapshot.states);
+    return ACHIEVEMENTS.flatMap(achievement => achievement(context));
+  };
+  const candidates = evaluate(snapshot.measures);
+  if (!snapshot.vaultRunsMerged) return candidates;
+  const gameDays = new Map(evaluate(snapshot.gameRunning ? [snapshot.gameRunning] : []).map(award => [award.key, award.on]));
+  return candidates.map(award => award.measureId === RUN_MEASURE_ID
+    ? withGameEarnedDay(award, gameDays.get(award.key)) : award);
+}
+
 export function visibleAwards(awards: readonly StoredAward[], healthAuthority: boolean): StoredAward[] {
-  return awards.filter(award => healthAuthority || !(award.kind.startsWith("health") || award.data.health === true || (award.measureId !== null && award.measureId in HEALTH)));
+  if (healthAuthority) return [...awards];
+  const visible = awards.flatMap(award => {
+    if (award.kind.startsWith("health") || (award.measureId !== null && award.measureId in HEALTH)) return [];
+    if (award.data.health !== true) return [award];
+    const on = award.data.gameEarnedOn;
+    return award.measureId === RUN_MEASURE_ID && typeof on === "string" ? [{ ...award, on }] : [];
+  });
+  // Independent game crossings can differ from the private dates used for DB ordering.
+  return visible.sort((a, b) => b.on.localeCompare(a.on) || b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id));
 }
 
 type MeasureLabel = Pick<Progress["measures"][number], "id" | "label">;
@@ -167,8 +187,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
         await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
     }
     if (snapshot.pending.length === 0) {
-      const context = achievementContext(snapshot.measures, snapshot.states);
-      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, markVaultRunAwards(ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), snapshot.vaultRunsMerged), beforeMutationTx,
+      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, gameCandidates(snapshot), beforeMutationTx,
         { awards: snapshot.awards, timeZone: profile.timeZone }));
     }
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);

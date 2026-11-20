@@ -6259,8 +6259,11 @@ performs one `createMany` with `skipDuplicates` in one transaction. Its only
 later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
 award. Awards strictly older than seven member-local calendar days at insertion
 start seen. `readAwards` opens a single owner-scoped ordered result, newest by
-`(earned_on, created_at, lookup)` descending. View owners filter health awards
-under live authority before choosing one gold medal. Moment ids resolve to
+`(earned_on, created_at, lookup)` descending. Running medals retain independent game crossing evidence. If vault runs reached
+the threshold first, the encrypted `gameEarnedOn` date supplies the crossing
+visible without health access. An existing health-tagged medal gains this proof
+under the member fence while retaining its ID, earned date and acknowledgement.
+View owners filter health awards under live authority before choosing one gold medal. Moment ids resolve to
 award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
 unseen rows and preserves the first acknowledgement time.
 

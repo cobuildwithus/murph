@@ -1,6 +1,7 @@
 import "server-only";
 
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
+import { Prisma } from "@prisma/client";
 import { getPrisma } from "../../prisma";
 import { addDays } from "../time";
 import { openProgressMany, progressLookup, sealProgressMany } from "./crypto";
@@ -11,9 +12,34 @@ export interface StoredAward extends Candidate {
   id: string;
   createdAt: Date;
   seenAt: Date | null;
+  /** Compare-and-swap only while a Running medal has no independent game evidence. */
+  healthEnvelope?: string;
 }
 
-/** Append only. Re-reading or a corrected/shrinking total never changes an award. */
+export function withGameEarnedDay(award: Candidate, gameDay: string | undefined): Candidate {
+  if (gameDay === award.on) {
+    const { health: _health, ...data } = award.data;
+    return { ...award, data };
+  }
+  return { ...award, data: { ...award.data, health: true, ...(gameDay && { gameEarnedOn: gameDay }) } };
+}
+
+async function prepareRunEvidence(memberId: string, awards: readonly StoredAward[], candidates: readonly Candidate[]) {
+  const unproven = awards.filter(award => award.healthEnvelope);
+  if (!unproven.length) return [];
+  const gameDays = new Map(candidates.filter(candidate => candidate.measureId === "run.meters").map(candidate =>
+    [candidate.key, candidate.data.health === true ? candidate.data.gameEarnedOn : candidate.on]));
+  const repairs = unproven.flatMap(({ id, seenAt, createdAt, healthEnvelope, ...award }) => {
+    const on = gameDays.get(award.key);
+    return typeof on === "string" ? [{ id, previous: healthEnvelope!, value: withGameEarnedDay(award, on) }] : [];
+  });
+  const sealed = await sealProgressMany(memberId, repairs.map(({ id, value }) => ({
+    table: "game_progress_award", rowId: id, field: "data", value,
+  })));
+  return repairs.map((repair, i) => Prisma.sql`(${repair.id}, ${repair.previous}, ${sealed[i]})`);
+}
+
+/** Keep the original win and its date. Independent game evidence may make it visible without health consent. */
 export async function settleAwards(memberId: string, candidates: readonly Candidate[], beforeMutationTx: BeforeProgressMutation,
   snapshot?: { awards: readonly StoredAward[]; timeZone: string },
 ): Promise<boolean> {
@@ -24,7 +50,8 @@ export async function settleAwards(memberId: string, candidates: readonly Candid
     where: { memberId, lookup: { in: keyed.map(row => row.lookup) } }, select: { lookup: true },
   })).map(row => row.lookup));
   const fresh = keyed.filter(row => !existing.has(row.lookup));
-  if (fresh.length === 0) return false;
+  const repairs = await prepareRunEvidence(memberId, snapshot?.awards ?? [], candidates);
+  if (fresh.length === 0 && repairs.length === 0) return false;
   const profile = snapshot ?? await db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
   const now = new Date();
   const cutoff = addDays(formatTimeZoneDateTimeParts(now, profile.timeZone).dayKey, -7);
@@ -33,7 +60,11 @@ export async function settleAwards(memberId: string, candidates: readonly Candid
   })));
   await db.$transaction(async tx => {
     await beforeMutationTx(tx);
-    await tx.gameProgressAward.createMany({ skipDuplicates: true, data: fresh.map(({ candidate, lookup }, index) => ({
+    if (repairs.length) await tx.$executeRaw`
+      UPDATE game_progress_award AS award SET data_encrypted = evidence.sealed
+      FROM (VALUES ${Prisma.join(repairs)}) AS evidence(lookup, previous, sealed)
+      WHERE award.member_id = ${memberId} AND award.lookup = evidence.lookup AND award.data_encrypted = evidence.previous`;
+    if (fresh.length) await tx.gameProgressAward.createMany({ skipDuplicates: true, data: fresh.map(({ candidate, lookup }, index) => ({
       memberId, lookup, subjectMemberId: candidate.subjectMemberId,
       earnedOn: new Date(`${candidate.on}T00:00:00.000Z`), createdAt: now,
       dataEncrypted: sealed[index], seenAt: candidate.on < cutoff ? now : null,
@@ -51,7 +82,9 @@ export async function readAwards(memberId: string): Promise<StoredAward[]> {
   });
   const data = await openProgressMany<Candidate>(rows.map(row => ({ memberId, table: "game_progress_award", rowId: row.lookup, field: "data", value: row.dataEncrypted })));
   return rows.flatMap((row, index) => retiredAward(data[index]) ? []
-    : [{ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt }]);
+    : [{ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt,
+      ...(data[index].measureId === "run.meters" && data[index].data.health === true && !data[index].data.gameEarnedOn
+        ? { healthEnvelope: row.dataEncrypted } : {}) }]);
 }
 
 /** Kinds no longer earned: streaks, hours slept and VO2 max. Their rows wait for

@@ -16,7 +16,7 @@ import { healthSteps } from "../src/lib/game/progress/health";
 import { savedHealthView } from "../src/lib/game/progress/health-view";
 import { roundTotals } from "../src/lib/game/progress/achievements";
 import { gameSeries } from "../src/lib/game/progress/series";
-import { achievementContext } from "../src/lib/game/progress/view";
+import { achievementContext, visibleAwards } from "../src/lib/game/progress/view";
 import { game, memberId, post, task } from "./support/progress-games";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -115,6 +115,19 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     await putProgressPic(owner, { id: id.toUpperCase(), takenAt: takenAt.toISOString(), ...meta }, Uint8Array.of(1), authorized);
     const row = await db.gameProgressPic.findUniqueOrThrow({ where: { id } });
     expect(await openProgress({ ...target, rowId: id }, row.metaEncrypted)).toEqual(meta);
+  });
+
+  it.each(["2026-11-01", "2026-11-02", "2026-11-04"])("recognizes independent Running evidence for a stored health medal on %s", async on => {
+    const owner = await member();
+    const game = { ...candidate("total:run.meters:1609.344", on), measureId: "run.meters" };
+    const health = { ...game, on: "2026-11-02", data: { ...game.data, health: true } };
+    await settleAwards(owner, [health], authorized);
+    const original = await readAwards(owner);
+    await settleAwards(owner, [game], authorized, { awards: original, timeZone: "UTC" });
+    const updated = await readAwards(owner);
+    expect(visibleAwards(updated, true)).toMatchObject([{ id: original[0].id, on: health.on }]);
+    expect(visibleAwards(updated, false)).toMatchObject([{ id: original[0].id, on: game.on }]);
+    expect(updated[0].seenAt).toEqual(original[0].seenAt);
   });
 
   it("starts time-total awards at ten minutes and preserves earned dates through repeated reads and corrections", async () => {
