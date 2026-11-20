@@ -161,7 +161,7 @@ export const hostedGameChatStateSchema = z.object({
   // A settled game carries its days only while its players can still correct them.
   progress: progress.optional(), result: result.nullable().optional(),
   changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), canEditTasks: z.boolean().optional(), canEditStakes: z.boolean().optional(), editableFromDay: z.number().int().nullable() }).strict(),
-}).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
+}).strict()).max(20), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
 export type HostedGameChatState = z.infer<typeof hostedGameChatStateSchema>;
 export const hostedGameToolResponseSchema = z.object({
   action: z.enum(GAME_TOOL_ACTIONS),

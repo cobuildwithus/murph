@@ -304,6 +304,23 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect((await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId)).toEqual([pair]);
   });
 
+  it("keeps a bound pair visible alongside ten group games", async () => {
+    const room = await fixture(), pair = await room.addGame(2, [], 2);
+    const ids = [pair];
+    for (let i = 0; i < 10; i++) ids.push(await room.addGame());
+    const players = room.people.map(person => person.id);
+    const read = () => readGameChatState(room.roomId, players);
+    expect((await read()).games.map(game => game.id).sort()).toEqual(ids.sort());
+  });
+
+  it("keeps a group's own game visible behind ten games in another room", async () => {
+    const room = await fixture(), own = await room.addGame();
+    const elsewhere = await fixture(3, undefined, room.people);
+    for (let i = 0; i < 10; i++) await elsewhere.addGame();
+    const result = await readGameChatState(room.roomId, room.people.map(person => person.id));
+    expect(result.games.map(game => game.id)).toEqual([own]);
+  });
+
   it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);

@@ -75,19 +75,22 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
   multiplayer = containerMemberId ? multiplayer : false;
   if (((!multiplayer || !containerMemberId) && !sameGamePlayers(playerMemberIds, playerMemberIds)) || playerMemberIds.length === 0 || !isGameEnabled()) return [];
   const prisma = getPrisma();
-  const [active, settled] = await Promise.all([
-    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), OR: [
-      { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } }, addressedGameRematchWhere(playerMemberIds),
-      ...(multiplayer && containerMemberId ? [{ chatContainerMemberId: containerMemberId, OR: [
-        { status: { in: ["negotiating", "live"] } },
-        { status: "invited", OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: new Date() } }] },
-      ] }] : []),
-    ] },
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } }),
+  const inAudience: Prisma.GameWhereInput = { OR: [
+    { ...gamePairWhere(playerMemberIds), status: { in: ["negotiating", "live"] } }, addressedGameRematchWhere(playerMemberIds),
+    ...(multiplayer ? [{ chatContainerMemberId: containerMemberId, OR: [
+      { status: { in: ["negotiating", "live"] } },
+      { status: "invited", OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: new Date() } }] },
+    ] }] : []),
+  ] };
+  const active = (where: Prisma.GameWhereInput) => prisma.game.findMany({ where: { ...inAudience, ...where },
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } });
+  const [pairs, groups, settled] = await Promise.all([
+    active({ maxPlayers: 2 }),
+    multiplayer ? active({ maxPlayers: 10, AND: { OR: [{ chatContainerMemberId: containerMemberId }, { chatContainerMemberId: null }] } }) : [],
     prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [gamePairWhere(playerMemberIds), { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),
   ]);
-  return [...active, ...settled.slice(0, GAME_MAX_OPEN_PER_PAIR - active.length)].map((row) => row.id);
+  return [...pairs, ...groups, ...settled.slice(0, Math.max(0, GAME_MAX_OPEN_PER_PAIR - pairs.length - groups.length))].map(row => row.id);
 }
 
 /** Pair lock must precede every game lock that can establish a primary room. */
