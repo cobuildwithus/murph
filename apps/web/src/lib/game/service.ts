@@ -110,6 +110,7 @@ import {
   isGameInviteExpired,
   isTicketExpired,
   GAME_MAX_OPEN_PER_PAIR,
+  GAME_TICKET_USE_DAYS,
   needsPostToday,
   parseStoredResult,
   parseStoredTerms,
@@ -189,7 +190,7 @@ const HISTORY_GROUP_LIMIT = 20;
 const HISTORY_GAMES_PER_GROUP_LIMIT = 25;
 const HOME_EXPIRED_SHOWN = 3;
 const HOME_EXPIRED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
-const WALLET_LIMIT = 200;
+const WALLET_HISTORY_LIMIT = 200;
 // Every returned game can settle on read with three legacy per-miss stakes.
 const CHAT_TICKET_LIMIT = GAME_MAX_OPEN_PER_PAIR * 3 * GAME_MAX_LENGTH_DAYS;
 const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
@@ -1051,7 +1052,7 @@ async function assertLatestInChain(actor: string, otherId: string, previousGameI
 /** An unaddressed link cannot occupy a pair's slot until someone joins it. */
 function openPairWhere(first: string, second: string, now: Date): Prisma.GameWhereInput {
   const unexpired = { OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }] };
-  return { OR: [
+  return { maxPlayers: 2, OR: [
     { ...gamePairWhere([first, second]), OR: [{ status: "live" }, { status: "negotiating", ...unexpired }] },
     { status: "invited", AND: [unexpired, { OR: [{ createdBy: first, invitees: { some: { memberId: second } } }, { createdBy: second, invitees: { some: { memberId: first } } }] }] },
   ] };
@@ -1068,7 +1069,7 @@ async function assertPairCapacity(tx: Tx, first: string, second: string, now: Da
 
 async function maintainPair(first: string, second: string): Promise<void> {
   const games = await getPrisma().game.findMany({
-    where: { ...gamePairWhere([first, second]), status: { in: ["live", "negotiating"] } },
+    where: { ...gamePairWhere([first, second]), maxPlayers: 2, status: { in: ["live", "negotiating"] } },
     select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR,
   });
   await loadCurrent(games.map((game) => game.id), true, first);
@@ -3233,6 +3234,17 @@ export async function readGame(gameId: string, memberId: string, multiplayer = f
   const { clock, games: [loaded] } = await loadCurrent([gameId], multiplayer, memberId);
   if (!loaded || !canView(loaded, memberId)) return null;
   const [view] = await buildViews([loaded], memberId, clock, undefined, multiplayer);
+  if (view.status === "settled") {
+    const rematch = await getPrisma().game.findFirst({
+      where: { previousGameId: gameId, maxPlayers: loaded.row.maxPlayers, AND: [
+        { OR: [{ status: { in: ["settled", "live"] } },
+          { status: { in: ["invited", "negotiating"] }, OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: clock } }] }] },
+        { OR: [{ players: { some: { memberId, leftAt: null } } }, { status: "invited", invitees: { some: { memberId } } }] },
+      ] },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true },
+    });
+    view.rematchGameId = rematch?.id ?? null;
+  }
   return view;
 }
 
@@ -3305,9 +3317,41 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
   }
 }
 
+/** Open obligations outlive the history window. Expiry uses each game's own clock. */
+async function readWalletTickets(memberId: string, multiplayer: boolean, clock: Date) {
+  const prisma = getPrisma();
+  const tickets = await prisma.$queryRaw<GameTicket[]>(Prisma.sql`
+    WITH visible AS (
+      SELECT ticket.id, ticket.created_at,
+        ticket.status = 'open' AND ticket.created_at + ${GAME_TICKET_USE_DAYS} * interval '1 day'
+          >= (${clock}::timestamptz AT TIME ZONE 'UTC') + COALESCE(game.dev_clock_offset_ms, 0) * interval '1 millisecond' AS actionable
+      FROM game_player seat JOIN game ON game.id = seat.game_id
+      JOIN game_ticket ticket ON ticket.game_id = game.id
+      WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL AND ${gameOnSql()}
+        AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+    ), wallet AS (
+      SELECT id FROM visible WHERE actionable
+      UNION ALL
+      (SELECT id FROM visible WHERE NOT actionable ORDER BY created_at DESC, id DESC LIMIT ${WALLET_HISTORY_LIMIT})
+    )
+    SELECT t.id, t.game_id AS "gameId", t.stake_key AS "stakeKey", t.owed_by_seats AS "owedBySeats",
+      t.owed_to_seats AS "owedToSeats", t.status, t.created_at AS "createdAt", t.redeemed_at AS "redeemedAt"
+    FROM wallet JOIN game_ticket t USING (id) ORDER BY t.created_at DESC, t.id DESC
+  `);
+  const games = await prisma.game.findMany({
+    where: { id: { in: [...new Set(tickets.map(ticket => ticket.gameId))] }, players: { some: { memberId, leftAt: null } } },
+    include: { players: true, invitees: true },
+  });
+  const byId = new Map(games.map(game => [game.id, game]));
+  return tickets.flatMap(ticket => {
+    const game = byId.get(ticket.gameId);
+    return game ? [{ ...ticket, game }] : [];
+  });
+}
+
 export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, addressed, tickets, usualEntry, identity] = await Promise.all([
+  const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
     // Apply active-game priority before the bounded history window, so new
     // invitations and completed games cannot displace an older live game.
@@ -3325,12 +3369,6 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     `),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),
-    prisma.gameTicket.findMany({
-      include: { game: { include: { players: true, invitees: true } } },
-      orderBy: { createdAt: "desc" },
-      take: WALLET_LIMIT,
-      where: { game: { ...(!multiplayer ? { maxPlayers: 2 } : {}), AND: [gameOnWhere(), { players: { some: { memberId, leftAt: null } } }] } },
-    }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
     // Only for the optional area-code hint: an identity that can't be read
@@ -3338,6 +3376,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
+  const tickets = await readWalletTickets(memberId, multiplayer, current.clock);
   const visible = current.games.filter((game) => canView(game, memberId));
   const counterpartyOf = (ticket: (typeof tickets)[number]) => ticket.game.players.find(player => player.memberId !== memberId)?.memberId;
   const blocks = await readGameBlocks(prisma, memberId, [
