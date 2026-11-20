@@ -62,6 +62,7 @@ import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
 import { JunctionRecoveryStudy, RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
+import { NotFoundContent } from "@/src/components/public/not-found-content";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import {
   GroupUsageFundingStudy,
@@ -119,6 +120,16 @@ export function SectionsContent({
           </StudySection>
           <StudySection title="Home unavailable details and retry">
             <HomeLoadStateStudy />
+          </StudySection>
+          <StudySection id="page-not-found" title="Page not found: signed out, then signed in">
+            <div className="flex flex-col gap-6" inert>
+              <div className="flex justify-center rounded-2xl border px-6 py-16">
+                <NotFoundContent authenticated={false} />
+              </div>
+              <div className="flex justify-center rounded-2xl border px-6 py-16">
+                <NotFoundContent authenticated />
+              </div>
+            </div>
           </StudySection>
         </>
       ) : null}
