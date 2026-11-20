@@ -32,6 +32,6 @@ export const PATCH = withJsonError(async (request: Request) => {
   const edit = parsed.data;
   const settings = await withGameRuleErrors(() => editGameReminders({
     actorMemberId: auth.member.id, beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx),
-  }, "minutes" in edit && !("gameId" in edit) ? { defaultMinutes: edit.minutes } : edit, "gameId" in edit ? [edit.gameId] : undefined));
+  }, edit, "gameId" in edit ? [edit.gameId] : undefined));
   return jsonOk({ ok: true, ...settings });
 });

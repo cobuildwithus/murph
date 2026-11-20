@@ -362,14 +362,14 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
 
 /** Chat edits carry only the fields the member asked to change. App saves lock the same profile first. */
 export async function editGameReminders(input: Pick<Parameters<typeof runGameCommand>[0], "actorMemberId" | "beforeMutationTx">,
-  edit: { defaultMinutes?: number; minutes?: number | null; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
+  edit: { minutes?: number | null; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
   const actor = input.actorMemberId;
   return commandTransaction(input, async tx => {
     const profile = await lockReminderProfile(tx, actor);
     if (!profile.length) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     if (edit.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     await tx.gameProfile.update({ where: { memberId: actor }, data: {
-      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.defaultMinutes ?? edit.minutes ?? undefined,
+      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes ?? undefined,
     } });
     if (edit.minutes !== undefined || edit.on !== undefined || edit.everyDay !== undefined) {
       await recordGameReminderPreferencesTx(tx, actor, { gameIds, minutes: edit.minutes !== undefined,
