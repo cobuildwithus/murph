@@ -34,7 +34,7 @@ describe('vault runs in Running', () => {
   });
 
   it('merges saved vault runs only while health consent holds', async () => {
-    const snapshot = () => ({ measures: [run([['2026-11-10', 1000]])], awards: [], incomplete: false, pending: [],
+    const snapshot = () => ({ measures: [run([['2026-11-10', 1000]])], awards: [], pending: [],
       states: new Map([[RUN_MEASURE_ID, { vaultRuns: { savedAt: 's1', days: [['2026-11-10', 9000]] } }]]) });
     mocks.series.mockResolvedValue(snapshot());
     const own = await readOwnSeries('ava', new Date());

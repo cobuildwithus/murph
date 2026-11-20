@@ -26,7 +26,7 @@ beforeEach(() => {
     { state: "available", records: [{ data: { date: day.date, metricKey: "total-sleep-minutes", value: 7.5, unit: "hours" },
       occurredAt: day.observedAt, recordKey: "sleep-day", source: { source: "garmin", label: "Garmin" } }] },
   ] }] });
-  mocks.rooms.mockResolvedValue({ rooms, incomplete: false });
+  mocks.rooms.mockResolvedValue(rooms);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -48,25 +48,19 @@ it("a private grant never returns its records even when stale bytes remain", asy
 });
 
 it("removes numbers if the pair room is no longer eligible after decryption", async () => {
-  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: false });
+  mocks.rooms.mockResolvedValue([]);
   expect((await read()).people[1].daily).toBeNull();
-});
-
-it("marks the result incomplete if the post-decryption room read reaches its cap", async () => {
-  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: true });
-  expect(await read()).toEqual({ people: [], incomplete: true, rooms: [] });
 });
 
 it("reads each of 500 pair rooms once, six shared reads at a time", async () => {
   const friends = Array.from({ length: 500 }, (_, index) => ({ ...people[1], memberId: `friend-${index}` }));
   const maximumRooms = friends.map(person => ({ ...rooms[0], otherMemberId: person.memberId, runtimeMemberId: `room-${person.memberId}` }));
-  mocks.rooms.mockResolvedValue({ rooms: maximumRooms, incomplete: false });
+  mocks.rooms.mockResolvedValue(maximumRooms);
   let active = 0, peak = 0;
   mocks.shared.mockImplementation(async () => { peak = Math.max(peak, ++active); await Promise.resolve(); active--; return null; });
   const result = await readFriendHealthSeries({ auth: await requireGameMemberAuth(request), people: [people[0], ...friends],
     rooms: maximumRooms, metric: "sleep", timeZone: "UTC", signal: request.signal });
   expect(result.people).toHaveLength(501);
-  expect(result.incomplete).toBe(false);
   expect(mocks.raw).toHaveBeenCalledTimes(1);
   expect(mocks.shared).toHaveBeenCalledTimes(500);
   expect(mocks.rooms).toHaveBeenCalledTimes(1);

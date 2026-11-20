@@ -25,8 +25,6 @@ export interface MeasureSeries {
   amounts: DayAmount[];
 }
 
-export const GAME_LIMIT = 500;
-export const ENTRY_LIMIT = 10_000;
 const factors = { reps: 1, seconds: 1, minutes: 60, hours: 3600, meters: 1, km: 1000, miles: 1609.344, steps: 1, days: 1 };
 
 const taskDaysId = (task: ProgressTask) => `h${task.lookup.slice(-12)}.days`;
@@ -135,28 +133,25 @@ export function cumulativePoints(amounts: readonly DayAmount[]): [string, number
   return [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => [date, total += amount]);
 }
 
-/** Limit-plus-one reads retain own history even after departure or a game's voiding. */
+/** Own history survives departure and a game's voiding. */
 export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming(), stateIds: readonly string[] = []) {
   const db = getPrisma();
-  const rows = await db.game.findMany({
+  const games = await db.game.findMany({
     where: { players: { some: { memberId, dayOne: { not: null } } }, status: { in: ["live", "settled", "void"] } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: GAME_LIMIT + 1,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, createdBy: true, status: true, maxPlayers: true, lengthDays: true, terms: true,
       termsWordsEncrypted: true, wordsOwnerMemberId: true, startsOn: true, settledAt: true, devClockOffsetMs: true,
       events: { where: { type: { in: ["cancelled", "blocked"] } }, orderBy: { id: "desc" }, take: 1, select: { createdAt: true } },
       players: { take: 10, select: { memberId: true, seat: true, dayOne: true, timeZone: true, joinedAt: true, leftAt: true } } },
   });
-  timing.counts.games = rows.length;
-  const games = rows.slice(0, GAME_LIMIT);
+  timing.counts.games = games.length;
   const entries = await db.gameEntry.findMany({ where: { memberId, gameId: { in: games.map(game => game.id) } },
-    take: ENTRY_LIMIT + 1, orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+    orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
     select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
       receivedAt: true, withdrawnAt: true, payloadEncrypted: true },
   });
   timing.counts.entries = entries.length;
-  const incomplete = rows.length > GAME_LIMIT || entries.length > ENTRY_LIMIT;
-  const admittedEntries = entries.slice(0, ENTRY_LIMIT);
-  const typed = admittedEntries.filter(entry => entry.attempt > 0 && !entry.incomplete && !entry.withdrawnAt && ["reps", "route"].includes(entry.kind));
+  const typed = entries.filter(entry => entry.attempt > 0 && !entry.incomplete && !entry.withdrawnAt && ["reps", "route"].includes(entry.kind));
   const plain = await openGameTexts([
     ...games.map(game => ({ memberId: game.wordsOwnerMemberId, table: "game" as const, rowId: game.id, field: "terms_words", value: game.termsWordsEncrypted })),
     ...typed.map(entry => ({ memberId, table: "game_entry" as const, rowId: entry.id, field: "payload", value: entry.payloadEncrypted })),
@@ -188,7 +183,7 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
       state: { game: { id: game.id, createdBy: game.createdBy, seats: game.maxPlayers, status: game.status as GameDaysSource["state"]["game"]["status"],
         lengthDays: game.lengthDays, terms, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null, inviteExpiresAt: null },
       players: [{ ...player, dayOne: player.dayOne!.toISOString().slice(0, 10) }],
-      entries: admittedEntries.filter(entry => entry.gameId === game.id).map(entry => ({ ...entry, kind: entry.kind as GameEntryKind, mediaKeys: [], blurHash: null })) },
+      entries: entries.filter(entry => entry.gameId === game.id).map(entry => ({ ...entry, kind: entry.kind as GameEntryKind, mediaKeys: [], blurHash: null })) },
     };
   });
   const cached = await db.gameProgressTaskMeasure.findMany({ where: { memberId, lookup: { in: [...tasks.keys()] } }, select: { lookup: true, measureEncrypted: true } });
@@ -224,7 +219,7 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
     measures.push({ ...describeMeasure(id, name, name), pending: false, gameOn: false, needsPerDay: false, amounts: [] });
   }
   const successors = measureSuccessors(tasks.values(), states, measures);
-  return { states, measures, successors, awards, incomplete, pending, checkIns: todayCheckIns(facts, memberId, states) };
+  return { states, measures, successors, awards, pending, checkIns: todayCheckIns(facts, memberId, states) };
 }
 
 function measureSuccessors(tasks: Iterable<ProgressTask>, states: ReadonlyMap<string, MeasureState>, measures: readonly MeasureSeries[]) {

@@ -173,24 +173,22 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 19.
   const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
   const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
-  const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
+  const pics = await timing.measure("pictures", () => readProgressPics(memberId));
   let attemptedInsert = false;
-  if (!snapshot.incomplete) {
-    const firstRoutes = snapshot.measures.filter(measure => !measure.pending
-      && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
-    if (firstRoutes.length) {
-      const places = routePlaces(BANK.find(entry => entry.kind === "route" && entry.id === firstRouteId(profile.timeZone))!.name)!;
-      // Mapbox down: the page still loads without a map; the next read sets the first route.
-      const route = await timing.measure("journeys", () => resolveRoute(places.from, places.to)).catch(() => null);
-      if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
-        await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
-    }
-    if (snapshot.pending.length === 0) {
-      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, gameCandidates(snapshot), beforeMutationTx,
-        { awards: snapshot.awards, timeZone: profile.timeZone }));
-    }
-    scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
+  const firstRoutes = snapshot.measures.filter(measure => !measure.pending
+    && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
+  if (firstRoutes.length) {
+    const places = routePlaces(BANK.find(entry => entry.kind === "route" && entry.id === firstRouteId(profile.timeZone))!.name)!;
+    // Mapbox down: the page still loads without a map; the next read sets the first route.
+    const route = await timing.measure("journeys", () => resolveRoute(places.from, places.to)).catch(() => null);
+    if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
+      await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
   }
+  if (snapshot.pending.length === 0) {
+    attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, gameCandidates(snapshot), beforeMutationTx,
+      { awards: snapshot.awards, timeZone: profile.timeZone }));
+  }
+  scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   // Deleting a friend can cascade-delete their awards after the snapshot.
   const stored = attemptedInsert || snapshot.awards.some(award => award.subjectMemberId !== null)
     ? await timing.measure("awards", () => readAwards(memberId)) : snapshot.awards;
@@ -202,7 +200,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   return timing.measure("render", () => {
     const byId = new Map(snapshot.measures.map(measure => [measure.id,
       measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units)]));
-    for (const pic of pictures.pics) {
+    for (const pic of pics) {
       const id = snapshot.successors.get(pic.measureId) ?? pic.measureId;
       let view = byId.get(id);
       if (!view) {
@@ -229,8 +227,8 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       if (shelf.length === 6) break;
     }
     const checkIns = snapshot.checkIns.flatMap(checkIn => checkInView(checkIn, snapshot, measures, awards, today, units));
-    return { joinedOn, today, incomplete: snapshot.incomplete || pictures.incomplete, contributionsIncomplete: snapshot.incomplete, picturesIncomplete: pictures.incomplete, measures,
-      medals, shelf, moments: momentsView(destinations, measures, units), picCount: pictures.pics.length, checkIns };
+    return { joinedOn, today, incomplete: false, measures,
+      medals, shelf, moments: momentsView(destinations, measures, units), picCount: pics.length, checkIns };
   });
 }
 

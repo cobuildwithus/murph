@@ -6233,8 +6233,8 @@ The inference provider boundary caps positive quantities at 10,000 while
 preserving fractional units. Typed rep counts already have a safe-integer
 bound; the route-summary boundary also caps `distanceM` at
 `Number.MAX_SAFE_INTEGER`, preserving fractional and long-distance posts.
-These bounds keep totals finite across the admitted 10,000 entries. Reducers
-do not validate the same input again.
+These bounds keep each entry's amount finite. Reducers do not validate the
+same input again.
 
 `patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
 open and shallow field merge, then seal outside the transaction. Its short
@@ -6267,15 +6267,14 @@ View owners filter health awards under live authority before choosing one gold m
 award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
 unseen rows and preserves the first acknowledgement time.
 
-The input readers in BE1/BE2 own the plan's limit-plus-one admission (500 games,
-10,000 entries); an incomplete input settles nothing. Persistence adds no
+The input readers in BE1/BE2 read every game and entry. Persistence adds no
 per-item queries or transactions. Award reads deliberately have no pagination
 or materialized totals, per the locked plan. The award sort index serves the
 Medals page, the subject index serves cascading deletion, the picture index
 serves owner/live/capture-order reads, and measure/task reads use composite keys.
 
-`series.ts` loads at most 501 games and 10,001 own entries, admits 500/10,000,
-and opens admitted task words and typed reps/route payloads in one batch. It
+`series.ts` loads every game and own entry, and opens their task words and
+typed reps/route payloads in one batch. It
 loads task classifications and measure state in two owner-scoped batch reads.
 Typed entries emit their own measure immediately; untyped entries use the day's
 terms revision and the seat override or group default. Retakes contribute once;
@@ -6381,8 +6380,7 @@ retry, new route or wire change; the next ordinary read can try unfinished work.
 
 Uncached untyped phrases are deduplicated and classified sequentially in
 `after()`, with one Responses and one Decisions call sharing an eight-second
-deadline per phrase, no retries, then one sealed cache batch insert. The source
-caps bound distinct credited phrases by 10,000. Provider failure leaves the
+deadline per phrase, no retries, then one sealed cache batch insert. Provider failure leaves the
 phrase uncached; interrupted background work can remain pending on a later read.
 The classifier uses the existing ideas model/client configuration. The live
 synthetic eval runs with `pnpm exec tsx --tsconfig apps/web/tsconfig.json
@@ -6555,13 +6553,12 @@ friend wins over duplicate pending invitations. The caller rechecks the cohort o
 returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
-500 games / 10,000 entries as limit-plus-one batches, including each friend's
+every contributing game in pages of 500, including each friend's
 other games, and exposes only exercise aggregates. Individual exercise comparisons admit the
-viewer and the selected friend. If lifetime entries exceed the budget on a week
-or month board, one more bounded entry query keeps the viewer's exercise catalog
-and peers' credited days in the requested period. The catalog then shows the
-viewer's known exercises. All-time overflow reads the viewer's catalog alone
-and returns incomplete rankings. Windowed peer data cannot settle lifetime passes.
+viewer and the selected friend. Week and month boards read the viewer's lifetime
+entries and peers' credited days in the requested period; when that leaves peer
+days out, the catalog shows the viewer's known exercises. Windowed peer data
+cannot settle lifetime passes.
 Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
@@ -6575,10 +6572,10 @@ the same deferred cache writer used by own Progress. It classifies sequentially,
 seals each owner's batch under that owner's key outside the transaction, then
 inserts all resolved rows once. The committing transaction rechecks the requesting
 session and current friendship while holding the affected pair locks; authority
-loss writes nothing. The next complete read settles awards idempotently.
+loss writes nothing. The next read settles awards idempotently.
 Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
-ranks; private rows have no rank, amount, chart line or gap. Caps set
-`Friends.incomplete` and settle nothing. Exercise reads schedule pass settlement after the response using the ranked input.
+ranks; private rows have no rank, amount, chart line or gap. `Progress.incomplete`
+and `Friends.incomplete` are always false; shipped app builds still require them. Exercise reads schedule pass settlement after the response using the ranked input.
 Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
@@ -6622,17 +6619,17 @@ make a first grant. Restoring a revoked scope requires a current revision.
 Deselecting Steps or Sleep on the person board also withdraws that scope from
 older eligible rooms for the same pair in the same transaction.
 
-Progress collection bounds are 500 games, 10,000 entries and at most 5,000
-current player identities. Deferred friend inference admits at most 10,000
-member-bound phrases, each with at most two sequential provider calls. Sealing
-runs one owner batch at a time, then one transaction takes at most 4,999 pair
-locks, two cohort queries, the existing native-session check and one cache insert.
+Progress reads every game, entry and current player identity. Deferred friend
+inference classifies each distinct member-bound phrase once, with at most two
+sequential provider calls each. Sealing runs one owner batch at a time, then one
+transaction takes one pair lock per affected friend, two cohort queries, the
+existing native-session check and one cache insert.
 No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
 blocks), repeated at the post-decryption and award-commit authority boundaries.
-Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
-source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
-transactions. Names are one batch of at most 5,001 fields including pending invite labels
-and a departure label. The same 501-game admission query selects at most ten
+Game inputs read contributing game ids once, then games and entries in pages of 500 games,
+then the task cache and measure state; their fields are opened in batches, outside
+transactions. Names are one batch including pending invite labels
+and a departure label. The same cohort game query selects at most ten
 player seats and nine invitation seats per game; occupied invitation seats are
 excluded. Pending identities never enter game-amount or pair-health reads. Exercise pills skip sharing-room discovery. Steps and Sleep discover
 eligible pair rooms, read the viewer's requested replica metric and open
@@ -6641,8 +6638,8 @@ projection for the selected friend and metric. Its two authority transactions
 retain both membership identities and check the exact grant generation. One
 post-open discovery catches a changed game binding or a bystander in the thread
 or group. Only this last discovery reads outgoing grants for the sharing preview.
-The full pair board retains its four scopes per person. Sharing likewise has at most 500
-sequential provider observations, transactions and post-commit wakes; verified
+The full pair board retains its four scopes per person. Sharing likewise runs one
+sequential provider observation, transaction and post-commit wake per room; verified
 contact checks run twice per room. The existing board/sharing owners retain
 their internal database and key-access bounds. Maximum-room tests assert the board concurrency bound, sequential sharing
 transactions, exact provider/contact call counts, and

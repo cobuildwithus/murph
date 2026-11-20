@@ -24,7 +24,7 @@ export function friendRangeStart(range: FriendsQuery["range"], today: string) {
 export function friendsView(input: {
   people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
-  incomplete: boolean; departureNotice: string | null;
+  departureNotice: string | null;
   units: ClientUnits; challenge: Friends["challenge"];
 }): Friends {
   const { measure, query, today } = input;
@@ -37,7 +37,7 @@ export function friendsView(input: {
       .filter(day => day.date >= from && day.date <= today)
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(day => [day.date, total += day.amount]);
-    return { person, total, points, ranked: !input.incomplete && person.daily !== null && (!health || points.length > 0) };
+    return { person, total, points, ranked: person.daily !== null && (!health || points.length > 0) };
   });
   const ranked = series.filter(row => row.ranked)
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));
@@ -51,7 +51,7 @@ export function friendsView(input: {
         total: hasTotal ? friendAmount(total, measure, input.units) : null };
   });
   const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
-  return { incomplete: input.incomplete, departureNotice: input.departureNotice,
+  return { incomplete: false, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     shareAsk: health && input.shareAudience.length > 0,
     shareAudience: input.shareAudience, challenge: input.challenge };

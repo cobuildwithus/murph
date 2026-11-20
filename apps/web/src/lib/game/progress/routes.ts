@@ -62,12 +62,10 @@ export function routeProgressIncomplete() {
 export async function setRouteGoal(memberId: string, measureId: string, goal: MeasureGoal, context: {
   points: readonly [Day, number][];
   awards: readonly StoredAward[];
-  incomplete: boolean;
   /** The member's day: a new leg after a finished one starts on it. */
   today: Day;
   beforeMutationTx: BeforeProgressMutation;
 }) {
-  if (context.incomplete) throw routeProgressIncomplete();
   const entry = 'rungId' in goal ? BANK.find(entry => entry.kind === 'route' && entry.id === goal.rungId) : null;
   const places = 'from' in goal ? goal : entry && bankPlaces(entry);
   if (!places) throw invalidGameRequest('Choose a route with two places.');

@@ -112,7 +112,7 @@ export async function setStepsMeasure(auth: HostedNativeMemberAuth, signal: Abor
   if ("perDay" in body) throw invalidGameRequest("This measure already has an amount.");
   const { measure, points, awards, today, timeZone } = await readStepsMeasure(auth, signal, true);
   const beforeMutationTx = healthAuthority(auth), memberId = auth.member.id;
-  const state = await setRouteGoal(memberId, "steps", body.goal, { points, awards, incomplete: false, today, beforeMutationTx });
+  const state = await setRouteGoal(memberId, "steps", body.goal, { points, awards, today, beforeMutationTx });
   const candidates = routeLegs({ measureId: "steps", legs: state.legs!, points });
   const inserted = await settleAwards(memberId, candidates, beforeMutationTx, { awards, timeZone });
   const currentAwards = inserted ? await readAwards(memberId) : awards;

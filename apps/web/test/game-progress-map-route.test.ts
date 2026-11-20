@@ -19,7 +19,7 @@ import { encodePolyline } from '../src/lib/game/progress/route-geometry';
 import { mapVersion, routeLegs } from '../src/lib/game/progress/route-progress';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 const leg = { from: 'London', to: 'Paris', distanceM: 1000, startTotal: 0, straightLine: false, towns: [], polyline: encodePolyline([[0, 50], [2, 49]]) };
-const snapshot = () => ({ incomplete: false, states: new Map([['walk.meters', { legs: [leg] }]]), awards: [],
+const snapshot = () => ({ states: new Map([['walk.meters', { legs: [leg] }]]), awards: [],
   measures: [{ id: 'walk.meters', amounts: [{ date: '2026-11-01', amount: 500 }] }] });
 const request = (query: string) => new Request(`https://example.test/api/game/v1/progress/map?${query}`);
 beforeEach(() => {
@@ -120,9 +120,7 @@ describe('Progress map HTTP contract', () => {
     expect(response.status).toBe(400); expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(mocks.series).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
-  it('renders nothing from an incomplete collection or absent measure', async () => {
-    mocks.series.mockResolvedValue({ ...snapshot(), incomplete: true });
-    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(503);
+  it('renders nothing for an absent measure', async () => {
     mocks.series.mockResolvedValue({ ...snapshot(), measures: [] });
     expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(404);
     expect(mocks.render).not.toHaveBeenCalled();

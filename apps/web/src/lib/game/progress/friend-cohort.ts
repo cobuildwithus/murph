@@ -16,10 +16,9 @@ type Db = Pick<Prisma.TransactionClient, "game" | "gameBlock" | "gameProfile">;
 export async function friendCohortIds(memberId: string, db: Db) {
   const games = await db.game.findMany({ where: { events: { none: { type: "cancelled" } },
     status: { in: ["live", "settled"] }, players: { some: { memberId, leftAt: null, joinedAt: { not: null } } } },
-    take: 501, orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     select: { players: { take: 10, select: { memberId: true, joinedAt: true, leftAt: true, departedLabel: true,
       profile: { select: { member: { select: { suspendedAt: true } } } } } } } });
-  if (games.length > 500) return { ids: [memberId], incomplete: true, departure: null };
   const ids = [...new Set([memberId, ...games.flatMap(game => game.players.flatMap(player =>
     player.memberId && player.joinedAt && !player.leftAt && !player.profile!.member.suspendedAt ? [player.memberId] : []))])];
   const blocks = await readGameBlocks(db, memberId, ids);
@@ -28,7 +27,7 @@ export async function friendCohortIds(memberId: string, db: Db) {
     const label = departedLabels(player.departedLabel).find(label => label.ownerMemberId === memberId);
     return label ? [{ on: player.leftAt, nameEncrypted: label.nameEncrypted }] : [];
   })).sort((a, b) => b.on.getTime() - a.on.getTime())[0] ?? null;
-  return { ids: ids.filter(id => !isHiddenBy(blocks, id)), incomplete: false, departure };
+  return { ids: ids.filter(id => !isHiddenBy(blocks, id)), departure };
 }
 
 export async function readFriendCohort(memberId: string) {
@@ -47,7 +46,7 @@ export async function readFriendCohort(memberId: string) {
     memberId: profile.memberId, firstName: names[index]!, avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     me: profile.memberId === memberId, joinedOn: toLocalDayKey(profile.createdAt, profile.timeZone), daily: null,
   }));
-  return { people, incomplete: cohort.incomplete, departure: cohort.departure,
+  return { people, departure: cohort.departure,
     timeZone: ownProfile.timeZone,
     departureNotice: cohort.departure
       ? `${names[profiles.length] ?? "A friend"} left Murph on ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: ownProfile.timeZone }).format(cohort.departure.on)}. Your games with them still count in your totals.` : null };
