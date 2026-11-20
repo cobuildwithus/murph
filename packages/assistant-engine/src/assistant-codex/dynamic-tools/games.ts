@@ -142,7 +142,7 @@ export const GAME_DAY_OUTCOME_GUIDANCE = {
 /** How a saved reminder arrives. */
 export const GAME_REMINDER_OUTCOME_GUIDANCE = {
   push: 'The reminder is saved and reaches them. Confirm in a few words, such as "Done, Leo. 6pm your time, just to you, on days you haven\'t posted." Say "your time" and do not name a city or a time zone.',
-  text: 'The reminder is saved and reaches them. Confirm in a few words, such as "Done, Leo. 6pm your time, just to you, on days you haven\'t posted." Say "your time" and do not name a city or a time zone.',
+  text: 'Confirm that the private text can arrive one hour after the saved reminder time on days they still have a post to make. Give that later local time if the request supplied minutes. This result confirms the private text only.',
   none: 'The reminder is saved but cannot reach them yet. Say so, and ask them to turn on notifications in the Murph app.',
   off: 'Reminders for that game are switched off. Confirm in a few words.',
 } as const
