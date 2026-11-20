@@ -10,9 +10,10 @@ import { assertHostedDirectAssistantNotificationRouteAuthority } from "../hosted
 import { getPrisma } from "../prisma";
 import { readPrivatelyTextedGameIds } from "./evening-check-in";
 import { readGamePushRoutes } from "./push-delivery";
-import { gameReminderReach } from "./reminders";
+import { gameReminderReach, REMINDER_GAME_LIMIT } from "./reminders";
 import { openGameTexts } from "./crypto";
-import { readGame, readGameReminders, runGameCommand } from "./service";
+import { GameRuleError } from "./rules";
+import { editGameReminders, readGame, readGameReminders, runGameCommand } from "./service";
 
 type Request = Extract<HostedGameToolRequest, { action: "my_game_reminders" }>;
 
@@ -41,16 +42,17 @@ async function authorize(memberId: string, runtimeIdentity: HostedRuntimeIdentit
   } catch { return false; }
 }
 
-export async function readMyGameReminderProjection(memberId: string) {
+export async function readMyGameReminderProjection(memberId: string, page: { ids?: string[]; after?: string; selected?: string } = {}) {
   const db = getPrisma();
-  const [settings, seats] = await Promise.all([
-    readGameReminders(memberId),
-    db.gamePlayer.findMany({ where: { memberId, leftAt: null, game: { status: "live" } },
+  const readSeats = (ids?: string[]) => db.gamePlayer.findMany({
+    where: { memberId, leftAt: null, game: { status: "live" }, gameId: { in: ids, gt: page.after } },
       select: { gameId: true, seat: true, reminderOff: true, reminderEveryDay: true, reminderMinutes: true, game: {
         select: { maxPlayers: true, players: { where: { leftAt: null }, select: { memberId: true } } },
-      } }, orderBy: { gameId: "asc" }, take: 21 }),
-  ]);
-  if (seats.length > 20) return null;
+      } }, orderBy: { gameId: "asc" }, take: REMINDER_GAME_LIMIT + 1 });
+  const [settings, rows] = await Promise.all([readGameReminders(memberId), readSeats(page.ids)]);
+  const more = rows.length > REMINDER_GAME_LIMIT;
+  // Preserve the complete settings reply for small accounts. A selected game always wins over the page.
+  const seats = more && page.selected ? await readSeats([page.selected]) : rows.slice(0, REMINDER_GAME_LIMIT);
   const peerIds = [...new Set(seats.flatMap(seat => seat.game.players.flatMap(player => player.memberId && player.memberId !== memberId ? [player.memberId] : [])))];
   const names = await db.gameProfile.findMany({ where: { memberId: { in: peerIds } }, select: { memberId: true, firstNameEncrypted: true } });
   const opened = await openGameTexts(names.map(name => ({ table: "game_profile" as const, field: "first_name", rowId: name.memberId,
@@ -77,8 +79,7 @@ export async function handleMyGameRemindersTool(input: { memberId: string; runti
     const error = await setMyGameReminders(input);
     if (error) return error;
   }
-  const reminders = await readMyGameReminderProjection(input.memberId);
-  if (!reminders) return unavailable();
+  const reminders = await readMyGameReminderProjection(input.memberId, { selected: input.request.gameId, after: input.request.after });
   const [route] = await readGamePushRoutes(getPrisma(), [input.memberId], true);
   const selected = reminders.games.filter(game => game.on && (!input.request.gameId || game.id === input.request.gameId)).map(game => game.id);
   const texted = await readPrivatelyTextedGameIds(selected, new Date());
@@ -88,24 +89,19 @@ export async function handleMyGameRemindersTool(input: { memberId: string; runti
 
 async function setMyGameReminders(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: Request }): Promise<HostedGameToolResponse | null> {
   const unavailable = (): HostedGameToolResponse => ({ action: "my_game_reminders", result: { status: "unavailable", error: "Private game reminders are unavailable." } });
-  const current = await readMyGameReminderProjection(input.memberId);
-  if (!current) return unavailable();
-  const game = input.request.gameId ? current.games.find(game => game.id === input.request.gameId) : null;
+  const game = input.request.gameId
+    ? (await readMyGameReminderProjection(input.memberId, { ids: [input.request.gameId] })).games[0] : null;
   if (input.request.gameId && !game || (input.request.on !== undefined || input.request.everyDay !== undefined) && !game) return unavailable();
-  const off = new Set(current.games.filter(game => !game.on).map(game => game.id));
-  const everyDay = new Set(current.games.filter(game => game.everyDay).map(game => game.id));
-  if (game && input.request.on !== undefined) input.request.on ? off.delete(game.id) : off.add(game.id);
-  if (game && input.request.everyDay !== undefined) input.request.everyDay ? everyDay.add(game.id) : everyDay.delete(game.id);
-  // A time with a game is that game's own; without one it is every game's, so no game keeps its own.
-  const minutes = input.request.minutes;
-  const time = minutes === undefined ? { timeForGameIds: [] } : game ? { timeForGameIds: [game.id] } : { gameMinutes: {} };
-  const result = await runGameCommand({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
-    await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
-    await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
-  }, command: { type: "setReminders", minutes: minutes ?? current.minutes, ...time,
-    push: input.request.push ?? current.push, text: input.request.text ?? current.text,
-    offGameIds: [...off], everyDayGameIds: [...everyDay] } });
-  return result.ok ? null : { action: "my_game_reminders", result: { status: "rejected", error: result.error.message.slice(0, 128) } };
+  try {
+    await editGameReminders({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
+      await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
+      await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+    } }, input.request, game ? [game.id] : undefined);
+    return null;
+  } catch (error) {
+    if (!(error instanceof GameRuleError)) throw error;
+    return { action: "my_game_reminders", result: { status: "rejected", error: error.error.message.slice(0, 128) } };
+  }
 }
 
 export async function handleMyGameNotForMeTool(input: {

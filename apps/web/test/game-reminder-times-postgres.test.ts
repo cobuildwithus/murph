@@ -59,6 +59,25 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     vi.unstubAllEnvs();
   });
 
+  it("reads a selected reminder beyond the first twenty live seats", async () => {
+    const owner = await member();
+    const ids = [];
+    for (let i = 0; i < 21; i++) ids.push(await game(owner, "Read"));
+    const gameId = ids.sort().at(-1)!;
+    const readPage = (after?: string) => handleMyGameRemindersTool({ memberId: owner, runtimeIdentity: null,
+      request: { action: "my_game_reminders", operation: "read", after, origin: { kind: "accepted_input", assistantInputId: "input-synthetic" } } });
+    const first = await readPage();
+    expect(first.result.reminders?.games).toHaveLength(20);
+    // Web sends nextAfter once the runner reads it; it already accepts after.
+    expect(first.result.reminders).not.toHaveProperty("nextAfter");
+    const last = await readPage(ids[19]);
+    expect(last.result.reminders?.games.map(game => game.id)).toEqual([gameId]);
+    const response = await direct(owner, { gameId, minutes: 900 });
+    expect(response.result).toMatchObject({ status: "ok", reminders: { games: expect.arrayContaining([
+      expect.objectContaining({ id: gameId, minutes: 900 }),
+    ]) } });
+  });
+
   it("moves only the named game from the direct chat, and every game without one", async () => {
     const owner = await member(), pullups = await game(owner, "20 pullups"), lifts = await game(owner, "3 lifts");
     const saved = await direct(owner, { gameId: pullups, minutes: 1260 });
@@ -69,6 +88,21 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     await direct(owner, { minutes: 1080 });
     expect([await own(pullups, owner), await own(lifts, owner)]).toEqual([null, null]);
     expect((await readGameReminders(owner)).minutes).toBe(1080);
+  });
+
+  it("keeps newer channel and mute choices when a room time edit is delayed", async () => {
+    const owner = await member(), room = await member();
+    const selected = await game(owner, "Stretch", room), other = await game(owner, "Swim");
+    const result = await runGameChatUpdate({ actorMemberId: owner, chatContainerMemberId: room,
+      chatPlayerMemberIds: [owner], update: { operation: "set_reminder", minutes: 480 },
+      beforeMutationTx: async () => {
+        await runGameCommand({ actorMemberId: owner, command: { type: "setReminders", push: false,
+          text: false, minutes: 1140, offGameIds: [other], everyDayGameIds: [other] } });
+      } });
+    expect(result).toMatchObject({ ok: true, reminders: { push: false, offGameIds: [other] } });
+    expect(await own(selected, owner)).toBe(480);
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId: other, memberId: owner } } }))
+      .toMatchObject({ reminderEveryDay: true });
   });
 
   it("keeps both of two concurrent single-game changes and never writes back the default", async () => {

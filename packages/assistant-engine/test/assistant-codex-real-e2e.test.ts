@@ -51001,7 +51001,7 @@ function hostingGame(extra: Partial<HostingGame> = {}): HostingGame {
     pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 }, ...extra }
 }
 
-async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; update?: (update: HostingUpdate) => void | string }) {
+async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; reminderReach?: "push" | "text"; update?: (update: HostingUpdate) => void | string }) {
   const config = await resolveRealCodexE2eConfig()
   const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-proof-'))
   const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -51015,7 +51015,7 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
       if (!input.update) throw new Error('No game mutation authorized')
       const refusal = input.update(request.update)
       if (refusal) return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'rejected', error: refusal } })
-      if (request.update.operation === 'set_reminder') return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'ok', reaches: 'push' } })
+      if (request.update.operation === 'set_reminder') return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'ok', reaches: input.reminderReach ?? 'push' } })
     }
     else if (request.action !== 'read_game') throw new Error('No other game effect authorized')
     return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: input.state } })
@@ -51069,6 +51069,17 @@ describeRealCodex('plan D ordinary group hosting', () => {
     expect(result.reply).toMatch(/12/u)
     expect(result.reply).toMatch(/\?/u)
     expect(result.reply).not.toMatch(/Taylor|join|new chat|separate chat|remove|cannot|can't|already.*(?:changed|extended)/iu)
+  }, 360_000)
+
+  it('game chat confirms the later private text time when push is off', async () => {
+    const game = hostingGame()
+    const result = await runHostingTurn({ name: 'private-text-time', actor: 1, reminderReach: 'text', state: { games: [game] },
+      prompt: 'Sam: Set my reminder for this game to 4:45 pm. When would you text me?',
+      update: update => { expect(update).toMatchObject({ operation: 'set_reminder', minutes: 1005 }) } })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(result.saves).toHaveLength(0)
+    expect(result.reply).toMatch(/5:45|17:45|quarter to six/i)
+    expect(result.reply).not.toMatch(/push|app notification/i)
   }, 360_000)
 
   it('game chat remind me at 6 writes only the speaker setting', async () => {

@@ -142,6 +142,15 @@ describe('game dynamic tools', () => {
     expect(GAME_REMINDER_GUIDANCE).toContain("The time is for this chat's game only")
     expect(GAME_REMINDER_GUIDANCE).toContain("this chat gets Murph's evening check-in on game days")
   })
+
+  it('confirms the later private text time from a shared reminder edit', async () => {
+    const output = await execute({ messageRef: inputId, operation: 'set_reminder', minutes: 1005 },
+      { ...context(), groupTool: { request: async () => ({ action: 'update_game', result: { status: 'ok', reaches: 'text' } }) } })
+    const { guidance } = splitResult(output.rpcResult.contentItems[0]?.text)
+    expect(guidance).toMatch(/one hour after|an hour after/i)
+    expect(guidance).not.toMatch(/6pm/i)
+  })
+
   it.each([
     { label: 'no game', games: [], carries: ['poll'] },
     { label: 'finished pair game', games: [{ status: 'settled', terms: { stakes: [{ kind: 'both_get', item: 'Dinner out together' }] } }], carries: ['poll', 'again'] },

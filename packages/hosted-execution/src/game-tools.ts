@@ -65,7 +65,7 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("my_game_not_for_me"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
     activities: z.array(z.enum(GAME_ACTIVITIES)).transform(values => GAME_ACTIVITIES.filter(value => values.includes(value))).optional() }).strict()
     .refine(value => value.operation !== "set" || value.activities !== undefined, "Set requires activities."),
-  z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
+  z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, after: gameId.optional(), operation: z.enum(["read", "set"]),
     minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional(),
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
@@ -181,9 +181,9 @@ export const hostedGameToolResponseSchema = z.object({
     // How a saved reminder arrives. Absent when the member has it switched off; none when nothing can deliver it.
     reaches: z.enum(["push", "text", "none"]).optional(),
     activities: z.array(z.enum(GAME_ACTIVITIES)).optional(),
-    reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
+    reminders: z.object({ nextAfter: gameId.optional(), minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
-        today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),
+        today: z.enum(["posted", "open", "off", "upcoming", "finished"]), otherFirstNames: z.array(z.string()),
         // The game's own reminder time. Accepted before Web sends it, so runners read it once Web starts to.
         on: z.boolean(), everyDay: z.boolean(), minutes: z.number().int().min(0).max(1439).optional() }).strict()).max(20) }).strict().optional(),
     // Exact server-authored delivery text; recap.chatLine and lore stay bare. A day correction

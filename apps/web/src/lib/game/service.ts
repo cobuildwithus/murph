@@ -41,7 +41,7 @@ import { readHostedRuntimeAiAccessDecision } from "../hosted-onboarding/member-a
 import { resolveHostedRuntimeAiUsageGate } from "../hosted-orchestration/runtime-usage-decision";
 import { readGamePushRoutes } from "./push-delivery";
 import { gameReminderReach } from "./reminders";
-import { GAME_REMINDER_OFF_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
+import { GAME_REMINDER_OFF_CHOICE_EVENT, MINUTES_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { createHostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
 import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
@@ -323,6 +323,32 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
   });
 }
 
+/** Chat edits carry only the fields the member asked to change. App saves lock the same profile first. */
+export async function editGameReminders(input: Pick<Parameters<typeof runGameCommand>[0], "actorMemberId" | "beforeMutationTx">,
+  edit: { minutes?: number; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
+  const actor = input.actorMemberId;
+  return commandTransaction(input, async tx => {
+    const profile = await tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${actor} FOR UPDATE`;
+    if (!profile.length) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+    if (edit.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
+    await tx.gameProfile.update({ where: { memberId: actor }, data: {
+      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes,
+    } });
+    if (edit.minutes !== undefined || edit.on !== undefined || edit.everyDay !== undefined) {
+      await recordGameReminderPreferencesTx(tx, actor, { gameIds, minutes: edit.minutes !== undefined,
+        off: edit.on !== undefined, everyDay: edit.everyDay !== undefined });
+      const seats = await tx.gamePlayer.updateMany({ where: { memberId: actor, leftAt: null,
+        game: { status: "live", ...(gameIds ? {} : { events: { some: { actor, type: MINUTES_CHOICE_EVENT } } }) },
+        gameId: gameIds ? { in: gameIds } : undefined }, data: {
+        reminderMinutes: edit.minutes === undefined || gameIds ? edit.minutes : null,
+        reminderOff: edit.on === undefined ? undefined : !edit.on, reminderEveryDay: edit.everyDay,
+      } });
+      if (gameIds && seats.count !== gameIds.length) reject("NOT_A_PLAYER", "Choose one of your live games.");
+    }
+    return readGameReminders(actor, tx);
+  });
+}
+
 /** Durable receipts already committed; optional delivery does not delay the app response. */
 async function deliverAppGameEffectsAfterResponse(command: GameCommand, gameId: string | null, room?: string): Promise<void> {
   if (!gameId || room) return;
@@ -394,30 +420,21 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
     throw error;
   }
 }
-
 async function setGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "set_reminder" }>): Promise<GameCommandResult> {
   await requireSelectedGameChatReminder(input, update);
-  const current = await readGameReminders(input.actorMemberId);
-  const seats = await getPrisma().gamePlayer.findMany({ where: { memberId: input.actorMemberId, leftAt: null, game: { status: "live" } },
-    select: { gameId: true, reminderEveryDay: true, game: { select: { chatContainerMemberId: true } } }, take: 1001 });
-  if (seats.length > 1000) reject("INVALID_REQUEST", "Too many open games to save reminders.");
-  // A time set in a group chat is for that chat's games only, never the player's other games.
-  const chatGames = update.gameId ? [update.gameId]
-    : seats.filter(seat => input.chatContainerMemberId && seat.game.chatContainerMemberId === input.chatContainerMemberId).map(seat => seat.gameId);
-  if (!chatGames.length) reject("NOT_A_PLAYER", "Choose one of your live games in this chat.");
-  const off = new Set(current.offGameIds);
-  if (update.gameId && update.on !== undefined) update.on ? off.delete(update.gameId) : off.add(update.gameId);
-  const { update: _update, ...context } = input;
-  const result = await runGameCommand({ ...context, command: { type: "setReminders", minutes: update.minutes ?? current.minutes,
-    timeForGameIds: update.minutes === undefined ? [] : chatGames, push: current.push, text: current.text && current.canText, offGameIds: [...off],
-    everyDayGameIds: seats.filter(seat => seat.reminderEveryDay).map(seat => seat.gameId) } });
-  if (!result.ok) return result;
+  const chatGames = update.gameId ? [update.gameId] : (await getPrisma().gamePlayer.findMany({
+    where: { memberId: input.actorMemberId, leftAt: null, game: { status: "live", chatContainerMemberId: input.chatContainerMemberId } },
+    select: { gameId: true }, take: 1001,
+  })).map(seat => seat.gameId);
+  if (!input.chatContainerMemberId || !chatGames.length) reject("NOT_A_PLAYER", "Choose one of your live games in this chat.");
+  if (chatGames.length > 1000) reject("INVALID_REQUEST", "Too many open games to save reminders.");
+  const reminders = await editGameReminders(input, update, chatGames);
   const [route] = await readGamePushRoutes(getPrisma(), [input.actorMemberId], true);
-  const selected = chatGames.filter(gameId => !result.reminders?.offGameIds.includes(gameId));
+  const selected = chatGames.filter(gameId => !reminders.offGameIds.includes(gameId));
   const { readPrivatelyTextedGameIds } = await import("./evening-check-in");
   const texted = await readPrivatelyTextedGameIds(selected, new Date());
-  const reaches = result.reminders ? gameReminderReach(result.reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route)) : "none";
-  return { ...result, reaches };
+  const reaches = gameReminderReach(reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route));
+  return { ok: true, game: null, reminders, reaches };
 }
 
 async function requireSelectedGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "set_reminder" }>): Promise<void> {
@@ -2820,10 +2837,10 @@ export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise
 export async function loadGameMissedCheckInGames(db: Db, gameIds: readonly string[]) {
   if (gameIds.length > 20 || new Set(gameIds).size !== gameIds.length) throw new Error("Game missed-day batch exceeds its room bound.");
   if (gameIds.length === 0) return [];
-  const entryBound = gameIds.length * 10 * 365 * 2;
+  const entryBound = gameIds.length * 10 * 365 * 3;
   const [rows, entries] = await Promise.all([
     db.game.findMany({ where: { id: { in: [...gameIds] } }, include: { invitees: true, players: true } }),
-    db.gameEntry.findMany({ where: { gameId: { in: [...gameIds] }, attempt: { gt: 0 }, withdrawnAt: null },
+    db.gameEntry.findMany({ where: { gameId: { in: [...gameIds] }, withdrawnAt: null },
       orderBy: { receivedAt: "asc" }, take: entryBound + 1,
       select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
         receivedAt: true, withdrawnAt: true, mediaKeys: true, blurHash: true } }),

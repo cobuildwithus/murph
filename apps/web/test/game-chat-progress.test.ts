@@ -15,6 +15,16 @@ describe("shared game progress", () => {
   it("does not call a grace-window blank day missed", () => {
     expect(gameChatProgress(state(), new Date("2030-03-05T03:30:00Z")).players[0].days[0].status).toBe("due");
   });
+  it("counts only eligible dates toward a late group player's target", () => {
+    const input = state();
+    input.game.seats = 10;
+    input.players[1].joinedAt = new Date("2030-03-08T12:00:00Z");
+    const targets = () => gameChatProgress(input, new Date("2030-03-09T12:00:00Z")).players.map(player => player.target);
+    expect(targets()).toEqual([5, 1]);
+    input.game.terms.versions[0].schedule = { count: 6 };
+    expect(targets()).toEqual([6, 3]);
+  });
+
   it("uses each player's time zone", () => {
     const input = state(); input.players[1].timeZone = "America/Los_Angeles";
     const players = gameChatProgress(input, new Date("2030-03-05T07:00:00Z")).players;

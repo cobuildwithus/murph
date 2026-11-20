@@ -79,6 +79,16 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     vi.useRealTimers(); vi.unstubAllEnvs();
   });
 
+  it("finds a push reminder after twenty already posted games", async () => {
+    const owner = await member(), ids = [];
+    for (let i = 0; i < 21; i++) ids.push(await game(owner));
+    ids.sort();
+    for (const gameId of ids.slice(0, 20)) await post(gameId, owner);
+    await sendDueGameReminders(now);
+    expect(m.send).toHaveBeenCalledOnce();
+    expect(m.send.mock.calls[0]![0].data.gameId).toBe(ids[20]);
+  });
+
   it("reads defaults without creating a profile", async () => {
     m.actor = `hbm_reminder_${randomUUID()}`; members.push(m.actor);
     await db.hostedMember.create({ data: { id: m.actor } });

@@ -18,7 +18,7 @@ export const MURPH_MY_GAME_REMINDERS_TOOL = {
   namespace: 'murph', name: 'my_game_reminders',
   description: "Read or set this person's own game reminders, only in their direct chat; read before you answer about one, coach them or suggest a task. Each game has its own time and reminds only on its days they haven't posted. Set minutes to the local time they ask for, after midnight, with gameId for that game only or without for all games; push or text; and for one gameId on, or for an any-N-days game everyDay: every unposted day, not only when behind. Confirm delivery only from reaches: push is an app notification at that time, text adds a private text here an hour later, none means ask them to turn on Murph app notifications, no reaches means off. A game in a group chat gets that chat's evening check-in instead. If they want help sticking to it, use the behavior-followthrough skill. Never state or guess another player's status or private words.",
   inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
-    operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
+    operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' }, after: { type: 'string' },
     minutes: { type: 'integer', minimum: 0, maximum: 1439 }, gameId: { type: 'string' },
     on: { type: 'boolean' }, everyDay: { type: 'boolean' }, text: { type: 'boolean' }, push: { type: 'boolean' },
   } },
@@ -142,7 +142,7 @@ export const GAME_DAY_OUTCOME_GUIDANCE = {
 /** How a saved reminder arrives. */
 export const GAME_REMINDER_OUTCOME_GUIDANCE = {
   push: 'The reminder is saved and reaches them. Confirm in a few words, such as "Done, Leo. 6pm your time, just to you, on days you haven\'t posted." Say "your time" and do not name a city or a time zone.',
-  text: 'The reminder is saved and reaches them. Confirm in a few words, such as "Done, Leo. 6pm your time, just to you, on days you haven\'t posted." Say "your time" and do not name a city or a time zone.',
+  text: 'Confirm that the private text can arrive one hour after the saved reminder time on days they still have a post to make. Give that later local time if the request supplied minutes. This result confirms the private text only.',
   none: 'The reminder is saved but cannot reach them yet. Say so, and ask them to turn on notifications in the Murph app.',
   off: 'Reminders for that game are switched off. Confirm in a few words.',
 } as const
@@ -222,7 +222,7 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'my_game_not_for_me'; operation: 'read' | 'set'; messageRef?: string; activities?: GameActivity[] } | { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
+export type GameDynamicRequest = { action: 'my_game_not_for_me'; operation: 'read' | 'set'; messageRef?: string; activities?: GameActivity[] } | { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; after?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
   if (input.tool === 'my_game_not_for_me') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
@@ -233,9 +233,9 @@ export function readGameDynamicToolRequest(input: { arguments: unknown; tool: st
   }
   if (input.tool === 'my_game_reminders') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
-      minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
+      minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(), after: z.string().min(8).max(64).optional(),
       on: z.boolean().optional(), everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict()
-    const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'messageRef', 'minutes', 'gameId', 'on', 'everyDay', 'text', 'push'], toolName: 'murph.my_game_reminders' })
+    const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'messageRef', 'after', 'minutes', 'gameId', 'on', 'everyDay', 'text', 'push'], toolName: 'murph.my_game_reminders' })
     return parsed.ok ? { kind: 'game' as const, request: { action: 'my_game_reminders' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
   }
   if (input.tool === 'game_lore') {

@@ -12,7 +12,7 @@ import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissed
 import { drainGameChatLifecycle, readOldestReceiptPerChat } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
-import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn } from "@/src/lib/game/evening-check-in";
+import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn, roomCoversEveningGame } from "@/src/lib/game/evening-check-in";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { advanceHostedMailboxConsumedSeqByLane, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
@@ -180,9 +180,9 @@ async function assertAndDispatch(authority: NonNullable<Awaited<ReturnType<typeo
     deliveryIdempotencyKey: authority.policy.eventId, groupMissedPolicy: authority.policy, now: at });
   return recordHostedLinqRuntimeProviderDispatchFenceTx({ prisma: tx, idempotencyKey: authority.policy.eventId, linqChatId: authority.policy.roomId, targetKind: "thread", attemptedAt: at });
 }
-async function conversation(f: Awaited<ReturnType<typeof fixture>>, text: string) {
+async function conversation(f: Awaited<ReturnType<typeof fixture>>, text: string, at = now) {
   const eventId = randomUUID(), person = f.people[0]!;
-  const envelope = parseHostedExecutionWake({ eventId, kind: "conversation.message", userId: f.roomId, occurredAt: now.toISOString(),
+  const envelope = parseHostedExecutionWake({ eventId, kind: "conversation.message", userId: f.roomId, occurredAt: at.toISOString(),
       message: { channel: "linq", contactKind: "email", contactLookupKey: createHostedEmailLookupKey(person.email),
         routeAuthority: { channel: "linq", containerMemberId: f.roomId, threadId: f.roomId },
         linqMessage: { chatId: f.roomId, from: person.email, isFromMe: false, threadIsDirect: false, messageId: eventId, parts: [{ type: "text", value: text }] } } });
@@ -272,6 +272,21 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
   });
 
   const eveningAt = new Date("2030-03-04T20:05:00Z");
+  it("uses the speaker's own game-day boundary for the evening transcript", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(), id = await f.addGame(10, ["UTC", "Europe/Paris", "UTC"]);
+    const at = new Date("2030-03-04T02:30:00Z");
+    await conversation(f, "Earlier chapter finished", at);
+    await conversation({ ...f, people: f.people.slice(1) }, "Morning chapter finished", at);
+    const eventId = gameEveningEventId(f.roomId, date); events.push(eventId);
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
+    await drainGameChatLifecycle({ now: eveningAt });
+    const wake = await readHostedMailboxWakeByDedupeKey({ userId: f.roomId, dedupeKey: eventId });
+    if (wake?.kind !== "assistant.notification.requested") throw new Error("Missing evening check-in");
+    expect(wake.notification.instructions).toContain("Morning chapter finished");
+    expect(wake.notification.instructions).not.toContain("Earlier chapter finished");
+  });
+
   it("reserves one evening per room and date, and freezes the addressed batch", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
@@ -293,6 +308,57 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const at = new Date("2030-03-04T21:05:00Z");
     expect(await reserveGameEveningCheckIn(f.roomId, [open, posted], at)).toBe(1);
     expect((await prepareGameEveningCheckIn(f.roomId, date, at))?.policy.batch.map(game => game.gameId)).toEqual([open]);
+  });
+
+  it("keeps the pair evening check-in when only another game spans distant zones", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(), pair = await room.addGame(2, [], 2), group = await room.addGame();
+    await db.gameProfile.update({ where: { memberId: room.people[2]!.id }, data: { timeZone: "Asia/Tokyo" } });
+    events.push(gameEveningEventId(room.roomId, date));
+    expect(await reserveGameEveningCheckIn(room.roomId, [pair, group], eveningAt)).toBe(1);
+    expect((await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId)).toEqual([pair]);
+  });
+
+  it("covers only one of two distant cohorts in a shared room and leaves the other its private reminders", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4), [ava, leo, sam, maya] = room.people.map(person => person.id) as [string, string, string, string];
+    await db.gameProfile.updateMany({ where: { memberId: { in: [sam, maya] } }, data: { timeZone: "Asia/Tokyo" } });
+    const near = await room.addGame(10, [], 2);
+    const far = await room.addGame(10, ["UTC", "UTC", "Asia/Tokyo", "Asia/Tokyo"], 4);
+    await db.gamePlayer.updateMany({ where: { gameId: far, memberId: { in: [ava, leo] } }, data: { leftAt: now } });
+    const covered = await Promise.all([near, far].map(id => roomCoversEveningGame(room.roomId, id, eveningAt)));
+    // One room evening can't address both cohorts: one stays on private reminders.
+    expect(covered.filter(Boolean)).toHaveLength(1);
+    const batch = (await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId) ?? [];
+    expect(batch).not.toContain([near, far][covered.indexOf(false)]);
+  });
+
+  it("keeps a bound pair visible alongside ten group games", async () => {
+    const room = await fixture(), pair = await room.addGame(2, [], 2);
+    const ids = [pair];
+    for (let i = 0; i < 10; i++) ids.push(await room.addGame());
+    const players = room.people.map(person => person.id);
+    const read = () => readGameChatState(room.roomId, players);
+    const shown = (await read()).games.map(game => game.id);
+    expect(shown).toHaveLength(10);
+    expect(shown).toContain(pair);
+  });
+
+  it("keeps a group's own game visible behind ten games in another room", async () => {
+    const room = await fixture(), own = await room.addGame();
+    const elsewhere = await fixture(3, undefined, room.people);
+    for (let i = 0; i < 10; i++) await elsewhere.addGame();
+    const result = await readGameChatState(room.roomId, room.people.map(person => person.id));
+    expect(result.games.map(game => game.id)).toEqual([own]);
+  });
+
+  it("leaves an excused date out of the morning group prompt", async () => {
+    const room = await fixture(), gameId = await room.addGame(), actor = room.people[0]!.id;
+    const saved = await runGameCommand({ actorMemberId: actor, multiplayer: true, now,
+      command: { type: "post", gameId, entryId: randomUUID(), kind: "excuse", text: "Rest day", mediaKeys: [] } });
+    expect(saved.ok).toBe(true);
+    const prepared = await prepareGroupMissedDay(room.roomId, date, now);
+    expect(prepared?.policy.batch[0]?.misses.map(miss => miss.memberId).sort()).toEqual(room.people.slice(1).map(person => person.id).sort());
   });
 
   it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
