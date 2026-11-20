@@ -16,7 +16,7 @@ const VOICE_TEST_MESSAGE =
 
 const mocks = vi.hoisted(() => ({
   countHostedFamilySponsoredMembers: vi.fn(),
-  readHostedMemberPhoneHint: vi.fn(),
+  readHostedMemberAccountHint: vi.fn(),
   getHostedAccountDeletionPageSession: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
 
@@ -191,8 +191,9 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
-  readHostedMemberPhoneHint: mocks.readHostedMemberPhoneHint,
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/hosted-member-store")>(),
+  readHostedMemberAccountHint: mocks.readHostedMemberAccountHint,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-activity", () => ({
@@ -365,7 +366,7 @@ beforeEach(() => {
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
-  mocks.readHostedMemberPhoneHint.mockResolvedValue(null);
+  mocks.readHostedMemberAccountHint.mockResolvedValue(null);
   mocks.countHostedFamilySponsoredMembers.mockResolvedValue(0);
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
@@ -603,7 +604,7 @@ test("a suspended owner can reopen deletion without enabling export", async () =
     code: "HOSTED_MEMBER_SUSPENDED", httpStatus: 403, message: "Suspended.",
   }));
   mocks.getHostedAccountDeletionPageSession.mockResolvedValueOnce({ member: { id: "member_123", suspendedAt: new Date() } });
-  mocks.readHostedMemberPhoneHint.mockResolvedValueOnce("*** 0731");
+  mocks.readHostedMemberAccountHint.mockResolvedValueOnce("*** 0731");
   const { default: Page } = await import("../app/settings/data-privacy/page");
   renderToStaticMarkup(await Page());
   expect(mocks.getHostedAccountDeletionPageSession).toHaveBeenCalledOnce();
@@ -618,11 +619,11 @@ test("data privacy passes the signed-in account to the deletion controls", async
     authenticatedMember: { billingStatus: "active", id: "member_123", suspendedAt: null },
     session: {},
   });
-  mocks.readHostedMemberPhoneHint.mockResolvedValueOnce("*** 0731");
+  mocks.readHostedMemberAccountHint.mockResolvedValueOnce("*** 0731");
   mocks.countHostedFamilySponsoredMembers.mockResolvedValueOnce(2);
   const { default: Page } = await import("../app/settings/data-privacy/page");
   renderToStaticMarkup(await Page());
-  expect(mocks.readHostedMemberPhoneHint).toHaveBeenCalledWith(expect.objectContaining({ memberId: "member_123" }));
+  expect(mocks.readHostedMemberAccountHint).toHaveBeenCalledWith(expect.objectContaining({ memberId: "member_123" }));
   expect(mocks.countHostedFamilySponsoredMembers).toHaveBeenCalledWith(
     expect.objectContaining({ ownerMemberId: "member_123" }),
   );

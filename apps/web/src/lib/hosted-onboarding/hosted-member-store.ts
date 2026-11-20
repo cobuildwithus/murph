@@ -395,6 +395,31 @@ export async function readHostedMemberVerifiedEmailRecord(input: {
   });
 }
 
+/**
+ * Names the account a page acts on without showing the contact: the
+ * phone's "*** 0731", else, for a member who signed up by email, its
+ * verified address as "o***@example.com".
+ */
+export async function readHostedMemberAccountHint(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: { maskedPhoneNumberHint: true },
+  });
+  if (identity?.maskedPhoneNumberHint) return identity.maskedPhoneNumberHint;
+  const record = await readHostedMemberVerifiedEmailRecord(input);
+  const email = record ? (await projectHostedMemberVerifiedEmailRecord(record, input.prisma)).verifiedEmail : null;
+  return email ? maskHostedEmailAddress(email.address) : null;
+}
+
+/** "o***@example.com": its first letter and its domain. */
+export function maskHostedEmailAddress(address: string): string {
+  const at = address.lastIndexOf("@");
+  return at > 0 ? `${address[0]}***${address.slice(at)}` : "your email";
+}
+
 export async function projectHostedMemberVerifiedEmailRecord(
   record: HostedMemberVerifiedEmailRecord,
   prisma?: HostedOnboardingReadClient,

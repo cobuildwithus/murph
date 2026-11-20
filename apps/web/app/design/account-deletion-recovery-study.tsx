@@ -62,8 +62,9 @@ export function AccountDeletionRecoveryStudy() {
             signed-in member keeps the normal delete-account entry point. The
             page names the signed-in account, with a way to sign out, because
             the app opens it in a browser that may hold someone else&apos;s
-            session. These inert previews mount the production Settings
-            component.
+            session: by its phone, or by a masked email for a member who
+            signed up by email. These inert previews mount the production
+            Settings component.
           </p>
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
@@ -79,10 +80,10 @@ export function AccountDeletionRecoveryStudy() {
             </DialogFrame>
           </div>
           <div data-design-proof="secure-approval-unavailable-mobile">
-            <DialogFrame label="Mobile · 390px" width="max-w-[390px]">
+            <DialogFrame label="Mobile · 390px, signed up by email" width="max-w-[390px]">
               <div inert>
                 <HostedDataPrivacySettings
-                  accountHint="*** 0731"
+                  accountHint="n***@example.com"
                   authenticated
                   authorizationEnabled={false}
                 />

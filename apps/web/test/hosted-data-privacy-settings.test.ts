@@ -481,6 +481,31 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
+  test("keeps Sign out when there is nothing to name the account by", async () => {
+    mockHostedDataPrivacyDeleteFlowState({ confirmationPhrase: "" });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { accountHint: null, authenticated: true }));
+    });
+
+    expect(container.textContent).toContain("Signed in");
+    expect(container.textContent).toContain("Sign out");
+  });
+
   test("tells a Family owner that deleting ends the people it covers, not their accounts", async () => {
     mockHostedDataPrivacyDeleteFlowState({ confirmationPhrase: "" });
 
