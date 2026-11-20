@@ -251,7 +251,7 @@
       "id": "after-dinner",
       "metric": "steps",
       "title": "Walk after dinner",
-      "detail": "20 min is about 2,000 steps",
+      "detail": "A 20 min walk is 2,000 steps",
       "task": "walk 20 min after dinner every day",
       "category": "move",
       "icon": "walk"
