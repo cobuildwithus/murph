@@ -7,7 +7,8 @@ import { readHostedAuthSession } from "../src/lib/better-auth/session";
 import { sealGameText } from "../src/lib/game/crypto";
 import { lockGamePair } from "../src/lib/game/blocks";
 import { friendsSchema } from "../src/lib/game/progress/contract";
-import { openProgress, progressLookup } from "../src/lib/game/progress/crypto";
+import { openProgress, progressLookup, sealProgress } from "../src/lib/game/progress/crypto";
+import { readFriendGameSeries } from "../src/lib/game/progress/friend-games";
 import { readAwards, settleAwards } from "../src/lib/game/progress/awards";
 import { removeRetiredProgressAwards } from "../scripts/migrations/remove-retired-progress-awards";
 import * as inference from "../src/lib/game/progress/infer";
@@ -98,6 +99,33 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
+  it("loads a bounded peer week while retaining the viewer's lifetime exercise catalog", async () => {
+    const ids: string[] = [];
+    for (const name of ["Ava", "Leo", "Priya", "Maya", "Nora"]) ids.push(await member(name));
+    const text = "Nine lunges";
+    for (const memberId of ids) {
+      const lookup = progressLookup(memberId, "task", [inference.normalizeTask(text), "photo"]);
+      await db.gameProgressTaskMeasure.create({ data: { memberId, lookup, measureEncrypted: await sealProgress({
+        memberId, table: "game_progress_task_measure", rowId: lookup, field: "measure",
+      }, { name: "lunges", unit: "reps", quantity: 9 }) } });
+    }
+    for (let round = 0; round < 6; round++) {
+      const id = await game(ids, text);
+      await db.game.update({ where: { id }, data: { maxPlayers: 10, lengthDays: 335 } });
+      await db.$executeRaw`
+        INSERT INTO game_entry (id, game_id, member_id, day_index, attempt, kind, received_at)
+        SELECT gen_random_uuid()::text, game_id, member_id, day, 1, 'photo', day_one + day
+        FROM game_player CROSS JOIN generate_series(0, 334) AS day WHERE game_id = ${id}`;
+    }
+    const result = await readFriendGameSeries(ids, undefined, { viewer: ids[0], period: { from: "2026-11-08", to: "2026-11-14" } });
+    expect(result.incomplete).toBe(false);
+    expect(result.amounts.get(ids[0])).toHaveLength(6 * 335);
+    for (const peer of ids.slice(1)) {
+      const amounts = result.amounts.get(peer)!;
+      expect(amounts).toHaveLength(6 * 7);
+      expect(amounts.every(day => day.date >= "2026-11-08" && day.date <= "2026-11-14" && day.amount === 9)).toBe(true);
+    }
+  });
   it("migrates only encrypted retired awards across page boundaries and is idempotent", async () => {
     const ava = await member("Ava");
     await settleAwards(ava, [

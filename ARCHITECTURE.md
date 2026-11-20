@@ -6556,7 +6556,13 @@ returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
 500 games / 10,000 entries as limit-plus-one batches, including each friend's
-other games, and exposes only exercise aggregates. Typed quantities use the
+other games, and exposes only exercise aggregates. Individual exercise comparisons admit the
+viewer and the selected friend. If lifetime entries exceed the budget on a week
+or month board, one more bounded entry query keeps the viewer's exercise catalog
+and peers' credited days in the requested period. The catalog then shows the
+viewer's known exercises. All-time overflow reads the viewer's catalog alone
+and returns incomplete rankings. Windowed peer data cannot settle lifetime passes.
+Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
 Only typed quantity payloads are decrypted; untyped photos/text stay sealed.
