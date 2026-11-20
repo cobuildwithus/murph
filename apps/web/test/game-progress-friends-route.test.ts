@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
-  board: vi.fn(), replica: vi.fn(),
+  gameIds: vi.fn(), board: vi.fn(), replica: vi.fn(),
   health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(), after: vi.fn(),
 }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.gameIds, game: { findMany: mocks.games },
   gameEntry: { findMany: mocks.entries }, gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states } }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
   assertGameMemberAuthCurrentTx: mocks.current }));
@@ -44,6 +44,7 @@ beforeEach(() => {
   ] });
   mocks.rooms.mockResolvedValue({ rooms: [], incomplete: false });
   mocks.ids.mockResolvedValue({ ids: ["ava", "leo"], incomplete: false });
+  mocks.gameIds.mockResolvedValue([{ id: "shared", windowed: false }, { id: "other-game", windowed: false }]);
   mocks.games.mockResolvedValue([game("shared", ["ava", "leo"]), game("other-game", ["leo"])]);
   mocks.entries.mockResolvedValue([
     entry("replaced", "shared", "ava", 0, 100), entry("retake", "shared", "ava", 0, 120, 2),
@@ -137,7 +138,7 @@ it("counts a friend's other games, merges same-day amounts and counts a retake o
   expect(body.chart.find(line => line.memberId === "leo")?.points).toEqual([["2026-11-01", 250]]);
   expect(JSON.stringify(body)).not.toMatch(/other-game|30 pushups daily|payloadEncrypted/);
   expect(body.challenge).toEqual({ task: "40 pushups daily", category: "strength" });
-  expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: { in: ["ava", "leo"] } });
+  expect(mocks.games.mock.calls[0][0].where.id.in).toEqual(["shared", "other-game"]);
   expect(mocks.settle).not.toHaveBeenCalled();
   await mocks.after.mock.calls[0][0]();
   // Leo has played one day, so passing him isn't a medal yet.
@@ -172,11 +173,10 @@ it.each([true, false])("keeps the requested exercise board when combined lifetim
   mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId), incomplete: false });
   mocks.games.mockResolvedValue([game("shared", ["ava", "leo", "sam"])]);
   const posts = people.map(person => entry(person.memberId, "shared", person.memberId, 15, 9));
-  const overflow = Array.from({ length: 10001 }, () => posts[0]);
+  mocks.gameIds.mockResolvedValue([{ id: "shared", windowed: true }]);
   mocks.entries.mockImplementation(({ where }) => {
     const ids: string[] = where.memberId.in;
-    const scoped = where.AND !== undefined;
-    return ids.length === 3 && !scoped ? overflow : posts.filter(post => ids.includes(post.memberId));
+    return posts.filter(post => ids.includes(post.memberId));
   });
   const response = await GET(request("measure=pushups.reps&range=week" + (pair ? "&with=leo" : "")));
   expect(response.status).toBe(200);
@@ -188,22 +188,38 @@ it.each([true, false])("keeps the requested exercise board when combined lifetim
   if (!pair) expect(mocks.after).not.toHaveBeenCalled();
 });
 
+it("pages contributing games across the game limit while keeping exact ranks", async () => {
+  const allGames = Array.from({ length: 501 }, (_, index) => game(String(index), ["ava", "leo"]));
+  mocks.gameIds.mockResolvedValue(allGames.map(({ id }) => ({ id, windowed: false })));
+  mocks.games.mockImplementation(({ where }) => allGames.filter(game => where.id.in.includes(game.id)));
+  mocks.entries.mockImplementation(({ where }) => where.gameId.in.flatMap((id: string) =>
+    ["ava", "leo"].map(member => entry(`${member}-${id}`, id, member, 15, member === "ava" ? 1 : 2))));
+  const board = friendsSchema.parse(await (await GET(request("measure=pushups.reps&range=week"))).json());
+  expect(board.incomplete).toBe(false);
+  expect(board.rows.map(row => [row.memberId, row.total?.value])).toEqual([["leo", 1002], ["ava", 501]]);
+  expect(mocks.games.mock.calls.map(([query]) => query.where.id.in.length)).toEqual([500, 1]);
+});
+
 it("keeps the viewer's exercise pills on an incomplete all-time group board", async () => {
   const own = entry("own", "shared", "ava", 0, 9);
-  mocks.entries.mockImplementation(({ where }) => where.AND?.memberId === "ava"
+  mocks.entries.mockImplementation(({ where }) => where.memberId.in.length === 1
     ? [own] : Array.from({ length: 10001 }, () => own));
   const board = friendsSchema.parse(await (await GET(request("measure=pushups.reps&range=all"))).json());
-  expect(board).toMatchObject({ incomplete: true, rows: [], chart: [] });
+  expect(board).toMatchObject({ incomplete: true, chart: [], rows: [
+    { memberId: "ava", total: null, rank: null }, { memberId: "leo", total: null, rank: null },
+  ] });
   expect(board.pills.map(pill => pill.id)).toContain("pushups.reps");
   expect(mocks.after).not.toHaveBeenCalled();
 });
 
 it.each(["games", "entries"])("marks a capped %s input incomplete and settles nothing", async cap => {
-  if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, () => game("shared", ["ava", "leo"])));
+  if (cap === "games") mocks.gameIds.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ id: String(i), windowed: false })));
   else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, () => entry("one", "shared", "ava", 0, 1)));
   const response = await GET(request());
   expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ incomplete: true, rows: [], chart: [] });
+  expect(await response.json()).toMatchObject({ incomplete: true, chart: [], rows: [
+    { memberId: "ava", total: null, rank: null }, { memberId: "leo", total: null, rank: null },
+  ] });
   expect(mocks.settle).not.toHaveBeenCalled();
   expect(mocks.after).not.toHaveBeenCalled();
 });

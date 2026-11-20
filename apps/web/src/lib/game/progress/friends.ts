@@ -37,7 +37,7 @@ export function friendsView(input: {
       .filter(day => day.date >= from && day.date <= today)
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(day => [day.date, total += day.amount]);
-    return { person, total, points, ranked: person.daily !== null && (!health || points.length > 0) };
+    return { person, total, points, ranked: !input.incomplete && person.daily !== null && (!health || points.length > 0) };
   });
   const ranked = series.filter(row => row.ranked)
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));

@@ -41,20 +41,20 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const series = await roomRead;
     let incomplete = series.incomplete || (!health && games.incomplete);
     let people = series.people;
-    if (!health && !incomplete) {
+    if (!health && !series.incomplete) {
       people = players.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
     }
     // Recheck once after the private reads. A departure or block must remove the friend before rendering.
     const current = await timing.measure("cohort", () => friendCohortIds(memberId, db));
     incomplete ||= current.incomplete;
     const currentIds = new Set(current.ids);
-    people = incomplete ? [] : people.filter(person => currentIds.has(person.memberId));
+    people = series.incomplete || current.incomplete ? [] : people.filter(person => currentIds.has(person.memberId));
     const visibleIds = gameMemberIds.filter(id => currentIds.has(id));
     const visiblePending = games.pending.filter(task => currentIds.has(task.memberId));
     const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
     if (!current.incomplete) assertSelectedFriend(query.with, visibleIds);
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-    if (people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
+    if (!incomplete && people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
       after(async () => {
         try {
           await runWithFreshHostedDomainRootUnwrapCache(() =>
