@@ -1003,8 +1003,10 @@ resulting avatar. No private photo is shared with the subject or other players.
 ## Daily reminders
 
 The profile owns one local reminder time (default 19:00), push on, text off;
-each live seat can opt out. `setReminders` is the single write owner for Settings,
-game-chat `set_reminder`, and direct `my_game_reminders`. Text can be enabled only
+each live seat can opt out. Current native Settings and the two chat tools edit
+individual preferences. Older Settings screens replace their full selection
+only while it matches the settings last returned to that session. A conflict
+asks the member to reopen Reminders before saving again. Text can be enabled only
 with the private-reminders flag, remaining AI access and usage, and an existing
 deliverable direct thread. Reading settings never creates a profile or changes
 Home. Tool results distinguish a saved setting from one that can reach the member

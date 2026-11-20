@@ -241,8 +241,8 @@ async function processPrivateEveningIntent(receipt: GameChatIntent, now: Date): 
     return false;
   }
   if (receipt.status === "generation_queued") {
-    const policy = await readPrivateEveningDeliveryAuthority(eventId, memberId);
-    if (!policy || !await getPrisma().$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))) return false;
+    const authority = await readPrivateEveningDeliveryAuthority(eventId, memberId, now);
+    if (!authority || !await getPrisma().$transaction(tx => isPrivateEveningCurrentTx(authority.policy, tx, now, authority.evidence))) return false;
     return recoverGameNotificationPointer(receipt.id, memberId, eventId);
   }
   return publishPrivateEveningCheckIn(memberId, date, minutes, now);

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { Response } from "openai/resources/responses/responses";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -13,10 +14,11 @@ import type { Goals, GoalsQuery, Ladder, Rung, SetMeasureBody } from "./contract
 import { formatAmount, formatHeight, formatNumber, formatRungTime } from "./format";
 import type { StoredAward } from "./awards";
 import { inferenceClient, normalizeTask } from "./infer";
-import { cumulativePoints, type MeasureSeries } from "./series";
+import { cumulativePoints, ENTRY_LIMIT, GAME_LIMIT, type MeasureSeries } from "./series";
 import { readOwnSeries } from "./vault-runs";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import { readRouteGoals, setRouteGoal } from "./routes";
+import { progressLookup } from "./crypto";
 import { memberPlaceFixer } from "./place-fix";
 
 export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id" | "unit">): number[] {
@@ -205,7 +207,33 @@ export async function readGoals(memberId: string, query: GoalsQuery, units: Clie
 
 const reachedGoalMessage = "You’ve already reached this goal. Choose one further ahead.";
 
+/** PostgreSQL row versions detect corrections as well as inserts and withdrawals. Only a rung PUT
+ * needs this witness; it never opens private payloads in the write transaction. */
+async function goalSeriesVersion(memberId: string, measureId: string, db: Prisma.TransactionClient) {
+  const [row] = await db.$queryRaw<Array<{ version: string }>>`
+    WITH games AS (
+      SELECT game.id, game.status, game.xmin AS version FROM game JOIN game_player seat ON seat.game_id = game.id
+      WHERE seat.member_id = ${memberId} AND seat.day_one IS NOT NULL AND game.status IN ('live', 'settled', 'void')
+      ORDER BY game.created_at, game.id LIMIT ${GAME_LIMIT}
+    ), versions(key, version) AS (
+      SELECT 'game:' || id, version FROM games
+      UNION ALL SELECT 'seat:' || p.game_id || ':' || p.seat, p.xmin FROM game_player p JOIN games ON games.id = p.game_id
+      UNION ALL (SELECT 'entry:' || e.id, e.xmin FROM game_entry e JOIN games ON games.id = e.game_id WHERE e.member_id = ${memberId}
+        ORDER BY e.received_at, e.id LIMIT ${ENTRY_LIMIT})
+      UNION ALL SELECT 'event:' || last_event.id, last_event.xmin FROM games CROSS JOIN LATERAL (
+        SELECT e.id, e.xmin FROM game_event e WHERE games.status = 'void' AND e.game_id = games.id AND e.type IN ('blocked', 'cancelled') ORDER BY e.id DESC LIMIT 1
+      ) last_event
+      UNION ALL SELECT 'task:' || lookup, xmin FROM game_progress_task_measure WHERE member_id = ${memberId}
+      -- The target rung state has its own ciphertext CAS; day-to-rep conversion uses other rows.
+      UNION ALL SELECT 'measure:' || lookup, xmin FROM game_progress_measure WHERE member_id = ${memberId} AND lookup <> ${progressLookup(memberId, "measure", [measureId])}
+      UNION ALL SELECT 'award:' || lookup, xmin FROM game_progress_award WHERE member_id = ${memberId}
+    )
+    SELECT md5(COALESCE(json_agg((key, version::text) ORDER BY key)::text, '[]')) AS version FROM versions`;
+  return row!.version;
+}
+
 export async function setMeasure(memberId: string, measureId: string, body: SetMeasureBody, beforeMutationTx: BeforeProgressMutation): Promise<string> {
+  const version = "goal" in body && "rungId" in body.goal ? await goalSeriesVersion(memberId, measureId, getPrisma()) : null;
   const snapshot = await readOwnSeries(memberId, new Date());
   const successor = snapshot.successors.get(measureId);
   if (successor && "perDay" in body && body.perDay === snapshot.states.get(measureId)?.perDay) return successor;
@@ -227,17 +255,21 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
   const kind = rungKind(measure.unit);
   const total = measure.amounts.reduce((sum, day) => sum + day.amount, 0);
   const canPick = goalEligibility(measure, snapshot.awards, total);
+  const checkSeries = async (tx: Prisma.TransactionClient) => {
+    if (await goalSeriesVersion(memberId, measureId, tx) !== version) throw hostedOnboardingError({ code: "GAME_PROGRESS_STATE_CONFLICT",
+      httpStatus: 409, message: "Your progress changed. Refresh and choose a goal again." });
+  };
   if (id.startsWith("found:")) {
     await patchMeasureState(memberId, measureId, previous => {
       if (previous.found?.id !== id || previous.found.kind !== kind) throw invalidGameRequest("Look up this goal again before choosing it.");
       if (!canPick(previous.found)) throw invalidGameRequest(reachedGoalMessage);
       return { goal: { found: previous.found } };
-    }, beforeMutationTx);
+    }, beforeMutationTx, checkSeries);
     return measureId;
   }
   const entry = BANK.find(entry => entry.id === id && entry.kind === kind);
   if (!entry) throw invalidGameRequest("Choose a goal for this measure.");
   if (!canPick(entry)) throw invalidGameRequest(reachedGoalMessage);
-  await patchMeasureState(memberId, measureId, { goal: { rungId: id } }, beforeMutationTx);
+  await patchMeasureState(memberId, measureId, { goal: { rungId: id } }, beforeMutationTx, checkSeries);
   return measureId;
 }

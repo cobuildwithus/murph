@@ -38,6 +38,7 @@ export async function patchMeasureState(
   measureId: string,
   patch: Partial<MeasureState> | ((previous: Readonly<MeasureState>) => Partial<MeasureState>),
   beforeMutationTx: BeforeProgressMutation,
+  checkSeries?: BeforeProgressMutation,
 ): Promise<MeasureState> {
   const db = getPrisma();
   const lookup = progressLookup(memberId, "measure", [measureId]);
@@ -59,6 +60,9 @@ export async function patchMeasureState(
       : await tx.gameProgressMeasure.createMany({ data: [{ memberId, lookup, stateEncrypted }], skipDuplicates: true });
     if (result.count !== 1) throw hostedOnboardingError({ code: "GAME_PROGRESS_STATE_CONFLICT", httpStatus: 503,
       message: "Progress changed while saving. Try again.", retryable: true });
+    // At READ COMMITTED this sees corrections committed even while the state write waited.
+    // A changed source rolls the write back before any reader can observe the new goal.
+    await checkSeries?.(tx);
   });
   return state;
 }

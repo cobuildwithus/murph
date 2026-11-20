@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { getPrisma } from "@/src/lib/prisma";
-import { runGameCommand, reserveDueGameMissedDayCheckIns, readGameChatState } from "@/src/lib/game/service";
+import { runGameCommand, reserveDueGameMissedDayCheckIns, readGameChatState, loadGameMissedCheckInGames } from "@/src/lib/game/service";
 import { gameAudienceKeys } from "@/src/lib/game/audience";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { readGameChatTranscript } from "@/src/lib/game/chat-tool";
@@ -12,7 +12,7 @@ import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, reserveGameMissed
 import { drainGameChatLifecycle, readOldestReceiptPerChat } from "@/src/lib/game/chat-lifecycle";
 import { GameChatAudienceError } from "@/src/lib/game/chat-membership";
 import { readGroupMissedDayDeliveryAuthority, prepareGroupMissedDay, reserveGroupGameMissedDay, isGroupMissedDayBatchCurrentTx } from "@/src/lib/game/group-missed-day";
-import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn, roomCoversEveningGame } from "@/src/lib/game/evening-check-in";
+import { gameEveningEventId, isEveningBatchCurrentTx, prepareGameEveningCheckIn, readGameEveningDeliveryAuthority, reserveGameEveningCheckIn, privateRoomCheck } from "@/src/lib/game/evening-check-in";
 import { assertGameProposalDeliveryCurrentTx } from "@/src/lib/game/chat-delivery-authority";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { advanceHostedMailboxConsumedSeqByLane, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
@@ -214,7 +214,82 @@ afterEach(async () => {
   members.length = 0; games.length = 0; events.length = 0; proof.rooms.clear();
 });
 
+async function roomCoversEveningGame(gameId: string, at: Date) {
+  const [game] = await loadGameMissedCheckInGames(db, [gameId]);
+  return privateRoomCheck(db, at, new Map(), true)(game!);
+}
+
 describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
+  it("invalidates a prepared evening when room-wide admission moves cohorts", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4);
+    const people = room.people.map(person => person.id);
+    const [other, original] = [await room.addGame(), await room.addGame()].sort();
+    await db.gamePlayer.updateMany({ where: { gameId: other, memberId: { in: people.slice(0, 2) } }, data: { leftAt: eveningAt } });
+    await db.gamePlayer.updateMany({ where: { gameId: original, memberId: { in: people.slice(2) } }, data: { leftAt: eveningAt } });
+    const move = (memberId: string) => db.gameProfile.update({ where: { memberId }, data: { timeZone: "Asia/Tokyo" } });
+    await move(people[3]!);
+    const prepared = await prepareGameEveningCheckIn(room.roomId, date, eveningAt);
+    expect(prepared?.policy.batch.map(slot => slot.gameId)).toEqual([original]);
+    expect(await roomCoversEveningGame(original!, eveningAt)).toBe(true);
+    await move(people[2]!);
+    expect(await roomCoversEveningGame(original!, eveningAt)).toBe(false);
+    expect(await roomCoversEveningGame(other!, eveningAt)).toBe(true);
+    expect(await db.$transaction(tx => isEveningBatchCurrentTx(prepared!.policy, prepared!.memberIds, prepared!.audience, tx, eveningAt))).toBe(false);
+  });
+
+  it("describes the private reminder for the cohort excluded from the room", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const room = await fixture(4);
+    const ids = room.people.map(person => person.id);
+    await db.gameProfile.updateMany({ where: { memberId: { in: ids.slice(2) } }, data: { timeZone: "Asia/Tokyo" } });
+    const first = await room.addGame(10, [], 2);
+    const second = await room.addGame(10, ["UTC", "UTC", "Asia/Tokyo", "Asia/Tokyo"], 4);
+    await db.gamePlayer.updateMany({ where: { gameId: second, memberId: { in: ids.slice(0, 2) } }, data: { leftAt: now } });
+    const { readPrivatelyTextedGameIds } = await import("@/src/lib/game/evening-check-in");
+    const { gameReminderReach } = await import("@/src/lib/game/reminders");
+    const coverage = await Promise.all([first, second].map(id => roomCoversEveningGame(id, eveningAt)));
+    expect(coverage.filter(Boolean)).toHaveLength(1);
+    const excluded = [first, second][coverage.indexOf(false)];
+    const described = await readPrivatelyTextedGameIds([excluded], eveningAt);
+    expect(described.has(excluded)).toBe(true);
+    expect(gameReminderReach({ push: false, text: true, canText: true }, { on: true, textedPrivately: described.size > 0 }, false)).toBe("text");
+  });
+
+  it("keeps the room result ahead of newer results in another room", async () => {
+    const local = await fixture(2), foreign = await fixture(2, undefined, local.people);
+    const actors = local.people.map(person => person.id);
+    const result = { v: 1, maxPlayers: 10, termsVersion: 1,
+      scores: actors.map((memberId, seat) => ({ memberId, seat, score: 2, misses: 5, eligible: true })) };
+    const finish = async (room: typeof local, offset: number) => {
+      const id = await room.addGame();
+      await db.game.update({ where: { id }, data: { status: "settled", settledAt: new Date(eveningAt.getTime() + offset), result } });
+      return id;
+    };
+    const own = await finish(local, 0);
+    const visible = async () => (await readGameChatState(local.roomId, actors)).games.map(game => game.id);
+    for (let i = 1; i <= 4; i++) await finish(foreign, i);
+    expect(await visible()).toEqual([own]);
+    await finish(foreign, 5);
+    expect(await visible()).toEqual([own]);
+  });
+
+  it("keeps the room game ahead of unrelated unlinked games", async () => {
+    const three = await fixture(3);
+    const ownRoom = await fixture(2, undefined, three.people.slice(0, 2));
+    const own = await ownRoom.addGame();
+    const ids = ownRoom.people.map(person => person.id);
+    const visible = async () => (await readGameChatState(ownRoom.roomId, ids)).games.map(game => game.id);
+    const createUnlinked = async () => {
+      const gameId = await three.addGame(10, [], 2);
+      await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: null } });
+    };
+    for (let i = 0; i < 9; i++) await createUnlinked();
+    expect(await visible()).toEqual([own]);
+    await createUnlinked();
+    expect(await visible()).toEqual([own]);
+  });
+
   it("waits for Pacific morning through the full drain while an Eastern room notice reads the due pair", async () => {
     const clock = new Date();
     const [roomId] = await shardRooms(1, Math.floor(clock.getTime() / 60_000) % 60);
@@ -326,7 +401,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     const near = await room.addGame(10, [], 2);
     const far = await room.addGame(10, ["UTC", "UTC", "Asia/Tokyo", "Asia/Tokyo"], 4);
     await db.gamePlayer.updateMany({ where: { gameId: far, memberId: { in: [ava, leo] } }, data: { leftAt: now } });
-    const covered = await Promise.all([near, far].map(id => roomCoversEveningGame(room.roomId, id, eveningAt)));
+    const covered = await Promise.all([near, far].map(id => roomCoversEveningGame(id, eveningAt)));
     // One room evening can't address both cohorts: one stays on private reminders.
     expect(covered.filter(Boolean)).toHaveLength(1);
     const batch = (await prepareGameEveningCheckIn(room.roomId, date, eveningAt))?.policy.batch.map(item => item.gameId) ?? [];

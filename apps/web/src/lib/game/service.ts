@@ -1,4 +1,4 @@
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameAreaCode } from "./area-code";
 import { readHostedMemberIdentity, readHostedMemberVerifiedPhoneNumbers } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
@@ -200,15 +200,48 @@ const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
 const BLOCK_GAME_LIMIT = 50;
 
 export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
+  return { ...await readReminderSettings(memberId, db), canText: await canTextGameReminders(memberId, db) };
+}
+
+async function readReminderSettings(memberId: string, db: Db) {
   const [profile, seats] = await Promise.all([
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
     db.gamePlayer.findMany({ where: { memberId, OR: [{ reminderOff: true }, { reminderMinutes: { not: null } }], game: { status: "live" } },
       select: { gameId: true, reminderOff: true, reminderMinutes: true }, orderBy: { gameId: "asc" } }),
   ]);
-  const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText, offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
+    offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
     gameMinutes: Object.fromEntries(seats.flatMap(seat => seat.reminderMinutes === null ? [] : [[seat.gameId, seat.reminderMinutes]])) };
+}
+
+async function rememberReminderRead(db: Db, sessionId: string, settings: Awaited<ReturnType<typeof readReminderSettings>>) {
+  const digest = sha256Hex(JSON.stringify(settings));
+  await db.gameReminderSessionRead.upsert({ where: { model_sessionId: { model: "session", sessionId } },
+    create: { sessionId, digest }, update: { digest } });
+}
+
+export async function readSessionGameReminders(memberId: string, sessionId: string, beforeMutationTx: (tx: Tx) => Promise<void>) {
+  const db = getPrisma(), canText = await canTextGameReminders(memberId, db);
+  const settings = await db.$transaction(async tx => {
+    await beforeMutationTx(tx);
+    await lockReminderProfile(tx, memberId);
+    const current = await readReminderSettings(memberId, tx);
+    await rememberReminderRead(tx, sessionId, current);
+    return current;
+  });
+  return { ...settings, canText };
+}
+
+function lockReminderProfile(tx: Tx, memberId: string) {
+  return tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${memberId} FOR UPDATE`;
+}
+
+async function checkReminderRead(tx: Tx, memberId: string, sessionId: string) {
+  await lockReminderProfile(tx, memberId);
+  const previous = await tx.gameReminderSessionRead.findUnique({ where: { model_sessionId: { model: "session", sessionId } } });
+  if (previous?.digest !== sha256Hex(JSON.stringify(await readReminderSettings(memberId, tx)))) {
+    throw hostedOnboardingError({ code: "GAME_REMINDERS_CHANGED", httpStatus: 409, message: "Your reminders changed. Reopen Reminders and try again." });
+  }
 }
 
 /** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
@@ -246,6 +279,7 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
  */
 export async function runGameCommand(input: {
   actorMemberId: string;
+  reminderSessionId?: string;
   multiplayer?: boolean;
   command: unknown;
   chatContainerMemberId?: string;
@@ -293,6 +327,7 @@ async function activatePrivateAfterGameCommand(command: GameCommand, gameId: str
 async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], command: Extract<GameCommand, { type: "setReminders" }>): Promise<GameReminders> {
   return commandTransaction(input, async tx => {
     const actor = input.actorMemberId;
+    if (input.reminderSessionId) await checkReminderRead(tx, actor, input.reminderSessionId);
     if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     // A time for some games is theirs alone: the default time and every other game stay.
     const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
@@ -319,20 +354,22 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
         AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
           AND choice.actor = ${actor} AND choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT})
     `;
-    return readGameReminders(actor, tx);
+    const settings = await readReminderSettings(actor, tx);
+    if (input.reminderSessionId) await rememberReminderRead(tx, input.reminderSessionId, settings);
+    return { ...settings, canText: await canTextGameReminders(actor, tx) };
   });
 }
 
 /** Chat edits carry only the fields the member asked to change. App saves lock the same profile first. */
 export async function editGameReminders(input: Pick<Parameters<typeof runGameCommand>[0], "actorMemberId" | "beforeMutationTx">,
-  edit: { minutes?: number; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
+  edit: { defaultMinutes?: number; minutes?: number | null; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
   const actor = input.actorMemberId;
   return commandTransaction(input, async tx => {
-    const profile = await tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${actor} FOR UPDATE`;
+    const profile = await lockReminderProfile(tx, actor);
     if (!profile.length) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     if (edit.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     await tx.gameProfile.update({ where: { memberId: actor }, data: {
-      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes,
+      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.defaultMinutes ?? edit.minutes ?? undefined,
     } });
     if (edit.minutes !== undefined || edit.on !== undefined || edit.everyDay !== undefined) {
       await recordGameReminderPreferencesTx(tx, actor, { gameIds, minutes: edit.minutes !== undefined,
@@ -3422,6 +3459,11 @@ async function readWalletTickets(memberId: string, multiplayer: boolean, clock: 
       JOIN game_ticket ticket ON ticket.game_id = game.id
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL AND ${gameOnSql()}
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+        AND (game.max_players <> 2 OR NOT EXISTS (
+          SELECT 1 FROM game_player opponent JOIN game_block block
+            ON block.blocked_member_id = opponent.member_id AND block.blocker_member_id = seat.member_id
+          WHERE opponent.game_id = game.id AND opponent.member_id <> seat.member_id
+        ))
     ), wallet AS (
       SELECT id FROM visible WHERE actionable
       UNION ALL
@@ -3446,19 +3488,21 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   const prisma = getPrisma();
   const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
-    // Apply active-game priority before the bounded history window, so new
-    // invitations and completed games cannot displace an older live game.
+    // Only finished seats have a history window.
     prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
-      SELECT seat.game_id AS "gameId" FROM game_player seat
-      JOIN game ON game.id = seat.game_id
-      WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
-        AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
-        AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
-        AND ${gameOnSql()}
-        AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
-      ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
-        seat.joined_at DESC, seat.game_id DESC
-      LIMIT ${HOME_CANDIDATE_LIMIT}
+      WITH seats AS (
+        SELECT seat.game_id, seat.joined_at, game.status FROM game_player seat
+        JOIN game ON game.id = seat.game_id
+        WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
+          AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+          AND ${gameOnSql()}
+          AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
+      )
+      SELECT game_id AS "gameId" FROM seats WHERE status IN ('invited', 'negotiating', 'live')
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'settled' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'void' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
     `),
     prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } }, events: { none: { actor: memberId, type: "invite_dismissed" } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),

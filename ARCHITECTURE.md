@@ -8049,8 +8049,15 @@ policy and allows a skip, with no game host tools or lore. Egress checks the
 Private game reminders reuse the signed group-tool transport for a direct-only
 `my_game_reminders` request. The runtime member and accepted direct input own
 authority; Web returns only that member's live tasks, schedule, status, peer
-first names and reminder settings. Settings and both chat tools write through
-`setReminders`. `canText` additionally requires the private-reminders flag,
+first names and reminder settings. Native clients PATCH `/api/game/v1/me/reminders`
+with one changed preference: `{push}`, `{text}`, or `{minutes}` for the profile,
+`{gameId, on}` or `{gameId, minutes}` for one live seat. Times are local minutes
+since midnight; a null seat time restores the profile default. Build 120 reads
+the full model with GET and saves it with PUT. The server stores a digest of the
+returned preferences per authenticated session. A missing or stale read returns
+409 and requires a fresh GET before editing again. A successful replacement
+advances the session digest. Chat tools apply scoped edits under the same
+profile lock. `canText` additionally requires the private-reminders flag,
 remaining AI access and usage, and an already deliverable direct thread; the
 game never grants a private conversation. A per-seat `reminder_every_day` option
 changes count-game reminder urgency without changing posting eligibility.

@@ -287,6 +287,34 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("keeps every live seat beyond the Home history window", async () => {
+    const owner = await member("Sam", "UTC"), peers = [];
+    for (let i = 0; i < 6; i++) peers.push(await member("Maya", "UTC"));
+    const ids = [];
+    for (let i = 0; i < 51; i++) {
+      ids.push((await seedSettledGame({ challenger: owner, opponent: peers[i % peers.length]!, settledAt: new Date() })).gameId);
+    }
+    await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "live", settledAt: null, result: Prisma.DbNull } });
+    expect((await readHome(owner)).games.map(game => game.id).sort()).toEqual(ids.sort());
+  });
+
+  it("keeps redeemed tickets from visible opponents past the wallet window", async () => {
+    const owner = await member("Ava", "UTC"), kept = await member("Maya", "UTC"), hidden = await member("Leo", "UTC");
+    const settledAt = new Date();
+    const retained = await seedSettledGame({ challenger: owner, opponent: kept, settledAt });
+    const blocked = await seedSettledGame({ challenger: owner, opponent: hidden, settledAt });
+    const record = { stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], status: "redeemed", redeemedAt: settledAt };
+    const retainedId = randomUUID();
+    const db = getPrisma();
+    await db.gameTicket.create({ data: { ...record, id: retainedId, gameId: retained.gameId, createdAt: new Date(settledAt.getTime() - 1000) } });
+    await db.gameTicket.createMany({ data: Array.from({ length: 199 }, () => ({ ...record, id: randomUUID(), gameId: blocked.gameId, createdAt: settledAt })) });
+    await ok(owner, { type: "block", memberId: hidden });
+    expect((await readHome(owner)).wallet.redeemed.map(ticket => ticket.id)).toEqual([retainedId]);
+    await db.gameTicket.create({ data: { ...record, id: randomUUID(), gameId: blocked.gameId, createdAt: settledAt } });
+    expect((await readHome(owner)).wallet.redeemed.map(ticket => ticket.id)).toEqual([retainedId]);
+    expect(await db.gameTicket.count({ where: { id: retainedId } })).toBe(1);
+  });
+
   it("projects only the caller's verified area code in Home", async () => {
     const self = await member("Player One", "UTC");
     const other = await member("Player Two", "UTC");

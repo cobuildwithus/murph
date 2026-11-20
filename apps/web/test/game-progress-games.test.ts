@@ -104,6 +104,17 @@ describe("today's check-ins", () => {
     expect(read(source)).toEqual([{ gameId: "pullups", dayIndex: 4, measureId: "pullups.reps", entryId: "pullups:4:1", after: null }]);
   });
 
+  it("keeps private pictures out of pending previews", () => {
+    const source = pullups();
+    post(source, 3, "photo", null);
+    const measures = gameSeries([source], memberId, new Map());
+    const shown = measureView(measures[0], {}, [], "2026-11-05", "us");
+    shown.pics.push({ id: "picture", takenOn: "2026-11-04", at: 20 });
+    const [today] = todayCheckIns([source], memberId, new Map());
+    expect(checkInView(today, { measures, states: new Map(), vaultRunsMerged: false }, [shown], [], "2026-11-05", "us")[0].after?.pics).toEqual([]);
+    expect(shown.pics).toHaveLength(1);
+  });
+
   it("starts a measure no post has added to yet, as its first read will show it", () => {
     const source = pullups();
     const [before] = read(source);
