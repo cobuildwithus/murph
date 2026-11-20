@@ -136,7 +136,7 @@ export async function publishPrivateKickoff(gameId: string, memberId: string, no
   const policy = gamePrivateKickoffPolicySchema.parse({ kind: "game_private_kickoff", eventId, gameId, memberId,
     messageKind: kind, expiresAt: new Date(game.startedAt.getTime() + 24 * 60 * 60_000).toISOString() });
   if (!await db.$transaction(tx => isPrivateKickoffCurrentTx(policy, tx, now))) return false;
-  const projection = await readMyGameReminderProjection(memberId);
+  const projection = await readMyGameReminderProjection(memberId, { ids: [gameId] });
   const own = projection?.games.find(item => item.id === gameId);
   if (!own) return false;
   const destination = await resolveHostedAssistantNotificationDestination({ memberId });

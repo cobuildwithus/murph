@@ -15,6 +15,29 @@ export function gameReminderReach(input: { push: boolean; text: boolean; canText
   return hasPushRoute ? "push" : "none";
 }
 
+/** Seat pages are bounded independently of the number of subjects in one reminder. */
+export const REMINDER_GAME_LIMIT = 20;
+
+export async function collectReminderGames<Seat extends { gameId: string }, Game>(
+  readPage: (after: string) => Promise<Seat[]>, open: (page: Seat[]) => Promise<Game[]>,
+): Promise<Game[]> {
+  const games: Game[] = [];
+  let after = "";
+  while (games.length < REMINDER_GAME_LIMIT) {
+    const page = await readPage(after);
+    if (!page.length) break;
+    games.push(...await open(page));
+    if (page.length < REMINDER_GAME_LIMIT) break;
+    after = page[page.length - 1]!.gameId;
+  }
+  return games.slice(0, REMINDER_GAME_LIMIT);
+}
+
+export function reminderSeatsAt(memberId: string, minutes: number, defaultMinutes: number, after: string) {
+  return { memberId, leftAt: null, reminderOff: false, game: { status: "live" }, gameId: { gt: after },
+    OR: minutes === defaultMinutes ? [{ reminderMinutes: minutes }, { reminderMinutes: null }] : [{ reminderMinutes: minutes }] };
+}
+
 /** Posting eligibility first; count games add urgency without requiring a perfect game. */
 export function reminderOpenDay(state: RuleState, player: RulePlayer, now: Date, everyDay = false): number | null {
   if (player.leftAt || !needsPostToday(state, player.memberId, now)) return null;

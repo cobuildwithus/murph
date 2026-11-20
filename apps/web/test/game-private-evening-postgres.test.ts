@@ -76,6 +76,27 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
   });
 
+  it("keeps an early private follow-up from moving to the next game day", async () => {
+    const owner = await member(), id = await game(owner);
+    await db.gameProfile.update({ where: { memberId: owner }, data: { reminderMinutes: 135 } });
+    const at = new Date("2026-11-07T03:15:00Z");
+    expect(await reserveDuePrivateEveningCheckIns(at)).toBe(0);
+    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, "2026-11-07", 135),
+      memberId: owner, date: "2026-11-07", expiresAt: "2026-11-07T03:45:00.000Z", conversationLaneSeq: "0",
+      batch: [{ gameId: id, termsVersion: 1, dayIndex: 1 }] };
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, at))).toBe(false);
+  });
+
+  it("finds a private reminder after twenty already posted games", async () => {
+    const owner = await member(), ids = [];
+    for (let i = 0; i < 21; i++) ids.push(await game(owner));
+    ids.sort();
+    await db.gameEntry.createMany({ data: ids.slice(0, 20).map(gameId => ({
+      id: randomUUID(), memberId: owner, gameId, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now,
+    })) });
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+  });
+
   it("texts each game an hour after its own time, with only the games at that time", async () => {
     const owner = await member(), evening = await game(owner), noon = await game(owner);
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: noon, memberId: owner } }, data: { reminderMinutes: 720 } });
@@ -91,6 +112,21 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner, date, 720) } })).toMatchObject({ sourceRef: `${owner}:${date}:720` });
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy(atNoon, "2026-11-06T13:30:00.000Z", [noon]), tx, one))).toBe(true);
     expect(await reserveDuePrivateEveningCheckIns(one)).toBe(0);
+  });
+
+  it("continues private reminders past an unreadable room", async () => {
+    const [first, second] = [await member(), await member()].sort();
+    const room = await member();
+    await game(first!, room);
+    await game(second!);
+    m.covered.mockImplementation(async (roomId: string | null) => {
+      if (roomId === room) throw new Error("Roster unavailable");
+      return false;
+    });
+
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(first!) } })).toBeNull();
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(second!) } })).toBeTruthy();
   });
 
   it("names the games that get the private text: no group chat, or players hours apart", async () => {

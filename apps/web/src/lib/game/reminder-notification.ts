@@ -7,7 +7,7 @@ import { sha256Hex } from "../primitives";
 import { isGameEnabled } from "./access";
 import { openGameTexts } from "./crypto";
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
-import { gameReminderWindow, reminderOpenDay } from "./reminders";
+import { collectReminderGames, REMINDER_GAME_LIMIT, reminderSeatsAt, gameReminderWindow, reminderOpenDay } from "./reminders";
 import { effectiveTermWords, eligibleFromDay, liveEntry, parseTermWords, termsForDay } from "./rules";
 import { toRuleState } from "./row";
 import { readNamesForViewer } from "./viewer-names";
@@ -16,7 +16,6 @@ import { readNamesForViewer } from "./viewer-names";
 const SHARDS = 5;
 const PAGE_SIZE = 500;
 const READ_BATCH = 5;
-const GAMES_PER_MEMBER = 20;
 const ENTRIES_PER_SEAT = 365 * 3;
 const entrySelect = { id: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
   receivedAt: true, withdrawnAt: true, mediaKeys: true, blurHash: true } as const;
@@ -26,26 +25,28 @@ type ReminderSlot = { memberId: string; minutes: number };
 
 /** Own attempt history only. Peer artifacts are read only for the final single-game wording. */
 async function readOpenGames(slots: readonly ReminderSlot[], now: Date) {
-  const profiles = await getPrisma().gameProfile.findMany({ where: { memberId: { in: [...new Set(slots.map(slot => slot.memberId))] }, reminderPush: true },
-    select: { memberId: true, timeZone: true, reminderMinutes: true, players: {
-      where: { leftAt: null, reminderOff: false, game: { status: "live" } }, orderBy: { gameId: "asc" }, take: GAMES_PER_MEMBER + 1,
-      include: { entries: { select: entrySelect, take: ENTRIES_PER_SEAT + 1 }, game: { include: { players: true, invitees: true } } },
-    } } });
-  return slots.flatMap(({ memberId, minutes }) => {
+  const db = getPrisma();
+  const profiles = await db.gameProfile.findMany({ where: { memberId: { in: slots.map(slot => slot.memberId) }, reminderPush: true },
+    select: { memberId: true, timeZone: true, reminderMinutes: true } });
+  const members = await Promise.all(slots.map(async ({ memberId, minutes }) => {
     const profile = profiles.find(profile => profile.memberId === memberId);
     const window = profile && gameReminderWindow(now, profile.timeZone, minutes);
-    if (!profile || !window || profile.players.length > GAMES_PER_MEMBER) return [];
-    const open = profile.players.flatMap(seat => {
-      if (!isGameEnabled() || seat.entries.length > ENTRIES_PER_SEAT || (seat.reminderMinutes ?? profile.reminderMinutes) !== minutes) return [];
+    if (!profile || !window || !isGameEnabled()) return [];
+    const open = await collectReminderGames(after => db.gamePlayer.findMany({
+      where: reminderSeatsAt(memberId, minutes, profile.reminderMinutes, after), orderBy: { gameId: "asc" }, take: REMINDER_GAME_LIMIT,
+      include: { entries: { select: entrySelect, take: ENTRIES_PER_SEAT + 1 }, game: { include: { players: true, invitees: true } } },
+    }), async seats => seats.flatMap(seat => {
+      if (seat.entries.length > ENTRIES_PER_SEAT) return [];
       try {
         const state = toRuleState(seat.game, seat.entries);
-        const player = state.players.find(player => player.memberId === profile.memberId);
+        const player = state.players.find(player => player.memberId === memberId);
         const day = player ? reminderOpenDay(state, player, new Date(now.getTime() + Number(seat.game.devClockOffsetMs)), seat.reminderEveryDay) : null;
         return day === null || !player ? [] : [{ row: seat.game, state, player, day }];
       } catch { return []; }
-    });
+    }));
     return open.length ? [{ memberId, minutes, window, open }] : [];
-  });
+  }));
+  return members.flat();
 }
 
 /** One attempt a day for each of a member's reminder times. No claim is released, including a lost or superseded push. */

@@ -6,7 +6,7 @@ import { groupGameRecapPlayers } from "./recap-cohort";
 
 import { isPairRoster, isGameMemberSet } from "./roster";
 import type { Game, HostedLinqDelivery, Prisma, PrismaClient } from "@prisma/client";
-import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
+import { dayStartInstant } from "./time";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { parseGameRecapEventId, buildGameBothWinOfferInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "@murphai/hosted-execution/runtime-control";
 import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeResolution } from "./change-resolution";
@@ -629,22 +629,24 @@ async function deliverGameEveningLifecycle(roomId: string, date: string, now: Da
   const prepared = await prepareGameEveningCheckIn(roomId, date, now);
   if (!prepared) return supersedeMissedDay(eventId, now);
   const { readGameMissedCheckInWords } = await import("./service");
-  const { readGameChatTranscript } = await import("./chat-tool");
+  const { readTimedGameChatTranscript } = await import("./chat-tool");
   const { names, tasks } = await readGameMissedCheckInWords(prepared.games, date);
-  const midnight = prepared.zones.map(zone => resolveFloatingIsoTimestampInTimeZone(`${date}T00:00:00`, zone))
-    .flatMap(value => value ? [new Date(value.timestamp).getTime()] : []);
-  if (!midnight.length) return false;
-  const transcript = await readGameChatTranscript({ containerMemberId: roomId,
+  const calendars = prepared.games.flatMap(({ row, state }) => state.players.filter(player => !player.leftAt)
+    .map(player => ({ gameId: row.id, memberId: player.memberId, start: dayStartInstant(date, player.timeZone).getTime() })));
+  const messages = await readTimedGameChatTranscript({ containerMemberId: roomId,
     playerNamesByMemberId: [...names].map(([memberId, name]) => ({ memberId, name })),
-    since: new Date(Math.min(...midnight)) });
-  const idsByName = new Map([...names].map(([id, name]) => [name, id]));
+    since: new Date(Math.min(...calendars.map(calendar => calendar.start))), until: now });
+  const transcript = messages.flatMap(message => {
+    const gameIds = calendars.filter(calendar => calendar.memberId === message.memberId && calendar.start <= Date.parse(message.occurredAt))
+      .map(calendar => calendar.gameId);
+    return gameIds.length ? [{ ...message, gameIds }] : [];
+  });
   const players = [...names].flatMap(([memberId, playerName]) => {
     const ownTasks = prepared.policy.batch.flatMap(game => game.memberIds.includes(memberId)
       ? [{ gameId: game.gameId, task: tasks.get(game.gameId)?.get(memberId) ?? "" }] : []);
     return ownTasks.length ? [{ memberId, playerName, tasks: ownTasks }] : [];
   });
-  const instructions = buildGameEveningCheckInInstructions({ date,
-    transcript: transcript.map(message => ({ ...message, memberId: idsByName.get(message.playerName)! })), players });
+  const instructions = buildGameEveningCheckInInstructions({ date, transcript, players });
   const destination = await resolveHostedAssistantNotificationDestination({ memberId: roomId });
   if (!destination || destination.conversationShape !== "thread-container" || destination.route.channel !== "linq") return false;
   const queued = await enqueueGameLifecycle({ game: prepared.games[0]!.row, gameId: roomId, containerMemberId: roomId,
