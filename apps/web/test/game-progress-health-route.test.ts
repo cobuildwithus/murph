@@ -397,17 +397,17 @@ it("matches BE0's not-connected health golden response", async () => {
   expect(await response.json()).toEqual(notConnected);
 });
 
-it("a default-route failure returns one retryable 503 before settling any health awards", async () => {
+it("a default-route failure returns Health and settles independent awards", async () => {
   const raw = snapshot();
   mocks.raw.mockResolvedValue({ ...raw, numbers: { restingHeartRate: null, sleep: null, vo2Max: null,
     steps: { daily: [{ date: joinedOn, value: 4000, source: "Garmin", observedAt: `${joinedOn}T12:00:00Z` }] } } });
   mocks.resolve.mockRejectedValueOnce(hostedOnboardingError({ code: "PROGRESS_MAP_UNAVAILABLE", httpStatus: 503, retryable: true,
     message: "The map could not load. Try again." }));
   const response = await GET(request());
-  expect(response.status).toBe(503);
-  expect(await response.json()).toMatchObject({ error: { retryable: true } });
+  expect(response.status).toBe(200);
+  expect(healthSchema.parse(await response.json()).sums[0]).toMatchObject({ id: "steps", route: null });
   expect(mocks.resolve).toHaveBeenCalledTimes(1);
-  expect(mocks.settle).not.toHaveBeenCalled();
+  expect(mocks.settle).toHaveBeenCalledOnce();
 });
 
 

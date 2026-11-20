@@ -186,13 +186,14 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   if (healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, ref.generatedAt, profile.timeZone, now)) return;
   const snapshot = await readCompanionHealthSeries(auth, new AbortController().signal, metricIds, workspace);
   if (!snapshot) return;
-  await settleProgressHealth(auth, snapshot, profile, states, now);
+  const { journeys } = await settleProgressHealth(auth, snapshot, profile, states, now);
   const authority: BeforeProgressMutation = async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
   };
   // Totals and its goals read Running's saved vault runs; this is their one replica read.
   await saveVaultRuns(memberId, snapshot.savedAt, snapshot.runs, authority);
+  if (journeys.measures.some(measure => measure.id === "steps") && !states.get("steps")?.legs?.length) return;
   await patchMeasureState(memberId, "restingHeartRate", previous => {
     const receipt = previous.healthSettlement;
     if (receipt && (Date.parse(receipt.savedAt) > Date.parse(snapshot.savedAt)

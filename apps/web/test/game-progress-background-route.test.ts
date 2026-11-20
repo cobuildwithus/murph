@@ -465,3 +465,17 @@ it("logs the aggregate request once for Prizes and Health, including invalid req
     totalMs: expect.any(Number), phaseMs: { auth: expect.any(Number), awards: expect.any(Number), render: expect.any(Number) } });
   expect(JSON.stringify(entries)).not.toMatch(/ava|leo|birthYear|memberId/i);
 });
+
+it("retries a missing Steps map on the same replica after settling other awards", async () => {
+  const snapshot = healthSnapshot();
+  mocks.raw.mockResolvedValue({ ...snapshot, numbers: { ...snapshot.numbers,
+    steps: { daily: snapshot.numbers.restingHeartRate.daily.map(point => ({ ...point, value: 5900 })) } } });
+  mocks.resolve.mockRejectedValueOnce(new Error("Map unavailable")).mockResolvedValue({
+    from: "A", to: "B", distanceM: 1000, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [], straightLine: false });
+  await GET(request()); await drain();
+  expect((await readAwards("ava")).some(award => award.measureId === "restingHeartRate")).toBe(true);
+  expect((await healthState())?.healthSettlement).toBeUndefined();
+  await GET(request()); await drain();
+  expect((await healthState())?.healthSettlement).toBeDefined();
+  expect(mocks.resolve).toHaveBeenCalledTimes(2);
+});
