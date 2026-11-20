@@ -19,7 +19,7 @@ import {
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
 
-import { requestHostedBillingSuccess } from "./client-api";
+import { HostedOnboardingApiError, requestHostedBillingSuccess } from "./client-api";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_DELAY_MS = 60_000;
@@ -52,7 +52,8 @@ export function JoinInviteSuccessClient({
     HostedInviteStatusPayload["stage"] | null
   >(null);
   const homeRedirectStartedRef = useRef(false);
-  const successSyncStartedRef = useRef(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const reconcile = !preview && status.session.matchesInvite && shouldRequestHostedBillingSuccess(status.stage);
   const shouldPoll = isHostedOnboardingPendingStage(status.stage);
   const shouldRedirectToHome = shouldRedirectHostedInviteSuccessToHome({
     sessionId,
@@ -73,43 +74,30 @@ export function JoinInviteSuccessClient({
   });
 
   useEffect(() => {
-    if (
-      preview ||
-      successSyncStartedRef.current ||
-      !sessionId ||
-      !status.session.matchesInvite ||
-      !shouldRequestHostedBillingSuccess(status.stage)
-    ) {
-      return;
-    }
-
+    if (!reconcile || !sessionId) return;
     let cancelled = false;
-    successSyncStartedRef.current = true;
-
-    void requestHostedBillingSuccess({
-      inviteCode,
-      sessionId,
-    })
-      .then((payload) => {
-        if (cancelled) {
-          return;
-        }
-
+    let timer: number | undefined;
+    const sync = async (attempt: number) => {
+      if (cancelled) return;
+      try {
+        const payload = await requestHostedBillingSuccess({ inviteCode, sessionId });
+        if (cancelled) return;
+        setBillingError(null);
         setErrorMessage(null);
         setStatus(payload);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
-      });
-
+      } catch (error) {
+        if (cancelled) return;
+        setBillingError(error instanceof Error ? error.message : "Unable to refresh setup status.");
+        const retryable = error instanceof HostedOnboardingApiError ? error.retryable : error instanceof TypeError;
+        if (retryable && attempt < 3) timer = window.setTimeout(() => void sync(attempt + 1), attempt * 2_000);
+      }
+    };
+    void Promise.resolve().then(() => sync(1));
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [inviteCode, preview, sessionId, status.session.matchesInvite, status.stage]);
+  }, [inviteCode, reconcile, sessionId]);
 
   useEffect(() => {
     if (preview || !shouldPoll || !sessionId) {
@@ -155,7 +143,7 @@ export function JoinInviteSuccessClient({
   return (
     <LinkPageFrame>
       <JoinInviteSuccessScreen
-        errorMessage={errorMessage}
+        errorMessage={reconcile ? billingError ?? errorMessage : errorMessage}
         hasCheckoutSession={Boolean(sessionId)}
         onAction={() => {
           if (!preview && shouldRedirectToHome) {
