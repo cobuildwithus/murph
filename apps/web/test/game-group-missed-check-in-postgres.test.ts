@@ -215,6 +215,40 @@ afterEach(async () => {
 });
 
 describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
+  it("keeps the room result ahead of newer results in another room", async () => {
+    const local = await fixture(2), foreign = await fixture(2, undefined, local.people);
+    const actors = local.people.map(person => person.id);
+    const result = { v: 1, maxPlayers: 10, termsVersion: 1,
+      scores: actors.map((memberId, seat) => ({ memberId, seat, score: 2, misses: 5, eligible: true })) };
+    const finish = async (room: typeof local, offset: number) => {
+      const id = await room.addGame();
+      await db.game.update({ where: { id }, data: { status: "settled", settledAt: new Date(eveningAt.getTime() + offset), result } });
+      return id;
+    };
+    const own = await finish(local, 0);
+    const visible = async () => (await readGameChatState(local.roomId, actors)).games.map(game => game.id);
+    for (let i = 1; i <= 4; i++) await finish(foreign, i);
+    expect(await visible()).toEqual([own]);
+    await finish(foreign, 5);
+    expect(await visible()).toEqual([own]);
+  });
+
+  it("keeps the room game ahead of unrelated unlinked games", async () => {
+    const three = await fixture(3);
+    const ownRoom = await fixture(2, undefined, three.people.slice(0, 2));
+    const own = await ownRoom.addGame();
+    const ids = ownRoom.people.map(person => person.id);
+    const visible = async () => (await readGameChatState(ownRoom.roomId, ids)).games.map(game => game.id);
+    const createUnlinked = async () => {
+      const gameId = await three.addGame(10, [], 2);
+      await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: null } });
+    };
+    for (let i = 0; i < 9; i++) await createUnlinked();
+    expect(await visible()).toEqual([own]);
+    await createUnlinked();
+    expect(await visible()).toEqual([own]);
+  });
+
   it("waits for Pacific morning through the full drain while an Eastern room notice reads the due pair", async () => {
     const clock = new Date();
     const [roomId] = await shardRooms(1, Math.floor(clock.getTime() / 60_000) % 60);

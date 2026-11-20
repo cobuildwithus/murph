@@ -86,8 +86,8 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
     orderBy: [{ createdAt: "desc" }, { id: "asc" }], take: GAME_MAX_OPEN_PER_PAIR, select: { id: true } });
   const [pairs, groups, settled] = await Promise.all([
     active({ maxPlayers: 2 }),
-    multiplayer ? active({ maxPlayers: 10, AND: { OR: [{ chatContainerMemberId: containerMemberId }, { chatContainerMemberId: null }] } }) : [],
-    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [gamePairWhere(playerMemberIds), { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
+    multiplayer ? active({ maxPlayers: 10, chatContainerMemberId: containerMemberId }) : [],
+    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [{ maxPlayers: 2, ...gamePairWhere(playerMemberIds) }, { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),
   ]);
   // Pairs first, so groups can't crowd a pair out of its own chat.
