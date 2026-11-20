@@ -6,7 +6,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isRecord } from "../primitives";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { departedLabels, type DepartedLabel, type GameRow } from "./row";
-import { settleGroupBeforeDeletionTx } from "./service";
+import { settleGameBeforeDeletionTx } from "./service";
 import { parseGameTalkPayload } from "./talk";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
@@ -169,7 +169,7 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
     await retireGameRecapAssetsTx(tx, original.id, original.wordsOwnerMemberId, input.now);
     const plan = prepared.get(original.id)!.kept;
     if (!plan) { await tx.game.delete({ where: { id: original.id } }); deleted += 1; continue; }
-    const row = await settleGroupBeforeDeletionTx(tx, original, input.now);
+    const row = await settleGameBeforeDeletionTx(tx, original, input.now);
     if (await retainGameTx(tx, row, plan, leaving, input.now)) calledOff += 1;
   }
   await redactTalkNotesTx(tx, notes, input.now);

@@ -62,20 +62,31 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("verify-stage success page keeps the copy neutral while verification settles", () => {
+test("a return without the invite's sign-in asks to sign in instead of waiting", () => {
+  for (const sessionId of [null, "cs_123"]) {
+    const markup = renderToStaticMarkup(
+      createElement(JoinInviteSuccessClient, {
+        initialStatus: createStatus("verify"),
+        inviteCode: "invite-code",
+        sessionId,
+      }),
+    );
+
+    assert.match(markup, /Sign in to finish\./);
+    assert.match(markup, /Go back to your invite and sign in to finish setting up\./);
+    assert.match(markup, />Sign in</);
+    assert.doesNotMatch(markup, /Payment received|Checking your signup status|data-slot="link-page-dots"/);
+    assert.match(markup, /data-slot="link-page-surface"/);
+  }
+  const otherAccount = createStatus("verify");
   const markup = renderToStaticMarkup(
     createElement(JoinInviteSuccessClient, {
-      initialStatus: createStatus("verify"),
+      initialStatus: { ...otherAccount, session: { ...otherAccount.session, authenticated: true } },
       inviteCode: "invite-code",
-      sessionId: null,
+      sessionId: "cs_123",
     }),
   );
-
-  assert.match(markup, /Finishing verification\./);
-  assert.match(markup, /Checking your signup status\./);
-  assert.doesNotMatch(markup, /Payment received/);
-  assert.match(markup, /Back to invite/);
-  assert.match(markup, /data-slot="link-page-surface"/);
+  assert.match(markup, /signed in to a different account/);
 });
 
 test("blocked success page does not pretend setup is still running", () => {

@@ -1088,7 +1088,7 @@ function expectHostedRuntimeActiveAccessRead(
   expect(findUnique).toHaveBeenCalledWith({
     select: {
       accountGroupMemberships: hostedSponsorAccessMembershipSelect,
-
+      accountGroupsOwned: { select: { billingStatus: true, suspendedAt: true } },
       billingStatus: true,
       suspendedAt: true,
       threadContainer: {

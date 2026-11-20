@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { POST as admitCompanion } from "../app/api/device-sync/companion/admission/route";
+import { issueHostedAppSession } from "./support/hosted-auth-session";
+import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -101,6 +104,46 @@ describe.skipIf(!runPostgresProof)("hosted member-access PostgreSQL projection",
       vi.restoreAllMocks();
       await prisma.$disconnect();
       vi.unstubAllEnvs();
+    }
+  });
+
+  it("admits an activated lapsed Family owner to free surfaces without granting paid access", async () => {
+    const prisma = prismaModule.getPrisma();
+    const memberId = randomUUID(), groupId = randomUUID(), input = { memberId, prisma };
+    try {
+      await prisma.hostedMember.create({ data: { id: memberId, billingStatus: "not_started" } });
+      await prisma.hostedAccountGroup.create({ data: { id: groupId, ownerMemberId: memberId, billingStatus: "canceled" } });
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+      await prisma.hostedMailboxItem.create({ data: { id: randomUUID(), userId: memberId, kind: "member.activated",
+        lane: "system", laneSeq: 1n, dedupeKey: "activation", occurredAt: new Date(), payloadSchema: "murph.test.activation.v1" } });
+      expect(await readActiveHostedMemberAccess(input)).toBe(true);
+      expect(await readActiveHostedMemberAccessState(input)).not.toBeNull();
+      expect(await readActiveHostedMemberAccessIds({ prisma, memberIds: [memberId] })).toEqual(new Set([memberId]));
+      expect(await prisma.$queryRaw`SELECT id FROM hosted_member m WHERE id = ${memberId} AND ${activeHostedPersonAccessSql(Prisma.sql`m`)}`).toEqual([{ id: memberId }]);
+      expect(await readStrictHostedMemberAccess(input)).toBe(false);
+      expect(await readHostedRuntimeAiAccessDecision(input)).toMatchObject({ allowed: false });
+      vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
+      vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 24).toString("base64url"));
+      vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 25).toString("base64url"));
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://example.test");
+      const { token } = await issueHostedAppSession({ memberId });
+      const admit = () => admitCompanion(new Request("https://example.test/api/device-sync/companion/admission", {
+        method: "POST", headers: { authorization: `Bearer murph_auth_v1.${token}` },
+      }));
+      expect((await admit()).status).toBe(403);
+      for (const scope of ["launch.legal", "launch.health-data"] as const) {
+        await recordHostedLaunchRequiredConsent({ memberId, prisma, scope, source: "test" });
+      }
+      const response = await admit();
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      expect(await prisma.hostedUsageCreditGrant.count({ where: { beneficiaryMemberId: memberId } })).toBe(0);
+      await prisma.hostedMember.update({ where: { id: memberId }, data: { suspendedAt: new Date() } });
+      expect(await readActiveHostedMemberAccess(input)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+      await prisma.hostedMember.deleteMany({ where: { id: memberId } });
     }
   });
 

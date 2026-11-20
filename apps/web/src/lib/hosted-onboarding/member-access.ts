@@ -4,9 +4,6 @@ import {
   HostedBillingStatus,
   Prisma,
 } from "@prisma/client";
-import {
-  HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-} from "@murphai/hosted-execution/runtime-control";
 
 import {
   activeHostedThreadContainerParticipantWhere,
@@ -69,6 +66,7 @@ export const hostedMemberPersonAccessSelect = Prisma.validator<Prisma.HostedMemb
 
 export const hostedMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedMemberPersonAccessSelect,
+  accountGroupsOwned: { select: { billingStatus: true, suspendedAt: true } },
   threadContainer: {
     select: {
       owner: {
@@ -123,24 +121,14 @@ const hostedRuntimeAiBatchParticipantSelect =
     },
   });
 
-const hostedBatchMemberAccessSelect =
-  Prisma.validator<Prisma.HostedMemberSelect>()({
-    ...hostedMemberAccessSelect,
-    id: true,
-  });
-
-const hostedBatchParticipantAccessSelect =
-  Prisma.validator<Prisma.HostedThreadContainerParticipantSelect>()({
-    containerMemberId: true,
-  });
-
 export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberPersonAccessSelect;
 }>;
 
 export type HostedMemberAccessState = HostedMemberPersonAccessState & {
-  /** Existing activation evidence, needed only for incomplete own product access. */
+  /** Activation evidence distinguishes returning members from unfinished signup. */
   activationProof?: boolean;
+  accountGroupsOwned?: { billingStatus: HostedBillingStatus; suspendedAt: Date | null }[];
   threadContainer?: {
     owner: HostedMemberPersonAccessState;
   } | null;
@@ -224,7 +212,7 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
 
   return hasStrictHostedPersonAccess(member)
     || isHostedLapsedBillingStatus(member.billingStatus)
-    || (member.billingStatus === HostedBillingStatus.incomplete && member.activationProof === true);
+    || (needsHostedActivationProof(member) && member.activationProof === true);
 }
 
 export function hasActiveHostedThreadContainerAccess(input: {
@@ -437,7 +425,9 @@ export async function readGameChatAllowanceBeneficiary(input: {
 /** Sponsored members already have access, so this read stays off the mailbox fetch path. */
 function needsHostedActivationProof(member: HostedMemberAccessState): boolean {
   return !member.threadContainer
-    && member.billingStatus === HostedBillingStatus.incomplete
+    && (member.billingStatus === HostedBillingStatus.incomplete
+      || (member.billingStatus === HostedBillingStatus.not_started
+        && member.accountGroupsOwned?.some(group => !group.suspendedAt && isHostedLapsedBillingStatus(group.billingStatus)) === true))
     && !hasStrictHostedPersonAccess(member);
 }
 
@@ -492,10 +482,7 @@ export async function readActiveHostedMemberAccessState(input: {
 export async function readActiveHostedMemberAccessIds(input: {
   memberIds: readonly string[];
   now?: Date;
-  prisma?: Pick<
-    Prisma.TransactionClient,
-    "hostedMember" | "hostedThreadContainerParticipant" | "$queryRaw"
-  >;
+  prisma?: Pick<Prisma.TransactionClient, "hostedMember" | "$queryRaw">;
 }): Promise<Set<string>> {
   const memberIds = [...new Set(input.memberIds)];
   if (memberIds.length === 0) {
@@ -505,68 +492,12 @@ export async function readActiveHostedMemberAccessIds(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const members = await prisma.hostedMember.findMany({
-    select: hostedBatchMemberAccessSelect,
-    where: {
-      id: { in: memberIds },
-    },
+    select: { id: true },
+    where: { ...activeHostedMemberAccessWithParticipantsWhere(now, false), id: { in: memberIds } },
   });
-  const containerMemberIds = members
-    .filter((member) =>
-      member.threadContainer !== null
-      && !isHostedMemberSuspended(member.suspendedAt)
-    )
-    .map((member) => member.id);
-  const participantRows = containerMemberIds.length === 0
-    ? []
-    : await prisma.hostedThreadContainerParticipant.findMany({
-        select: hostedBatchParticipantAccessSelect,
-        take:
-          containerMemberIds.length
-          * HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-          + 1,
-        where: {
-          ...activeHostedThreadContainerParticipantWhere({ now }),
-          containerMemberId: { in: containerMemberIds },
-          participant: strictHostedPersonAccessWhere(),
-        },
-      });
-  if (
-    participantRows.length
-      > containerMemberIds.length * HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-  ) {
-    throw new Error("Hosted member access participant read exceeded its admitted bound.");
-  }
-  const participantBackedContainerIds = new Set(
-    participantRows.map((row) => row.containerMemberId),
-  );
-
-  const incompleteIds = members.filter(member => !member.threadContainer && member.billingStatus === HostedBillingStatus.incomplete).map(member => member.id);
-  const activatedMemberIds = new Set(incompleteIds.length === 0 ? [] : (await prisma.hostedMember.findMany({
-    select: { id: true }, where: { ...hostedMemberActivationProofWhere(), id: { in: incompleteIds } },
-  })).map(member => member.id));
-  const activeMemberIds = new Set<string>();
-  for (const member of members) {
-    if (isHostedMemberSuspended(member.suspendedAt)) {
-      continue;
-    }
-    if (!member.threadContainer) {
-      if (hasActiveHostedMemberAccess({ ...member, activationProof: activatedMemberIds.has(member.id) })) {
-        activeMemberIds.add(member.id);
-      }
-      continue;
-    }
-
-    const ownerActive = hasActiveHostedThreadContainerAccess({
-      container: member,
-      owner: member.threadContainer.owner,
-    });
-    if (ownerActive || participantBackedContainerIds.has(member.id)) {
-      activeMemberIds.add(member.id);
-    }
-  }
-
+  const activeMemberIds = new Set(members.map((member) => member.id));
   const gameContainers = await readGameChatAccessIds({
-    memberIds: containerMemberIds.filter((id) => !activeMemberIds.has(id)),
+    memberIds: memberIds.filter((id) => !activeMemberIds.has(id)),
     now,
     prisma,
   });

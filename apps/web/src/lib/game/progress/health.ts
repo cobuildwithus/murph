@@ -25,7 +25,7 @@ export const HEALTH_RECS: Record<HealthMetric["id"], Rec[]> = {
       task: "30 min of cardio every day", category: "move", icon: "heart" },
   ],
   steps: [
-    { id: "after-dinner", metric: "steps", title: "Walk after dinner", detail: "20 min is about 2,000 steps",
+    { id: "after-dinner", metric: "steps", title: "Walk after dinner", detail: "A 20 min walk is 2,000 steps",
       task: "Walk 20 min after dinner every day", category: "move", icon: "walk" },
     { id: "stairs", metric: "steps", title: "Take the stairs", detail: "Every time, all week",
       task: "Take the stairs every day", category: "move", icon: "stairs" },

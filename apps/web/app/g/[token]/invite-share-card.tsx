@@ -61,6 +61,7 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
   const when = `${describeSchedule(preview.terms.schedule).toUpperCase()} · ${preview.lengthDays ?? 7} DAYS`
     + (preview.startsOn ? ` · STARTS ${describeStartDate(preview.startsOn).toUpperCase()}` : "");
   const nameSize = nameFontSize(Math.max(preview.inviterFirstName.length, INVITEE_NAME.length));
+  const title = inviteShareCopy(preview).title;
   return (
     <div
       style={{
@@ -86,8 +87,9 @@ function OpenTicket({ preview }: { preview: Extract<GameInvitePreview, { status:
         <Label color={SIENNA} size={20} spacing={5.6}>CHALLENGE</Label>
         {preview.maxPlayers === 10 ? (
           <div style={{ alignItems: "center", display: "flex", flexDirection: "column", gap: 16, textAlign: "center" }}>
-            <div style={{ color: INK, display: "flex", fontFamily: "Fraunces", fontSize: 44, fontWeight: 600, lineHeight: 1.15 }}>
-              {inviteShareCopy(preview).title}
+            {/* A group's word can run long: two lines, so the prize stays in the image. */}
+            <div style={{ color: INK, ...twoLinePreview, fontFamily: "Fraunces", fontSize: title.length > 40 ? 36 : 44, fontWeight: 600, lineHeight: 1.15 }}>
+              {title}
             </div>
             <div style={{ color: MUTED, ...twoLinePreview, fontFamily: "DM Sans", fontSize: 24, lineHeight: 1.3 }}>
               {preview.terms.defaultTask}

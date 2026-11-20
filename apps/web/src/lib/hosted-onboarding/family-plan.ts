@@ -859,6 +859,25 @@ export async function readHostedFamilyAccessForMember(input: {
   });
 }
 
+/** The people an owner's paid Family covers, the owner left out. */
+export async function countHostedFamilySponsoredMembers(input: {
+  ownerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  return prisma.hostedAccountGroupMembership.count({
+    where: {
+      group: {
+        billingStatus: HostedBillingStatus.active,
+        ownerMemberId: input.ownerMemberId,
+        suspendedAt: null,
+      },
+      memberId: { not: input.ownerMemberId },
+      status: "active",
+    },
+  });
+}
+
 function compareHostedFamilyOwnerSnapshotRows(
   left: { createdAt: Date; id: string },
   right: { createdAt: Date; id: string },

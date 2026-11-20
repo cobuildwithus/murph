@@ -268,12 +268,23 @@ function resolveHostedInviteSuccessState(
         title: "You’re all set.",
       };
     case "checkout":
-    case "verify":
       return {
         buttonLabel: "Back to invite",
         description: "Checking your signup status.",
         pending: true,
         title: "Finishing verification.",
+      };
+    // This browser isn't signed in to the invite, often a different browser
+    // than the one checkout opened from. Nothing here can finish setup
+    // until they sign in, so no spinner.
+    case "verify":
+      return {
+        buttonLabel: "Sign in",
+        description: status.session.authenticated
+          ? "This browser is signed in to a different account. Go back to your invite and sign in as yourself to finish."
+          : "Go back to your invite and sign in to finish setting up.",
+        pending: false,
+        title: "Sign in to finish.",
       };
     case "expired":
       return {

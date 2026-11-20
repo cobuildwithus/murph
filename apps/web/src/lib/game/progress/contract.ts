@@ -89,7 +89,7 @@ const checkIn = z.object({ gameId: z.string(), dayIndex: z.number().int(), measu
   /** The entry it counted, once it's in; the app shows `after` or the measure only for that day and entry. */
   entryId: z.string().nullable(), after: measureSchema.nullable() });
 export const progressSchema = z.object({
-  joinedOn: day, today: day, incomplete: z.boolean(), measures: z.array(measureSchema),
+  joinedOn: day, today: day, incomplete: z.boolean(), contributionsIncomplete: z.boolean().optional(), picturesIncomplete: z.boolean().optional(), measures: z.array(measureSchema),
   medals: z.array(medalSchema), shelf: z.array(z.string()).max(6), moments: z.array(moment), picCount: z.number(),
   checkIns: z.array(checkIn),
 });

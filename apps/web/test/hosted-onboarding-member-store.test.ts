@@ -33,6 +33,7 @@ import {
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
   readHostedMemberVerifiedEmailRecord,
+  readHostedMemberAccountHint,
   readHostedMemberVerifiedEmailSnapshots,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
@@ -337,6 +338,34 @@ describe("hosted-member-store", () => {
         verifiedEmailVerifiedAt: true,
       },
     });
+  });
+
+  it("names an account by its phone hint, else its masked verified email", async () => {
+    const memberId = "member_account_hint";
+    const emailRecord = {
+      memberId,
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId,
+        value: "nora.lane@example.test",
+      }),
+      verifiedEmailLookupKey: "hbidx:email:v1:nora",
+      verifiedEmailVerifiedAt: new Date("2026-11-01T12:00:00.000Z"),
+    };
+    const prisma = (phoneHint: string | null, email: typeof emailRecord | null) => ({
+      hostedMemberIdentity: { findUnique: vi.fn().mockResolvedValue(phoneHint ? { maskedPhoneNumberHint: phoneHint } : null) },
+      hostedMemberEmailAuthorization: { findUnique: vi.fn().mockResolvedValue(email) },
+    }) as never;
+
+    await expect(readHostedMemberAccountHint({ memberId, prisma: prisma("*** 0731", emailRecord) }))
+      .resolves.toBe("*** 0731");
+    await expect(readHostedMemberAccountHint({ memberId, prisma: prisma(null, emailRecord) }))
+      .resolves.toBe("n***@example.test");
+    await expect(readHostedMemberAccountHint({
+      memberId,
+      prisma: prisma(null, { ...emailRecord, verifiedEmailVerifiedAt: null as never }),
+    })).resolves.toBeNull();
+    await expect(readHostedMemberAccountHint({ memberId, prisma: prisma(null, null) })).resolves.toBeNull();
   });
 
   it("reads, projects, compares, and locks the exact verified-email owner record", async () => {

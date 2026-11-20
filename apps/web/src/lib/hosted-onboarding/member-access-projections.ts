@@ -52,11 +52,14 @@ export function strictHostedPersonAccessWhere(): Prisma.HostedMemberWhereInput {
   ] };
 }
 
+const lapsedBilling = { in: ["canceled", "paused", "unpaid", "past_due"] } satisfies Prisma.EnumHostedBillingStatusFilter;
+
 /** Real-person product projection; never use this as room sponsorship. */
 export function activeHostedPersonAccessWhere(): Prisma.HostedMemberWhereInput {
   return { suspendedAt: null, threadContainer: null, OR: [
     strictHostedPersonAccessWhere(),
-    { billingStatus: { in: ["canceled", "paused", "unpaid", "past_due"] } },
+    { billingStatus: lapsedBilling },
+    { billingStatus: "not_started", accountGroupsOwned: { some: { suspendedAt: null, billingStatus: lapsedBilling } }, AND: [hostedMemberActivationProofWhere()] },
     { billingStatus: "incomplete", AND: [hostedMemberActivationProofWhere()] },
   ] };
 }
@@ -84,7 +87,9 @@ export function activeHostedPersonAccessSql(member: Prisma.Sql): Prisma.Sql {
       WHERE "product_container"."member_id" = ${member}."id")
     AND (${strictHostedPersonAccessSql(member)}
       OR ${member}."billing_status" IN ('canceled', 'paused', 'unpaid', 'past_due')
-      OR (${member}."billing_status" = 'incomplete'
+      OR ((${member}."billing_status" = 'incomplete' OR (${member}."billing_status" = 'not_started'
+        AND EXISTS (SELECT 1 FROM hosted_account_group g WHERE g.owner_member_id = ${member}."id"
+          AND g.suspended_at IS NULL AND g.billing_status IN ('canceled', 'paused', 'unpaid', 'past_due'))))
         AND ${hostedMemberActivationProofSql(Prisma.sql`${member}."id"`)}))
   )`;
 }

@@ -207,7 +207,7 @@ describe("Progress HTTP contracts", () => {
   it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     expect(await (await GET(request())).json()).toEqual({ joinedOn: "2026-11-01", today: "2026-11-05", incomplete: false,
-      measures: [], medals: [], shelf: [], moments: [], picCount: 0, checkIns: [] });
+      contributionsIncomplete: false, picturesIncomplete: false, measures: [], medals: [], shelf: [], moments: [], picCount: 0, checkIns: [] });
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
   it("returns a private complete response and settles the same crossing only once", async () => {
