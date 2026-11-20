@@ -1,4 +1,4 @@
-import { isGameDue, eligibleFromDay, remainingPlayers, termsForDay, isScheduledDay, liveEntry, type RuleState } from "./rules";
+import { isGameDue, eligibleFromDay, remainingPlayers, termsForDay, isScheduledDay, liveEntry, entriesForDay, indexGameEntries, type RuleState } from "./rules";
 import { addDays, dayStartInstant, GAME_GRACE_MS } from "./time";
 import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 
@@ -59,12 +59,14 @@ export function missedCheckInDueAt(firstMissedDate: string, timeZone: string): D
 /** Canonical misses exclude incomplete artifacts and any-days capacity. */
 export function gameMissedCheckInRuns(state: RuleState, now: Date) {
   if (state.game.status !== "live" || state.game.seats === 2 && isGameDue(state, now)) return [];
+  const entries = indexGameEntries(state.entries);
   return remainingPlayers(state).flatMap((player) => {
     if (!player.dayOne) return [];
     const days: MissedCheckInDay[] = Array.from({ length: state.game.lengthDays }, (_, dayIndex) => {
       const date = addDays(player.dayOne!, dayIndex);
       if (dayIndex < eligibleFromDay(state, player) || !("days" in termsForDay(state.game.terms, dayIndex).schedule) || !isScheduledDay(state, dayIndex)) return { date, status: "off" };
-      const entry = liveEntry(state.entries, player.memberId, dayIndex);
+      if (entriesForDay(entries, player.memberId, dayIndex).some(entry => entry.attempt === 0)) return { date, status: "incomplete" };
+      const entry = liveEntry(entries, player.memberId, dayIndex);
       if (entry) return { date, status: entry.incomplete ? "incomplete" : "posted" };
       const closed = now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
       return { date, status: closed ? "missed" : "open" };

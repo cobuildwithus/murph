@@ -2799,10 +2799,10 @@ export async function reserveDueGameMissedDayCheckIns(now = new Date()): Promise
 export async function loadGameMissedCheckInGames(db: Db, gameIds: readonly string[]) {
   if (gameIds.length > 20 || new Set(gameIds).size !== gameIds.length) throw new Error("Game missed-day batch exceeds its room bound.");
   if (gameIds.length === 0) return [];
-  const entryBound = gameIds.length * 10 * 365 * 2;
+  const entryBound = gameIds.length * 10 * 365 * 3;
   const [rows, entries] = await Promise.all([
     db.game.findMany({ where: { id: { in: [...gameIds] } }, include: { invitees: true, players: true } }),
-    db.gameEntry.findMany({ where: { gameId: { in: [...gameIds] }, attempt: { gt: 0 }, withdrawnAt: null },
+    db.gameEntry.findMany({ where: { gameId: { in: [...gameIds] }, withdrawnAt: null },
       orderBy: { receivedAt: "asc" }, take: entryBound + 1,
       select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
         receivedAt: true, withdrawnAt: true, mediaKeys: true, blurHash: true } }),

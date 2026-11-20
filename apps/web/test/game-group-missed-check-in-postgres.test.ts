@@ -336,6 +336,15 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(result.games.map(game => game.id)).toEqual([own]);
   });
 
+  it("leaves an excused date out of the morning group prompt", async () => {
+    const room = await fixture(), gameId = await room.addGame(), actor = room.people[0]!.id;
+    const saved = await runGameCommand({ actorMemberId: actor, multiplayer: true, now,
+      command: { type: "post", gameId, entryId: randomUUID(), kind: "excuse", text: "Rest day", mediaKeys: [] } });
+    expect(saved.ok).toBe(true);
+    const prepared = await prepareGroupMissedDay(room.roomId, date, now);
+    expect(prepared?.policy.batch[0]?.misses.map(miss => miss.memberId).sort()).toEqual(room.people.slice(1).map(person => person.id).sort());
+  });
+
   it("ignores unjoined bystanders, suppresses far-apart players, and excludes a switched-off player", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const unjoined = await fixture(3), unjoinedId = await unjoined.addGame(10, [], 2);
