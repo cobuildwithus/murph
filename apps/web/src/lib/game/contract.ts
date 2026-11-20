@@ -508,6 +508,8 @@ export interface GameView {
   round: number;
   /** The settled game this one rematches; null for a new game. */
   previousGameId: string | null;
+  /** Settled game detail only. The viewer's direct open or settled rematch, if any. */
+  rematchGameId?: string | null;
   terms: GameTermsVersion;
   /** The picked Day 1, if the challenger chose one. */
   startsOn: string | null;

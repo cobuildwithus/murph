@@ -473,6 +473,9 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(attempts.filter(result => !result.ok)).toMatchObject([{ error: { code: "TOO_MANY_GAMES" } }]);
     const rows = await db.game.findMany({ where: { createdBy: a.id }, select: { audienceKey: true } });
     expect(new Set(rows.map(row => row.audienceKey)).size).toBe(1);
+    const pair = await ok(a.id, { type: "createGame", gameId: randomUUID(), inviteeFirstName: "Leo",
+      terms: { ...terms, defaultTask: undefined, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Walk" }] } });
+    expect(await run(b.id, join(pair!.inviteToken!))).toMatchObject({ ok: true, game: { status: "live" } });
     await expect(create(a, [b, b])).rejects.toThrow("INVALID_REQUEST");
     await expect(create(a, [a])).rejects.toThrow("INVALID_REQUEST");
   });

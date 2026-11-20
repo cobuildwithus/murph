@@ -284,7 +284,8 @@ It returns at most twenty groups with the twenty-five most recent rounds each. P
 retains its fifty-people/fifty-round limits. Each record counts the returned
 rounds, following existing pair semantics. Selection limits precede hydration.
 
-Home keeps fifty games and two hundred wallet tickets. Group cards retain every
+Home keeps fifty games. Its wallet includes every open, unexpired ticket and the
+two hundred newest redeemed or expired tickets, ordered by creation time. Group cards retain every
 calendar day and the viewer's own entries/status for the live film strip and
 settled result card. Other players' entries/status appear only on the viewer's
 current live day. Detail keeps all days and peers. Ordinary JSON responses
@@ -372,7 +373,7 @@ error, Messages opens with no recipient.
 An invite nobody accepts expires, and stays on the challenger's Home for a week
 marked expired. The invitee opens it, signs in, and shakes on the terms they saw; a
 changed version is refused with `TERMS_CHANGED`. Accepting makes the game live.
-Two people can have up to ten open games together. Unexpired addressed rematch
+Two people can have up to ten open one-on-one games together. Group games count toward their own audience cap. Unexpired addressed rematch
 invites, unexpired negotiations and live games count; unclaimed link invites do
 not count until joined. An eleventh is refused with `TOO_MANY_GAMES` (409). Each
 game keeps its own schedule, days, posts, unlocks, prize, changes, recap and
@@ -953,6 +954,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   never agrees to one. The refused player reads the offer on Home and answers
   with Shake on it or Suggest changes. Repeating your own create with the same
   game id returns that game.
+  A settled game's detail includes `rematchGameId`, the ID of its direct open
+  or settled rematch visible to the viewer, or null if none exists. An expired
+  invitation or a void game leaves the chain available for a new offer.
   Independent games and their rematches do not conflict. The pair's ten-open-game
   cap still applies, including to addressed rematches.
 - **Retries.** Every action is safe to repeat: creating a game with the same id,
