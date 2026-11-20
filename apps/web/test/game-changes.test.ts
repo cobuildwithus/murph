@@ -305,6 +305,7 @@ describe("weekly game mutually agreed changes", () => {
 describe("group change rules", () => {
   function group(count = 4): RuleState {
     const s = state(); s.game.seats = 10;
+    s.game.chatContainerMemberId = "group-room";
     s.players = Array.from({ length: count }, (_, seat) => ({ ...s.players[0], memberId: `member_${seat}`, seat }));
     return s;
   }
@@ -344,10 +345,12 @@ describe("group change rules", () => {
 
   it("uses calendar locks and due cutoffs for groups, including Start now", () => {
     const s = group();
-    for (const now of [BEFORE, DURING, new Date("2026-11-09T08:00:00Z"), new Date("2026-11-10T08:00:00Z")]) {
+    for (const now of [BEFORE, DURING, new Date("2026-11-09T08:00:00Z"), new Date("2026-11-10T12:00:00Z")]) {
       const pair = { ...s, game: { ...s.game, seats: 2 }, players: s.players.slice(0, 2) };
       expect(gameChangeControls(s, now, null)).toEqual(gameChangeControls(pair, now, null));
     }
+    expect(gameChangeControls(s, new Date("2026-11-10T08:00:00Z"), null))
+      .toMatchObject({ canEdit: true, canEditStakes: true, canEditSchedule: false });
     expect(decideGameChange(s, "member_0", { kind: "start_now" }, BEFORE)).toMatchObject({ startsOn: "2026-11-02" });
     expect(gameChangeControls(s, BEFORE, pending()).canEdit).toBe(false);
     expect(decideGameChange(s, "member_1", { kind: "edit", startsOn: "2026-11-06" }, DURING)).toMatchObject({ effectiveFromDay: 0 });

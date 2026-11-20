@@ -172,6 +172,41 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("explains the room requirement before a seated player edits", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const g = await create(people[0], people.slice(1));
+    await ok(people[1].id, join(g.token)); await ok(people[2].id, join(g.token));
+    expect(await gameRow(g.id)).toMatchObject({ chatContainerMemberId: null });
+    expect(await readGame(g.id, people[1].id, true)).toMatchObject({ changeControls: { canEdit: false, canEditStakes: false, requiresGroupChat: true } });
+    expect(await run(people[1].id, { type: "editTerms", gameId: g.id, expectedTermsVersion: 1, proposalId: randomUUID(),
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose a trail" }] } })).toMatchObject({ ok: false, status: 409, error: { code: "GAME_CHAT_REQUIRED" } });
+  });
+
+  it("allows the deciding prize vote while the last player can still play", async () => {
+    const zones = ["Pacific/Kiritimati", "Pacific/Honolulu", "UTC", "UTC"];
+    const people = await Promise.all(zones.map(zone => person(zone)));
+    await exactRoom(people);
+    const game = await create(people[0], people.slice(1));
+    for (let i = 1; i < people.length; i++) await ok(people[i].id, join(game.token, zones[i]));
+    const proposalId = randomUUID();
+    const send = (actor: number, command: GameCommand, time: string) => runGameCommand({
+      multiplayer: true, actorMemberId: people[actor].id, command, now: new Date(`2030-03-18T${time}:00Z`),
+    });
+    const ask: GameCommand = { type: "editTerms", gameId: game.id, proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose the park" }] } };
+    const opened = await send(1, ask, "12:00");
+    expect(opened.ok ? "open" : opened.error.code).toBe("open");
+    const vote: GameCommand = { type: "respondChange", gameId: game.id, proposalId, decision: "approve" };
+    expect((await send(2, vote, "12:01")).ok).toBe(true);
+    const last = await send(3, vote, "14:00");
+    expect(last.ok ? "accepted" : last.error.code).toBe("accepted");
+    const row = await gameRow(game.id);
+    expect(row.status).toBe("live");
+    expect(row.pendingChange).toBeNull();
+    expect((await run(people[1].id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Balance practice" },
+      new Date("2030-03-18T14:01:00Z"))).ok).toBe(true);
+  });
+
   it("preserves the winning seat when deletion is the first action after the deadline", async () => {
     const outcomes = [];
     for (const readFirst of [true, false]) {
@@ -685,7 +720,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(b.id, join(game.token));
     expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
     expect(await run(a.id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }))
-      .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+      .toMatchObject({ ok: false, error: { code: "GAME_CHAT_REQUIRED" } });
     await ok(a.id, { type: "cancelInvite", gameId: game.id });
     expect((await gameRow(game.id)).status).toBe("void");
     expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
@@ -2334,7 +2369,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
     await ok(people[1].id, join(game.token));
     await db.game.update({ where: { id: game.id }, data: { chatContainerMemberId: null } });
-    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "GAME_CHAT_REQUIRED" } });
     expect(await db.gameEvent.count({ where: { gameId: game.id, type: "change_proposed" } })).toBe(0);
   });
 

@@ -283,6 +283,7 @@ export interface GamePendingChange {
 }
 
 export interface GameChangeControls {
+  requiresGroupChat?: boolean;
   canStartNow: boolean;
   canEdit: boolean;
   canEditSchedule: boolean;
@@ -689,6 +690,7 @@ export type GameErrorCode =
   | "CHANGE_PENDING"
   | "CHANGE_EXPIRED"
   | "CHAT_UNAVAILABLE"
+  | "GAME_CHAT_REQUIRED"
   | "GAME_CHAT_CHANGED"
   /** One of you blocked the other: no invite or rematch between you. */
   | "PLAYER_UNAVAILABLE"

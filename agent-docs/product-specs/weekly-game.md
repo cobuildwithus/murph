@@ -96,7 +96,9 @@ directly. Waiting invitations retain only their latest terms and encrypted words
 version numbers still increase, so stale acceptance remains invalid. Once live,
 played-day history remains available and any remaining seated player can ask for a change from the
 app or bound group chat with full terms, the current terms version and a new
-proposal ID. New app asks require a proven bound room for their announcement.
+proposal ID. New app asks require a proven bound room for their announcement. When
+`changeControls.requiresGroupChat` is true, offer to share the invitation in the
+matching group text. A write before binding returns 409 `GAME_CHAT_REQUIRED`.
 More than half of the remaining players must say yes, including
 the proposer. Each person can answer only for themselves; their yes or no is
 final for that ask. Repeating the same answer is a no-op, even after resolution.

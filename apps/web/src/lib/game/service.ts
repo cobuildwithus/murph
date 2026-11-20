@@ -1385,7 +1385,8 @@ async function assertGroupProposalPreparedTx(locked: LockedStep,
   prepared: (PreparedGameChangeWords & { rosterBasis?: string }) | null,
   groupContext: { before: LoadedGame; audience: GameChatAudience | null | undefined } | undefined): Promise<void> {
   const { loaded, tx } = locked;
-  if (!groupContext?.audience || !loaded.row.chatContainerMemberId
+  if (!loaded.row.chatContainerMemberId) reject("GAME_CHAT_REQUIRED", "Share the game invitation in a group text with the invited players and Murph before proposing a change.");
+  if (!groupContext?.audience
     || !await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, groupContext.audience, tx)) reject("NOT_A_PLAYER", "Open this game’s bound group chat before requesting a change.");
   if (!prepared || loaded.row.wordsOwnerMemberId !== groupContext.before.row.wordsOwnerMemberId
     || prepared.rosterBasis !== groupChangeRosterBasis(loaded.state)) reject("TERMS_CHANGED", "The game changed. Take another look.");
