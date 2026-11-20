@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ member: vi.fn(), current: vi.fn(), upsert: vi.fn() }));
+const m = vi.hoisted(() => ({ member: vi.fn(), current: vi.fn(), findUnique: vi.fn(), upsert: vi.fn() }));
 vi.mock("@/src/lib/game/http/auth", async original => ({
   ...await original<typeof import("@/src/lib/game/http/auth")>(), requireGameMemberAuth: m.member,
 }));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: m.current }));
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({ $transaction: async (run: (tx: object) => Promise<void>) => run({ companionPushRoute: { upsert: m.upsert } }) }),
+  getPrisma: () => ({ $transaction: async (run: (tx: object) => Promise<void>) => run({ companionPushRoute: { upsert: m.upsert, findUnique: m.findUnique } }) }),
 }));
 import { POST } from "../app/api/game/v1/push-route/route";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -67,7 +67,13 @@ describe("game push registration", () => {
     expect(await response.json()).toMatchObject({ error: { code: "MEMBER_SUSPENDED", retryable: false } });
     expect(m.upsert).not.toHaveBeenCalled();
   });
+  it("keeps an allowed destination when another installation registers without alerts", async () => {
+    m.findUnique.mockResolvedValue({ installationId: "00000000-0000-4000-8000-000000000002", alertsAllowed: true });
+    expect((await POST(request({ ...registration, alertsAllowed: false }))).status).toBe(200);
+    expect(m.upsert).not.toHaveBeenCalled();
+  });
   it("records revoked alert permission without erasing the wearable background address", async () => {
+    m.findUnique.mockResolvedValue(registration);
     expect((await POST(request({ ...registration, alertsAllowed: false }))).status).toBe(200);
     expect(m.upsert.mock.calls[0]?.[0].update.alertsAllowed).toBe(false);
   });

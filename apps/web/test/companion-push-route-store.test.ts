@@ -27,6 +27,11 @@ describe("shared companion address game enrollment", () => {
     await registerCompanionPushRoute("member-one", { ...address, alertsAllowed: false });
     expect(m.upsert.mock.calls[0]?.[0].update).toMatchObject({ gameSessionId: "session-a", gameReminders: true, alertsAllowed: false });
   });
+  it("keeps another phone's enabled alert address on a wearable-only registration", async () => {
+    await registerCompanionPushRoute("member-one", { ...address,
+      installationId: "00000000-0000-4000-8000-000000000002", alertsAllowed: false });
+    expect(m.upsert).not.toHaveBeenCalled();
+  });
   it.each([
     { installationId: "00000000-0000-4000-8000-000000000002" },
     { token: "cd".repeat(32) },
