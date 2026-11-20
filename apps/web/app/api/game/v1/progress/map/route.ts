@@ -14,7 +14,6 @@ import { routeView } from '@/src/lib/game/progress/routes';
 import { cumulativePoints } from '@/src/lib/game/progress/series';
 import { readOwnSeries } from '@/src/lib/game/progress/vault-runs';
 import { runWithHostedDomainRootUnwrapCache } from '@/src/lib/hosted-crypto/domain-root-unwrap-cache';
-import { hostedOnboardingError } from '@/src/lib/hosted-onboarding/errors';
 import { getPrisma } from '@/src/lib/prisma';
 
 export const GET = withProgressJsonError(async (request: Request) => runWithHostedDomainRootUnwrapCache(async () => {
@@ -31,8 +30,6 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       ({ polyline, progress } = await readProgressStepsRoute(auth, request.signal));
     } else {
       const snapshot = await readOwnSeries(auth.member.id, new Date());
-      if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
-        retryable: true, message: 'Progress could not load completely. Try again.' });
       const measure = snapshot.measures.find(measure => measure.id === query.measure);
       const state = snapshot.states.get(query.measure);
       if (!measure || !state?.legs?.length) throw gameNotFound();

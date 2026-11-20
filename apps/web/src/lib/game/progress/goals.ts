@@ -14,7 +14,7 @@ import type { Goals, GoalsQuery, Ladder, Rung, SetMeasureBody } from "./contract
 import { formatAmount, formatHeight, formatNumber, formatRungTime } from "./format";
 import type { StoredAward } from "./awards";
 import { inferenceClient, normalizeTask } from "./infer";
-import { cumulativePoints, ENTRY_LIMIT, GAME_LIMIT, type MeasureSeries } from "./series";
+import { cumulativePoints, type MeasureSeries } from "./series";
 import { readOwnSeries } from "./vault-runs";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import { readRouteGoals, setRouteGoal } from "./routes";
@@ -214,12 +214,10 @@ async function goalSeriesVersion(memberId: string, measureId: string, db: Prisma
     WITH games AS (
       SELECT game.id, game.status, game.xmin AS version FROM game JOIN game_player seat ON seat.game_id = game.id
       WHERE seat.member_id = ${memberId} AND seat.day_one IS NOT NULL AND game.status IN ('live', 'settled', 'void')
-      ORDER BY game.created_at, game.id LIMIT ${GAME_LIMIT}
     ), versions(key, version) AS (
       SELECT 'game:' || id, version FROM games
       UNION ALL SELECT 'seat:' || p.game_id || ':' || p.seat, p.xmin FROM game_player p JOIN games ON games.id = p.game_id
-      UNION ALL (SELECT 'entry:' || e.id, e.xmin FROM game_entry e JOIN games ON games.id = e.game_id WHERE e.member_id = ${memberId}
-        ORDER BY e.received_at, e.id LIMIT ${ENTRY_LIMIT})
+      UNION ALL SELECT 'entry:' || e.id, e.xmin FROM game_entry e JOIN games ON games.id = e.game_id WHERE e.member_id = ${memberId}
       UNION ALL SELECT 'event:' || last_event.id, last_event.xmin FROM games CROSS JOIN LATERAL (
         SELECT e.id, e.xmin FROM game_event e WHERE games.status = 'void' AND e.game_id = games.id AND e.type IN ('blocked', 'cancelled') ORDER BY e.id DESC LIMIT 1
       ) last_event
@@ -247,7 +245,7 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
   if (measure.unit === "meters" || measure.unit === "steps") {
     const profile = await getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
     await setRouteGoal(memberId, measureId, body.goal, { points: cumulativePoints(measure.amounts),
-      awards: snapshot.awards, incomplete: snapshot.incomplete, today: formatTimeZoneDateTimeParts(new Date(), profile.timeZone).dayKey, beforeMutationTx });
+      awards: snapshot.awards, today: formatTimeZoneDateTimeParts(new Date(), profile.timeZone).dayKey, beforeMutationTx });
     return measureId;
   }
   if ("from" in body.goal) throw invalidGameRequest("Choose a route for a distance measure.");

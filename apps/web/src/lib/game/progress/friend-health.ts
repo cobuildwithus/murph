@@ -30,7 +30,7 @@ export async function readFriendHealthSeries(input: {
     return { ...person, daily: days?.map(day => ({ date: day.date, amount: input.metric === "sleep" ? day.value * 60 : day.value })) ?? null };
   };
   // Your replica and friends' boards are independent: read them together, six boards at a time.
-  // Drawer totals use one friend. Sharing and the room-cap recheck still use the full cohort.
+  // Drawer totals use one friend. Sharing and the room recheck still use the full cohort.
   const others = input.people.filter(person => !person.me && (!input.with || person.memberId === input.with));
   const [snapshot, friends] = await Promise.all([
     timing.measure("ownReplica", () => readCompanionHealthSeries(input.auth, input.signal, [input.metric])),
@@ -49,8 +49,7 @@ export async function readFriendHealthSeries(input: {
   });
   // A room gaining a bystander while decrypting cannot leak its former friend's values.
   const current = await timing.measure("rooms", () => readFriendRooms(memberId, input.people.filter(person => !person.me).map(person => person.memberId)));
-  if (current.incomplete) return { people: [], rooms: [], incomplete: true };
-  return { incomplete: false, rooms: current.rooms, people: people.map(person => person.me || current.rooms.some(room => room.otherMemberId === person.memberId
+  return { rooms: current, people: people.map(person => person.me || current.some(room => room.otherMemberId === person.memberId
     && room.runtimeMemberId === input.rooms.find(previous => previous.otherMemberId === person.memberId)?.runtimeMemberId)
     ? person : { ...person, daily: null }) };
 }

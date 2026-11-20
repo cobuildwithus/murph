@@ -11,7 +11,7 @@ const played = (memberId: string, firstName: string, days: Record<string, number
   ...person(memberId, firstName, 0), daily: Object.entries(days).map(([date, amount]) => ({ date, amount })),
 });
 const view = (people: FriendSeries[]) => friendsView({ units: "us", people, measure, pills: [measure],
-  query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
+  query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], departureNotice: null, challenge: null });
 
 it("competition ranks ties 1, 2, 2, 4", () => {
   expect(view([person("sam", "Sam", 960), person("ava", "Ava", 900, true),
@@ -39,7 +39,7 @@ it.each(["pushups.reps", "steps", "sleep"])("charts every ranked person for %s",
   const people = [person("sam", "Sam", 120), person("maya", "Maya", 110), person("leo", "Leo", 100),
     person("ava", "Ava", 90, true), person("jordan", "Jordan", 80), person("priya", "Priya", 70)];
   const result = friendsView({ units: "us", people, measure: { ...measure, id }, pills: [], query: { measure: id, range: "month" },
-    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
+    today: "2026-11-16", shareAudience: [], departureNotice: null, challenge: null });
   expect(result.chart).toEqual(people.map(person => ({ memberId: person.memberId,
     points: [["2026-11-01", person.daily![0].amount]] })));
   expect(result.rows.map(row => row.rank)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -82,7 +82,7 @@ it("filters the drawer's dates without changing the all-time award input", () =>
   const people = [me, played("leo", "Leo", { "2026-10-27": 200, "2026-10-28": 200, "2026-10-29": 300 }),
     played("sam", "Sam", { "2026-10-27": 300, "2026-10-28": 300, "2026-10-29": 300 })];
   const result = friendsView({ units: "us", people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
-    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
+    today: "2026-11-16", shareAudience: [], departureNotice: null, challenge: null });
   expect(result.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 100], ["leo", 0]]);
   expect(result.chart).toEqual([{ memberId: "ava", points: [["2026-11-16", 100]] }, { memberId: "leo", points: [] }]);
   expect(friendPasses({ measureId: measure.id, people }).map(award => award.on)).toEqual(["2026-10-30", "2026-10-30"]);
@@ -106,7 +106,7 @@ it.each(["sleep", "steps"])("leaves an unobserved %s range unranked and counts a
     { ...played("jordan", "Jordan", { "2026-05-03": 30 }), me: true }];
   const result = friendsView({ people, units: "us", measure: { ...measure, id }, pills: [],
     query: { measure: id, range: "month" }, today: "2026-05-08", shareAudience: [],
-    incomplete: false, departureNotice: null, challenge: null });
+    departureNotice: null, challenge: null });
   expect(result.rows).toMatchObject([{ memberId: "jordan", rank: 1 }, { memberId: "priya", rank: 2, total: { value: 0 } },
     { memberId: "nora", private: false, rank: null, total: null }]);
   expect(result.chart.map(line => line.memberId)).toEqual(["jordan", "priya"]);

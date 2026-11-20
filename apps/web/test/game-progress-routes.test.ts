@@ -147,16 +147,13 @@ describe("Progress HTTP contracts", () => {
     expect(after.medals.find(item => item.id === medal.id)).toEqual(medal);
     expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });
-  it("composes only a picture's own measure pin and stops all settlement at the picture cap", async () => {
+  it("composes only a picture's own measure pin", async () => {
     const id = "11111111-1111-4111-8111-111111111111";
     mocks.pictures.mockResolvedValue([{ id, takenAt: new Date("2026-11-02T12:00:00Z"),
       metaEncrypted: await sealProgress({ memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: "pushups.reps" }) }]);
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].pics).toEqual([{ id, takenOn: "2026-11-02", at: 40 }]);
     expect(view.picCount).toBe(1);
-    mocks.transaction.mockClear(); mocks.pictures.mockResolvedValue(Array.from({ length: 10001 }, () => ({ id })));
-    expect(progressSchema.parse(await (await GET(request())).json()).incomplete).toBe(true);
-    expect(mocks.transaction).not.toHaveBeenCalled(); expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });
   it("resolves a checked bank route through the same setter and rolls over at the current total", async () => {
     mocks.entries.mockResolvedValue([routeEntry()]); await savedRoute({ legs: [routeLeg] });
@@ -207,7 +204,7 @@ describe("Progress HTTP contracts", () => {
   it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     expect(await (await GET(request())).json()).toEqual({ joinedOn: "2026-11-01", today: "2026-11-05", incomplete: false,
-      contributionsIncomplete: false, picturesIncomplete: false, measures: [], medals: [], shelf: [], moments: [], picCount: 0, checkIns: [] });
+      measures: [], medals: [], shelf: [], moments: [], picCount: 0, checkIns: [] });
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
   it("returns a private complete response and settles the same crossing only once", async () => {
@@ -223,8 +220,9 @@ describe("Progress HTTP contracts", () => {
     expect(mocks.awards).toHaveBeenCalledOnce();
     expect(awards).toEqual(original);
     expect(mocks.current).toHaveBeenCalled();
-    expect(mocks.games).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }));
-    expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ take: 10001, where: expect.objectContaining({ memberId }) }));
+    expect(mocks.games.mock.calls[0][0]).not.toHaveProperty("take");
+    expect(mocks.entries.mock.calls[0][0]).not.toHaveProperty("take");
+    expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ memberId }) }));
   });
   it("rereads an insert lost to another writer and renders its seen state", async () => {
     mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
@@ -315,14 +313,6 @@ describe("Progress HTTP contracts", () => {
     await GET(request());
     expect(awards).toEqual(original);
     expect(mocks.after).toHaveBeenCalledTimes(1);
-  });
-  it.each(["games", "entries"])("marks %s overflow incomplete and makes no settling or inference writes", async cap => {
-    if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, (_, i) => gameRow(`game-${i}`)));
-    else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ ...entryRow(0), id: `entry-${i}` })));
-    const response = await GET(request());
-    expect(response.status).toBe(200);
-    expect(progressSchema.parse(await response.json()).incomplete).toBe(true);
-    expect(mocks.transaction).not.toHaveBeenCalled(); expect(mocks.after).not.toHaveBeenCalled();
   });
   it("keeps passed landmarks even after the final contributing post is withdrawn", async () => {
     const entry = { ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) };

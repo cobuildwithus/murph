@@ -39,22 +39,20 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const games = await gameRead;
     const measure = friendMeasure(query.measure);
     const series = await roomRead;
-    let incomplete = series.incomplete || (!health && games.incomplete);
     let people = series.people;
-    if (!health && !series.incomplete) {
+    if (!health) {
       people = players.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
     }
     // Recheck once after the private reads. A departure or block must remove the friend before rendering.
     const current = await timing.measure("cohort", () => friendCohortIds(memberId, db));
-    incomplete ||= current.incomplete;
     const currentIds = new Set(current.ids);
-    people = series.incomplete || current.incomplete ? [] : people.filter(person => currentIds.has(person.memberId));
+    people = people.filter(person => currentIds.has(person.memberId));
     const visibleIds = gameMemberIds.filter(id => currentIds.has(id));
     const visiblePending = games.pending.filter(task => currentIds.has(task.memberId));
     const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
-    if (!current.incomplete) assertSelectedFriend(query.with, visibleIds);
+    assertSelectedFriend(query.with, visibleIds);
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-    if (!incomplete && people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
+    if (people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
       after(async () => {
         try {
           await runWithFreshHostedDomainRootUnwrapCache(() =>
@@ -65,9 +63,9 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
       });
     }
     scheduleFriendInference(auth, visiblePending);
-    const shareAudience = incomplete ? [] : sharingPreview(people, series.rooms.filter(room => currentIds.has(room.otherMemberId)), query.measure);
+    const shareAudience = sharingPreview(people, series.rooms.filter(room => currentIds.has(room.otherMemberId)), query.measure);
     return await timing.measure("render", () => friendsView({ people, measure, pills, query, units, today,
-      shareAudience, incomplete, departureNotice: cohort.departure?.nameEncrypted === current.departure?.nameEncrypted ? cohort.departureNotice : null,
+      shareAudience, departureNotice: cohort.departure?.nameEncrypted === current.departure?.nameEncrypted ? cohort.departureNotice : null,
       challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) }));
   } catch (error) {
     if (isHostedOnboardingError(error)) throw error;
@@ -89,13 +87,10 @@ function assertSelectedFriend(selected: string | undefined, ids: readonly string
 async function readFriendsHealth(auth: HostedNativeMemberAuth, cohort: Awaited<ReturnType<typeof readFriendCohort>>,
   query: FriendsQuery, signal: AbortSignal, timing: ProgressReadTiming) {
   const metric = query.measure;
-  if (cohort.incomplete || (metric !== "steps" && metric !== "sleep")) {
-    return { people: [], rooms: [], incomplete: cohort.incomplete };
-  }
+  if (metric !== "steps" && metric !== "sleep") return { people: [], rooms: [] };
   const friendIds = cohort.people.filter(person => !person.me).map(person => person.memberId);
   const rooms = await timing.measure("rooms", () => readFriendRooms(auth.member.id, friendIds, false));
-  if (rooms.incomplete) return { people: [], rooms: [], incomplete: true };
-  return readFriendHealthSeries({ auth, people: cohort.people, rooms: rooms.rooms, with: query.with,
+  return readFriendHealthSeries({ auth, people: cohort.people, rooms, with: query.with,
     metric, timeZone: cohort.timeZone, signal, timing });
 }
 
@@ -104,13 +99,10 @@ export async function settleProgressFriends(auth: HostedNativeMemberAuth) {
   const db = getPrisma(), memberId = auth.member.id;
   await assertGameMemberAuthCurrentTx(auth, db);
   const cohort = await readFriendCohort(memberId);
-  if (cohort.incomplete) return;
   const ids = cohort.people.map(person => person.memberId);
   if (!cohort.people.some(person => !person.me)) return;
   const games = await readFriendGameSeries(ids);
-  if (games.incomplete) return;
   const current = await friendCohortIds(memberId, db);
-  if (current.incomplete) return;
   const currentIds = new Set(current.ids);
   const people = cohort.people.filter(person => currentIds.has(person.memberId));
   const currentGames = { ...games, pending: games.pending.filter(task => currentIds.has(task.memberId)) };
@@ -132,7 +124,7 @@ async function settleFriendPasses(auth: HostedNativeMemberAuth, people: FriendSe
     await assertGameMemberAuthCurrentTx(auth, tx);
     for (const subject of [...new Set(candidates.map(candidate => candidate.subjectMemberId!))].sort()) await lockGamePair(tx, memberId, subject);
     const atCommit = await friendCohortIds(memberId, tx);
-    if (atCommit.incomplete || people.some(person => !atCommit.ids.includes(person.memberId))) throw audienceChanged();
+    if (people.some(person => !atCommit.ids.includes(person.memberId))) throw audienceChanged();
   });
 }
 
@@ -143,7 +135,7 @@ function scheduleFriendInference(auth: HostedNativeMemberAuth, pending: FriendGa
     const owners = [...new Set(pending.map(task => task.memberId))].sort();
     for (const owner of owners) if (owner !== memberId) await lockGamePair(tx, memberId, owner);
     const atCommit = await friendCohortIds(memberId, tx);
-    if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
+    if (owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
   });
 }
 
@@ -156,8 +148,8 @@ function friendExerciseIds(games: FriendGameSeries, memberId: string, ids: strin
 /** Pending classifications must not remove the member's known exercise pills. */
 function friendPills(games: FriendGameSeries, memberId: string, ids: string[], selected: string): Friends["pills"] {
   const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
-  if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.incomplete && !games.pending.length) throw gameNotFound();
-  const exercises = games.windowed || games.incomplete ? [...mine] : friendExerciseIds(games, memberId, ids);
+  if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.pending.length) throw gameNotFound();
+  const exercises = games.windowed ? [...mine] : friendExerciseIds(games, memberId, ids);
   return [...exercises.map(id => games.measures.get(id)!),
     { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
     .map(({ id, label, icon }) => ({ id, label, icon }));
@@ -183,11 +175,9 @@ export async function setProgressFriendSharing(auth: HostedNativeMemberAuth, bod
     const currentIds = new Set(current.ids);
     const people = cohort.people.filter(person => currentIds.has(person.memberId));
     const rooms = await readFriendRooms(auth.member.id, people.filter(person => !person.me).map(person => person.memberId));
-    if (cohort.incomplete || rooms.incomplete || current.incomplete) throw hostedOnboardingError({ code: "PROGRESS_INCOMPLETE", httpStatus: 409,
-      message: "The full sharing audience could not be loaded." });
-    const audience = sharingAudience(people, rooms.rooms);
+    const audience = sharingAudience(people, rooms);
     await assertGameMemberAuthCurrentTx(auth, getPrisma());
-    return await shareWithFriends({ auth, body, rooms: rooms.rooms, audience, signal });
+    return await shareWithFriends({ auth, body, rooms, audience, signal });
   } catch (error) {
     if (isHostedOnboardingError(error)) throw error;
     throw hostedOnboardingError({ code: "PROGRESS_SHARING_UNAVAILABLE", httpStatus: 503, retryable: true,

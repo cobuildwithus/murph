@@ -21,17 +21,16 @@ export interface FriendRoom {
 }
 
 /** Rooms remain the sole health-sharing owner; a group-game acquaintance gains no grant. */
-export async function readFriendRooms(memberId: string, friendIds: readonly string[], includeShared = true): Promise<{ rooms: FriendRoom[]; incomplete: boolean }> {
+export async function readFriendRooms(memberId: string, friendIds: readonly string[], includeShared = true): Promise<FriendRoom[]> {
   const db = getPrisma();
-  if (!friendIds.length) return { rooms: [], incomplete: false };
+  if (!friendIds.length) return [];
   const games = await db.game.findMany({ where: { maxPlayers: 2, status: { in: ["live", "settled"] },
     chatContainerMemberId: { not: null }, AND: [
       { players: { some: { memberId, leftAt: null } } },
       { players: { some: { memberId: { in: [...friendIds] }, leftAt: null } } },
     ], players: { every: { memberId: { in: [memberId, ...friendIds] }, leftAt: null } } },
-    take: 501, orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     select: { id: true, chatContainerMemberId: true, players: { take: 2, select: { memberId: true } } } });
-  if (games.length > 500) return { rooms: [], incomplete: true };
   // A person's board can manage only their newest bound game, even if that room is ineligible.
   const current = new Map<string, (typeof games)[number]>();
   for (const game of games) {
@@ -39,11 +38,11 @@ export async function readFriendRooms(memberId: string, friendIds: readonly stri
     if (friend && !current.has(friend)) current.set(friend, game);
   }
   const roomIds = [...current.values()].flatMap(game => game.chatContainerMemberId ?? []);
-  if (!roomIds.length) return { rooms: [], incomplete: false };
+  if (!roomIds.length) return [];
   const [groups, containers, shares] = await Promise.all([
-    db.hostedGroup.findMany({ where: { runtimeMemberId: { in: roomIds } }, take: 501,
+    db.hostedGroup.findMany({ where: { runtimeMemberId: { in: roomIds } },
       select: { id: true, runtimeMemberId: true, members: { take: 3, select: { id: true, memberId: true } } } }),
-    db.hostedThreadContainer.findMany({ where: { memberId: { in: roomIds } }, take: 501,
+    db.hostedThreadContainer.findMany({ where: { memberId: { in: roomIds } },
       select: { memberId: true, participants: { where: { removedAt: null }, take: 3, select: { participantMemberId: true } } } }),
     includeShared ? db.hostedVaultShare.findMany({ where: { grantorMemberId: memberId, destinationMemberId: { in: roomIds },
       projectionScopeKey: { in: HOSTED_GROUP_BOARD_SCOPES.map(buildHostedVaultShareProjectionScopeKey) } },
@@ -66,7 +65,7 @@ export async function readFriendRooms(memberId: string, friendIds: readonly stri
       shared: (["sleep", "steps"] as const).filter((_, index) => grants.some(share => share.status === "granted"
         && share.projectionScopeKey === buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index + 1]))) });
   }
-  return { rooms, incomplete: false };
+  return rooms;
 }
 
 export async function shareWithFriends(input: {

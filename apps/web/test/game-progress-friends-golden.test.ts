@@ -21,5 +21,5 @@ it.each(readdirSync(directory).filter(name => name.startsWith("friends-")))("ren
   expect(friendsView({ units: "us", people, measure: { ...pill, noun: pill.label.toLowerCase(),
     format: pill.id.endsWith(".seconds") || pill.id === "sleep" ? "duration" : "count" },
   pills: expected.pills, query: { measure: pill.id, range: expected.range }, today,
-  shareAudience: expected.shareAudience, incomplete: false, departureNotice: expected.departureNotice, challenge: expected.challenge })).toEqual(expected);
+  shareAudience: expected.shareAudience, departureNotice: expected.departureNotice, challenge: expected.challenge })).toEqual(expected);
 });

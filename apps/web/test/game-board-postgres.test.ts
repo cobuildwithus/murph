@@ -329,7 +329,7 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
       containerMemberId: f.room, participantMemberId: id, handleLookupKey: id, firstSeenAt: new Date(), lastSeenAt: new Date(),
     })) });
     await f.share(f.a, "steps-days.v0");
-    const preview = async () => (await readFriendRooms(f.a, [f.b])).rooms[0];
+    const preview = async () => (await readFriendRooms(f.a, [f.b]))[0];
     const original = await preview();
     const grant = (expectedSharingRevision?: string) => db.$transaction(tx => addHostedGroupPairBoardSharingTx({
       ...original, memberId: f.a, expectedMembershipId: original.membershipId, metrics: ["steps"], expectedSharingRevision,

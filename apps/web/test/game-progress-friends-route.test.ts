@@ -38,12 +38,12 @@ const entry = (id: string, gameId: string, memberId: string, dayIndex: number, c
 beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
   mocks.openGameTexts.mockImplementation(async (rows: { value: string }[]) => rows.map(row => row.value));
-  mocks.cohort.mockResolvedValue({ incomplete: false, departureNotice: null, timeZone: "UTC", people: [
+  mocks.cohort.mockResolvedValue({ departureNotice: null, timeZone: "UTC", people: [
     { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, joinedOn: "2026-10-21", daily: null },
     { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn: "2026-10-21", daily: null },
   ] });
-  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: false });
-  mocks.ids.mockResolvedValue({ ids: ["ava", "leo"], incomplete: false });
+  mocks.rooms.mockResolvedValue([]);
+  mocks.ids.mockResolvedValue({ ids: ["ava", "leo"] });
   mocks.gameIds.mockResolvedValue([{ id: "shared", windowed: false }, { id: "other-game", windowed: false }]);
   mocks.games.mockResolvedValue([game("shared", ["ava", "leo"]), game("other-game", ["leo"])]);
   mocks.entries.mockResolvedValue([
@@ -69,9 +69,9 @@ it("reads Friends inside the request's root unwrap cache", async () => {
 it("starts games and rooms together and reads health after rooms while games are pending", async () => {
   let finishGames!: () => void, finishRooms!: () => void;
   mocks.games.mockImplementationOnce(() => new Promise(resolve => { finishGames = () => resolve([]); }));
-  mocks.rooms.mockImplementationOnce(() => new Promise(resolve => { finishRooms = () => resolve({ rooms: [], incomplete: false }); }));
+  mocks.rooms.mockImplementationOnce(() => new Promise(resolve => { finishRooms = () => resolve([]); }));
   mocks.entries.mockResolvedValue([]);
-  mocks.health.mockResolvedValue({ people: [], rooms: [], incomplete: false });
+  mocks.health.mockResolvedValue({ people: [], rooms: [] });
   const response = GET(request("measure=steps"));
   await vi.waitFor(() => {
     expect(mocks.games).toHaveBeenCalledOnce();
@@ -108,11 +108,11 @@ it("reads only the selected Steps board and own replica while retaining the full
   const cohort = await mocks.cohort();
   const people = [...cohort.people, { ...cohort.people[1], memberId: "sam", firstName: "Sam" }];
   mocks.cohort.mockResolvedValue({ ...cohort, people });
-  mocks.ids.mockResolvedValue({ ids: ["ava", "leo", "sam"], incomplete: false });
-  mocks.rooms.mockResolvedValue({ incomplete: false, rooms: [
+  mocks.ids.mockResolvedValue({ ids: ["ava", "leo", "sam"] });
+  mocks.rooms.mockResolvedValue([
     { otherMemberId: "leo", runtimeMemberId: "room-leo", shared: ["steps"] },
     { otherMemberId: "sam", runtimeMemberId: "room-sam", shared: [] },
-  ] });
+  ]);
   const date = "2026-11-10";
   mocks.replica.mockResolvedValue({ numbers: { steps: { daily: [{ date, value: 4000 }] } } });
   mocks.board.mockResolvedValue({ people: [{ memberId: "leo", projections: [null, null, {
@@ -166,11 +166,11 @@ it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders ranked distance in requ
   expect(body.chart.find(line => line.memberId === "ava")?.points).toEqual([["2026-11-01", 1609.344]]);
 });
 
-it.each([true, false])("keeps the requested exercise board when combined lifetime history is over the cap (pair=%s)", async pair => {
+it.each([true, false])("keeps the requested exercise board on a windowed week (pair=%s)", async pair => {
   const cohort = await mocks.cohort();
   const people = [...cohort.people, { ...cohort.people[1], memberId: "sam", firstName: "Sam" }];
   mocks.cohort.mockResolvedValue({ ...cohort, people });
-  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId), incomplete: false });
+  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId) });
   mocks.games.mockResolvedValue([game("shared", ["ava", "leo", "sam"])]);
   const posts = people.map(person => entry(person.memberId, "shared", person.memberId, 15, 9));
   mocks.gameIds.mockResolvedValue([{ id: "shared", windowed: true }]);
@@ -188,7 +188,7 @@ it.each([true, false])("keeps the requested exercise board when combined lifetim
   if (!pair) expect(mocks.after).not.toHaveBeenCalled();
 });
 
-it("pages contributing games across the game limit while keeping exact ranks", async () => {
+it("pages contributing games 500 at a time while keeping exact ranks", async () => {
   const allGames = Array.from({ length: 501 }, (_, index) => game(String(index), ["ava", "leo"]));
   mocks.gameIds.mockResolvedValue(allGames.map(({ id }) => ({ id, windowed: false })));
   mocks.games.mockImplementation(({ where }) => allGames.filter(game => where.id.in.includes(game.id)));
@@ -200,32 +200,8 @@ it("pages contributing games across the game limit while keeping exact ranks", a
   expect(mocks.games.mock.calls.map(([query]) => query.where.id.in.length)).toEqual([500, 1]);
 });
 
-it("keeps the viewer's exercise pills on an incomplete all-time group board", async () => {
-  const own = entry("own", "shared", "ava", 0, 9);
-  mocks.entries.mockImplementation(({ where }) => where.memberId.in.length === 1
-    ? [own] : Array.from({ length: 10001 }, () => own));
-  const board = friendsSchema.parse(await (await GET(request("measure=pushups.reps&range=all"))).json());
-  expect(board).toMatchObject({ incomplete: true, chart: [], rows: [
-    { memberId: "ava", total: null, rank: null }, { memberId: "leo", total: null, rank: null },
-  ] });
-  expect(board.pills.map(pill => pill.id)).toContain("pushups.reps");
-  expect(mocks.after).not.toHaveBeenCalled();
-});
-
-it.each(["games", "entries"])("marks a capped %s input incomplete and settles nothing", async cap => {
-  if (cap === "games") mocks.gameIds.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ id: String(i), windowed: false })));
-  else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, () => entry("one", "shared", "ava", 0, 1)));
-  const response = await GET(request());
-  expect(response.status).toBe(200);
-  expect(await response.json()).toMatchObject({ incomplete: true, chart: [], rows: [
-    { memberId: "ava", total: null, rank: null }, { memberId: "leo", total: null, rank: null },
-  ] });
-  expect(mocks.settle).not.toHaveBeenCalled();
-  expect(mocks.after).not.toHaveBeenCalled();
-});
-
 it("withholds a friend blocked while loading private game inputs", async () => {
-  mocks.ids.mockResolvedValue({ ids: ["ava"], incomplete: false });
+  mocks.ids.mockResolvedValue({ ids: ["ava"] });
   const response = await GET(request());
   const body = friendsSchema.parse(await response.json());
   expect(body.rows.map(row => row.memberId)).toEqual(["ava"]);
@@ -269,14 +245,6 @@ it("validates range and private drawer identity before reading game amounts", as
   expect(mocks.entries).not.toHaveBeenCalled();
 });
 
-it("returns an incomplete health view when the room authority recheck reaches its cap", async () => {
-  mocks.health.mockResolvedValue({ people: [], incomplete: true });
-  const response = await GET(request("measure=sleep"));
-  expect(response.status).toBe(200);
-  expect(friendsSchema.parse(await response.json())).toMatchObject({ incomplete: true, rows: [], chart: [] });
-  expect(mocks.settle).not.toHaveBeenCalled();
-});
-
 it.each(["steps", "sleep"])("returns every ranked %s line and leaves private friends off the board", async measure => {
   const people = ["Sam", "Maya", "Leo", "Ava", "Leo", "Maya"].map((firstName, index) => ({
     memberId: firstName === "Ava" ? "ava" : `friend-${index}`, firstName, avatarUrl: null, me: firstName === "Ava",
@@ -284,15 +252,15 @@ it.each(["steps", "sleep"])("returns every ranked %s line and leaves private fri
   }));
   const cohort = await mocks.cohort();
   mocks.cohort.mockResolvedValue({ ...cohort, people });
-  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId), incomplete: false });
-  mocks.health.mockResolvedValue({ people, rooms: [], incomplete: false });
+  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId) });
+  mocks.health.mockResolvedValue({ people, rooms: [] });
   const body = friendsSchema.parse(await (await GET(request(`measure=${measure}`))).json());
   expect(body.chart.map(line => line.memberId)).toEqual(people.map(person => person.memberId));
   expect(body.rows.map(row => row.rank)).toEqual([1, 2, 3, 4, 5, 6]);
   expect(body.incomplete).toBe(false);
   expect(mocks.settle).not.toHaveBeenCalled();
 
-  mocks.health.mockResolvedValue({ people: people.map((person, index) => index === people.length - 1 ? { ...person, daily: null } : person), rooms: [], incomplete: false });
+  mocks.health.mockResolvedValue({ people: people.map((person, index) => index === people.length - 1 ? { ...person, daily: null } : person), rooms: [] });
   const privateBody = friendsSchema.parse(await (await GET(request(`measure=${measure}`))).json());
   expect(privateBody.rows.map(row => row.memberId)).toEqual(people.slice(0, -1).map(person => person.memberId));
   expect(privateBody.chart.map(line => line.memberId)).toEqual(people.slice(0, -1).map(person => person.memberId));
@@ -319,7 +287,7 @@ it("keeps the response and refuses the deferred pass if a friend leaves before c
     const response = await GET(request());
     expect(response.status).toBe(200);
     expect(mocks.settle).not.toHaveBeenCalled();
-    mocks.ids.mockResolvedValue({ ids: ["ava"], incomplete: false });
+    mocks.ids.mockResolvedValue({ ids: ["ava"] });
     await mocks.after.mock.calls[0][0]();
     expect(mocks.current).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledExactlyOnceWith("PROGRESS_BACKGROUND_SETTLEMENT_FAILED");
@@ -331,7 +299,7 @@ it("logs foreground counts once per request and omits drawer identity and custom
   try {
     const { readFriendHealthSeries } = await vi.importActual<typeof import("@/src/lib/game/progress/friend-health")>("@/src/lib/game/progress/friend-health");
     mocks.health.mockImplementationOnce(readFriendHealthSeries);
-    mocks.rooms.mockResolvedValue({ rooms: [{ otherMemberId: "leo", runtimeMemberId: "room", shared: [] }], incomplete: false });
+    mocks.rooms.mockResolvedValue([{ otherMemberId: "leo", runtimeMemberId: "room", shared: [] }]);
     expect((await GET(request("measure=steps&with=leo"))).status).toBe(200);
     expect((await GET(request("measure=ava.reps"))).status).toBe(404);
     expect((await GET(request())).status).toBe(200);
@@ -350,7 +318,7 @@ it("logs foreground counts once per request and omits drawer identity and custom
 it("withholds the drawer and a superseded departure notice on the final cohort check", async () => {
   const cohort = await mocks.cohort();
   mocks.cohort.mockResolvedValue({ ...cohort, departure: { nameEncrypted: "old" }, departureNotice: "Sam left." });
-  mocks.ids.mockResolvedValue({ ids: ["ava"], incomplete: false, departure: { nameEncrypted: "new" } });
+  mocks.ids.mockResolvedValue({ ids: ["ava"], departure: { nameEncrypted: "new" } });
   expect((await GET(request("measure=pushups.reps&with=leo"))).status).toBe(404);
   const view = friendsSchema.parse(await (await GET(request())).json());
   expect(view.departureNotice).toBeNull();

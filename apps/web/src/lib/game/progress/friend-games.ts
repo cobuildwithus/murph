@@ -14,11 +14,10 @@ import { EXERCISES, type DayAmount } from "./registry";
 import type { FriendMeasure } from "./friends";
 
 import { normalizeTask, type InferredMeasure } from "./infer";
-import { entryContribution, taskMeasureId, type ProgressTask, type PendingProgressTask, GAME_LIMIT, ENTRY_LIMIT } from "./series";
+import { entryContribution, taskMeasureId, type ProgressTask, type PendingProgressTask } from "./series";
 import type { MeasureState } from "./state";
 
 export interface FriendGameSeries {
-  incomplete: boolean;
   /** Peer contributions cover only the requested dates. Never settle lifetime passes from these. */
   windowed?: true;
   amounts: Map<string, DayAmount[]>;
@@ -30,6 +29,7 @@ export interface FriendGameSeries {
 
 type FriendScope = { viewer: string; period: { from: string; to: string } | null };
 type GameSeats = { id: string; players: { memberId: string | null; dayOne: Date | null }[] };
+const GAME_PAGE = 500;
 
 function periodEntries(games: readonly GameSeats[], viewer: string, period: NonNullable<FriendScope["period"]>): Prisma.GameEntryWhereInput {
   // All viewer entries retain their exercise catalog and latest challenge. Each peer's
@@ -60,11 +60,11 @@ async function friendGameIds(memberIds: string[], scope?: FriendScope) {
         AND e.attempt > 0 AND e.withdrawn_at IS NULL AND e.incomplete IS NOT TRUE
     )
     SELECT DISTINCT game_id AS id, EXISTS (SELECT 1 FROM eligible WHERE NOT ${inRange}) AS windowed
-    FROM eligible WHERE ${inRange} ORDER BY id LIMIT ${ENTRY_LIMIT + 1}
+    FROM eligible WHERE ${inRange} ORDER BY id
   `);
 }
 
-async function friendInputPage(gameIds: string[], memberIds: string[], remaining: number, scope?: FriendScope) {
+async function friendInputPage(gameIds: string[], memberIds: string[], scope?: FriendScope) {
   const db = getPrisma();
   const games = await db.game.findMany({ where: { id: { in: gameIds } },
     select: { id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
@@ -72,39 +72,27 @@ async function friendInputPage(gameIds: string[], memberIds: string[], remaining
   const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
     memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }],
     AND: scope?.period ? periodEntries(games, scope.viewer, scope.period) : undefined },
-    take: remaining + 1, orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+    orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
     select: { id: true, memberId: true, gameId: true, kind: true, dayIndex: true, attempt: true, payloadEncrypted: true } });
   return { games, entries };
 }
 
 async function friendInputs(memberIds: string[], scope?: FriendScope) {
   const ids = await friendGameIds(memberIds, scope);
-  // Each distinct game has at least one eligible contribution.
-  if (ids.length > ENTRY_LIMIT) return null;
   const result: Awaited<ReturnType<typeof friendInputPage>> = { games: [], entries: [] };
-  for (let start = 0; start < ids.length; start += GAME_LIMIT) {
-    const remaining = ENTRY_LIMIT - result.entries.length;
-    const page = await friendInputPage(ids.slice(start, start + GAME_LIMIT).map(row => row.id), memberIds, remaining, scope);
-    if (page.entries.length > remaining) return null;
+  for (let start = 0; start < ids.length; start += GAME_PAGE) {
+    const page = await friendInputPage(ids.slice(start, start + GAME_PAGE).map(row => row.id), memberIds, scope);
     result.games.push(...page.games);
     result.entries.push(...page.entries);
   }
   return { ...result, windowed: ids[0]?.windowed ?? false };
 }
 
-async function scopedFriendInputs(memberIds: string[], scope?: FriendScope) {
-  const full = await friendInputs(memberIds, scope);
-  if (full || !scope || memberIds.length === 1) return { inputs: full, incomplete: !full };
-  return { inputs: await friendInputs([scope.viewer]), incomplete: true };
-}
-
 /** D7: load each current friend's own posts, including games the viewer never joined. */
 export async function readFriendGameSeries(memberIds: string[], timing = new ProgressReadTiming(), scope?: FriendScope): Promise<FriendGameSeries> {
   return runWithHostedDomainRootUnwrapCache(async () => {
     const db = getPrisma();
-    const { inputs, incomplete } = await scopedFriendInputs(memberIds, scope);
-    if (!inputs) return { incomplete: true, amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
-    const { games, entries, windowed } = inputs;
+    const { games, entries, windowed } = await friendInputs(memberIds, scope);
     timing.counts.games = games.length;
     timing.counts.entries = entries.length;
     const typedEntries = entries.filter(entry => entry.kind === "reps" || entry.kind === "route");
@@ -150,7 +138,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
       const own = states.get(row.memberId) ?? new Map<string, MeasureState>();
       own.set(stateLookups.get(row.lookup)!, openedStates[index]); states.set(row.memberId, own);
     });
-    const result: FriendGameSeries = { incomplete, ...(windowed && { windowed: true }), amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
+    const result: FriendGameSeries = { ...(windowed && { windowed: true }), amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
     const pending = new Map<string, PendingProgressTask>();
     // Retakes have the same obligation key; only the latest surviving attempt counts.
     const surviving = new Map<string, typeof prepared[number]>();
@@ -172,7 +160,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
       result.measures.set(contribution.id, friendMeasure(contribution.id));
       keepLatestTask(result.tasks, entry.memberId, contribution.id, { date, text: task.text });
     }
-    if (!incomplete) result.pending = [...pending.values()];
+    result.pending = [...pending.values()];
     return result;
   });
 }
