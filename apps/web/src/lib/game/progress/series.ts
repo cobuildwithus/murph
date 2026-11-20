@@ -41,7 +41,7 @@ export function taskMeasureId(task: ProgressTask): string {
 
 export function describeMeasure(id: string, name: string, label: string): Omit<MeasureSeries, "amounts" | "pending" | "gameOn" | "needsPerDay"> {
   const unit = id.split(".")[1] as MeasureSeries["unit"];
-  const exercise = EXERCISES[name as keyof typeof EXERCISES];
+  const exercise = Object.hasOwn(EXERCISES, name) ? EXERCISES[name as keyof typeof EXERCISES] : undefined;
   const noun = unit === "days" ? "days" : unit === "seconds" ? name === "planks" ? "planked" : `of ${exercise?.label.toLowerCase() ?? label.toLowerCase()}`
     : unit === "meters" ? name === "run" ? "run" : "walked" : exercise?.label.toLowerCase() ?? name;
   return { id, name, label: exercise?.label ?? label, noun, icon: exercise?.icon ?? "dumbbell", unit, ftPerRep: exercise?.ftPerRep ?? 1 };
