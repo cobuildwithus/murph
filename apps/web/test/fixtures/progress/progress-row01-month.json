@@ -576,12 +576,16 @@
   "checkIns": [
     {
       "gameId": "game-pushups",
+      "dayIndex": 13,
       "measureId": "pushups.reps",
+      "entryId": "entry-pushups-day-14",
       "after": null
     },
     {
       "gameId": "game-pullups",
+      "dayIndex": 13,
       "measureId": "pullups.reps",
+      "entryId": null,
       "after": {
         "id": "pullups.reps",
         "label": "Pull-ups",
