@@ -481,6 +481,32 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
+  test("tells a Family owner that deleting ends the people it covers, not their accounts", async () => {
+    mockHostedDataPrivacyDeleteFlowState({ confirmationPhrase: "" });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true, familyCovered: 2 }));
+    });
+
+    expect(document.body.textContent).toContain(
+      "Family ends for the 2 people it covers. Their own accounts stay. This cannot be undone.",
+    );
+  });
+
   test("keeps deletion available when secure approval is unavailable", async () => {
     mockHostedDataPrivacyDeleteFlowState();
 

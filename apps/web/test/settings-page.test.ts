@@ -15,6 +15,7 @@ const VOICE_TEST_MESSAGE =
   "just picked a new voice for you! send me a voice memo so I can hear it";
 
 const mocks = vi.hoisted(() => ({
+  countHostedFamilySponsoredMembers: vi.fn(),
   readHostedMemberPhoneHint: vi.fn(),
   getHostedAccountDeletionPageSession: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
@@ -293,6 +294,7 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  countHostedFamilySponsoredMembers: mocks.countHostedFamilySponsoredMembers,
   isHostedFamilyBillingPortalManageable: (billingStatus: string) =>
     ["active", "incomplete", "past_due", "paused", "unpaid"].includes(
       billingStatus,
@@ -364,6 +366,7 @@ beforeEach(() => {
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedMemberPhoneHint.mockResolvedValue(null);
+  mocks.countHostedFamilySponsoredMembers.mockResolvedValue(0);
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedConsentStatus.mockResolvedValue(
@@ -605,7 +608,7 @@ test("a suspended owner can reopen deletion without enabling export", async () =
   renderToStaticMarkup(await Page());
   expect(mocks.getHostedAccountDeletionPageSession).toHaveBeenCalledOnce();
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
-    accountHint: "*** 0731", authenticated: true, authorizationEnabled: false,
+    accountHint: "*** 0731", authenticated: true, authorizationEnabled: false, familyCovered: 0,
   }, undefined);
 });
 
@@ -616,11 +619,15 @@ test("data privacy passes the signed-in account to the deletion controls", async
     session: {},
   });
   mocks.readHostedMemberPhoneHint.mockResolvedValueOnce("*** 0731");
+  mocks.countHostedFamilySponsoredMembers.mockResolvedValueOnce(2);
   const { default: Page } = await import("../app/settings/data-privacy/page");
   renderToStaticMarkup(await Page());
   expect(mocks.readHostedMemberPhoneHint).toHaveBeenCalledWith(expect.objectContaining({ memberId: "member_123" }));
+  expect(mocks.countHostedFamilySponsoredMembers).toHaveBeenCalledWith(
+    expect.objectContaining({ ownerMemberId: "member_123" }),
+  );
   expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
-    accountHint: "*** 0731", authenticated: true, authorizationEnabled: true,
+    accountHint: "*** 0731", authenticated: true, authorizationEnabled: true, familyCovered: 2,
   }, undefined);
 });
 
@@ -656,6 +663,7 @@ test.each(["active", "checkout"])(
         accountHint: null,
         authenticated: true,
         authorizationEnabled: true,
+        familyCovered: 0,
       }, undefined);
     } finally {
 

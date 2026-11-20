@@ -5,6 +5,7 @@ import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getHostedAccountDeletionPageSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { countHostedFamilySponsoredMembers } from "@/src/lib/hosted-onboarding/family-plan";
 import { readHostedMemberPhoneHint } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
@@ -31,9 +32,14 @@ export default async function SettingsDataPrivacyPage() {
   const exportEnabled = !authenticatedMember?.suspendedAt;
   // The app opens this page in the browser, which may hold someone else's
   // session on a shared phone: say whose account deletion would remove.
-  const accountHint = authenticatedMember
-    ? await readHostedMemberPhoneHint({ memberId: authenticatedMember.id, prisma: getPrisma() })
-    : null;
+  const [accountHint, familyCovered] = authenticatedMember
+    ? await Promise.all([
+      readHostedMemberPhoneHint({ memberId: authenticatedMember.id, prisma: getPrisma() }),
+      // Deleting an owner ends Family for everyone it covers: the
+      // confirmation says so.
+      countHostedFamilySponsoredMembers({ ownerMemberId: authenticatedMember.id, prisma: getPrisma() }),
+    ])
+    : [null, 0];
   const content = (
     <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-8">
@@ -47,6 +53,7 @@ export default async function SettingsDataPrivacyPage() {
           <HostedDataPrivacySettings
             accountHint={accountHint}
             authenticated
+            familyCovered={familyCovered}
             authorizationEnabled={exportEnabled}
           />
         </section>

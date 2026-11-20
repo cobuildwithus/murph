@@ -164,6 +164,9 @@ export function JoinInviteStudy() {
       <Stage label="Back from checkout: checking payment" state="checkout-returned">
         <JoinInviteSuccessScreen status={status("checkout")} />
       </Stage>
+      <Stage label="Back from checkout in another browser" state="checkout-returned-signed-out">
+        <JoinInviteSuccessScreen status={verify} />
+      </Stage>
       <Stage label="Back from checkout without paying" state="checkout-unpaid">
         <JoinInviteSuccessScreen hasCheckoutSession={false} status={status("checkout")} />
       </Stage>
