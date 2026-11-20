@@ -440,3 +440,11 @@ test("offset sleep timestamps retain the local wake day", () => {
   assert.equal(payload.events?.find(event => event.kind === "sleep_session")?.dayKey, "2026-05-04");
   assert.equal(payload.events?.find(event => event.fields?.metric === "sleep-total-minutes")?.dayKey, "2026-05-04");
 });
+
+test("an Oura workout without a day uses the local start date of its mirrored run", () => {
+  const run = { id: "morning-run", activity: "running", distance: 5800,
+    start_datetime: "2026-04-22T06:20:00+10:00", end_datetime: "2026-04-22T06:56:00+10:00" };
+  const event = normalizeOuraSnapshot({ workouts: [run] }).events?.[0];
+  assert.equal(event?.occurredAt, "2026-04-21T20:20:00.000Z");
+  assert.equal(event.dayKey, "2026-04-22");
+});
