@@ -264,7 +264,8 @@ It returns at most twenty groups with the twenty-five most recent rounds each. P
 retains its fifty-people/fifty-round limits. Each record counts the returned
 rounds, following existing pair semantics. Selection limits precede hydration.
 
-Home keeps fifty games and two hundred wallet tickets. Group cards retain every
+Home keeps fifty games. Its wallet includes every open, unexpired ticket and the
+two hundred newest redeemed or expired tickets, ordered by creation time. Group cards retain every
 calendar day and the viewer's own entries/status for the live film strip and
 settled result card. Other players' entries/status appear only on the viewer's
 current live day. Detail keeps all days and peers. Ordinary JSON responses
