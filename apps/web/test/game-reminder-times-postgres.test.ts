@@ -59,6 +59,24 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     vi.unstubAllEnvs();
   });
 
+  it("reads a selected reminder beyond the first twenty live seats", async () => {
+    const owner = await member();
+    const ids = [];
+    for (let i = 0; i < 21; i++) ids.push(await game(owner, "Read"));
+    const gameId = ids.sort().at(-1)!;
+    const readPage = (after?: string) => handleMyGameRemindersTool({ memberId: owner, runtimeIdentity: null,
+      request: { action: "my_game_reminders", operation: "read", after, origin: { kind: "accepted_input", assistantInputId: "input-synthetic" } } });
+    const first = await readPage();
+    expect(first.result.reminders?.games).toHaveLength(20);
+    expect(first.result.reminders?.nextAfter).toBe(ids[19]);
+    const last = await readPage(first.result.reminders?.nextAfter);
+    expect(last.result.reminders?.games.map(game => game.id)).toEqual([gameId]);
+    const response = await direct(owner, { gameId, minutes: 900 });
+    expect(response.result).toMatchObject({ status: "ok", reminders: { games: expect.arrayContaining([
+      expect.objectContaining({ id: gameId, minutes: 900 }),
+    ]) } });
+  });
+
   it("moves only the named game from the direct chat, and every game without one", async () => {
     const owner = await member(), pullups = await game(owner, "20 pullups"), lifts = await game(owner, "3 lifts");
     const saved = await direct(owner, { gameId: pullups, minutes: 1260 });

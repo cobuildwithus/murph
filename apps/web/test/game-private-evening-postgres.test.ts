@@ -76,6 +76,16 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
   });
 
+  it("finds a private reminder after twenty already posted games", async () => {
+    const owner = await member(), ids = [];
+    for (let i = 0; i < 21; i++) ids.push(await game(owner));
+    ids.sort();
+    await db.gameEntry.createMany({ data: ids.slice(0, 20).map(gameId => ({
+      id: randomUUID(), memberId: owner, gameId, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now,
+    })) });
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+  });
+
   it("texts each game an hour after its own time, with only the games at that time", async () => {
     const owner = await member(), evening = await game(owner), noon = await game(owner);
     await db.gamePlayer.update({ where: { gameId_memberId: { gameId: noon, memberId: owner } }, data: { reminderMinutes: 720 } });
