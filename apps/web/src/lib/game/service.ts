@@ -2152,11 +2152,11 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR, morningClock?: D
 }
 
 /** Caller holds the game lock. Freeze scores before erasing any of their evidence. */
-export async function settleGroupBeforeDeletionTx(tx: Tx, row: GameRow, clock: Date): Promise<GameRow> {
-  if (row.maxPlayers !== 10 || row.status !== "live") return row;
+export async function settleGameBeforeDeletionTx(tx: Tx, row: GameRow, clock: Date): Promise<GameRow> {
+  if (row.status !== "live") return row;
   const now = gameNow(clock, row);
-  // Empty final days carry the maximum grace. Before that last day ends, no settlement is possible.
-  if (now.getTime() < settleDueAt(toRuleState(row, [])).getTime() - GAME_GRACE_MS) return row;
+  // Groups can only finish at their deadline. Pairs can finish early on completed posts.
+  if (row.maxPlayers === 10 && now.getTime() < settleDueAt(toRuleState(row, [])).getTime() - GAME_GRACE_MS) return row;
   const [loaded] = await loadGames(tx, [row.id]);
   if (!await settleLoaded({ tx, loaded, clock, now }, SYSTEM_ACTOR)) return row;
   const settled = await tx.game.findUniqueOrThrow({ where: { id: row.id }, select: { result: true, status: true, pendingChange: true } });
