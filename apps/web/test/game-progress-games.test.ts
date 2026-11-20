@@ -281,6 +281,19 @@ describe("checked ladders and permanent crossings", () => {
 });
 
 describe("shared Progress numbers", () => {
+  it("labels a walk counted in steps on route-free totals and new total medals", () => {
+    const source = game("steps", task("Take 2,400 steps at lunch", { quantity: 2400, unit: "steps", name: "walk" }));
+    post(source, 0, "photo", null);
+    const [measure] = gameSeries([source], memberId, new Map());
+    expect(measureView(measure, {}, [], "2026-11-01", "us")).toMatchObject({
+      id: "walk.steps", label: "Walk", noun: "steps", total: { text: "2,400" }, route: null,
+    });
+    const context = achievementContext([measure], new Map());
+    expect(ACHIEVEMENTS.flatMap(evaluate => evaluate(context))).toContainEqual(expect.objectContaining({
+      key: "total:walk.steps:2000", data: expect.objectContaining({ unit: "steps", noun: "steps" }),
+    }));
+  });
+
   it.each([
     [18120, "full", "18,120"], [187700, "full", "187,700"], [31240, "full", "31,240"],
     [9999, "compact", "9,999"], [10000, "compact", "10k"], [20000, "compact", "20k"],
@@ -343,6 +356,11 @@ describe("Medal words and pages", () => {
     expect(medalView(award("landmark", "pullups.reps", { ...tower, noun: "pull-ups" }), false, "us").detail).toBe("1,776 pull-ups");
     expect(medalView(award("time", "planks.seconds", { rung: { at: 10800, target: { kind: "time", id: "concorde" } },
       noun: "planked", page: "totals" }), false, "us").detail).toMatch(/ planked$/);
+  });
+
+  it("shows steps on a saved total medal with the old activity noun", () => {
+    const saved = award("total", "walk.steps", { value: 2000, unit: "steps", noun: "walk", page: "totals" });
+    expect(medalView(saved, false, "us")).toMatchObject({ title: "2,000", detail: "steps" });
   });
 
   it("says what a friend was passed in, all time", () => {

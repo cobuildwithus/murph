@@ -61,6 +61,16 @@ export function visibleAwards(awards: readonly StoredAward[], healthAuthority: b
 
 type MeasureLabel = Pick<Progress["measures"][number], "id" | "label">;
 
+/** A total's number and what it counts. Steps say steps, even on medals saved with the activity's name. */
+function totalMedal(award: StoredAward, units: ClientUnits): Pick<Medal, "face" | "title" | "detail"> {
+  const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
+  const amount = formatAmount(value, unit, "compact", units);
+  const title = unit === "seconds" ? value < 3600 ? `${value / 60} ${value === 60 ? "minute" : "minutes"}`
+    : `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
+    : unit === "days" ? `${amount.text} days` : amount.text;
+  return { face: { number: amount.text }, title, detail: unit === "steps" ? unit : award.data.noun as string };
+}
+
 /** A friend pass says what it was in; a health number's medal opens Health. */
 export function medalView(award: StoredAward, gold: boolean, units: ClientUnits, measures: readonly MeasureLabel[] = []): Medal {
   let face: Medal["face"], title: string, detail: string;
@@ -71,13 +81,7 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits,
     // Both name their exercise: a pushups landmark and a pull-ups one can be the same tower.
     detail = award.kind === "time" ? `${rung.atText} ${award.data.noun}` : `${formatNumber(Math.ceil(rung.at), "compact")} ${award.data.noun}`;
   } else if (award.kind === "total" || award.kind === "days") {
-    const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
-    const amount = formatAmount(value, unit, "compact", units);
-    face = { number: amount.text };
-    title = unit === "seconds" ? value < 3600 ? `${value / 60} ${value === 60 ? "minute" : "minutes"}`
-      : `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
-      : unit === "days" ? `${amount.text} days` : amount.text;
-    detail = award.data.noun as string;
+    ({ face, title, detail } = totalMedal(award, units));
   } else if (award.kind === "route") {
     face = { drawing: "route" }; title = routeAwardName(award, award.data.to as string);
     detail = `${formatAmount(award.data.distanceM as number, "meters", "full", units).text} from ${award.data.from}`;
