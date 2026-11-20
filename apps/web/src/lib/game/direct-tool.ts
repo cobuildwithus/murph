@@ -12,7 +12,8 @@ import { readPrivatelyTextedGameIds } from "./evening-check-in";
 import { readGamePushRoutes } from "./push-delivery";
 import { gameReminderReach } from "./reminders";
 import { openGameTexts } from "./crypto";
-import { readGame, readGameReminders, runGameCommand } from "./service";
+import { GameRuleError } from "./rules";
+import { editGameReminders, readGame, readGameReminders, runGameCommand } from "./service";
 
 type Request = Extract<HostedGameToolRequest, { action: "my_game_reminders" }>;
 
@@ -92,20 +93,16 @@ async function setMyGameReminders(input: { memberId: string; runtimeIdentity: Ho
   if (!current) return unavailable();
   const game = input.request.gameId ? current.games.find(game => game.id === input.request.gameId) : null;
   if (input.request.gameId && !game || (input.request.on !== undefined || input.request.everyDay !== undefined) && !game) return unavailable();
-  const off = new Set(current.games.filter(game => !game.on).map(game => game.id));
-  const everyDay = new Set(current.games.filter(game => game.everyDay).map(game => game.id));
-  if (game && input.request.on !== undefined) input.request.on ? off.delete(game.id) : off.add(game.id);
-  if (game && input.request.everyDay !== undefined) input.request.everyDay ? everyDay.add(game.id) : everyDay.delete(game.id);
-  // A time with a game is that game's own; without one it is every game's, so no game keeps its own.
-  const minutes = input.request.minutes;
-  const time = minutes === undefined ? { timeForGameIds: [] } : game ? { timeForGameIds: [game.id] } : { gameMinutes: {} };
-  const result = await runGameCommand({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
-    await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
-    await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
-  }, command: { type: "setReminders", minutes: minutes ?? current.minutes, ...time,
-    push: input.request.push ?? current.push, text: input.request.text ?? current.text,
-    offGameIds: [...off], everyDayGameIds: [...everyDay] } });
-  return result.ok ? null : { action: "my_game_reminders", result: { status: "rejected", error: result.error.message.slice(0, 128) } };
+  try {
+    await editGameReminders({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
+      await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
+      await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+    } }, input.request, game ? [game.id] : undefined);
+    return null;
+  } catch (error) {
+    if (!(error instanceof GameRuleError)) throw error;
+    return { action: "my_game_reminders", result: { status: "rejected", error: error.error.message.slice(0, 128) } };
+  }
 }
 
 export async function handleMyGameNotForMeTool(input: {

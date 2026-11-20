@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 export const GAME_REMINDER_OFF_CHOICE_EVENT = "reminder_off_chosen";
 const EVERY_DAY_CHOICE_EVENT = "reminder_every_day_chosen";
-const MINUTES_CHOICE_EVENT = "reminder_minutes_chosen";
+export const MINUTES_CHOICE_EVENT = "reminder_minutes_chosen";
 
 function choiceKey(gameId: string, memberId: string, type: string): string {
   return `game-reminder-choice:${gameId}:${memberId}:${type}`;
@@ -12,7 +12,7 @@ function choiceKey(gameId: string, memberId: string, type: string): string {
 
 /** Record explicit fields before player writes: the event FK takes a game key-share lock. */
 export async function recordGameReminderPreferencesTx(tx: Prisma.TransactionClient, memberId: string,
-  chose: { everyDay: boolean; minutes: boolean | readonly string[] }): Promise<void> {
+  chose: { off?: boolean; everyDay: boolean; minutes: boolean | readonly string[]; gameIds?: readonly string[] }): Promise<void> {
   await tx.$executeRaw`
     INSERT INTO game_event (game_id, actor, type, command_key, payload)
     SELECT seat.game_id, ${memberId}, choice.type,
@@ -21,7 +21,8 @@ export async function recordGameReminderPreferencesTx(tx: Prisma.TransactionClie
     FROM game_player seat JOIN game ON game.id = seat.game_id
     CROSS JOIN (VALUES (${GAME_REMINDER_OFF_CHOICE_EVENT}), (${EVERY_DAY_CHOICE_EVENT}), (${MINUTES_CHOICE_EVENT})) AS choice(type)
     WHERE seat.member_id = ${memberId} AND game.status = 'live'
-      AND (choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT} OR choice.type = ${EVERY_DAY_CHOICE_EVENT} AND ${chose.everyDay}
+      AND (${chose.gameIds === undefined} OR seat.game_id = ANY(${chose.gameIds ?? []}::text[]))
+      AND (choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT} AND ${chose.off ?? true} OR choice.type = ${EVERY_DAY_CHOICE_EVENT} AND ${chose.everyDay}
         OR choice.type = ${MINUTES_CHOICE_EVENT} AND (${chose.minutes === true} OR seat.game_id = ANY(${Array.isArray(chose.minutes) ? chose.minutes : []}::text[])))
     ORDER BY seat.game_id, choice.type
     ON CONFLICT (command_key) DO NOTHING
