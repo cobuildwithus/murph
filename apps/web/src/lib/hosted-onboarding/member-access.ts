@@ -69,6 +69,7 @@ export const hostedMemberPersonAccessSelect = Prisma.validator<Prisma.HostedMemb
 
 export const hostedMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
   ...hostedMemberPersonAccessSelect,
+  accountGroupsOwned: { select: { billingStatus: true, suspendedAt: true } },
   threadContainer: {
     select: {
       owner: {
@@ -139,8 +140,9 @@ export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
 }>;
 
 export type HostedMemberAccessState = HostedMemberPersonAccessState & {
-  /** Existing activation evidence, needed only for incomplete own product access. */
+  /** Activation evidence distinguishes returning members from unfinished signup. */
   activationProof?: boolean;
+  accountGroupsOwned?: { billingStatus: HostedBillingStatus; suspendedAt: Date | null }[];
   threadContainer?: {
     owner: HostedMemberPersonAccessState;
   } | null;
@@ -224,7 +226,7 @@ export function hasActiveHostedMemberAccess(member: HostedMemberAccessState): bo
 
   return hasStrictHostedPersonAccess(member)
     || isHostedLapsedBillingStatus(member.billingStatus)
-    || (member.billingStatus === HostedBillingStatus.incomplete && member.activationProof === true);
+    || (needsHostedActivationProof(member) && member.activationProof === true);
 }
 
 export function hasActiveHostedThreadContainerAccess(input: {
@@ -437,7 +439,9 @@ export async function readGameChatAllowanceBeneficiary(input: {
 /** Sponsored members already have access, so this read stays off the mailbox fetch path. */
 function needsHostedActivationProof(member: HostedMemberAccessState): boolean {
   return !member.threadContainer
-    && member.billingStatus === HostedBillingStatus.incomplete
+    && (member.billingStatus === HostedBillingStatus.incomplete
+      || (member.billingStatus === HostedBillingStatus.not_started
+        && member.accountGroupsOwned?.some(group => !group.suspendedAt && isHostedLapsedBillingStatus(group.billingStatus)) === true))
     && !hasStrictHostedPersonAccess(member);
 }
 
@@ -540,7 +544,7 @@ export async function readActiveHostedMemberAccessIds(input: {
     participantRows.map((row) => row.containerMemberId),
   );
 
-  const incompleteIds = members.filter(member => !member.threadContainer && member.billingStatus === HostedBillingStatus.incomplete).map(member => member.id);
+  const incompleteIds = members.filter(needsHostedActivationProof).map(member => member.id);
   const activatedMemberIds = new Set(incompleteIds.length === 0 ? [] : (await prisma.hostedMember.findMany({
     select: { id: true }, where: { ...hostedMemberActivationProofWhere(), id: { in: incompleteIds } },
   })).map(member => member.id));
