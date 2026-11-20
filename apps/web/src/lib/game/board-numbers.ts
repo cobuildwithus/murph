@@ -49,7 +49,7 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
 }
 
 /** The same selected, grant-authorized series before the board's display rounding. */
-export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
+function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
   if (projection.state === "not_granted") return { state: "not_shared" };
   if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
@@ -136,6 +136,22 @@ function numericPoint(record: HostedRuntimeGroupSharedRecord, key: string, windo
     unit: key === "steps" && unit?.toLowerCase() === "steps" ? "count" : unit });
   if (normalized.canonicalValue === null || normalized.canonicalUnit === null) return null;
   return { date: data.date, metricKey: key, unit: normalized.canonicalUnit, value: normalized.canonicalValue };
+}
+
+/** A total can span devices. Keep one grant-authorized value on each observed date. */
+export function sharedHealthDays(metric: "steps" | "sleep", projection: HostedGroupBoardProjection,
+  window: PairBoard["window"]): BoardDayValue[] | null {
+  if (projection.state !== "available") return null;
+  const byDate = new Map<string, BoardDayValue>();
+  const worn = (record: HostedRuntimeGroupSharedRecord) => metric === "steps" && !!record.source?.source
+    && !NOT_WORN_STEP_SOURCES.has(record.source.source);
+  const records = [...projection.records].sort((a, b) => Number(worn(a)) - Number(worn(b))
+    || a.occurredAt.localeCompare(b.occurredAt) || a.recordKey.localeCompare(b.recordKey));
+  for (const record of records) {
+    const point = numericPoint(record, POLICY[metric].key, window);
+    if (point && point.value !== null) byDate.set(point.date, { date: point.date, value: point.value });
+  }
+  return byDate.size ? [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)) : null;
 }
 
 export function boardCrowns(people: readonly BoardPerson[]): PairBoard["crowns"] {

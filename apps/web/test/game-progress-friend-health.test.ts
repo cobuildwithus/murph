@@ -72,3 +72,17 @@ it("reads each of 500 pair rooms once, six shared reads at a time", async () => 
   expect(mocks.rooms).toHaveBeenCalledTimes(1);
   expect(peak).toBe(6);
 });
+
+it("counts each shared night once across a change of device", async () => {
+  const shared = await mocks.shared();
+  const records = shared.people[0].projections[1].records;
+  const earlier = "2026-11-12";
+  for (const date of [earlier, "2026-11-13"]) {
+    records.push({ ...records[0], data: { ...records[0].data, date }, source: { source: "oura", label: "Oura" },
+      recordKey: `oura-${date}` });
+  }
+  records.push({ ...records[0], data: { ...records[0].data, date: "2026-11-13" }, recordKey: "garmin-overlap" });
+  expect((await read()).people[1].daily).toEqual([
+    { date: earlier, amount: 27000 }, { date: "2026-11-13", amount: 27000 }, { date: day.date, amount: 27000 },
+  ]);
+});
