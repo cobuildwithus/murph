@@ -147,3 +147,10 @@ it.each([
   });
   expect(result.metrics.find(item => item.id === "sleep")!.access).toBe(access);
 });
+
+it("supplies the drawer with the same sleep comparison used for the change since joining", () => {
+  const model = healthMetricView({ ...sleep, baseline: 8 * 3600,
+    daily: nights([...Array(7).fill(5 * 3600), ...Array(7).fill(9 * 3600)]) }, joinedOn, today, profile);
+  expect(model).toMatchObject({ headline: "9h 00m a night", direction: "worse", change: "Down 60 min since joining",
+    comparisonValue: 7 * 3600 });
+});

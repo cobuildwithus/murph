@@ -59,6 +59,7 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   }
   return { id: metric.id, label: labels[metric.id], unit: units[metric.id],
     access: metric.daily.length ? "ok" : "missing", direction,
+    ...(metric.id === "sleep" ? { comparisonValue: current } : {}),
     ...healthHeadlines(metric.id, change, daily, today),
     daily, baseline: metric.baseline === null ? null : healthAmount(metric.id, metric.baseline),
     wins: metric.wins.map(award => {
