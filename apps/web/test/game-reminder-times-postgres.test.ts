@@ -68,14 +68,24 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
       request: { action: "my_game_reminders", operation: "read", after, origin: { kind: "accepted_input", assistantInputId: "input-synthetic" } } });
     const first = await readPage();
     expect(first.result.reminders?.games).toHaveLength(20);
-    // Web sends nextAfter once the runner reads it; it already accepts after.
-    expect(first.result.reminders).not.toHaveProperty("nextAfter");
-    const last = await readPage(ids[19]);
+    expect(first.result.reminders?.nextAfter).toBe(ids[19]);
+    const last = await readPage(first.result.reminders?.nextAfter);
     expect(last.result.reminders?.games.map(game => game.id)).toEqual([gameId]);
     const response = await direct(owner, { gameId, minutes: 900 });
     expect(response.result).toMatchObject({ status: "ok", reminders: { games: expect.arrayContaining([
       expect.objectContaining({ id: gameId, minutes: 900 }),
     ]) } });
+  });
+
+  it("recognizes a finished personal calendar while a peer still has a day open", async () => {
+    const owner = await member(), peer = await member(), id = await game(owner, "Read");
+    const dayOne = new Date("2030-03-04T00:00:00Z");
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: owner } }, data: { dayOne, timeZone: "Asia/Tokyo" } });
+    await db.gamePlayer.create({ data: { gameId: id, memberId: peer, seat: 1, joinedAt: dayOne, dayOne, timeZone: "America/Los_Angeles" } });
+    await db.game.update({ where: { id }, data: { devClockOffsetMs: BigInt(Date.parse("2030-03-11T02:00:00Z") - Date.now()) } });
+    const result = await handleMyGameRemindersTool({ memberId: owner, runtimeIdentity: null, request: {
+      action: "my_game_reminders", operation: "read", origin: { kind: "accepted_input", assistantInputId: "input-synthetic" } } });
+    expect(result.result.reminders?.games[0]?.today).toBe("finished");
   });
 
   it("moves only the named game from the direct chat, and every game without one", async () => {

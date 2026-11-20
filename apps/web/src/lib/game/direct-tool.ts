@@ -53,6 +53,7 @@ export async function readMyGameReminderProjection(memberId: string, page: { ids
   const more = rows.length > REMINDER_GAME_LIMIT;
   // Preserve the complete settings reply for small accounts. A selected game always wins over the page.
   const seats = more && page.selected ? await readSeats([page.selected]) : rows.slice(0, REMINDER_GAME_LIMIT);
+  const nextAfter = more && !page.selected ? seats.at(-1)?.gameId : undefined;
   const peerIds = [...new Set(seats.flatMap(seat => seat.game.players.flatMap(player => player.memberId && player.memberId !== memberId ? [player.memberId] : [])))];
   const names = await db.gameProfile.findMany({ where: { memberId: { in: peerIds } }, select: { memberId: true, firstNameEncrypted: true } });
   const opened = await openGameTexts(names.map(name => ({ table: "game_profile" as const, field: "first_name", rowId: name.memberId,
@@ -64,12 +65,12 @@ export async function readMyGameReminderProjection(memberId: string, page: { ids
     if (!view || view.status !== "live") continue;
     const ownDay = view.days.find(day => day.index === view.players.find(player => player.isMe)?.dayIndex);
     games.push({ id: view.id, task: view.terms.tasks.find(task => task.seat === seat.seat)?.text ?? view.terms.defaultTask ?? "",
-      schedule: view.terms.schedule, today: !ownDay ? "upcoming" as const : ownDay.off ? "off" as const
+      schedule: view.terms.schedule, today: view.settlesAt ? "finished" as const : !ownDay ? "upcoming" as const : ownDay.off ? "off" as const
         : ownDay.mine ? "posted" as const : "open" as const,
       otherFirstNames: seat.game.players.flatMap(player => player.memberId && player.memberId !== memberId ? [byId.get(player.memberId) ?? ""] : []).filter(Boolean),
       on: !seat.reminderOff, everyDay: seat.reminderEveryDay, minutes: seat.reminderMinutes ?? settings.minutes });
   }
-  return { minutes: settings.minutes, push: settings.push, text: settings.text, canText: settings.canText, games };
+  return { minutes: settings.minutes, push: settings.push, text: settings.text, canText: settings.canText, games, ...(nextAfter ? { nextAfter } : {}) };
 }
 
 export async function handleMyGameRemindersTool(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: Request }): Promise<HostedGameToolResponse> {
