@@ -63,6 +63,7 @@ vi.mock("@/src/components/settings/hosted-settings-sync-helpers", () => ({
 }));
 
 vi.mock("@/src/components/ui/button", () => ({
+  buttonVariants: () => "button",
   Button: ({
     children,
     className,
@@ -124,6 +125,21 @@ test("renders the Messages alternative as a quiet link and opens sign-in", async
   });
 
   expect(mocks.authDialogProps?.open).toBe(true);
+});
+
+test.each(["EMAIL", "PHONE", "TELEGRAM"])("offers account switching after a %s invite mismatch", async (binding) => {
+  const { HostedOnboardingApiError } = await import("@/src/components/hosted-onboarding/client-api");
+  mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
+    code: `HOSTED_FAMILY_INVITE_${binding}_MISMATCH`, message: "Account mismatch.",
+  }));
+  const { FamilyInviteWebAcceptScreen } = await import("@/src/components/family/family-invite-accept-client");
+  const rendered = await renderClientComponent(createElement(FamilyInviteWebAcceptScreen, {
+    inviteCode: "synthetic", title: "Family invite",
+  }));
+  cleanupRender = rendered.cleanup;
+  await act(async () => rendered.button.click());
+  expect(rendered.container.textContent).toContain("Sign out and continue");
+  expect(rendered.container.textContent).not.toContain("Accept invite");
 });
 
 test("links an active Family draft conflict to Settings and preserves the invite", async () => {
