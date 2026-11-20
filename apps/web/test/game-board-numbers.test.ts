@@ -248,7 +248,7 @@ describe("pair board steps", () => {
       ...steps("garmin", first, 19, 9000), ...steps("garmin", addDays(first, 19), 1, 0)];
     const number = at(addDays(first, 19), records);
     expect(number).toMatchObject({ latest: { date: addDays(first, 18), value: 9000 }, comparison: {
-      baseline: { value: 8000, days: 55 }, current: { through: addDays(first, 18), value: 9000, days: 7 }, improvement: 1000 } });
+      baseline: { value: 8000, days: 55 }, current: { through: addDays(first, 19), value: 9000, days: 6 }, improvement: 1000 } });
     if (number.state !== "available") throw new Error("Expected steps");
     expect(number.daily.every(point => point.value > 0)).toBe(true);
     expect(at(addDays(first, 19), steps("garmin", first, 20, 0))).toEqual({ state: "pending", reason: "no_readings" });
@@ -258,7 +258,7 @@ describe("pair board steps", () => {
     const real = addDays(first, 10);
     const records = [...steps("whoop", addDays(first, -60), 70, 0), ...steps("whoop", real, 7, 8000), ...steps("whoop", addDays(real, 7), 30, 9000),
       ...steps("apple-health-kit", addDays(first, -60), 110, 15000)];
-    const rival = available([], "steps");
+    const rival = at(addDays(real, 13), steps("garmin", first, 31, 8000));
     const crown = (number: BoardNumber) => boardCrowns([person("a", number), person("b", rival)]).steps;
     const onWorn = (number: BoardNumber) => {
       if (number.state !== "available") throw new Error("Expected steps");
@@ -361,4 +361,12 @@ describe("settled any-days board obligations", () => {
     game.game.terms.versions[0].schedule = { count: 3 };
     expect(pairBoardStreak([{ state: game, now: new Date("2030-01-20"), settledAt: new Date("2030-01-08T04:00:00Z") }], "a")).toBe(3);
   });
+});
+
+it("withholds the pair crown when a shared comparison is from an older week", () => {
+  const old = available([...rows(), ...rows("restingHeartRate", "oura", "2030-02-05", 7, 56)]);
+  const fresh = available([...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 7, 64)]);
+  expect(old).toMatchObject({ latest: { date: "2030-02-11" }, stale: true,
+    comparison: { current: { through: "2030-02-11" } } });
+  expect(boardCrowns([person("a", old), person("b", fresh)]).restingHeartRate).toBeNull();
 });
