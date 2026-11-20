@@ -1,4 +1,4 @@
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameAreaCode } from "./area-code";
 import { readHostedMemberIdentity, readHostedMemberVerifiedPhoneNumbers } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
@@ -200,15 +200,48 @@ const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
 const BLOCK_GAME_LIMIT = 50;
 
 export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
+  return { ...await readReminderSettings(memberId, db), canText: await canTextGameReminders(memberId, db) };
+}
+
+async function readReminderSettings(memberId: string, db: Db) {
   const [profile, seats] = await Promise.all([
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
     db.gamePlayer.findMany({ where: { memberId, OR: [{ reminderOff: true }, { reminderMinutes: { not: null } }], game: { status: "live" } },
       select: { gameId: true, reminderOff: true, reminderMinutes: true }, orderBy: { gameId: "asc" } }),
   ]);
-  const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText, offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
+    offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
     gameMinutes: Object.fromEntries(seats.flatMap(seat => seat.reminderMinutes === null ? [] : [[seat.gameId, seat.reminderMinutes]])) };
+}
+
+async function rememberReminderRead(db: Db, sessionId: string, settings: Awaited<ReturnType<typeof readReminderSettings>>) {
+  const digest = sha256Hex(JSON.stringify(settings));
+  await db.gameReminderSessionRead.upsert({ where: { model_sessionId: { model: "session", sessionId } },
+    create: { sessionId, digest }, update: { digest } });
+}
+
+export async function readSessionGameReminders(memberId: string, sessionId: string, beforeMutationTx: (tx: Tx) => Promise<void>) {
+  const db = getPrisma(), canText = await canTextGameReminders(memberId, db);
+  const settings = await db.$transaction(async tx => {
+    await beforeMutationTx(tx);
+    await lockReminderProfile(tx, memberId);
+    const current = await readReminderSettings(memberId, tx);
+    await rememberReminderRead(tx, sessionId, current);
+    return current;
+  });
+  return { ...settings, canText };
+}
+
+function lockReminderProfile(tx: Tx, memberId: string) {
+  return tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${memberId} FOR UPDATE`;
+}
+
+async function checkReminderRead(tx: Tx, memberId: string, sessionId: string) {
+  await lockReminderProfile(tx, memberId);
+  const previous = await tx.gameReminderSessionRead.findUnique({ where: { model_sessionId: { model: "session", sessionId } } });
+  if (previous?.digest !== sha256Hex(JSON.stringify(await readReminderSettings(memberId, tx)))) {
+    throw hostedOnboardingError({ code: "GAME_REMINDERS_CHANGED", httpStatus: 409, message: "Your reminders changed. Reopen Reminders and try again." });
+  }
 }
 
 /** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
@@ -246,6 +279,7 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
  */
 export async function runGameCommand(input: {
   actorMemberId: string;
+  reminderSessionId?: string;
   multiplayer?: boolean;
   command: unknown;
   chatContainerMemberId?: string;
@@ -293,6 +327,7 @@ async function activatePrivateAfterGameCommand(command: GameCommand, gameId: str
 async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], command: Extract<GameCommand, { type: "setReminders" }>): Promise<GameReminders> {
   return commandTransaction(input, async tx => {
     const actor = input.actorMemberId;
+    if (input.reminderSessionId) await checkReminderRead(tx, actor, input.reminderSessionId);
     if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     // A time for some games is theirs alone: the default time and every other game stay.
     const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
@@ -319,20 +354,22 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
         AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
           AND choice.actor = ${actor} AND choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT})
     `;
-    return readGameReminders(actor, tx);
+    const settings = await readReminderSettings(actor, tx);
+    if (input.reminderSessionId) await rememberReminderRead(tx, input.reminderSessionId, settings);
+    return { ...settings, canText: await canTextGameReminders(actor, tx) };
   });
 }
 
 /** Chat edits carry only the fields the member asked to change. App saves lock the same profile first. */
 export async function editGameReminders(input: Pick<Parameters<typeof runGameCommand>[0], "actorMemberId" | "beforeMutationTx">,
-  edit: { minutes?: number; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
+  edit: { defaultMinutes?: number; minutes?: number | null; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
   const actor = input.actorMemberId;
   return commandTransaction(input, async tx => {
-    const profile = await tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${actor} FOR UPDATE`;
+    const profile = await lockReminderProfile(tx, actor);
     if (!profile.length) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     if (edit.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     await tx.gameProfile.update({ where: { memberId: actor }, data: {
-      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes,
+      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.defaultMinutes ?? edit.minutes ?? undefined,
     } });
     if (edit.minutes !== undefined || edit.on !== undefined || edit.everyDay !== undefined) {
       await recordGameReminderPreferencesTx(tx, actor, { gameIds, minutes: edit.minutes !== undefined,

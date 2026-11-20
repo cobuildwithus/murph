@@ -13,6 +13,11 @@ vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", async ori
   assertHostedDirectAssistantNotificationRouteAuthority: async () => {},
 }));
 
+vi.mock("@/src/lib/game/http/auth", () => ({
+  requireGameMemberAuth: async (request: Request) => ({ member: { id: request.headers.get("member")! }, sessionId: request.headers.get("session")! }),
+  assertGameMemberAuthCurrentTx: async () => {},
+}));
+import * as remindersRoute from "../app/api/game/v1/me/reminders/route";
 import { getPrisma } from "@/src/lib/prisma";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { handleMyGameRemindersTool } from "@/src/lib/game/direct-tool";
@@ -57,6 +62,38 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     await cleanupGameFixtures(db, members);
     await db.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
     vi.unstubAllEnvs();
+  });
+
+  it("rejects a stale whole-settings save from the session that read it", async () => {
+    const owner = await member(), gameId = await game(owner, "Step practice");
+    const sessions = [randomUUID(), randomUUID()];
+    await db.hostedAuthRecord.createMany({ data: sessions.map(id => ({ model: "session" as const, id, memberId: owner,
+      payloadEncrypted: "synthetic", createdAt: new Date(), updatedAt: new Date() })) });
+    const request = (session: string, method = "GET", body?: object) => new Request("https://example.test/api/game/v1/me/reminders", {
+      method, headers: { member: owner, session }, body: body && JSON.stringify(body),
+    });
+    const read = async (session: string) => (await remindersRoute.GET(request(session))).json();
+    const legacy = (settings: Awaited<ReturnType<typeof readGameReminders>>) => ({ minutes: settings.minutes, push: !settings.push,
+      text: settings.text, offGameIds: settings.offGameIds, gameMinutes: settings.gameMinutes });
+    expect((await remindersRoute.PUT(request(sessions[0]!, "PUT", legacy(await readGameReminders(owner))))).status).toBe(409);
+    const before = await read(sessions[0]!);
+    await handleMyGameRemindersTool({ memberId: owner, runtimeIdentity: null,
+      request: { action: "my_game_reminders", operation: "set", origin: { kind: "accepted_input", assistantInputId: "input-synthetic" },
+        gameId, minutes: 985, on: false } });
+    await read(sessions[1]!);
+    expect((await remindersRoute.PUT(request(sessions[0]!, "PUT", legacy(before)))).status).toBe(409);
+    expect(await own(gameId, owner)).toBe(985);
+    expect((await readGameReminders(owner)).offGameIds).toEqual([gameId]);
+    const refreshed = await read(sessions[0]!);
+    expect((await remindersRoute.PUT(request(sessions[0]!, "PUT", legacy(refreshed)))).status).toBe(200);
+    expect((await remindersRoute.PATCH(request(sessions[1]!, "PATCH", { push: true }))).status).toBe(200);
+    const patch = (body: object) => remindersRoute.PATCH(request(sessions[1]!, "PATCH", body));
+    expect((await patch({ minutes: 600 })).status).toBe(200);
+    expect(await readGameReminders(owner)).toMatchObject({ push: true, minutes: 600, offGameIds: [gameId], gameMinutes: { [gameId]: 985 } });
+    expect((await patch({ gameId, minutes: null })).status).toBe(200);
+    expect(await readGameReminders(owner)).toMatchObject({ offGameIds: [gameId], gameMinutes: {} });
+    expect((await patch({ gameId, on: true })).status).toBe(200);
+    expect((await readGameReminders(owner)).offGameIds).toEqual([]);
   });
 
   it("reads a selected reminder beyond the first twenty live seats", async () => {

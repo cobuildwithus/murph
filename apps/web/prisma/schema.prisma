@@ -2779,12 +2779,25 @@ model HostedAuthRecord {
   updatedAt          DateTime        @map("updated_at")
   member             HostedMember?   @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
+  gameReminderRead GameReminderSessionRead?
+
   @@id([model, id])
   @@unique([model, lookupKey])
   @@unique([model, secondaryLookupKey])
   @@index([model, memberId, id])
   @@index([model, expiresAt, id])
   @@map("hosted_auth_record")
+}
+
+/// Last whole-settings projection delivered to this native session.
+model GameReminderSessionRead {
+  model     HostedAuthModel @default(session)
+  sessionId String          @map("session_id")
+  digest    String
+  session   HostedAuthRecord @relation(fields: [model, sessionId], references: [model, id], onDelete: Cascade)
+
+  @@id([model, sessionId])
+  @@map("game_reminder_session_read")
 }
 
 model HostedConversationPoll {

@@ -14,7 +14,7 @@ vi.mock("@/src/lib/game/push-delivery", async original => {
   } };
 });
 vi.mock("@/src/lib/game/http/auth", () => ({
-  requireGameMemberAuth: async () => ({ member: { id: m.actor }, sessionId: "synthetic-session" }),
+  requireGameMemberAuth: async () => ({ member: { id: m.actor }, sessionId: m.actor }),
   assertGameMemberAuthCurrentTx: m.current,
 }));
 
@@ -42,7 +42,7 @@ async function member(zone = "UTC", capable = true, sweepAt = now) {
   await db.hostedMember.create({ data: { id, billingStatus: "not_started" } });
   await runGameCommand({ actorMemberId: id, command: { type: "setProfile", firstName: "Player", timeZone: "UTC" } });
   await db.gameProfile.update({ where: { memberId: id }, data: { timeZone: zone } });
-  const sessionId = randomUUID();
+  const sessionId = id;
   await db.hostedAuthRecord.create({ data: { id: sessionId, model: "session", memberId: id, payloadEncrypted: "unused",
     expiresAt: new Date("2027-01-01T00:00:00Z"), createdAt: now, updatedAt: now } });
   await db.companionPushRoute.create({ data: { userId: id, installationId: randomUUID(), token: "ab".repeat(32),
@@ -92,6 +92,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
   it("reads defaults without creating a profile", async () => {
     m.actor = `hbm_reminder_${randomUUID()}`; members.push(m.actor);
     await db.hostedMember.create({ data: { id: m.actor } });
+    await db.hostedAuthRecord.create({ data: { model: "session", id: m.actor, memberId: m.actor, payloadEncrypted: "unused", createdAt: now, updatedAt: now } });
     expect(await (await GET(request())).json()).toEqual({ ok: true, ...preference, canText: false, gameMinutes: {} });
     expect(await db.gameProfile.findUnique({ where: { memberId: m.actor } })).toBeNull();
   });
@@ -102,10 +103,11 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     const live = (member: string) => game(member, "Walk", undefined, false, today);
     const first = await live(owner), second = await live(owner), other = await live(foreign);
     const home = await readHome(owner);
+    expect((await GET(request())).status).toBe(200);
     const saved = { ...preference, minutes: 1200, push: false, offGameIds: [first, other, randomUUID()] };
     expect(await (await PUT(request(saved))).json()).toEqual({ ok: true, ...saved, canText: false, offGameIds: [first], gameMinutes: {} });
     expect(await (await GET(request())).json()).toEqual({ ok: true, ...saved, canText: false, offGameIds: [first], gameMinutes: {} });
-    expect(m.current).toHaveBeenCalledOnce();
+    expect(m.current).toHaveBeenCalledTimes(3);
     expect(await readHome(owner)).toEqual(home);
     expect(await runGameCommand({ actorMemberId: owner, command: { type: "setReminders", ...preference, offGameIds: [second] } }))
       .toMatchObject({ ok: true, reminders: { offGameIds: [second] } });
@@ -116,6 +118,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     const today = new Date(new Date(vi.getRealSystemTime()).toISOString().slice(0, 10));
     const first = await game(owner, "Walk", undefined, false, today), second = await game(owner, "Read", undefined, false, today);
     const other = await game(foreign, "Walk", undefined, false, today);
+    expect((await GET(request())).status).toBe(200);
     const own = await (await PUT(request({ ...preference, gameMinutes: { [first]: 720, [other]: 600, [`game_${randomUUID()}`]: 1 } }))).json();
     expect(own).toMatchObject({ ok: true, minutes: 1140, gameMinutes: { [first]: 720 } });
     // An app that doesn't send gameMinutes moves only the games without their own time.
@@ -171,6 +174,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
   });
   it("refuses text, partial and invalid route bodies without writing", async () => {
     m.actor = await member();
+    expect((await GET(request())).status).toBe(200);
     for (const body of [{ ...preference, text: true }, { ...preference, minutes: 1440 }, { minutes: 900 }]) {
       const response = await PUT(request(body));
       expect(response.status).toBe(400);
