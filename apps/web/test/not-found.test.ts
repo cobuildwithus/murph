@@ -50,7 +50,8 @@ test("NotFound sends anonymous users back to the public landing page", async () 
   expect(mocks.getHostedPageAuthSnapshot).toHaveBeenCalledTimes(1);
   assert.match(markup, /data-prefetch="false" href="\/"[^>]*>\s*Back to Murph\s*<\/a>/u);
   assert.match(markup, /Page not found/u);
-  assert.match(markup, /public Murph page/u);
+  assert.match(markup, /no Murph page at this address/u);
+  assert.doesNotMatch(markup, /machine-readable|public route/u);
   assert.match(markup, /href="\/llms\.txt"/u);
   assert.match(markup, /href="\/sitemap\.xml"/u);
 });
