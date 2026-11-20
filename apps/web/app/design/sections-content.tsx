@@ -690,7 +690,10 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Friend’s invite link: the ticket, shared authentication, recipient claim, and signed-in recovery states">
+          <StudySection
+            id="friend-invite-link"
+            title="Friend’s invite link: the ticket, shared authentication, recipient claim, and signed-in recovery states"
+          >
             <SignupReferralFlowStudy />
           </StudySection>
 

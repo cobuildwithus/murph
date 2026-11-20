@@ -1,4 +1,7 @@
+import Link from "next/link";
+
 import {
+  LINK_PAGE_PILL_CLASS,
   LinkPagePill,
   LinkPageScreen,
   LinkPageTicket,
@@ -13,10 +16,17 @@ export function HostedSignupReferralLanding(props: {
   referralCode: string;
   state: HostedSignupReferralLandingState;
 }) {
+  // An expired link, or one whose sharer has left: plain signup still
+  // works, without saying which.
   if (props.state === "unavailable") {
     return (
       <LinkPageScreen
-        detail="Ask the person who shared it to send their current Murph link."
+        actions={(
+          <Link className={LINK_PAGE_PILL_CLASS} href="/">
+            Join Murph
+          </Link>
+        )}
+        detail="Ask the person who shared it for their current Murph link, or join without one."
         title="This link isn’t available."
       />
     );
