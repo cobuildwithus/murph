@@ -11,7 +11,7 @@ import { picturePin, putProgressPic, readProgressPic, deleteProgressPic, deleteP
 const id = '11111111-1111-4111-8111-111111111111';
 const storageKey = `progress/${'a'.repeat(32)}.jpg`;
 const row = { id, storageKey, takenAt: new Date('2026-11-02T12:00:00Z'), metaEncrypted: 'sealed-meta' };
-beforeEach(() => { vi.resetAllMocks(); mocks.seal.mockResolvedValue('sealed-bytes'); mocks.open.mockResolvedValue(new Uint8Array([1, 2])); });
+beforeEach(() => { vi.resetAllMocks(); mocks.update.mockResolvedValue({ count: 1 }); mocks.seal.mockResolvedValue('sealed-bytes'); mocks.open.mockResolvedValue(new Uint8Array([1, 2])); });
 describe('Progress picture ownership and deletion', () => {
   it.each([
     ['2026-11-01T02:00:00Z', '2026-10-31', 0],
@@ -38,7 +38,7 @@ describe('Progress picture ownership and deletion', () => {
   it('gives a different owner exactly the missing-picture result without fetching or opening bytes', async () => {
     mocks.find.mockResolvedValue(null);
     await expect(readProgressPic('other', id)).rejects.toMatchObject({ httpStatus: 404 });
-    expect(mocks.find).toHaveBeenCalledWith({ where: { id, memberId: 'other', retiredAt: null }, select: { storageKey: true } });
+    expect(mocks.find).toHaveBeenCalledWith({ where: { id, memberId: 'other', retiredAt: null, stagingSince: null }, select: { storageKey: true } });
     expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.open).not.toHaveBeenCalled();
   });
   it('opens with owner/key AAD and rechecks liveness before returning', async () => {

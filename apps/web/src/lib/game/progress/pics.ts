@@ -3,6 +3,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { formatTimeZoneDateTimeParts } from '@murphai/contracts';
 import type { PrismaClient } from '@prisma/client';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
+import { runWithHostedDomainRootUnwrapCache } from '../../hosted-crypto/domain-root-unwrap-cache';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { getPrisma } from '../../prisma';
 import { progressEffect } from './http';
@@ -22,6 +23,21 @@ const bytesTarget = (userId: string, key: string) => ({ userId, lane: 'hosted-me
   aad: { purpose: 'game-progress', table: 'game_progress_pic', rowId: key, field: 'bytes' } } as const);
 const notFound = () => hostedOnboardingError({ code: 'PROGRESS_PIC_NOT_FOUND', httpStatus: 404, message: 'That picture is not available.' });
 const conflict = () => hostedOnboardingError({ code: 'PROGRESS_PIC_CONFLICT', httpStatus: 409, message: 'That picture was already used or deleted.' });
+type PictureRow = { id: string; metaEncrypted: string; takenAt: Date };
+type PictureMeta = { measureId: string };
+
+async function openPictureMeta(memberId: string, row: PictureRow): Promise<PictureMeta> {
+  const open = (id: string) => openProgress<PictureMeta>(metaTarget(memberId, id), row.metaEncrypted);
+  try {
+    return await open(row.id);
+  } catch (error) {
+    // Older clients registered an uppercase UUID before Postgres normalized it.
+    const oldId = row.id.toUpperCase();
+    if (oldId === row.id) throw error;
+    return open(oldId);
+  }
+}
+
 /** Create ownership before uploading, under the same member fence as account deletion. */
 export async function putProgressPic(memberId: string, input: PicUploadQuery, bytes: Uint8Array, beforeMutationTx: BeforeProgressMutation): Promise<void> {
   const db = getPrisma(), control = progressMediaStore();
@@ -31,12 +47,12 @@ export async function putProgressPic(memberId: string, input: PicUploadQuery, by
     sealProgress(metaTarget(memberId, input.id.toLowerCase()), { measureId: input.measureId }));
   const row = await progressEffect('register_picture', () => db.$transaction(async tx => {
     await beforeMutationTx(tx);
-    await tx.gameProgressPic.createMany({ data: [{ id: input.id, memberId, storageKey, takenAt: new Date(input.takenAt), metaEncrypted }], skipDuplicates: true });
+    await tx.gameProgressPic.createMany({ data: [{ id: input.id, memberId, storageKey, stagingSince: new Date(), takenAt: new Date(input.takenAt), metaEncrypted }], skipDuplicates: true });
     return tx.gameProgressPic.findFirst({ where: { id: input.id, memberId, retiredAt: null } });
   }));
   if (!row) throw conflict();
   const meta = await progressEffect('open_picture_metadata', () =>
-    openProgress<{ measureId: string }>(metaTarget(memberId, row.id), row.metaEncrypted));
+    openPictureMeta(memberId, row));
   if (meta.measureId !== input.measureId || row.takenAt.getTime() !== Date.parse(input.takenAt)) throw conflict();
   const envelope = await progressEffect('seal_picture_bytes', () =>
     sealHostedUserSecureBoxBytes({ ...bytesTarget(memberId, row.storageKey), value: bytes }));
@@ -44,19 +60,19 @@ export async function putProgressPic(memberId: string, input: PicUploadQuery, by
     userId: memberId, mediaId: row.storageKey, envelope, hash: createHash('sha256').update(bytes).digest('hex'),
   }));
   const live = await progressEffect('recheck_picture', () =>
-    db.gameProgressPic.findFirst({ where: { id: input.id, memberId, retiredAt: null }, select: { id: true } }));
-  if (!live) throw conflict();
+    db.gameProgressPic.updateMany({ where: { id: input.id, memberId, retiredAt: null }, data: { stagingSince: null, metaEncrypted } }));
+  if (!live.count) throw conflict();
 }
 
 export async function readProgressPic(memberId: string, id: string): Promise<Uint8Array> {
   const db = getPrisma();
-  const row = await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null }, select: { storageKey: true } });
+  const row = await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null, stagingSince: null }, select: { storageKey: true } });
   if (!row) throw notFound();
   const stored = await progressMediaStore().readProgressPic({ userId: memberId, mediaId: row.storageKey });
   if (!stored) throw notFound();
   const bytes = await openHostedUserSecureBoxBytes({ ...bytesTarget(memberId, row.storageKey), value: stored.envelope });
   try {
-    if (!await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null }, select: { id: true } })) throw notFound();
+    if (!await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null, stagingSince: null }, select: { id: true } })) throw notFound();
     return bytes;
   } catch (error) { bytes.fill(0); throw error; }
 }
@@ -75,11 +91,29 @@ export async function deleteProgressPic(memberId: string, id: string, beforeMuta
 
 /** The view computes chart positions from its own cumulative points. No totals are persisted here. */
 export async function readProgressPics(memberId: string) {
-  const rows = await getPrisma().gameProgressPic.findMany({ where: { memberId, retiredAt: null },
+  const rows = await getPrisma().gameProgressPic.findMany({ where: { memberId, retiredAt: null, stagingSince: null },
     select: { id: true, takenAt: true, metaEncrypted: true }, orderBy: [{ takenAt: 'asc' }, { id: 'asc' }], take: MAX_PROGRESS_PICS + 1 });
   if (rows.length > MAX_PROGRESS_PICS) return { incomplete: true, pics: [] };
-  const metadata = await openProgressMany<{ measureId: string }>(rows.map(row => ({ ...metaTarget(memberId, row.id), value: row.metaEncrypted })));
-  return { incomplete: false, pics: rows.map((row, i) => ({ id: row.id, takenAt: row.takenAt, measureId: metadata[i]!.measureId })) };
+  return runWithHostedDomainRootUnwrapCache(async () => {
+    const pins = await readPictureMetadata(memberId, rows);
+    return { incomplete: pins.length !== rows.length, pics: pins };
+  });
+}
+
+async function readPictureMetadata(memberId: string, rows: PictureRow[]) {
+  const pin = (row: PictureRow, meta: PictureMeta) => ({ id: row.id, takenAt: row.takenAt, measureId: meta.measureId });
+  try {
+    const metadata = await openProgressMany<PictureMeta>(rows.map(row => ({ ...metaTarget(memberId, row.id), value: row.metaEncrypted })), true);
+    return rows.map((row, index) => pin(row, metadata[index]));
+  } catch {
+    // Preserve readable pins and reuse the request's cached roots on the recovery path.
+    const pics = [];
+    for (const row of rows) {
+      const meta = await openPictureMeta(memberId, row).catch(() => null);
+      if (meta) pics.push(pin(row, meta));
+    }
+    return pics;
+  }
 }
 
 /** Called after account suspension, before member cascades. Tombstones outlive both rows and keys. */

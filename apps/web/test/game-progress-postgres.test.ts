@@ -3,7 +3,7 @@ import sharp from "sharp";
 import * as controlAuth from "../src/lib/hosted-execution/auth-adapter";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../src/lib/hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
-import { putProgressPic, readProgressPic } from "../src/lib/game/progress/pics";
+import { putProgressPic, readProgressPic, readProgressPics } from "../src/lib/game/progress/pics";
 import { localRosterCrypto } from "./support/roster-postgres";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
@@ -77,6 +77,46 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     expect(keys).toEqual([row.storageKey, row.storageKey]);
     expect(Buffer.from(await readProgressPic(owner, input.id)).equals(jpeg)).toBe(true);
   });
+  it("publishes a picture once its reserved upload succeeds on retry", async () => {
+    localRosterCrypto();
+    const owner = await member();
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ userId: owner, domain: "control" });
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", "https://control.example.test");
+    vi.spyOn(controlAuth, "createHostedExecutionVercelOidcBearerTokenProvider").mockReturnValue(async () => "synthetic");
+    const stage = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("staging interrupted"));
+    const input = { id: randomUUID(), measureId: "squats.reps", takenAt: "2026-08-09T12:00:00Z" };
+    const upload = () => putProgressPic(owner, input, Uint8Array.of(1, 2), authorized);
+    await expect(upload()).rejects.toMatchObject({ httpStatus: 503 });
+    expect(await readProgressPics(owner)).toEqual({ incomplete: false, pics: [] });
+    stage.mockResolvedValue(Response.json({ stored: true }));
+    await upload();
+    stage.mockResolvedValue(Response.json({ stored: true }));
+    await upload();
+    expect((await readProgressPics(owner)).pics).toEqual([{ ...input, takenAt: new Date(input.takenAt) }]);
+  });
+
+  it("opens an uppercase legacy picture alongside an unreadable neighbor and finishes its replay", async () => {
+    localRosterCrypto();
+    vi.stubGlobal("__murphHostedSecureBoxStringTestCodec", undefined);
+    const owner = await member();
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ userId: owner, domain: "control" });
+    const id = "ab12cd34-5678-4abc-8def-0123456789ab";
+    const takenAt = new Date("2026-08-09T12:00:00Z");
+    const meta = { measureId: "lunges.reps" };
+    const target = { memberId: owner, table: "game_progress_pic", field: "meta" } as const;
+    const encrypted = await sealProgress({ ...target, rowId: id.toUpperCase() }, meta);
+    await db.gameProgressPic.createMany({ data: [id, randomUUID()].map(rowId => ({
+      id: rowId, memberId: owner, takenAt, metaEncrypted: encrypted, storageKey: `progress/${randomBytes(16).toString("hex")}.jpg`,
+    })) });
+    expect(await readProgressPics(owner)).toEqual({ incomplete: true, pics: [{ id, takenAt, ...meta }] });
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", "https://control.example.test");
+    vi.spyOn(controlAuth, "createHostedExecutionVercelOidcBearerTokenProvider").mockReturnValue(async () => "synthetic");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ stored: true }));
+    await putProgressPic(owner, { id: id.toUpperCase(), takenAt: takenAt.toISOString(), ...meta }, Uint8Array.of(1), authorized);
+    const row = await db.gameProgressPic.findUniqueOrThrow({ where: { id } });
+    expect(await openProgress({ ...target, rowId: id }, row.metaEncrypted)).toEqual(meta);
+  });
+
   it("starts time-total awards at ten minutes and preserves earned dates through repeated reads and corrections", async () => {
     const id = await member();
     const source = game("time", task("4 min planks", { quantity: 4, unit: "minutes", name: "planks" }));

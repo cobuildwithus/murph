@@ -3211,6 +3211,7 @@ model GameProgressPic {
   storageKey    String       @unique @map("storage_key")
   takenAt       DateTime     @map("taken_at")
   metaEncrypted String       @map("meta_encrypted")
+  stagingSince  DateTime?    @map("staging_since")
   retiredAt     DateTime?    @map("retired_at")
   member        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 

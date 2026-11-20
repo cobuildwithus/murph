@@ -6026,7 +6026,7 @@ inference. The following classification covers every column of exactly
 | --- | --- | --- | --- |
 | `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
 | `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline, health settlement receipt | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
-| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
+| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `staging_since`: outstanding upload reservation time; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `storage_key`: primary key, the random Progress object identity of one picture attempt; `member_id`: owner FK; `status`: generating, ready, failed or retired; `created_at`: admission time, also the public attempt id (base 36); `failure_code`: nullable generation_failed, timeout or refused |
 | `game_progress_share_photo` | None in the row; the prepared medal photo JPEG is sealed in the Progress store | None | `storage_key`: primary key, random Progress object identity; `member_id`: owner FK; `status`: pending, current or retired; `created_at`: pick time |
@@ -7189,7 +7189,11 @@ at most 10,000 serial object retirements and one bulk row deletion, all outside
 database transactions; failures preserve the rows and block account deletion.
 There is no pagination recovery or automatic retry. Upload admission
 rechecks native auth under the member lock before registering the random key,
-so account cleanup also fences uploads still in flight. Live picture lists read
+so account cleanup also fences uploads still in flight. Registration reserves the
+key as pending. A successful stage publishes the pin and canonical UUID-bound
+metadata while the row is live. Older rows remain visible. Legacy uppercase
+metadata opens under its original spelling. Unreadable rows mark the read
+incomplete while other pins remain available. Live picture lists read
 10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
 pins or award evidence.
 

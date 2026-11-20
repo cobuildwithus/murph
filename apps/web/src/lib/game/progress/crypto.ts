@@ -14,8 +14,8 @@ const scope = "game-progress";
 const aad = (target: ProgressSealTarget) => ({ purpose: scope, table: target.table, rowId: target.rowId, field: target.field });
 
 /** The JSON is ours: authenticate it, then decode without a second schema parse. */
-export async function openProgressMany<T>(entries: readonly (ProgressSealTarget & { value: string })[]): Promise<T[]> {
-  const values = await openHostedUserSecureBoxStrings({ lane,
+export async function openProgressMany<T>(entries: readonly (ProgressSealTarget & { value: string })[], retainFailureInScopedCache = false): Promise<T[]> {
+  const values = await openHostedUserSecureBoxStrings({ lane, retainFailureInScopedCache,
     entries: entries.map(target => ({ aad: aad(target), scope, userId: target.memberId, value: target.value })),
   });
   return values.map(value => {
