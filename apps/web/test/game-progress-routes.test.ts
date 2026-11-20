@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({ profile: vi.fn(), games: vi.fn(), entries: vi.
 vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
+  $queryRaw: async () => [{ version: "synthetic" }],
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
   gameProfile: { findUnique: mocks.profile, findUniqueOrThrow: async () => {
     const profile = await mocks.profile();
@@ -470,7 +471,7 @@ describe("Progress HTTP contracts", () => {
   it("writes a checked goal only through patchMeasureState and rejects a route on a rep measure", async () => {
     const response = await PUT(request("/measures/pushups.reps", { goal: { rungId: "half-dome" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(response.status).toBe(200);
-    expect(mocks.patch).toHaveBeenCalledWith(memberId, "pushups.reps", { goal: { rungId: "half-dome" } }, expect.any(Function));
+    expect(mocks.patch).toHaveBeenCalledWith(memberId, "pushups.reps", { goal: { rungId: "half-dome" } }, expect.any(Function), expect.any(Function));
     const route = await PUT(request("/measures/pushups.reps", { goal: { from: "London", to: "Paris" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(route.status).toBe(400); expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });

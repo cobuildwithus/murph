@@ -82,6 +82,34 @@ describe.skipIf(!enabled)("Progress found-goal PostgreSQL journeys", () => {
     expect(view.measures).toMatchObject([{ id: "pushups.reps", points: [], total: { value: 0 }, pics: [{ id, at: 0 }] }]);
   });
 
+  it.each(["series read", "write transaction"])("refuses a rung when the final reps arrive during the %s", async stage => {
+    const { memberId, entryId } = await fixture();
+    const goal = goalsSchema.parse(await (await goals(request(memberId, "/goals?measure=pushups.reps&q=great-blue-hole"))).json()).match!;
+    const observed = deferred(), resume = deferred(), read = series.readGameSeries;
+    if (stage === "series read") vi.spyOn(series, "readGameSeries").mockImplementationOnce(async (...args) => {
+      const snapshot = await read(...args);
+      observed.release();
+      await resume.promise;
+      return snapshot;
+    });
+    else mocks.current.mockImplementationOnce(async (_auth: unknown, tx: Prisma.TransactionClient) => {
+      await tx.$queryRaw`SELECT 1`;
+      observed.release();
+      await resume.promise;
+    });
+    const saving = pick(memberId, goal.id);
+    await observed.promise;
+    try {
+      await db.gameEntry.update({ where: { id: entryId }, data: { payloadEncrypted: await sealGameText(
+        { memberId, table: "game_entry", rowId: entryId, field: "payload" },
+        JSON.stringify({ exercise: "pushups", count: goal.at, reps: [] })) } });
+    } finally { resume.release(); }
+    const saved = await saving;
+    expect(saved.status).toBe(409);
+    expect(await saved.json()).toMatchObject({ error: { code: "GAME_PROGRESS_STATE_CONFLICT" } });
+    expect((await state(memberId)).goal).toBeUndefined();
+  });
+
   it("removes a newly reached goal from search and refuses the stale selection", async () => {
     const { memberId, entryId } = await fixture();
     const search = async () => goalsSchema.parse(await (await goals(request(memberId, "/goals?measure=pushups.reps&q=great-blue-hole"))).json());
