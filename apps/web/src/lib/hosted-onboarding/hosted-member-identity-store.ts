@@ -304,6 +304,18 @@ export async function readHostedMemberIdentity(input: {
   return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
 }
 
+/** "*** 0731": names the account a page acts on without reading the number. */
+export async function readHostedMemberPhoneHint(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    where: { memberId: input.memberId },
+    select: { maskedPhoneNumberHint: true },
+  });
+  return identity?.maskedPhoneNumberHint ?? null;
+}
+
 /** Request-local verified phones. Callers must authorize the member set; never log values. */
 export async function readHostedMemberVerifiedPhoneNumbers(input: {
   memberIds: readonly string[];

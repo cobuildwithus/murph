@@ -5,7 +5,9 @@ import { HostedDataPrivacySettings } from "@/src/components/settings/hosted-data
 import { PageHeader } from "@/src/components/ui/page-header";
 import { getHostedAccountDeletionPageSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { readHostedMemberPhoneHint } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { SettingsDataPrivacyAuthRequired } from "./settings-data-privacy-auth-required";
@@ -27,6 +29,11 @@ export default async function SettingsDataPrivacyPage() {
   }
 
   const exportEnabled = !authenticatedMember?.suspendedAt;
+  // The app opens this page in the browser, which may hold someone else's
+  // session on a shared phone: say whose account deletion would remove.
+  const accountHint = authenticatedMember
+    ? await readHostedMemberPhoneHint({ memberId: authenticatedMember.id, prisma: getPrisma() })
+    : null;
   const content = (
     <main className="min-h-dvh bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-8">
@@ -38,6 +45,7 @@ export default async function SettingsDataPrivacyPage() {
 
         <section id="data-privacy" className="flex flex-col gap-4">
           <HostedDataPrivacySettings
+            accountHint={accountHint}
             authenticated
             authorizationEnabled={exportEnabled}
           />

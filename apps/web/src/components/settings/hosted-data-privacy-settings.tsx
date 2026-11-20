@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Download, Trash2 } from "lucide-react";
+import { Download, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -9,6 +9,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { useSensitiveActionAuthorization } from "@/src/components/sensitive-actions/use-sensitive-action-authorization";
+import { JoinInviteSignOutButtonIsland } from "@/src/components/hosted-onboarding/join-invite-islands";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
@@ -68,6 +69,8 @@ type SensitiveActionAuthorizer =
   ReturnType<typeof useSensitiveActionAuthorization>["authorize"];
 
 export function HostedDataPrivacySettings(props: {
+  /** "*** 0731": the account a deletion here removes. */
+  accountHint?: string | null;
   authenticated: boolean;
   authorizationEnabled?: boolean;
 }) {
@@ -80,21 +83,43 @@ export function HostedDataPrivacySettings(props: {
     );
   }
 
+  const accountHint = props.accountHint ?? null;
   return props.authorizationEnabled === false
-    ? <HostedDataPrivacySettingsContent authorize={null} />
-    : <HostedDataPrivacySettingsWithSecureApproval />;
+    ? <HostedDataPrivacySettingsContent accountHint={accountHint} authorize={null} />
+    : <HostedDataPrivacySettingsWithSecureApproval accountHint={accountHint} />;
 }
 
-function HostedDataPrivacySettingsWithSecureApproval() {
+function HostedDataPrivacySettingsWithSecureApproval(props: { accountHint: string | null }) {
   const { authorize } = useSensitiveActionAuthorization();
 
-  return <HostedDataPrivacySettingsContent authorize={authorize} />;
+  return <HostedDataPrivacySettingsContent accountHint={props.accountHint} authorize={authorize} />;
+}
+
+/** Whose account: the browser the app opens may hold someone else's session. */
+function HostedSignedInAccountRow(props: { accountHint: string | null }) {
+  if (!props.accountHint) return null;
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+      <UserRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+      <span className="font-serif text-base tracking-tight text-foreground">
+        Signed in as {props.accountHint}
+      </span>
+      <JoinInviteSignOutButtonIsland appearance="ghost" idleLabel="Sign out" />
+    </div>
+  );
+}
+
+function deletionDescription(accountHint: string | null) {
+  return accountHint
+    ? `Deletes the account for ${accountHint}, with its data, subscription, and login, permanently. This cannot be undone.`
+    : "Deletes your account, data, subscription, and login permanently. This cannot be undone.";
 }
 
 function HostedDataPrivacySettingsContent(props: {
+  accountHint: string | null;
   authorize: SensitiveActionAuthorizer | null;
 }) {
-  const { authorize } = props;
+  const { accountHint, authorize } = props;
   const [exportPending, setExportPending] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [acknowledgedSensitiveDownload, setAcknowledgedSensitiveDownload] = useState(false);
@@ -322,7 +347,8 @@ function HostedDataPrivacySettingsContent(props: {
       ) : null}
 
       <div className="divide-y divide-[rgba(196,168,130,0.25)]">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
+        <HostedSignedInAccountRow accountHint={accountHint} />
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4 first:pt-0">
           <Download className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           <span className={authorize === null
             ? "font-serif text-base tracking-tight text-muted-foreground"
@@ -385,7 +411,7 @@ function HostedDataPrivacySettingsContent(props: {
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {dialogStep === "reason"
                 ? "Could you let us know why you're leaving? This is optional and it won't hold up your deletion."
-                : "Deletes your account, data, subscription, and login permanently. This cannot be undone."}
+                : deletionDescription(accountHint)}
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
