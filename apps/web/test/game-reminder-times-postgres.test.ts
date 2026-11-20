@@ -77,6 +77,17 @@ describe.skipIf(!enabled)("per-game reminder times PostgreSQL", () => {
     ]) } });
   });
 
+  it("recognizes a finished personal calendar while a peer still has a day open", async () => {
+    const owner = await member(), peer = await member(), id = await game(owner, "Read");
+    const dayOne = new Date("2030-03-04T00:00:00Z");
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: owner } }, data: { dayOne, timeZone: "Asia/Tokyo" } });
+    await db.gamePlayer.create({ data: { gameId: id, memberId: peer, seat: 1, joinedAt: dayOne, dayOne, timeZone: "America/Los_Angeles" } });
+    await db.game.update({ where: { id }, data: { devClockOffsetMs: BigInt(Date.parse("2030-03-11T02:00:00Z") - Date.now()) } });
+    const result = await handleMyGameRemindersTool({ memberId: owner, runtimeIdentity: null, request: {
+      action: "my_game_reminders", operation: "read", origin: { kind: "accepted_input", assistantInputId: "input-synthetic" } } });
+    expect(result.result.reminders?.games[0]?.today).toBe("finished");
+  });
+
   it("moves only the named game from the direct chat, and every game without one", async () => {
     const owner = await member(), pullups = await game(owner, "20 pullups"), lifts = await game(owner, "3 lifts");
     const saved = await direct(owner, { gameId: pullups, minutes: 1260 });

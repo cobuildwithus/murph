@@ -65,7 +65,7 @@ export async function readMyGameReminderProjection(memberId: string, page: { ids
     if (!view || view.status !== "live") continue;
     const ownDay = view.days.find(day => day.index === view.players.find(player => player.isMe)?.dayIndex);
     games.push({ id: view.id, task: view.terms.tasks.find(task => task.seat === seat.seat)?.text ?? view.terms.defaultTask ?? "",
-      schedule: view.terms.schedule, today: !ownDay ? "upcoming" as const : ownDay.off ? "off" as const
+      schedule: view.terms.schedule, today: view.settlesAt ? "finished" as const : !ownDay ? "upcoming" as const : ownDay.off ? "off" as const
         : ownDay.mine ? "posted" as const : "open" as const,
       otherFirstNames: seat.game.players.flatMap(player => player.memberId && player.memberId !== memberId ? [byId.get(player.memberId) ?? ""] : []).filter(Boolean),
       on: !seat.reminderOff, everyDay: seat.reminderEveryDay, minutes: seat.reminderMinutes ?? settings.minutes });

@@ -183,7 +183,7 @@ export const hostedGameToolResponseSchema = z.object({
     activities: z.array(z.enum(GAME_ACTIVITIES)).optional(),
     reminders: z.object({ nextAfter: gameId.optional(), minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
-        today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),
+        today: z.enum(["posted", "open", "off", "upcoming", "finished"]), otherFirstNames: z.array(z.string()),
         // The game's own reminder time. Accepted before Web sends it, so runners read it once Web starts to.
         on: z.boolean(), everyDay: z.boolean(), minutes: z.number().int().min(0).max(1439).optional() }).strict()).max(20) }).strict().optional(),
     // Exact server-authored delivery text; recap.chatLine and lore stay bare. A day correction
