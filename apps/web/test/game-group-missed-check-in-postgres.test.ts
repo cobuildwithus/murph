@@ -325,7 +325,9 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     for (let i = 0; i < 10; i++) ids.push(await room.addGame());
     const players = room.people.map(person => person.id);
     const read = () => readGameChatState(room.roomId, players);
-    expect((await read()).games.map(game => game.id).sort()).toEqual(ids.sort());
+    const shown = (await read()).games.map(game => game.id);
+    expect(shown).toHaveLength(10);
+    expect(shown).toContain(pair);
   });
 
   it("keeps a group's own game visible behind ten games in another room", async () => {

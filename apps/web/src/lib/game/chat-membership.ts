@@ -90,7 +90,9 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
     prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [gamePairWhere(playerMemberIds), { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),
   ]);
-  return [...pairs, ...groups, ...settled.slice(0, Math.max(0, GAME_MAX_OPEN_PER_PAIR - pairs.length - groups.length))].map(row => row.id);
+  // Pairs first, so groups can't crowd a pair out of its own chat.
+  const open = [...pairs, ...groups].slice(0, GAME_MAX_OPEN_PER_PAIR);
+  return [...open, ...settled.slice(0, GAME_MAX_OPEN_PER_PAIR - open.length)].map(row => row.id);
 }
 
 /** Pair lock must precede every game lock that can establish a primary room. */
