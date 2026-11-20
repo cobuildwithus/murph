@@ -71,6 +71,17 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("Progress found-goal PostgreSQL journeys", () => {
+  it("keeps the private picture on its measure after the last post is withdrawn", async () => {
+    const { memberId, entryId } = await fixture();
+    const id = randomUUID(), takenAt = new Date();
+    const metaEncrypted = await crypto.sealProgress({ memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: "pushups.reps" });
+    await db.gameProgressPic.create({ data: { memberId, id, takenAt, metaEncrypted, storageKey: randomUUID() } });
+    await db.gameEntry.update({ where: { id: entryId }, data: { withdrawnAt: new Date() } });
+    const view = progressSchema.parse(await (await progress(request(memberId))).json());
+    expect(view.picCount).toBe(1);
+    expect(view.measures).toMatchObject([{ id: "pushups.reps", points: [], total: { value: 0 }, pics: [{ id, at: 0 }] }]);
+  });
+
   it("removes a newly reached goal from search and refuses the stale selection", async () => {
     const { memberId, entryId } = await fixture();
     const search = async () => goalsSchema.parse(await (await goals(request(memberId, "/goals?measure=pushups.reps&q=great-blue-hole"))).json());

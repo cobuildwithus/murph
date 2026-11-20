@@ -161,7 +161,7 @@ export function checkInView(checkIn: TodayCheckIn, snapshot: { measures: readonl
     ?? { ...describeMeasure(checkIn.measureId, checkIn.name, checkIn.text), pending: false, gameOn: true, needsPerDay: checkIn.needsPerDay, amounts: [] };
   const after = measureView({ ...series, amounts: [...series.amounts, { measureId: checkIn.measureId, date: checkIn.date, amount: checkIn.adds }] },
     snapshot.states.get(checkIn.measureId) ?? {}, awards, today, units);
-  return [{ ...entry, after: { ...after, label: shown?.label ?? after.label, pics: shown?.pics ?? [] } }];
+  return [{ ...entry, after: { ...after, label: shown?.label ?? after.label } }];
 }
 
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
@@ -201,11 +201,23 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     return successor ? { ...award, measureId: successor } : award;
   });
   return timing.measure("render", () => {
-    const measures = snapshot.measures.map(measure => {
-      const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
-      view.pics = pictures.pics.filter(pic => (snapshot.successors.get(pic.measureId) ?? pic.measureId) === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
-      return view;
-    });
+    const byId = new Map(snapshot.measures.map(measure => [measure.id,
+      measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units)]));
+    for (const pic of pictures.pics) {
+      const id = snapshot.successors.get(pic.measureId) ?? pic.measureId;
+      let view = byId.get(id);
+      if (!view) {
+        // Picture metadata outlives the post. Only synthesize recognized game measure units.
+        if (!/^[^.]+\.(reps|seconds|steps|meters|days)$/u.test(id)) continue;
+        const task = snapshot.checkIns.find(checkIn => checkIn.measureId === id);
+        const name = task?.name ?? id.split(".")[0];
+        view = measureView({ ...describeMeasure(id, name, task?.text ?? name), amounts: [], pending: false,
+          gameOn: Boolean(task), needsPerDay: false }, snapshot.states.get(id) ?? {}, awards, today, units);
+        byId.set(id, view);
+      }
+      view.pics.push(picturePin(pic, view.points, profile.timeZone));
+    }
+    const measures = [...byId.values()];
     // Two units of the same exercise need distinct pills (row 15).
     for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
     const medals = medalsView(destinations, units, measures);
