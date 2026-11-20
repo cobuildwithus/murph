@@ -695,10 +695,23 @@ export function decideJoin(
   assertJoinOpen(state, input, claimed);
   const seat = admissionSeat(state, input, claimed);
   const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(calendarPlayers(state)), joinedAt: input.now };
-  if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  if (group && game.status === "live") {
+    if (!hasPlayableGroupDay(state, input.timeZone, input.now)) reject("INVITE_EXPIRED", "Your last scheduled day has ended.");
+    return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  }
   return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
     ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
       player => acceptanceStartDate(input.now, player.timeZone), game.startsOn) };
+}
+
+export function hasPlayableGroupDay(state: RuleState, timeZone: string, now: Date): boolean {
+  const dayOne = gameDayOne(calendarPlayers(state));
+  if (!dayOne) return true;
+  const first = Math.max(0, daysBetween(dayOne, gameLocalDate(now, timeZone)));
+  for (let day = first; day < state.game.lengthDays; day++) {
+    if (isScheduledDay(state, day)) return true;
+  }
+  return false;
 }
 
 type JoinInput = Parameters<typeof decideJoin>[1];

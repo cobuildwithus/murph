@@ -91,7 +91,10 @@ A second acceptance activates it; until then it waits without expiry. Addressed
 invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
-the common schedule. While invited, the starter alone can edit full terms
+the common schedule. A live group accepts a new seat only while a scheduled
+day remains in the joining time zone. A signed-in preview uses the profile time
+zone and returns `status: "expired"` with `noPlayableDay: true` after that cutoff.
+While invited, the starter alone can edit full terms
 directly. Waiting invitations retain only their latest terms and encrypted words;
 version numbers still increase, so stale acceptance remains invalid. Once live,
 played-day history remains available and any remaining seated player can ask for a change from the

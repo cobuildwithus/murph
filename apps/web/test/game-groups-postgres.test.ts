@@ -510,8 +510,8 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await db.gameEvent.findFirst({ where: { gameId: game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId, reason: "The start date locks once someone checks in." } });
   });
 
-  it("accepts a late day after 20:00 without resetting the calendar, including DST and zero-opportunity joins", async () => {
-    const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person();
+  it("accepts a late day after 20:00 without resetting the calendar, across DST and refuses joins without a playable day", async () => {
+    const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person("Pacific/Kiritimati");
     const game = await create(a, [b]);
     await ok(b.id, join(game.token, "Pacific/Honolulu"));
     const lateAt = new Date("2030-03-11T01:30:00Z"); // March 10, 21:30 after New York's DST transition.
@@ -519,13 +519,16 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(late.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, lateAt);
     expect(await db.gameEntry.findFirst({ where: { gameId: game.id, memberId: late.id }, select: { dayIndex: true } })).toEqual({ dayIndex: 1 });
     const ownEnd = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
-    await ok(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd);
-    expect(await run(zero.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, ownEnd)).toMatchObject({ ok: false, error: { code: "DAY_CLOSED" } });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(ownEnd.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(game.token, true, zero.id)).toMatchObject({ status: "expired", noPlayableDay: true });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
+    expect(await run(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd)).toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
     const row = await gameRow(game.id);
     expect(row.players.every(player => player.dayOne?.toISOString().slice(0, 10) === "2030-03-09")).toBe(true);
     expect(row.players.find(player => player.memberId === late.id)?.joinedAt).toEqual(lateAt);
     const result = parseStoredResult((await settle(game.id, a.id)).result);
-    expect(result.scores.find(score => score.memberId === zero.id)).toMatchObject({ score: 0, misses: 0, eligible: true });
+    expect(result.scores.some(score => score.memberId === zero.id)).toBe(false);
   });
 
   it("uses conditional final-day grace and never admits or leaves after settlement becomes due", async () => {
@@ -533,7 +536,10 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const game = await create(a, [b]);
     await ok(b.id, join(game.token));
     const end = dayStartInstant("2030-03-19", "UTC");
-    await ok(c.id, join(game.token), new Date(end.getTime() + GAME_GRACE_MS - 1));
+    await ok(c.id, join(game.token), new Date(end.getTime() - 1));
+    expect(await run(d.id, join(game.token), new Date(end.getTime() + GAME_GRACE_MS - 1)))
+      .toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
+    expect((await gameRow(game.id)).status).toBe("live");
     const atDue = new Date(end.getTime() + GAME_GRACE_MS);
     const race = await Promise.all([run(d.id, join(game.token), atDue), run(a.id, { type: "leave", gameId: game.id }, atDue)]);
     expect(race.every(result => !result.ok)).toBe(true);

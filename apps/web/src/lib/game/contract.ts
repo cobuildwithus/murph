@@ -658,7 +658,7 @@ export type GameInvitePreview =
       expiresAt: string | null;
     }
   | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
-  | { status: "expired"; reason?: "cancelled"; talkDelivery?: "pending" | "sent" | "failed" };
+  | { status: "expired"; reason?: "cancelled"; noPlayableDay?: true; talkDelivery?: "pending" | "sent" | "failed" };
 
 export type GameErrorCode =
   | "REPLY_USED"

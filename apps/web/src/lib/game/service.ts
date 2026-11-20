@@ -103,6 +103,7 @@ import {
   GAME_INVITE_TTL_MS,
   GAME_MAX_LENGTH_DAYS,
   GameRuleError,
+  hasPlayableGroupDay,
   gameOffDayMessage,
   isGameDue,
   isGameDecided,
@@ -3532,7 +3533,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const closed = await closedInvitePreview(row, now);
+  const closed = await closedInvitePreview(row, now, memberId);
   if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
@@ -3568,7 +3569,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
-async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
+async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: string): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
   if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
@@ -3579,6 +3580,10 @@ async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInv
     return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
+  if (groupOpen && memberId && !row.players.some(player => player.memberId === memberId)) {
+    const profile = await getPrisma().gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
+    if (profile && !hasPlayableGroupDay(toRuleState(row, []), profile.timeZone, now)) return { status: "expired", noPlayableDay: true };
+  }
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
   return null;
 }
