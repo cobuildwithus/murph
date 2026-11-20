@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  after: vi.fn(), current: vi.fn(), authority: vi.fn(), replica: vi.fn(), raw: vi.fn(),
+  pictures: vi.fn(), after: vi.fn(), current: vi.fn(), authority: vi.fn(), replica: vi.fn(), raw: vi.fn(),
   ownGames: vi.fn(), friendGames: vi.fn(), cohort: vi.fn(), ids: vi.fn(), rooms: vi.fn(),
   pairLock: vi.fn(), resolve: vi.fn(), states: vi.fn(), state: vi.fn(), createState: vi.fn(), updateState: vi.fn(),
   awards: vi.fn(), createAwards: vi.fn(), profile: vi.fn(), transaction: vi.fn(), inference: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock("@/src/lib/game/progress/series", async original => ({
   ...await original<typeof import("@/src/lib/game/progress/series")>(), readGameSeries: mocks.ownGames,
   scheduleInference: mocks.inference,
 }));
-vi.mock("@/src/lib/game/progress/pics", () => ({ readProgressPics: async () => ({ incomplete: false, pics: [] }) }));
+vi.mock("@/src/lib/game/progress/pics", () => ({ readProgressPics: mocks.pictures }));
 vi.mock("@/src/lib/game/progress/friend-games", async original => ({
   ...await original<typeof import("@/src/lib/game/progress/friend-games")>(), readFriendGameSeries: mocks.friendGames,
 }));
@@ -85,6 +85,7 @@ async function healthState() {
 beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(savedAt));
   states = []; awards = [];
+  mocks.pictures.mockResolvedValue({ incomplete: false, pics: [] });
   mocks.profile.mockResolvedValue({ timeZone: "UTC", createdAt: new Date(`${joinedOn}T12:00:00Z`) });
   mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" });
   mocks.raw.mockResolvedValue(healthSnapshot());
@@ -263,7 +264,8 @@ it("skips background Friends input work without co-players", async () => {
   expect((await readAwards("ava")).some(award => award.kind === "friend")).toBe(false);
 });
 
-it("schedules the viewer's pending tasks only in the foreground and friends' tasks in the background", async () => {
+it.each([false, true])("schedules the viewer's pending tasks in the foreground and friends' tasks in the background (partial pictures=%s)", async incomplete => {
+  mocks.pictures.mockResolvedValue({ incomplete, pics: [] });
   const own = { memberId: "ava", lookup: "ava-pending", text: "40 pushups", kind: "photo", inferred: null };
   const friend = { ...own, memberId: "leo", lookup: "leo-pending" };
   const games = await mocks.friendGames();
@@ -356,6 +358,20 @@ it("keeps run days and the settlement receipt from the newest replica", async ()
   const running = await openProgress<MeasureState>({ memberId: "ava", table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
   expect(running.vaultRuns).toEqual({ savedAt, days: [["2026-11-13", 2000], ["2026-11-14", 6000]] });
   expect((await healthState())?.healthSettlement?.savedAt).toBe(savedAt);
+});
+
+it("settles earned exercise medals and schedules follow-up work despite unreadable picture metadata", async () => {
+  mocks.pictures.mockResolvedValue({ incomplete: true, pics: [] });
+  const measureId = "lunges.reps";
+  mocks.ownGames.mockResolvedValue({ incomplete: false, checkIns: [], successors: new Map(), states: new Map(), awards: [], pending: [],
+    measures: [{ id: measureId, name: "lunges", label: "Lunges", noun: "lunges", icon: "dumbbell", unit: "reps",
+      ftPerRep: 1, gameOn: true, pending: false, needsPerDay: false, amounts: [{ measureId, date: joinedOn, amount: 1000 }] }] });
+  const response = await GET(request());
+  expect(response.status).toBe(200);
+  expect(await readAwards("ava")).toContainEqual(expect.objectContaining({ measureId, kind: "total" }));
+  expect(await response.json()).toMatchObject({ incomplete: true, picturesIncomplete: true, contributionsIncomplete: false });
+  expect(mocks.inference).toHaveBeenCalledOnce();
+  expect(mocks.after).toHaveBeenCalledOnce();
 });
 
 it("an incomplete main read schedules no settlement", async () => {

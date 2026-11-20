@@ -174,7 +174,6 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
   const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
   const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
-  snapshot.incomplete ||= pictures.incomplete;
   let attemptedInsert = false;
   if (!snapshot.incomplete) {
     const firstRoutes = snapshot.measures.filter(measure => !measure.pending
@@ -218,7 +217,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       if (shelf.length === 6) break;
     }
     const checkIns = snapshot.checkIns.flatMap(checkIn => checkInView(checkIn, snapshot, measures, awards, today, units));
-    return { joinedOn, today, incomplete: snapshot.incomplete, measures,
+    return { joinedOn, today, incomplete: snapshot.incomplete || pictures.incomplete, contributionsIncomplete: snapshot.incomplete, picturesIncomplete: pictures.incomplete, measures,
       medals, shelf, moments: momentsView(destinations, measures, units), picCount: pictures.pics.length, checkIns };
   });
 }
