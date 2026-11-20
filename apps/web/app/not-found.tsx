@@ -22,7 +22,7 @@ export default async function NotFound() {
           <p className="mx-auto mt-4 max-w-[54ch] text-sm leading-7 text-muted-foreground">
             {authenticated
               ? "That address could not be found. Return to your Murph home to continue, review your settings, or contact support if you need help."
-              : "That address does not match a public Murph page. Return to Murph, learn what the product does, contact support, or use the machine-readable guides below to find another public route."}
+              : "There's no Murph page at this address. Go back to Murph, see what it does, or get in touch."}
           </p>
 
           <Link
