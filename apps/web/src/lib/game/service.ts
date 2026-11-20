@@ -168,6 +168,7 @@ export { mediaKeyPrefixFor } from "./access";
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
 interface LoadedGame {
+  completedDays?: Map<string, Set<number>>;
   row: GameRow;
   entries: GameEntry[];
   state: RuleState;
@@ -3166,9 +3167,9 @@ async function loadGames(db: Db, gameIds: readonly string[], multiplayer = true)
 }
 
 /** Loads only visible, non-withdrawn, unreported posts that can appear in history previews. */
-async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
+async function loadHistoryGames(db: Db, gameIds: readonly string[], groupIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
   if (gameIds.length === 0) return [];
-  const [rows, entries] = await Promise.all([
+  const [rows, entries, postedDays] = await Promise.all([
     db.game.findMany({ include: { invitees: true, players: true }, where: { id: { in: [...gameIds] } } }),
     db.$queryRaw<GameEntry[]>(Prisma.sql`
       WITH ranked_entry AS (
@@ -3211,7 +3212,21 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
       WHERE preview_rank <= ${GAME_HISTORY_PREVIEW_LIMIT}
       ORDER BY game_id, preview_rank
     `),
+    // One bounded list of credited days per group seat, independent of preview selection.
+    groupIds.length === 0 ? [] : db.$queryRaw<{ gameId: string; memberId: string; days: number[] }[]>(Prisma.sql`
+      SELECT entry.game_id AS "gameId", entry.member_id AS "memberId", array_agg(DISTINCT entry.day_index) AS days
+      FROM game_entry entry
+      WHERE entry.game_id IN (${Prisma.join(groupIds)})
+        AND entry.attempt > 0 AND entry.withdrawn_at IS NULL AND entry.incomplete IS NOT TRUE
+      GROUP BY entry.game_id, entry.member_id
+    `),
   ]);
+  const daysByGame = new Map<string, Map<string, Set<number>>>();
+  for (const { gameId, memberId, days } of postedDays) {
+    const players = daysByGame.get(gameId) ?? new Map<string, Set<number>>();
+    players.set(memberId, new Set(days));
+    daysByGame.set(gameId, players);
+  }
   const byId = new Map(rows.map((row) => [row.id, row]));
   const entriesByGame = new Map<string, GameEntry[]>();
   for (const entry of entries) {
@@ -3223,7 +3238,7 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
     const row = byId.get(id);
     if (!row) return [];
     const gameEntries = entriesByGame.get(id) ?? [];
-    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries) }];
+    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries), completedDays: daysByGame.get(id) }];
   });
 }
 
@@ -3447,7 +3462,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
  */
 export async function readHistory(memberId: string, multiplayer = false): Promise<GameHistoryView> {
   const prisma = getPrisma();
-  const candidates = await prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
+  const candidates = await prisma.$queryRaw<Array<{ gameId: string; maxPlayers: number }>>(Prisma.sql`
     WITH settled_games AS (
       SELECT game.id AS game_id, game.max_players,
         CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END AS opponent_id,
@@ -3478,7 +3493,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
       FROM settled_games
       GROUP BY max_players, opponent_id
     )
-    SELECT settled_games.game_id AS "gameId"
+    SELECT settled_games.game_id AS "gameId", settled_games.max_players AS "maxPlayers"
     FROM settled_games
     JOIN recent_audiences USING (max_players, opponent_id)
     WHERE recent_audiences.audience_rank <= CASE WHEN max_players = 10 THEN ${HISTORY_GROUP_LIMIT}::int ELSE ${HISTORY_PEOPLE_LIMIT}::int END
@@ -3492,7 +3507,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
 
   const gameIds = candidates.map((candidate) => candidate.gameId);
   const [games, clock] = await Promise.all([
-    loadHistoryGames(prisma, gameIds, memberId),
+    loadHistoryGames(prisma, gameIds, candidates.filter(game => game.maxPlayers === 10).map(game => game.gameId), memberId),
     databaseNow(prisma),
   ]);
   const built = await buildHistoryViews(games, memberId, clock, multiplayer);
@@ -4035,7 +4050,7 @@ async function buildViewInputs(
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return {
-      multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
+      completedDays: game.completedDays, multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
       challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
       talkDelivery: talkViews.get(game.row.id),

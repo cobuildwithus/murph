@@ -978,10 +978,10 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
 }
 
 /** Consecutive scheduled posts, ignoring an unposted current day and off days. */
-export function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
+export function playerStreak(state: RuleState, player: RulePlayer, now: Date, completedDays?: ReadonlySet<number>): number {
   const today = dayIndexAt(player, now);
   if (today === null) return 0;
-  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
+  const posted = completedDays ?? new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
   let streak = 0;
   for (let day = Math.min(today, state.game.lengthDays - 1); day >= eligibleFromDay(state, player); day -= 1) {
     if (!isScheduledDay(state, day)) continue;

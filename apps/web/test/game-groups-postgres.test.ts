@@ -172,6 +172,20 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it("shows complete streaks with bounded history previews", async () => {
+    const { game, people } = await majorityGame(4);
+    for (const player of people) for (let day = 0; day < terms.lengthDays!; day++) await entry(game.id, player.id, day);
+    await settle(game.id, people[0].id);
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(Date.parse("2030-04-02") - Date.now()) } });
+    const detail = await readGame(game.id, people[0].id, true);
+    const { readHistory } = await import("@/src/lib/game/service");
+    const history = (await readHistory(people[0].id, true)).groups?.[0].games[0];
+    expect(detail?.players.map(p => p.streak)).toEqual([10, 10, 10, 10]);
+    expect(history?.players.map(p => p.score)).toEqual([10, 10, 10, 10]);
+    expect(history?.players.map(p => p.streak)).toEqual([10, 10, 10, 10]);
+    expect(history?.previews).toHaveLength(6);
+  });
+
   it("keeps a live invitation on Home without exposing player detail", async () => {
     const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
     const game = await create(starter, [joined, invited]);

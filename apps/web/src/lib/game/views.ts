@@ -102,6 +102,7 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  completedDays?: Map<string, Set<number>>;
   /** Request-local verified phones, loaded only for eligible ticket counterparties. */
   verifiedPhones?: ReadonlyMap<string, string>;
   entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
@@ -488,7 +489,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today, entries).score : 0),
     seat: player.seat,
-    streak: playerStreak(input.state, player, now),
+    streak: playerStreak(input.state, player, now, input.completedDays?.get(player.memberId)),
   };
 }
 

@@ -276,7 +276,8 @@ renders sparse seat overrides, authenticated preview extras, private labels or
 other players' names. Pair rendering, app links and closed/cancelled copy stay
 unchanged.
 
-Group history keeps each round's roster, frozen standings and previews, plus
+Group history computes each seat's streak from its completed scheduled days across
+the full round. It keeps each round's roster, frozen standings and previews, plus
 the shared default `task` and `prize` from the latest round's final terms at group
 level. The task is the same for every viewer, including players with a seat override.
 It returns at most twenty groups with the twenty-five most recent rounds each. Pair history independently
