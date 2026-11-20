@@ -88,7 +88,7 @@ beforeEach(() => {
   mocks.profile.mockResolvedValue({ timeZone: "UTC", createdAt: new Date(`${joinedOn}T12:00:00Z`) });
   mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" });
   mocks.raw.mockResolvedValue(healthSnapshot());
-  mocks.ownGames.mockImplementation(async () => ({ incomplete: false, checkIns: [], measures: [], states: new Map(), awards: await readAwards("ava"), pending: [] }));
+  mocks.ownGames.mockImplementation(async () => ({ incomplete: false, checkIns: [], measures: [], successors: new Map(), states: new Map(), awards: await readAwards("ava"), pending: [] }));
   mocks.cohort.mockResolvedValue({ incomplete: false, people: ["Ava", "Leo"].map(firstName => ({
     memberId: firstName.toLowerCase(), firstName, avatarUrl: null, me: firstName === "Ava", joinedOn, daily: null,
   })) });
@@ -268,7 +268,7 @@ it("schedules the viewer's pending tasks only in the foreground and friends' tas
   const friend = { ...own, memberId: "leo", lookup: "leo-pending" };
   const games = await mocks.friendGames();
   mocks.friendGames.mockResolvedValue({ ...games, pending: [own, friend] });
-  mocks.ownGames.mockResolvedValue({ incomplete: false, checkIns: [], measures: [], states: new Map(), awards: [], pending: [own] });
+  mocks.ownGames.mockResolvedValue({ incomplete: false, checkIns: [], measures: [], successors: new Map(), states: new Map(), awards: [], pending: [own] });
   await GET(request());
   expect(mocks.inference.mock.calls.map(call => call[0])).toEqual([[own]]);
   await drain();
@@ -359,7 +359,7 @@ it("keeps run days and the settlement receipt from the newest replica", async ()
 });
 
 it("an incomplete main read schedules no settlement", async () => {
-  mocks.ownGames.mockResolvedValue({ incomplete: true, checkIns: [], measures: [], states: new Map(), awards: [], pending: [] });
+  mocks.ownGames.mockResolvedValue({ incomplete: true, checkIns: [], measures: [], successors: new Map(), states: new Map(), awards: [], pending: [] });
   expect(progressSchema.parse(await (await GET(request())).json()).incomplete).toBe(true);
   expect(mocks.after).not.toHaveBeenCalled();
 });

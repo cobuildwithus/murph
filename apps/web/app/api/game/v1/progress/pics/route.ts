@@ -23,7 +23,8 @@ export const POST = withProgressJsonError(async (request: Request) => runWithHos
     ]);
     if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
       retryable: true, message: 'Progress could not load completely. Try again.' });
-    const measure = snapshot.measures.find(measure => measure.id === input.measureId);
+    const currentId = snapshot.successors.get(input.measureId) ?? input.measureId;
+    const measure = snapshot.measures.find(measure => measure.id === currentId);
     if (!measure) throw gameNotFound();
     await putProgressPic(memberId, input, bytes, tx => assertGameMemberAuthCurrentTx(auth, tx));
     const response: PicUploadResponse = { ok: true, pic: picturePin({ id: input.id, takenAt: new Date(input.takenAt) },

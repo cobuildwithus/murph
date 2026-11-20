@@ -177,15 +177,19 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const stored = attemptedInsert || snapshot.awards.some(award => award.subjectMemberId !== null)
     ? await timing.measure("awards", () => readAwards(memberId)) : snapshot.awards;
   const awards = visibleAwards(stored, await timing.measure("auth", () => hasHealthAuthority(memberId)));
+  const destinations = awards.map(award => {
+    const successor = award.measureId && snapshot.successors.get(award.measureId);
+    return successor ? { ...award, measureId: successor } : award;
+  });
   return timing.measure("render", () => {
     const measures = snapshot.measures.map(measure => {
       const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
-      view.pics = pictures.pics.filter(pic => pic.measureId === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
+      view.pics = pictures.pics.filter(pic => (snapshot.successors.get(pic.measureId) ?? pic.measureId) === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
       return view;
     });
     // Two units of the same exercise need distinct pills (row 15).
     for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
-    const medals = medalsView(awards, units, measures);
+    const medals = medalsView(destinations, units, measures);
     const shelf: string[] = [];
     const kinds = new Set<string>();
     for (const medal of medals) {
@@ -196,7 +200,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     }
     const checkIns = snapshot.checkIns.flatMap(checkIn => checkInView(checkIn, snapshot, measures, awards, today, units));
     return { joinedOn, today, incomplete: snapshot.incomplete, measures,
-      medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length, checkIns };
+      medals, shelf, moments: momentsView(destinations, measures, units), picCount: pictures.pics.length, checkIns };
   });
 }
 

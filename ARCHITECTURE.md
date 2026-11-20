@@ -6279,7 +6279,8 @@ terms revision and the seat override or group default. Retakes contribute once;
 withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
 are pending days; the games read settles no awards until all credited tasks have
 classifications, while still scheduling inference. A per-day choice applies to all
-completed history while previously earned day medals remain stored.
+completed history. The task lookup connects its original days ID to the current
+measure for picture pins, upload retries and navigation from earned day medals.
 
 `game-days.ts` owns credited game dates: each game's frozen clock, join,
 departure, settlement and end bound its contributions. Void games end at their

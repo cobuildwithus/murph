@@ -372,6 +372,38 @@ describe("Progress HTTP contracts", () => {
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].total.value).toBe(80);
   });
+  it.each(["per-day choice", "inference"])("opens earlier pins and day medals on the measure resolved by %s", async mode => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), kind: "photo", payloadEncrypted: null }]);
+    const oldId = progressSchema.parse(await (await GET(request())).json()).measures[0].id;
+    const takenAt = new Date("2026-11-01T14:00:00Z"), id = "abc00001-0000-4000-8000-000000000001";
+    mocks.pictures.mockResolvedValue([{ id, takenAt, metaEncrypted: await sealProgress({
+      memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: oldId }) }]);
+    const key = `total:${oldId}:10`, lookup = progressLookup(memberId, "award", [key]);
+    awards.push({ memberId, lookup, earnedOn: takenAt, createdAt: takenAt, seenAt: null,
+      dataEncrypted: await sealProgress({ memberId, table: "game_progress_award", rowId: lookup, field: "data" }, {
+        key, kind: "days", measureId: oldId, subjectMemberId: null, on: "2026-11-01",
+        data: { value: 10, unit: "days", noun: "lunges", page: "totals" },
+      }) });
+    const taskLookup = progressLookup(memberId, "task", ["40 pushups", "photo"]);
+    const inferred = mode === "inference" ? { name: "lunges", quantity: 8, unit: "reps" } : { name: "lunges", quantity: null, unit: "days" };
+    mocks.tasks.mockResolvedValue([{ lookup: taskLookup, measureEncrypted: await sealProgress({
+      memberId, table: "game_progress_task_measure", rowId: taskLookup, field: "measure" }, inferred) }]);
+    if (mode === "per-day choice") {
+      const stateLookup = progressLookup(memberId, "measure", [oldId]);
+      mocks.states.mockResolvedValue([{ lookup: stateLookup, stateEncrypted: await sealProgress({
+        memberId, table: "game_progress_measure", rowId: stateLookup, field: "state" }, { perDay: 8 }) }]);
+    }
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.measures).toMatchObject([{ id: "lunges.reps", pics: [{ id, at: 8 }] }]);
+    expect(view.medals).toMatchObject([{ id: lookup, title: "10 days", open: { measureId: "lunges.reps" } }]);
+    expect(view.moments).toMatchObject([{ measureId: "lunges.reps" }]);
+    if (mode === "per-day choice") {
+      const replay = await PUT(request(`/measures/${oldId}`, { perDay: 8 }), { params: Promise.resolve({ id: oldId }) });
+      expect(await replay.json()).toMatchObject({ ok: true, measure: { id: "lunges.reps" } });
+      expect(mocks.patch).not.toHaveBeenCalled();
+    }
+  });
+
   it("schedules only unresolved untyped phrases after the response, with member and kind bound lookups", async () => {
     mocks.entries.mockResolvedValue([0, 1].map(day => ({ ...entryRow(day), kind: "photo", payloadEncrypted: null })));
     const response = await GET(request());
