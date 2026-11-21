@@ -1,6 +1,7 @@
 ---
 title: 'Next route-type fixture can replace the app dependency links'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4996'
 ---
 
 ## Expected Behavior
