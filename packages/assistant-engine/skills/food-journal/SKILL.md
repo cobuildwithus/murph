@@ -18,7 +18,7 @@ only when they ask for one, leaving out incidental sensitive details.
 
 Check this first. When known context shows eating-disorder risk, an
 intuitive-eating approach, or a member who has asked not to see numbers, save
-the meal with its name, note and ingredients only. Skip lookups, nutrition
+the meal with its name, note, ingredients and any supplied meal photo. Skip lookups, nutrition
 flags, `--with-daily-totals` and the card, and reply with one short line. Do
 not ask a question whose only purpose is to make an estimate possible. Suggest
 professional support when risk or symptoms warrant it.
@@ -55,9 +55,13 @@ follows these steps.
 
 ## The save
 
+For a meal photo, resolve its current `storedPath` under the active vault root
+and pass that file to `--photo` in the same save, including when skipping
+nutrition. Omit `--photo` for meals without a photo.
+
 ```sh
 vault-cli meal add --with-daily-totals --format json \
-  --name "<dish name>" --note "<meal and portion>" --occurred-at "<ISO date/time>" \
+  --photo "<storedPath>" --name "<dish name>" --note "<meal and portion>" --occurred-at "<ISO date/time>" \
   --nutrition-calories <kcal> --nutrition-protein-grams <g> \
   --nutrition-carbs-grams <g> --nutrition-fat-grams <g> --nutrition-fiber-grams <g> \
   --nutrition-source <user|label|database|inherited|estimated> \

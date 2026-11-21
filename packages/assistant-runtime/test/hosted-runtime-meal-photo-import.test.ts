@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +20,7 @@ import {
   findEventByExternalRef,
   initializeVault,
   readEvent,
+  runMealPhotoMaintenance,
   showAutomation,
   upsertEvent,
 } from "@murphai/core";
@@ -385,6 +388,38 @@ describe("hosted meal photo mailbox import", () => {
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.not.toBeNull();
+  });
+
+  it("matches a later camera upload to a meal saved with the food journal command", async () => {
+    const vaultRoot = await createTestVault();
+    const photo = await readFile(new URL("./fixtures/synthetic-meal-photo.jpg", import.meta.url));
+    const photoPath = path.join(vaultRoot, "lunch.jpg");
+    await writeFile(photoPath, photo);
+    const capturedAt = new Date().toISOString();
+    const skill = await readFile(new URL("../../assistant-engine/skills/food-journal/SKILL.md", import.meta.url), "utf8");
+    const command = skill.split("## The save")[1]!.split("```sh\nvault-cli ")[1]!.split("\n```")[0]!;
+    const values: Record<string, string> = {
+      storedPath: photoPath, "dish name": "Bean salad", "meal and portion": "One plate", "ISO date/time": capturedAt,
+      kcal: "420", g: "12", "user|label|database|inherited|estimated": "user", "low|medium|high": "high",
+      "sources, ids or URL, and the deciding assumption": "Supplied portion totals",
+    };
+    const args = Array.from(command.replaceAll("\\\n", " ").matchAll(/"([^"]+)"|(\S+)/gu), ([, quoted, token]) =>
+      (quoted ?? token)!.replace(/<([^>]+)>/gu, (_, field: string) => values[field]!));
+    const cli = fileURLToPath(new URL("../../cli/dist/bin.js", import.meta.url));
+    execFileSync(process.execPath, [cli, ...args, "--vault", vaultRoot], { stdio: "pipe" });
+    const wake = createMealPhotoWake();
+    Object.assign(wake.mealPhoto, mealPhotoIdentity(photo), { capturedAt });
+    const result = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => photo }),
+      item: createMealPhotoMailboxItem(), vaultRoot, wake,
+    });
+    expect(result.reasonCode).toBe("meal_photo.already_logged");
+    expect(await runMealPhotoMaintenance({ vaultRoot })).toMatchObject({ thumbnailCount: 1 });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
+      metricPoints: [], generatedAt: capturedAt, sourceBundleHash: "b".repeat(64) });
+    expect(replica.meals?.days.flatMap(day => day.meals)).toEqual([
+      expect.objectContaining({ name: "Bean salad", calories: 420, proteinGrams: 12, thumbnail: expect.anything(), uploadId: CAPTURE_ID }),
+    ]);
   });
 
   it("links the phone's capture of a texted photo to its meal instead of adding another", async () => {
