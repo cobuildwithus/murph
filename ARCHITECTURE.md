@@ -7620,9 +7620,11 @@ binding. Pairs remain visible in exact two-person rooms even when unbound or
 bound elsewhere; an expanded room needs the pair's binding. Pair rematches
 include their invited addressee in the current-player projection. Keys are
 computed only for two to ten people; larger rooms cannot claim an unbound game.
-Deleting the room owner removes the room and clears the binding; ownership is
-not transferred. Resolved verified room members plus all extant player IDs,
-including leavers, retain block, suspension and revoked-consent checks.
+Deleting the room owner removes the room and clears the binding. For a settled
+group, the departure event records that the game was shared. The exact verified
+surviving roster can read its result in another room. Block, suspension and
+revoked-consent checks cover verified room members and all extant player IDs,
+including leavers.
 Unresolved bystanders acquire no account rights.
 
 Runtime funding remains one database-only admission query over at most 32 fresh

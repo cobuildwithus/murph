@@ -326,6 +326,31 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect((await run(people[3].id, join(game.token))).ok).toBe(true);
   });
 
+  it("shares the settled result with exactly the remaining players after the room owner deletes", async () => {
+    const owner = await person(), survivors = [await person(), await person()];
+    const room = await exactRoom([owner, ...survivors]);
+    const game = await create(owner, survivors);
+    for (const player of survivors) await ok(player.id, join(game.token));
+    await entry(game.id, owner.id, 0);
+    await settle(game.id, survivors[0].id);
+    const memberIds = [room, owner.id];
+    const prepared = await prepareGameAccountDeletion({ memberIds, prisma: db });
+    await db.$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds, prepared, tx, now: createdAt });
+      await tx.hostedThreadContainer.delete({ where: { memberId: room } });
+      await tx.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+    });
+    const replacement = await exactRoom(survivors);
+    const read = async () => (await readGameChatState(replacement, survivors.map(p => p.id))).games.find(card => card.id === game.id);
+    expect((await read())?.result?.scores).toContainEqual(expect.objectContaining({ memberId: "departed-seat-0", score: 1 }));
+    chatProof.rooms.set(replacement, [...survivors.map(p => p.email), "nora@example.test"]);
+    expect(await read()).toBeUndefined();
+    chatProof.rooms.set(replacement, survivors.map(p => p.email));
+    await db.gameEvent.updateMany({ where: { gameId: game.id, type: "player_left" },
+      data: { payload: { v: 1, seat: 0, calledOff: false } } });
+    expect(await read()).toBeUndefined();
+  });
+
   it("preserves the anonymous winning score in the surviving chat", async () => {
     const people = await Promise.all([person(), person(), person(), person()]);
     const room = await exactRoom([...people.slice(1), people[0]]);
