@@ -180,16 +180,18 @@ export function createPhoneCallRequestKey(input: {
     throw new TypeError('Phone call request key requires accepted user input.')
   }
 
+  // One message places one call per number. A replayed turn may reword the
+  // brief, so the brief stays out of the key and the replay finds that call.
   const digest = createHash('sha256')
     .update(stableJson({
       acceptedInputIds: [input.scope.acceptedInputIds.at(-1)!],
-      brief: input.brief,
       conversationId: input.scope.conversationId,
       inboundMailboxItemIds: input.scope.inboundMailboxItemIds.length > 0
         ? [input.scope.inboundMailboxItemIds.at(-1)!]
         : [],
+      phoneNumber: input.brief.to.phoneNumber,
       recipientKey: input.scope.recipientKey,
-      schema: 'murph.create-phone-call.request-key.v1',
+      schema: 'murph.create-phone-call.request-key.v2',
     }))
     .digest('hex')
   return `phone_call_${digest}`
