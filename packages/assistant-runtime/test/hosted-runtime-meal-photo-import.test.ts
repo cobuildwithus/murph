@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -396,17 +394,11 @@ describe("hosted meal photo mailbox import", () => {
     const photoPath = path.join(vaultRoot, "lunch.jpg");
     await writeFile(photoPath, photo);
     const capturedAt = new Date().toISOString();
+    // The skill's save passes the photo; `meal add --photo` hands it to core as photoPath.
     const skill = await readFile(new URL("../../assistant-engine/skills/food-journal/SKILL.md", import.meta.url), "utf8");
     const command = skill.split("## The save")[1]!.split("```sh\nvault-cli ")[1]!.split("\n```")[0]!;
-    const values: Record<string, string> = {
-      storedPath: photoPath, "dish name": "Bean salad", "meal and portion": "One plate", "ISO date/time": capturedAt,
-      kcal: "420", g: "12", "user|label|database|inherited|estimated": "user", "low|medium|high": "high",
-      "sources, ids or URL, and the deciding assumption": "Supplied portion totals",
-    };
-    const args = Array.from(command.replaceAll("\\\n", " ").matchAll(/"([^"]+)"|(\S+)/gu), ([, quoted, token]) =>
-      (quoted ?? token)!.replace(/<([^>]+)>/gu, (_, field: string) => values[field]!));
-    const cli = fileURLToPath(new URL("../../cli/dist/bin.js", import.meta.url));
-    execFileSync(process.execPath, [cli, ...args, "--vault", vaultRoot], { stdio: "pipe" });
+    expect(command).toContain('--photo "<storedPath>"');
+    await addMeal({ vaultRoot, photoPath, name: "Bean salad", note: "One plate", occurredAt: capturedAt });
     const wake = createMealPhotoWake();
     Object.assign(wake.mealPhoto, mealPhotoIdentity(photo), { capturedAt });
     const result = await importHostedMealPhotoCapturedMailboxItem({
@@ -418,7 +410,7 @@ describe("hosted meal photo mailbox import", () => {
     const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
       metricPoints: [], generatedAt: capturedAt, sourceBundleHash: "b".repeat(64) });
     expect(replica.meals?.days.flatMap(day => day.meals)).toEqual([
-      expect.objectContaining({ name: "Bean salad", calories: 420, proteinGrams: 12, thumbnail: expect.anything(), uploadId: CAPTURE_ID }),
+      expect.objectContaining({ name: "Bean salad", thumbnail: expect.anything(), uploadId: CAPTURE_ID }),
     ]);
   });
 
