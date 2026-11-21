@@ -2055,6 +2055,33 @@ text(result.output);
     })
   })
 
+  it('delivers whole memory pages and their cursors through the maintenance transport', async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = scenario.turnInput.workingDirectory
+    for (const label of ['Pottery', 'Sketching']) {
+      await upsertMemory(vaultRoot, { section: 'Preferences', text: label + ' details'.repeat(5500) })
+    }
+    const records = (await readMemoryDocument(vaultRoot)).records.sort((a, b) => a.id.localeCompare(b.id))
+    const cursor = records[0]!.id
+    scenario.stub.queue(
+      { functionCall: { arguments: { action: 'show' }, name: 'member_memory', namespace: 'murph' } },
+      { functionCall: { arguments: { action: 'show', cursor }, name: 'member_memory', namespace: 'murph' } },
+      { text: '{"kind":"skip"}' },
+    )
+    await executeCodexAppServerTurn({
+      ...scenario.turnInput, approvalPolicy: 'never', dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+      memberMemoryMaintenanceAuthorized: true, processLifetime: 'one-shot', ephemeral: true,
+      prompt: 'Review saved preferences.', runtimeWorkspaceRoots: [vaultRoot], sandbox: 'read-only',
+      threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG, vaultRoot,
+    })
+    const outputs = scenario.stub.requestSummariesSinceBaseline().flatMap(summary => summary.functionCallOutputs ?? [])
+    const pages = [...new Set(outputs)].map(output => JSON.parse(output))
+    expect(pages).toEqual(records.map(({ id, section, text, updatedAt }, index) => ({
+      document: { exists: true, records: [{ id, section, text, updatedAt }] },
+      ...(index === 0 && { nextCursor: cursor }),
+    })))
+  }, TURN_TIMEOUT_MS)
+
   it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
     const scenario = await prepareScriptedTurnScenario()
     const vaultRoot = scenario.turnInput.workingDirectory

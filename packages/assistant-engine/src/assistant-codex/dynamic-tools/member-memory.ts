@@ -1,8 +1,6 @@
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
 import { toolTextResult as memberMemoryTextResult } from '../tool-failure-diagnostics.js'
-import {
-  memorySectionSchema,
-} from '@murphai/contracts'
+import { memoryRecordMetadataSchema, memorySectionSchema, type MemoryDocumentSnapshot } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   forgetMemory,
@@ -18,7 +16,7 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const memberMemoryArgumentsSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('show') }).strict(),
+  z.object({ action: z.literal('show'), cursor: memoryRecordMetadataSchema.shape.id.optional() }).strict(),
   z.object({
     action: z.literal('upsert'),
     section: memorySectionSchema,
@@ -43,7 +41,7 @@ export const MURPH_MEMBER_MEMORY_TOOL = {
   name: 'member_memory',
   description: [
     'Read, add, update, or forget saved member memory during silent memory consolidation.',
-    'show returns every record with its id, section, text, and updatedAt.',
+    'show returns a page of records with id, section, text, and updatedAt. Pass nextCursor as cursor to read the next page. Leave any oversizedRecordId unchanged.',
     'upsert adds one fact.',
     "update and forget take a memoryId from show and that record's updatedAt as expectedUpdatedAt.",
     'A successful write result is final and needs no second show.',
@@ -76,6 +74,7 @@ export function readMemberMemoryDynamicToolRequest(input: {
     schema: memberMemoryArgumentsSchema,
     schemaRootKeys: [
       'action',
+      'cursor',
       'expectedUpdatedAt',
       'memoryId',
       'section',
@@ -120,17 +119,7 @@ export async function executeMemberMemoryDynamicTool(input: {
       const document = await readMemoryDocument(input.vaultRoot)
       return memberMemoryTextResult(
         true,
-        JSON.stringify({
-          document: {
-            exists: document.exists,
-            records: document.records.map(({ id, section, text, updatedAt }) => ({
-              id,
-              section,
-              text,
-              updatedAt,
-            })),
-          },
-        }),
+        JSON.stringify(memoryPage(document, input.request.args.cursor)),
       )
     }
 
@@ -190,6 +179,29 @@ export async function executeMemberMemoryDynamicTool(input: {
       'handler_exception', error,
     )
   }
+}
+
+// Leave room for the envelope and cursor below the app-server's 48 KB text limit.
+const MEMORY_PAGE_RECORD_BYTES = 47_000
+
+function memoryPage(document: MemoryDocumentSnapshot, cursor?: string) {
+  const records = []
+  let bytes = 0
+  const sorted = document.records.sort((a, b) => a.id.localeCompare(b.id))
+  for (const { id, section, text, updatedAt } of sorted) {
+    if (cursor && id.localeCompare(cursor) <= 0) continue
+    const record = { id, section, text, updatedAt }
+    const size = Buffer.byteLength(JSON.stringify(record)) + 1
+    if (size + bytes > MEMORY_PAGE_RECORD_BYTES) {
+      if (records.length) return { document: { exists: document.exists, records }, nextCursor: records[records.length - 1]!.id }
+      // One oversized fact must not hide later records or be returned as editable partial text.
+      return { document: { exists: document.exists, records }, oversizedRecordId: id,
+        ...(id !== sorted.at(-1)?.id && { nextCursor: id }) }
+    }
+    records.push(record)
+    bytes += size
+  }
+  return { document: { exists: document.exists, records } }
 }
 
 // A write reports the stored id and version. Section and text are echoed only
