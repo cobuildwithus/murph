@@ -16,6 +16,7 @@ import {
 import { eventImportDecisionSchema, toLocalDayKey, vaultMetadataSchema, type ExternalRef } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import { importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
+import { normalizeMetricValue, unitsEquivalent } from "@murphai/health-metrics";
 import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } from "@murphai/query";
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
 
@@ -421,10 +422,9 @@ function clinicalProposalDate(
   return null;
 }
 
-function clinicalSourceCodings(source: NonNullable<Job["source"]>, text: string | undefined): Set<string> | null {
-  if (!source.resource) return null;
+function clinicalSourceCodings(resource: Record<string, unknown>): Set<string> {
   const codings = new Set<string>();
-  const pending: unknown[] = text ? [JSON.parse(text)] : [];
+  const pending: unknown[] = [resource];
   while (pending.length) {
     const value = pending.pop();
     if (!value || typeof value !== "object") continue;
@@ -435,6 +435,36 @@ function clinicalSourceCodings(source: NonNullable<Job["source"]>, text: string 
     for (const child of Object.values(value)) pending.push(child);
   }
   return codings;
+}
+
+function observationQuantity(resource: Record<string, unknown>) {
+  if (resource.resourceType !== "Observation" || resource.component) return null;
+  const quantity = object(resource.valueQuantity);
+  const unit = quantity.code ?? quantity.unit;
+  if (typeof quantity.value === "number" && typeof unit === "string" && !quantity.comparator) {
+    return { value: quantity.value, unit };
+  }
+  if (typeof resource.valueString !== "string") return null;
+  // A single labeled quantity, excluding ranges and other multi-value text.
+  const match = /^[a-z\s:]*?([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-z%][a-z/%]*)\.?$/iu.exec(resource.valueString.trim());
+  return match ? { value: Number(match[1]), unit: match[2]! } : null;
+}
+
+function matchesObservationQuantity(
+  entry: Extract<ClinicalDocumentExtractionPayload, { kind: "measurement" }>["measurements"][number],
+  source: { value: number; unit: string },
+): boolean {
+  if (unitsEquivalent(entry.unit, source.unit)) return entry.value === source.value;
+  const actual = normalizeMetricValue({ metricKey: entry.metric, ...source });
+  const proposed = normalizeMetricValue({ metricKey: entry.metric, unit: entry.unit, value: entry.value });
+  return actual.canonicalValue !== null && actual.canonicalUnit === proposed.canonicalUnit
+    && actual.canonicalValue === proposed.canonicalValue;
+}
+
+function clinicalResourceEvidence(source: NonNullable<Job["source"]>, text?: string) {
+  if (!source.resource) return null;
+  const resource = text ? object(JSON.parse(text)) : {};
+  return { codings: clinicalSourceCodings(resource), quantity: observationQuantity(resource) };
 }
 
 function clinicalTypedFactEvidenceHold(record: ClinicalDocumentExtractionOutput["records"][number], text: string | undefined): string | null {
@@ -456,15 +486,21 @@ function clinicalPageLocator(mediaType: string, page: number): { page?: number }
   return ["application/pdf", "image/png", "image/jpeg"].includes(mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "") ? { page } : {};
 }
 
-function clinicalEvidenceHoldReason(record: ClinicalDocumentExtractionOutput["records"][number], codings: Set<string> | null, text: string | undefined): string | null {
+function clinicalEvidenceHoldReason(record: ClinicalDocumentExtractionOutput["records"][number], evidence: ReturnType<typeof clinicalResourceEvidence>, text: string | undefined): string | null {
   const typedHold = clinicalTypedFactEvidenceHold(record, text);
   if (typedHold) return typedHold;
-  if (codings === null) return null;
+  if (!evidence) return null;
   if ((record.payload.kind === "note" && !record.payload.clinicalFact) || !text || !record.excerpt || !text.includes(record.excerpt)
     || (record.dateBasis === "document" && (!record.dateEvidence || !text.includes(record.dateEvidence)))) {
     return "Clinical resource proposal lacks literal source evidence.";
   }
-  const payload = record.payload;
+  return clinicalResourcePayloadHold(record.payload, evidence);
+}
+
+function clinicalResourcePayloadHold(payload: ClinicalDocumentExtractionPayload, { codings, quantity }: NonNullable<ReturnType<typeof clinicalResourceEvidence>>): string | null {
+  if (quantity && payload.kind === "measurement" && payload.measurements.some(entry => !matchesObservationQuantity(entry, quantity))) {
+    return "Clinical measurement disagrees with the source observation.";
+  }
   if (payload.kind === "note" && payload.clinicalFact?.codings?.some((coding) => !codings.has(JSON.stringify([coding.code, coding.system])))) {
     return "Clinical source fact coding does not match source coding.";
   }
@@ -490,7 +526,7 @@ async function planClinicalEnrichmentPage(
   let held = 0;
   const identities = new Set<string>();
   const verifiedIds: string[] = [];
-  const sourceCodings = clinicalSourceCodings(source, sourceText);
+  const evidence = clinicalResourceEvidence(source, sourceText);
   const hold = (reason: string) => {
     held++;
     if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
@@ -499,7 +535,7 @@ async function planClinicalEnrichmentPage(
     const output = clinicalDocumentExtractionOutputSchemaForFamily(family).parse(prepared.outputs[family]);
     if (output.status === "blocked") hold(`${family}: ${output.reason}`.slice(0, 500));
     for (const record of output.records) {
-      const evidenceHold = clinicalEvidenceHoldReason(record, sourceCodings, sourceText);
+      const evidenceHold = clinicalEvidenceHoldReason(record, evidence, sourceText);
       if (evidenceHold) {
         hold(evidenceHold); continue;
       }
