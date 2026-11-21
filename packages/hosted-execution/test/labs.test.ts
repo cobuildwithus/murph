@@ -173,6 +173,11 @@ describe("hosted Labs contract", () => {
     })).toMatchObject({ action: "locations", status: "available" });
 
     expect(() => parseHostedRuntimeLabsToolResponse({
+      action: "locations", ...responseBase, homeCollectionAvailable: false,
+      locations: [], radiusMiles: 25, status: "not_served", partial: true, zipCode: "00000",
+    })).toThrow();
+
+    expect(() => parseHostedRuntimeLabsToolResponse({
       action: "locations",
       ...responseBase,
       homeCollectionAvailable: true,

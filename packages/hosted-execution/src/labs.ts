@@ -55,6 +55,12 @@ export const hostedRuntimeLabsToolRequestSchema = z.discriminatedUnion(
   ],
 );
 
+const coverageRequest = { includeCoverage: z.literal(true).optional() };
+const labsWireRequestSchema = z.discriminatedUnion("action", [
+  hostedRuntimeLabsSearchRequestSchema.extend(coverageRequest),
+  hostedRuntimeLabsLocationsRequestSchema.extend(coverageRequest),
+]);
+
 const hostedRuntimeLabsCatalogPriceSchema = z
   .object({
     amount: z.string().max(32).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u),
@@ -119,6 +125,7 @@ export const hostedRuntimeLabsLocationSchema = z
   .strict();
 
 const hostedRuntimeLabsResponseBase = {
+  partial: z.literal(true).optional(),
   checkedAt: z.isoDateTime({ offset: true }),
   orderingStatus: z.literal("discovery_only"),
   orderableThroughMurph: z.literal(false),
@@ -136,7 +143,7 @@ const hostedRuntimeLabsLocationsResponseSchema = z
   .object({
     action: z.literal("locations"),
     ...hostedRuntimeLabsResponseBase,
-    status: z.enum(["available", "not_served"]),
+    status: z.enum(["available", "not_served", "unknown"]),
     zipCode: z.string().regex(/^\d{5}$/u),
     radiusMiles: hostedRuntimeLabsRadiusMilesSchema,
     homeCollectionAvailable: z.boolean(),
@@ -146,11 +153,11 @@ const hostedRuntimeLabsLocationsResponseSchema = z
   .superRefine((response, context) => {
     if (
       response.status === "not_served"
-      && (response.homeCollectionAvailable || response.locations.length > 0)
+      && (response.partial || response.homeCollectionAvailable || response.locations.length > 0)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "A not-served response cannot include an available collection option.",
+        message: "A not-served response requires complete coverage and no collection option.",
         path: ["status"],
       });
     }
@@ -165,14 +172,10 @@ export const hostedRuntimeLabsToolResponseSchema = z.discriminatedUnion(
 );
 
 export type HostedRuntimeLabsToolRequest = z.infer<
-  typeof hostedRuntimeLabsToolRequestSchema
+  typeof labsWireRequestSchema
 >;
-export type HostedRuntimeLabsSearchRequest = z.infer<
-  typeof hostedRuntimeLabsSearchRequestSchema
->;
-export type HostedRuntimeLabsLocationsRequest = z.infer<
-  typeof hostedRuntimeLabsLocationsRequestSchema
->;
+export type HostedRuntimeLabsSearchRequest = Extract<HostedRuntimeLabsToolRequest, { action: "search" }>;
+export type HostedRuntimeLabsLocationsRequest = Extract<HostedRuntimeLabsToolRequest, { action: "locations" }>;
 export type HostedRuntimeLabsOffering = z.infer<
   typeof hostedRuntimeLabsOfferingSchema
 >;
@@ -192,7 +195,7 @@ export type HostedRuntimeLabsLocationsResponse = z.infer<
 export function parseHostedRuntimeLabsToolRequest(
   value: unknown,
 ): HostedRuntimeLabsToolRequest {
-  const parsed = hostedRuntimeLabsToolRequestSchema.safeParse(value);
+  const parsed = labsWireRequestSchema.safeParse(value);
   if (!parsed.success) {
     throw new ContractValidationError("Hosted Labs tool request is invalid.");
   }

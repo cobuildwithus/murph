@@ -69,9 +69,9 @@ describe("Junction labs provider boundary", () => {
             type: "panel",
           }),
         ],
-        page: 2,
-        pages: 7,
-        total: 123,
+        page: 1,
+        pages: 1,
+        total: 4,
       });
     });
 
@@ -107,6 +107,41 @@ describe("Junction labs provider boundary", () => {
       /offeringId|providerId|labId|slug|provider/iu,
     );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("scans past non-orderable rows and reports when the page budget ends", async () => {
+    const search = async (pages: number, match: number) => {
+      const fetchImpl = vi.fn<typeof fetch>(async input => {
+        const page = Number(toUrl(input).searchParams.get("page"));
+        return jsonResponse({ page, pages, total: pages, markers: [junctionMarker({ is_orderable: page === match })] });
+      });
+      const result = await executeJunctionLabsTool({
+        action: "search", query: "marker", limit: 1, includeCoverage: true,
+      }, dependencies(fetchImpl));
+      expect(fetchImpl).toHaveBeenCalledTimes(Math.min(4, pages));
+      return result;
+    };
+    await expect(search(2, 2)).resolves.toMatchObject({ items: [{ name: "Fixture health panel" }] });
+    const exhausted = await search(2, 0);
+    expect(exhausted).toMatchObject({ items: [] });
+    expect(exhausted).not.toHaveProperty("partial");
+    await expect(search(100, 99)).resolves.toMatchObject({ items: [], partial: true });
+  });
+
+  it("keeps unchecked collection networks distinct from an unserved ZIP", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async input => {
+      if (toUrl(input).pathname.endsWith("/area/info")) return jsonResponse({
+        central_labs: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [
+          i, { lab_id: i + 1, supported_bill_types: [], patient_service_centers: { within_radius: 1, radius: "25", appointment_with_vital: false } },
+        ])),
+        phlebotomy: { is_served: false, providers: [] }, zip_code: "10001",
+      });
+      return jsonResponse({ patient_service_centers: [], lab_id: Number(toUrl(input).searchParams.get("lab_id")), slug: "lab" });
+    });
+    await expect(executeJunctionLabsTool({ action: "locations", zipCode: "10001", includeCoverage: true }, dependencies(fetchImpl)))
+      .resolves.toMatchObject({ locations: [], status: "unknown", partial: true });
+    await expect(executeJunctionLabsTool({ action: "locations", zipCode: "10001" }, dependencies(fetchImpl)))
+      .rejects.toMatchObject({ code: "LABS_RESULTS_INCOMPLETE" });
   });
 
   it("keeps a genuine empty search distinct from all-malformed provider drift", async () => {

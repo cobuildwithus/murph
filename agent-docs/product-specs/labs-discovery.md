@@ -97,7 +97,12 @@ retried automatically.
 
 A provider timeout, rate limit, or server failure is temporary unavailability;
 it must not be rendered as an empty catalog or an unsupported ZIP. A clean
-provider response that reports no local coverage is `not_served`. Invalid
+provider response that reports no local coverage is `not_served`. Search checks
+up to four catalog pages. Location searches check up to four eligible networks. When
+either search is incomplete, a runner requesting coverage details gets
+`partial: true`. Without a confirmed collection option, partial ZIP coverage
+has status `unknown`. Older runners receive the existing result shape for
+confirmed matches and a service error for an inconclusive empty result. Invalid
 provider data fails closed behind a sanitized error rather than leaking a raw
 body or inventing a fact.
 

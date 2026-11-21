@@ -21,6 +21,7 @@ const JUNCTION_LABS_TIMEOUT_MS = 8_000;
 const JUNCTION_SEARCH_RESPONSE_MAX_BYTES = 1_024 * 1_024;
 const JUNCTION_AREA_RESPONSE_MAX_BYTES = 256 * 1_024;
 const JUNCTION_PSC_RESPONSE_MAX_BYTES = 512 * 1_024;
+const JUNCTION_MAX_SEARCH_PAGES = 4;
 const JUNCTION_MAX_PSC_LABS = 4;
 const JUNCTION_PSC_CONCURRENCY = 3;
 const JUNCTION_INCLUDED_MARKER_LIMIT = 40;
@@ -92,43 +93,70 @@ async function searchJunctionLabs(
   const providerSize = kind === "all"
     ? limit
     : Math.min(100, Math.max(50, limit * 5));
-  const payload = await requestJunctionResource(
-    runtime,
-    JUNCTION_SEARCH_RESPONSE_MAX_BYTES,
-    (client, requestOptions) => {
-      requestOptions.queryParams = { include_pricing: "true" };
-      return client.labTests.getMarkers(
-        {
-          aLaCarteEnabled: true,
-          name: request.query,
-          page: 1,
-          size: providerSize,
-        },
-        requestOptions,
-      );
-    },
-  );
-  if (!isRecord(payload)) {
-    throw labsUnavailableError(true);
+  const offerings = new Map<string, HostedRuntimeLabsOffering>();
+  let malformed = false;
+  let exhausted = false;
+  let scanned = 0;
+  for (let page = 1; page <= JUNCTION_MAX_SEARCH_PAGES; page++) {
+    const payload = await requestJunctionResource(
+      runtime,
+      JUNCTION_SEARCH_RESPONSE_MAX_BYTES,
+      (client, options) => {
+        options.queryParams = { include_pricing: "true" };
+        return client.labTests.getMarkers({
+          aLaCarteEnabled: true, name: request.query, page, size: providerSize,
+        }, options);
+      },
+    );
+    const candidates = readMarkerArray(payload);
+    scanned += candidates.length;
+    exhausted = markerSearchExhausted(payload, page, scanned);
+    for (const candidate of candidates) {
+      const entry = normalizeJunctionOffering(candidate);
+      if (entry === "not_orderable") continue;
+      if (entry === null) malformed = true;
+      else if ((kind === "all" || entry.offering.kind === kind) && !offerings.has(entry.identity)) {
+        offerings.set(entry.identity, entry.offering);
+      }
+    }
+    if (exhausted || offerings.size >= limit) break;
   }
-  const candidates = readMarkerArray(payload);
-  const normalizedOfferings = candidates
-    .map(normalizeJunctionOffering)
-    .filter((offering): offering is JunctionOfferingProjection => offering !== null);
-  if (candidates.length > 0 && normalizedOfferings.length === 0) {
-    throw labsUnavailableError(true);
-  }
-  const items = dedupeOfferings(normalizedOfferings)
-    .filter(({ offering }) => kind === "all" || offering.kind === kind)
-    .slice(0, limit)
-    .map(({ offering }) => offering);
-
+  if (malformed && !offerings.size) throw labsUnavailableError(true);
   return {
     action: "search",
     ...RESPONSE_BASE,
+    ...partialCoverage(!exhausted || malformed, request.includeCoverage, offerings.size > 0),
     checkedAt: runtime.now().toISOString(),
-    items,
+    items: [...offerings.values()].slice(0, limit),
   };
+}
+
+function markerSearchExhausted(
+  payload: { page?: number | null; pages?: number | null; total?: number | null },
+  page: number,
+  scanned: number,
+) {
+  if (payload.page != null && payload.page !== page) throw labsUnavailableError(true);
+  const { pages, total } = payload;
+  if (total != null && (!Number.isSafeInteger(total) || total < scanned)) throw labsUnavailableError(true);
+  if (pages == null) return total === scanned && (page === 1 || payload.page === page);
+  if (!Number.isSafeInteger(pages) || pages < 0 || (pages < page && !(page === 1 && pages === 0 && scanned === 0))) {
+    throw labsUnavailableError(true);
+  }
+  if (pages > page) return false;
+  if (total != null && total !== scanned) throw labsUnavailableError(true);
+  return true;
+}
+
+function partialCoverage(partial: boolean, includeCoverage: boolean | undefined, hasResult: boolean) {
+  if (!partial) return {};
+  if (includeCoverage) return { partial: true as const };
+  // Older runners accept only the original success shape.
+  if (!hasResult) throw hostedOnboardingError({
+    code: "LABS_RESULTS_INCOMPLETE", httpStatus: 503,
+    message: "Only part of the lab directory could be checked.",
+  });
+  return {};
 }
 
 async function findJunctionLabLocations(
@@ -180,11 +208,9 @@ async function findJunctionLabLocations(
   const locations = dedupeAndSortLocations(locationGroups.flat())
     .slice(0, limit)
     .map(({ location }) => location);
-  const status = homeCollectionAvailable || locations.length > 0
-    ? "available"
-    : "not_served";
-
-  if (status === "not_served" && hadMalformedCoverageData) {
+  const available = homeCollectionAvailable || locations.length > 0;
+  const partial = hadMalformedCoverageData || areaLabs.labIds.length > eligibleLabIds.length;
+  if (!available && hadMalformedCoverageData) {
     throw labsUnavailableError(true);
   }
 
@@ -195,7 +221,8 @@ async function findJunctionLabLocations(
     homeCollectionAvailable,
     locations,
     radiusMiles,
-    status,
+    ...partialCoverage(partial, request.includeCoverage, available),
+    status: available ? "available" : partial ? "unknown" : "not_served",
     zipCode: request.zipCode,
   };
 }
@@ -396,10 +423,14 @@ function readMarkerArray(value: unknown): unknown[] {
   return candidates;
 }
 
-function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection | null {
+function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection | "not_orderable" | null {
   if (!isRecord(value)) {
     return null;
   }
+
+  const orderable = value.is_orderable ?? value.isOrderable;
+  const aLaCarte = value.a_la_carte_enabled ?? value.aLaCarteEnabled;
+  if (orderable === false || aLaCarte === false) return "not_orderable";
 
   const labId = readPositiveInteger(value, "lab_id", "labId");
   const providerId = readBoundedText(value.provider_id ?? value.providerId, 120);
@@ -413,8 +444,8 @@ function normalizeJunctionOffering(value: unknown): JunctionOfferingProjection |
     || providerId === null
     || name === null
     || kind === null
-    || (value.a_la_carte_enabled ?? value.aLaCarteEnabled) !== true
-    || (value.is_orderable ?? value.isOrderable) !== true
+    || aLaCarte !== true
+    || orderable !== true
   ) {
     return null;
   }
@@ -682,19 +713,6 @@ function dedupeAndSortLocations(
     left.location.distanceMiles - right.location.distanceMiles
       || left.location.name.localeCompare(right.location.name)
       || left.identity.localeCompare(right.identity));
-}
-
-function dedupeOfferings(
-  offerings: JunctionOfferingProjection[],
-): JunctionOfferingProjection[] {
-  const seen = new Set<string>();
-  return offerings.filter((offering) => {
-    if (seen.has(offering.identity)) {
-      return false;
-    }
-    seen.add(offering.identity);
-    return true;
-  });
 }
 
 function readPositiveInteger(
