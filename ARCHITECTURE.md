@@ -1666,7 +1666,11 @@ The account-deletion endpoint authenticates the same encrypted browser session
 but admits its suspended owner, so a provider failure can be retried with the
 existing session. This exception grants only deletion; ordinary session reads,
 runtime access, and transaction-time session guards still reject suspension.
-Revoked or expired sessions never qualify.
+Revoked or expired sessions never qualify. For member-requested deletions, the
+suspension transaction also records the confirmed owner and next retry time.
+External retention claims one due request at a time and runs the same deletion
+service. Deleting the member removes the request by cascade. Operator canary
+resets use their own retention policy and never enqueue this member operation.
 Game history beyond one page commits in separate transactions under the suspension
 fence; a request stops after 20 partial pages with a retryable error. The endpoint
 reports every server failure as retryable, and the delete dialog stays open for any

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
 
+import { resumeConfirmedAccountDeletion } from "../hosted-privacy/account-data-service";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import { getPrisma } from "../prisma";
@@ -15,6 +16,7 @@ import { sweepHostedLinqGroupLeaves } from "../hosted-routing/linq-group-leave";
 import { normalizeHostedRetentionDate } from "./cleanup";
 
 export interface HostedExternalRetentionCleanupResult {
+  confirmedAccountDeletion: Awaited<ReturnType<typeof resumeConfirmedAccountDeletion>>;
   healthDataConsentStopRedrive: Awaited<ReturnType<typeof redriveHostedHealthDataConsentStops>>;
   healthDataConsentCleanupRedrive: Awaited<ReturnType<typeof redriveHostedHealthDataConsentCleanups>>;
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
@@ -44,7 +46,9 @@ export async function runHostedExternalRetentionCleanup(input: {
   const runtimeResourceCleanup = await runHostedRuntimeResourceCleanup({ now, prisma });
   const healthDataConsentCleanupRedrive = await redriveHostedHealthDataConsentCleanups({ now, prisma, request: input.request });
 
+  const confirmedAccountDeletion = await resumeConfirmedAccountDeletion({ now, prisma, request: input.request });
   return {
+    confirmedAccountDeletion,
     linqGroupLeaveAttempts,
     healthDataConsentStopRedrive,
     healthDataConsentCleanupRedrive,

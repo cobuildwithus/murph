@@ -233,6 +233,7 @@ import {
   deleteHostedLinqProductionCanaryAccountData,
   HOSTED_ACCOUNT_DATA_STORE_COVERAGE,
   parseHostedAccountDeletionRequest,
+  resumeConfirmedAccountDeletion,
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
@@ -249,6 +250,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_member_billing_ref",
   "prisma.hosted_member_accepted_subscription",
   "prisma.hosted_member_subscription_checkout",
+  "prisma.hosted_account_deletion_request",
   "prisma.hosted_account_deletion_cleanup",
   "prisma.hosted_connected_app_connect_intent",
   "prisma.hosted_connected_apps_session",
@@ -806,14 +808,15 @@ describe("deleteHostedAccountData", () => {
   });
 
 
-  it("keeps the deletion fence when durable cleanup ownership cannot be prepared", async () => {
+  it("records the confirmed owner for a sessionless retry when cleanup preparation fails", async () => {
+    const requests: unknown[] = [];
     const onTransaction = vi.fn();
     const hostedMemberUpdateCalls: unknown[] = [];
     serviceMocks.prepareHostedAccountDeletionCleanup.mockRejectedValue(
       new Error("kms unavailable"),
     );
     const prisma = createHostedAccountDeletionPrismaForTest({
-      hostedMemberUpdateCalls,
+      deletionRequests: requests, hostedMemberUpdateCalls,
       onTransaction,
     });
 
@@ -827,6 +830,8 @@ describe("deleteHostedAccountData", () => {
     });
 
     expect(onTransaction).toHaveBeenCalledTimes(2);
+    expect(requests).toEqual([{ where: { memberId: "member_123" },
+      create: { memberId: "member_123", nextAttemptAt: expect.any(Date) }, update: { nextAttemptAt: expect.any(Date) } }]);
     expect(hostedMemberUpdateCalls).toEqual([{
       data: {
         suspendedAt: expect.any(Date),
@@ -836,6 +841,27 @@ describe("deleteHostedAccountData", () => {
       },
     }]);
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.env.MURPH_TEST_POSTGRES_CONCURRENCY !== "1")("finishes a confirmed deletion from retention without a browser session", async () => {
+    const { getPrisma } = await import("@/src/lib/prisma");
+    const prisma = getPrisma();
+    const memberId = crypto.randomUUID(), other = crypto.randomUUID();
+    const request = new Request("http://localhost/settings/privacy");
+    await prisma.hostedMember.createMany({ data: [{ id: memberId }, { id: other, suspendedAt: new Date() }] });
+    try {
+      serviceMocks.prepareHostedAccountDeletionCleanup.mockRejectedValueOnce(new Error("Temporary cleanup failure"));
+      await expect(deleteHostedAccountData({ memberId, prisma, request })).rejects.toMatchObject({ retryable: true });
+      const pending = await prisma.hostedAccountDeletionRequest.findUniqueOrThrow({ where: { memberId } });
+      const retry = { now: pending.nextAttemptAt, prisma, request: new Request("http://localhost/internal/retention") };
+      expect((await Promise.all([resumeConfirmedAccountDeletion(retry), resumeConfirmedAccountDeletion(retry)])).sort())
+        .toEqual(["completed", "idle"]);
+      expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
+      expect(await prisma.hostedAccountDeletionRequest.count({ where: { memberId } })).toBe(0);
+      expect(await prisma.hostedMember.count({ where: { id: other } })).toBe(1);
+    } finally {
+      await prisma.hostedMember.deleteMany({ where: { id: { in: [memberId, other] } } });
+    }
   });
 
   it("does not suspend while exact Customer claim recovery cannot reach Stripe", async () => {
@@ -4720,6 +4746,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     state: string;
   }>;
   hostedComputerRunRows?: Record<string, unknown>[];
+  deletionRequests?: unknown[];
   hostedMemberUpdateCalls?: unknown[];
   familyBillingRefRecords?: Record<string, unknown>[];
   familyClaimOwnerMemberIds?: string[];
@@ -4877,6 +4904,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
+    hostedAccountDeletionRequest: { upsert: async args => { input.deletionRequests?.push(args); } },
     $executeRaw: async (...args: unknown[]) => {
       recordTerminalStatement("executeRaw");
       input.operationOrder?.push("executeRaw");
@@ -5522,6 +5550,7 @@ type HostedAccountDeletionPrismaDeleteDelegate = {
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {
+  hostedAccountDeletionRequest: { upsert: (args: unknown) => Promise<void> };
   $executeRaw: (...args: unknown[]) => Promise<number>;
   $queryRaw: (...args: unknown[]) => Promise<Array<Record<string, unknown>>>;
   deviceConnection: HostedAccountDeletionPrismaDeleteDelegate & {
