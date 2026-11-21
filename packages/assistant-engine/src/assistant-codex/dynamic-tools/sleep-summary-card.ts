@@ -15,13 +15,14 @@ export async function resolveTrustedSleepSummaryCard(input: {
   const efficiency = night.sleepEfficiency.selection.value
   const rmssd = rounded(night.hrv.selection.value, 1, 1000)
   const sdnn = rounded(sdnnMilliseconds, 1, 1000)
+  const totalSleepMinutes = Math.round(night.totalSleepMinutes.selection.value!)
   return sleepSummaryResponseCardV1Schema.parse({
     kind: 'sleep_summary', version: 1, localDate: input.date,
     bedtime: hasWindow ? clock(start, timeZone) : null,
     wakeTime: hasWindow ? clock(end, timeZone) : null,
-    totalSleepMinutes: Math.round(night.totalSleepMinutes.selection.value!),
+    totalSleepMinutes,
     score: rounded(night.sleepScore.selection.value ?? night.sleepPerformance.selection.value, 0, 100),
-    stages: sleepStages(night),
+    stages: sleepStages(night, totalSleepMinutes),
     awakeMinutes: rounded(night.awakeMinutes.selection.value, 1, 1440),
     efficiencyPercent: rounded(efficiency === null ? null : efficiency <= 1 ? efficiency * 100 : efficiency, 1, 100),
     hrv: rmssd !== null ? { milliseconds: rmssd, method: 'rmssd' }
@@ -31,12 +32,12 @@ export async function resolveTrustedSleepSummaryCard(input: {
   })
 }
 
-function sleepStages(night: WearableSleepCardNight['night']): SleepSummaryResponseCardV1['stages'] {
+function sleepStages(night: WearableSleepCardNight['night'], totalSleepMinutes: number): SleepSummaryResponseCardV1['stages'] {
   const deepMinutes = rounded(night.deepMinutes.selection.value, 0, 1440)
   const remMinutes = rounded(night.remMinutes.selection.value, 0, 1440)
   const lightMinutes = rounded(night.lightMinutes.selection.value, 0, 1440)
   return deepMinutes !== null && remMinutes !== null && lightMinutes !== null
-    && deepMinutes + remMinutes + lightMinutes > 0 && deepMinutes + remMinutes + lightMinutes <= 1440
+    && deepMinutes + remMinutes + lightMinutes > 0 && deepMinutes + remMinutes + lightMinutes <= totalSleepMinutes
     ? { deepMinutes, remMinutes, lightMinutes } : null
 }
 
