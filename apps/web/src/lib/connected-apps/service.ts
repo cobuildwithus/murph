@@ -1006,7 +1006,7 @@ async function executeConnectedAppsRead(input: {
   return wrapHostedConnectedAppsReadResult(await client.executeDirect({
     account: account.id, arguments: { ...args, ...policy.forcedArguments },
     toolSlug, userId: input.memberId, version: policy.version,
-  }), policy.result);
+  }), policy.result, input.input.calendarMemberAddress);
 }
 
 async function searchConnectedApps(input: {

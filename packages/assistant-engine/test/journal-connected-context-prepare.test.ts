@@ -564,6 +564,24 @@ describe('prepared Journal acquisition', () => {
     expect(candidates(prepared.instructions)[1].existingPlans).toEqual([{ accountId: 'gmail-account', sourceId: 'mail-1', eventId: saved.eventId, revision: 1, currentRevision: 2, deleted: true }])
   })
 
+  it('verifies the appointment without exposing provider metadata or the guest list', async () => {
+    const request = async (input: HostedConnectedAppsRequest) => {
+      if (input.operation === 'manage') return { result: { accounts: [account('googlecalendar')], toolkits: [] } }
+      if (input.operation !== 'read') throw new Error('Unexpected operation')
+      if (input.input.toolSlug.endsWith('LIST_CALENDARS')) return envelope({ items: [{ id: 'owned', accessRole: 'owner', primary: true }] })
+      if (input.input.toolSlug.endsWith('EVENTS_GET')) return envelope({ ...event('visit'), colorId: '2',
+        extendedProperties: { private: { display: 'grid' } }, attendees: [
+          ...Array.from({ length: 1600 }, () => ({ displayName: 'Ava', comment: 'x'.repeat(80) })),
+          { self: true, responseStatus: 'accepted' },
+        ] })
+      return envelope({ items: [] })
+    }
+    const prepared = await prepare(request)
+    const result = await prepared.readSource('googlecalendar:googlecalendar-account:owned:visit')
+    expect(result).toMatchObject({ status: 'verified', item: { id: 'visit', description: 'PRIVATE DESCRIPTION', selfResponse: 'accepted' } })
+    expect(JSON.stringify(result)).not.toMatch(/colorId|extendedProperties|attendees|displayName/)
+  })
+
   it.each(['googlecalendar', 'outlook'] as const)('binds exact %s reads to eligible calendars, even outside the digest', async provider => {
     const request = vi.fn(async (request: HostedConnectedAppsRequest) => {
       if (request.operation === 'manage') return { result: { accounts: [account(provider)], toolkits: [] } }
@@ -580,7 +598,7 @@ describe('prepared Journal acquisition', () => {
     expect(prepared.issues).toEqual([])
     const locator = `${provider}:${provider}-account:owned:outside`
     expect(await prepared.readSource(`${provider}:${provider}-account:unlisted:outside`)).toEqual({ status: 'unverified' })
-    expect(await prepared.readSource(locator)).toMatchObject({ status: 'verified', item: { id: 'outside', description: 'PRIVATE DESCRIPTION', attendees: undefined } })
+    expect(await prepared.readSource(locator)).toMatchObject({ status: 'verified', item: { id: 'outside', description: 'PRIVATE DESCRIPTION' } })
     expect(request.mock.calls.at(-1)?.[0]).toMatchObject({ operation: 'read', input: { arguments: { calendar_id: 'owned', event_id: 'outside' } } })
     for (let i = 1; i < 20; i++) expect(await prepared.readSource(locator)).toMatchObject({ status: 'verified' })
     const count = request.mock.calls.length
