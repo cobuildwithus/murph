@@ -133,7 +133,9 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     const access = await vi.importActual<typeof import("@/src/lib/hosted-mailbox/runtime-access")>("@/src/lib/hosted-mailbox/runtime-access");
     m.activeAccess.mockImplementation(access.requireHostedRuntimeActiveAccessForUpdateTx);
     await db.hostedMember.createMany({ data: [a, b, room].map(id => ({ id, billingStatus: "not_started" })) });
-    await db.hostedMemberIdentity.createMany({ data: [a, b].map((memberId, index) => ({ memberId, phoneNumberVerifiedAt: new Date(), phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102") })) });
+    const identities = [a, b].map((memberId, index) => ({ memberId, phoneNumberVerifiedAt: now,
+      phoneLookupKey: createHostedPhoneLookupKey(index === 0 ? "+15555550101" : "+15555550102")! }));
+    await db.hostedMemberIdentity.createMany({ data: identities });
     for (const actorMemberId of [a, b]) await runGameCommand({ actorMemberId, command: { type: "setProfile", firstName: actorMemberId === a ? "Ava" : "Sam", timeZone: "UTC" } });
     const tokens = new Map<string, string>();
     for (const [index, gameId] of [older, newer].entries()) {
@@ -146,7 +148,7 @@ describe.skipIf(!enabled)("game bootstrap lifecycle recovery against PostgreSQL"
     }
     // Reuse the prepared-container fixture; provider routing remains absent.
     await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: a, participants: {
-      create: [a, b].map(participantMemberId => ({ participantMemberId, handleLookupKey: participantMemberId, firstSeenAt: now, lastSeenAt: now })),
+      create: identities.map(({ memberId, phoneLookupKey }) => ({ participantMemberId: memberId, handleLookupKey: phoneLookupKey, firstSeenAt: now, lastSeenAt: now })),
     } } });
     const proposals = new Map<string, string>();
     for (const gameId of [newer, older]) {

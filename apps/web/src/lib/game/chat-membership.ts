@@ -103,7 +103,19 @@ export async function readPairGameChatTx(tx: Prisma.TransactionClient, players: 
     where: { maxPlayers: 2, ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, chatContainerMemberId: { not: null } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: { chatContainerMemberId: true },
   });
-  return bound?.chatContainerMemberId ?? null;
+  const room = bound?.chatContainerMemberId;
+  if (!room) return null;
+  // A participant row can outlive the verified address that identified its player.
+  const current = await tx.$queryRaw<{ participant_member_id: string }[]>`
+    SELECT p.participant_member_id FROM hosted_thread_container_participant p
+    LEFT JOIN hosted_member_identity i ON i.member_id = p.participant_member_id
+    LEFT JOIN hosted_member_email_authorization e ON e.member_id = p.participant_member_id
+    WHERE p.container_member_id = ${room} AND p.removed_at IS NULL
+      AND p.participant_member_id IN (${players[0]}, ${players[1]})
+      AND ((p.handle_lookup_key = i.phone_lookup_key AND i.phone_number_verified_at IS NOT NULL)
+        OR (p.handle_lookup_key = e.verified_email_lookup_key AND e.verified_email_verified_at IS NOT NULL))
+  `;
+  return current.length === 2 ? room : null;
 }
 
 /** Recheck discovery under the pair lock so simultaneous kickoffs share a room. */
