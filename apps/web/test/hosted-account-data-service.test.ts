@@ -67,6 +67,8 @@ const serviceMocks = vi.hoisted(() => ({
   resolveDeviceProviderApplicationForConnection: vi.fn(),
 }));
 
+// Product feedback reaches the changelog, whose generated editions the PostgreSQL job doesn't build.
+vi.mock("@/src/lib/changelog", () => ({ resolveChangelogCardItems: vi.fn() }));
 vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
   readHostedLinqProductionCanaryMemberId: serviceMocks.readHostedLinqProductionCanaryMemberId,
 }));
