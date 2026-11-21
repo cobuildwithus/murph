@@ -18,6 +18,7 @@ import {
   findEventByExternalRef,
   initializeVault,
   readEvent,
+  runMealPhotoMaintenance,
   showAutomation,
   upsertEvent,
 } from "@murphai/core";
@@ -385,6 +386,32 @@ describe("hosted meal photo mailbox import", () => {
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
       vaultRoot,
     })).resolves.not.toBeNull();
+  });
+
+  it("matches a later camera upload to a meal saved with the food journal command", async () => {
+    const vaultRoot = await createTestVault();
+    const photo = await readFile(new URL("./fixtures/synthetic-meal-photo.jpg", import.meta.url));
+    const photoPath = path.join(vaultRoot, "lunch.jpg");
+    await writeFile(photoPath, photo);
+    const capturedAt = new Date().toISOString();
+    // The skill's save passes the photo; `meal add --photo` hands it to core as photoPath.
+    const skill = await readFile(new URL("../../assistant-engine/skills/food-journal/SKILL.md", import.meta.url), "utf8");
+    const command = skill.split("## The save")[1]!.split("```sh\nvault-cli ")[1]!.split("\n```")[0]!;
+    expect(command).toContain('--photo "<storedPath>"');
+    await addMeal({ vaultRoot, photoPath, name: "Bean salad", note: "One plate", occurredAt: capturedAt });
+    const wake = createMealPhotoWake();
+    Object.assign(wake.mealPhoto, mealPhotoIdentity(photo), { capturedAt });
+    const result = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto: async () => photo }),
+      item: createMealPhotoMailboxItem(), vaultRoot, wake,
+    });
+    expect(result.reasonCode).toBe("meal_photo.already_logged");
+    expect(await runMealPhotoMaintenance({ vaultRoot })).toMatchObject({ thumbnailCount: 1 });
+    const replica = await createBrowserVaultReplica({ vault: await readVault(vaultRoot),
+      metricPoints: [], generatedAt: capturedAt, sourceBundleHash: "b".repeat(64) });
+    expect(replica.meals?.days.flatMap(day => day.meals)).toEqual([
+      expect.objectContaining({ name: "Bean salad", thumbnail: expect.anything(), uploadId: CAPTURE_ID }),
+    ]);
   });
 
   it("links the phone's capture of a texted photo to its meal instead of adding another", async () => {

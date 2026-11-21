@@ -73,6 +73,11 @@ it('fails closed on unreadable optional preference evidence without inventing an
   expect(containsNutritionGoalInvitation('ordinary meal confirmation')).toBe(false)
 })
 
+it('includes the retained attachment in the text-photo meal save instructions', async () => {
+  const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'), 'utf8')
+  expect(skill.split('## The save')[1]).toMatch(/--photo "<storedPath>"/u)
+})
+
 it('keeps the shipped invitation instructions compatible with the exact renderer contract', async () => {
   const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'food-journal', 'SKILL.md'), 'utf8')
   expect(skill).toContain(DAILY_NUTRITION_OPTIONAL_GOALS_INTRO)

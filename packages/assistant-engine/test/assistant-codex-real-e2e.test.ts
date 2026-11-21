@@ -3130,6 +3130,37 @@ describeRealCodex('real model canonical production journeys', () => {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
     }
   }, 600_000)
+  it('saves the retained message photo with the meal and its nutrition', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const photo = 'raw/inbox/meal/attachments/lunch.jpg'
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({
+        config, goalScenario: 'no-goals', seedMeals: false, allowMealWrites: true,
+        initialPrompt: [
+          'Log my tofu rice bowl at lunch. I ate the whole portion. The label gives 480 calories,',
+          '21 g protein, 62 g carbs, 16 g fat and 7 g fiber. I use nutrition numbers.',
+          'The active vault is ./vault. Current message attachment storedPath: ' + photo,
+        ].join(' '),
+        setupVault: async vaultRoot => {
+          await mkdir(path.dirname(path.join(vaultRoot, photo)), { recursive: true })
+          await cp(new URL('../../assistant-runtime/test/fixtures/synthetic-meal-photo.jpg', import.meta.url), path.join(vaultRoot, photo))
+        },
+        verifyVault: async vaultRoot => {
+          const meals = (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.kind === 'meal')
+          expect(meals).toHaveLength(1)
+          expect(meals[0]?.attributes).toMatchObject({
+            attachments: expect.arrayContaining([expect.objectContaining({ role: 'photo' })]),
+            nutrition: { totals: { calories: 480, proteinGrams: 21 } },
+          })
+        },
+      })
+      expect(result.attachCallCount).toBe(1)
+      expect(result.card).toMatchObject({ kind: 'daily_nutrition', mealCount: 1 })
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 600_000)
+
   it('real model meal dish names separate notes and exclude non-food observations', async () => {
     const config = await resolveRealCodexE2eConfig()
     const root = await mkdtemp(path.join(tmpdir(), 'murph-meal-names-e2e-'))

@@ -4164,6 +4164,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
           return await automationTool.request({
             action: "save",
             instructions: "Send the unrelated reminder.",
+            requestedAt: "2026-08-06T21:00:00.000Z",
             schedule: {
               at: "2026-08-07T13:00:00.000Z",
               kind: "at",

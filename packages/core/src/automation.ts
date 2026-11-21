@@ -154,6 +154,7 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  requestedAt?: string;
   resumeAt?: Date;
   /** Scheduler-only lower bound for the first occurrence after a cadence migration. */
   scheduleNotBefore?: Date;
@@ -920,18 +921,37 @@ function parseAutomationRecord(
   };
 }
 
-async function loadAutomationRecords(vaultRoot: string): Promise<AutomationRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
+async function loadAutomationRecords(
+  vaultRoot: string,
+  selection?: { automationId?: string; slug?: string; patch?: Pick<PatchAutomationInput, "slug"> },
+): Promise<AutomationRecord[]> {
+  const documents = await loadMarkdownRegistryDocuments({
     vaultRoot,
     directory: AUTOMATIONS_DIRECTORY,
-    recordFromParts: parseAutomationRecord,
-    isExpectedRecord: (record) =>
-      record.docType === AUTOMATION_DOC_TYPE && record.schemaVersion === AUTOMATION_SCHEMA_VERSION,
+    recordFromParts: (attributes, relativePath, markdown) => ({
+      automationId: requireString(attributes.automationId, "automationId", 64),
+      slug: normalizeSlug(attributes.slug, "slug"),
+      attributes, relativePath, markdown,
+    }),
+    isExpectedRecord: ({ attributes }) =>
+      attributes.docType === AUTOMATION_DOC_TYPE && attributes.schemaVersion === AUTOMATION_SCHEMA_VERSION,
     invalidCode: "VAULT_INVALID_AUTOMATION",
     invalidMessage: "Automation registry document has an unexpected shape.",
   });
-
-  return sortAutomationRecords(records);
+  let relevant = documents;
+  if (selection) {
+    const selected = selectAutomationRecord(documents, selection);
+    if (!selected) return [];
+    relevant = [selected];
+    if (selection.patch) {
+      // A patch also checks the destination slug and retires the parent's live follow-ups.
+      const requestedSlug = normalizeSlug(selection.patch.slug ?? selected.slug, "slug");
+      relevant = documents.filter(document => document === selected || document.slug === requestedSlug
+        || (document.attributes.followUpParentAutomationId === selected.automationId && document.attributes.status !== "archived"));
+    }
+  }
+  return sortAutomationRecords(relevant.map(({ attributes, relativePath, markdown }) =>
+    parseAutomationRecord(attributes, relativePath, markdown)));
 }
 
 function sortAutomationRecords(records: AutomationRecord[]): AutomationRecord[] {
@@ -1110,14 +1130,14 @@ export async function readAutomation(
 export async function showAutomation(
   input: ReadAutomationInput,
 ): Promise<AutomationRecord | null> {
-  const records = await loadAutomationRecords(input.vaultRoot);
-  return selectAutomationRecord(records, input);
+  const [record] = await loadAutomationRecords(input.vaultRoot, input);
+  return record ?? null;
 }
 
-function selectAutomationRecord(
-  records: AutomationRecord[],
+function selectAutomationRecord<T extends { automationId: string; slug: string }>(
+  records: T[],
   input: { automationId?: string; slug?: string },
-): AutomationRecord | null {
+): T | null {
   return selectExistingRegistryRecord({
     records,
     recordId: input.automationId,
@@ -1209,11 +1229,9 @@ export async function patchAutomation(
   assertAutomationPatchHasChanges(input);
 
   return withAutomationRegistryLock(input.vaultRoot, async () => {
-    const records = await loadAutomationRecords(input.vaultRoot);
-    const existingRecord = selectAutomationRecord(records, {
-      automationId: input.lookup,
-      slug: input.lookup,
-    });
+    const selection = { automationId: input.lookup, slug: input.lookup };
+    const records = await loadAutomationRecords(input.vaultRoot, { ...selection, patch: input });
+    const existingRecord = selectAutomationRecord(records, selection);
     if (!existingRecord) {
       throw new VaultError("VAULT_AUTOMATION_MISSING", "Automation was not found.");
     }
@@ -1803,6 +1821,12 @@ function resolveAutomationScheduleAnchorAt(input: {
   )).toISOString();
 }
 
+function assertNewAutomationTime(schedule: AutomationSchedule, requestedAt?: string): void {
+  if (schedule.kind === "at" && requestedAt && !(Date.parse(schedule.at) > Date.parse(requestedAt))) {
+    throw new VaultError("VAULT_AUTOMATION_TIME_PAST", "Choose a future time for this reminder.");
+  }
+}
+
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationWithLatestRegistryInput,
   records?: AutomationRecord[],
@@ -1855,6 +1879,7 @@ async function upsertAutomationWithLatestRegistry(
     ? existingRecord?.activeUntil ?? null
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
+  assertNewAutomationTime(schedule, input.requestedAt);
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
   const scheduleAnchorAt = resolveAutomationScheduleAnchorAt({ existingRecord, schedule, status, now,
     resumeAt: input.resumeAt, scheduleNotBefore: input.scheduleNotBefore });

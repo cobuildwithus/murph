@@ -1,5 +1,5 @@
 import { createPhaseInput, mocks } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
@@ -69,6 +69,26 @@ it("replays an ordinary save in a fresh run without creating a second reminder",
 const otherInputId = "ain_55555555555555555555555555555555";
 const accepted = { acceptedInputIds: [inputId] };
 
+it("inspects and archives one reminder beside an invalid paused schedule", async () => {
+  await withAutomationRuns(async ({ vaultRoot, run }) => {
+    const active = await run(tool => tool.request(saveRequest, accepted));
+    const paused = await run(tool => tool.request({ ...saveRequest, status: "paused",
+      schedule: { kind: "every", everyMs: 420000 } }, { acceptedInputIds: [otherInputId] }), [otherInputId]);
+    if (active.action !== "save" || paused.action !== "save") throw new Error("Expected saved reminders.");
+    const record = await showAutomation({ vaultRoot, automationId: paused.automationId });
+    const file = path.join(vaultRoot, record!.relativePath);
+    const damaged = (await readFile(file, "utf8")).replace("420000", "-420000");
+    await writeFile(file, damaged);
+    await expect(run(tool => tool.request({ action: "inspect", lookup: paused.automationId }))).rejects.toThrow();
+    const inspected = await run(tool => tool.request({ action: "inspect", lookup: active.automationId }));
+    expect(inspected).toMatchObject({ updatedAt: active.updatedAt, status: "active" });
+    const stopped = await run(tool => tool.request({ action: "patch", lookup: active.automationId,
+      expectedUpdatedAt: active.updatedAt, status: "archived" }));
+    expect(stopped).toMatchObject({ status: "archived", automationId: active.automationId });
+    expect(await readFile(file, "utf8")).toBe(damaged);
+  });
+});
+
 it("replays stored purpose despite a different title, instructions and schedule shape", async () => {
   await withAutomationRuns(async ({ vaultRoot, run }) => {
     const first = await run(tool => tool.request(saveRequest, accepted));
@@ -135,6 +155,19 @@ it("returns fresh replay purpose when the stored record changes before timing re
         issues: expect.arrayContaining(["record_readback_mismatch"]),
       },
     });
+  });
+});
+
+it("rejects an already-due one-shot but honors a future time accepted before processing", async () => {
+  await withAutomationRuns(async ({ vaultRoot, run }) => {
+    const once = (at: string) => ({ ...saveRequest, requestedAt: "2025-07-28T12:00:00Z", schedule: { kind: "at" as const, at } });
+    await expect(run(tool => tool.request(once("2025-07-28T11:59:00Z"), accepted)))
+      .rejects.toMatchObject({ code: "VAULT_AUTOMATION_TIME_PAST" });
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(0);
+    const future = once("2025-07-28T12:01:00Z");
+    expect(await run(tool => tool.request(future, accepted))).toMatchObject({ created: true });
+    const replay = await run(tool => tool.request(once("2025-07-28T11:59:00Z"), accepted));
+    expect(replay).toMatchObject({ created: false, schedule: future.schedule });
   });
 });
 

@@ -958,20 +958,25 @@ type MemberNotificationRouteResolver = (
 
 function saveHostedAutomation(
   writeFields: Omit<UpsertAutomationInput, "automationId" | "createOnly" | "slug">,
-  automationId: string | undefined,
-  slug: string | undefined,
+  request: Pick<UpsertAutomationInput, "automationId" | "slug" | "requestedAt">,
   acceptedInputIds: readonly string[] | undefined,
   claimedAutomationIds: Set<string>,
 ): Promise<Pick<UpsertAutomationResult, "created" | "record">> {
+  const { automationId, slug } = request;
+  // Onboarding sets its own due time from the completion transition.
+  const requestedAt = automationId === MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID
+    ? undefined : request.requestedAt ?? new Date().toISOString();
   if (!automationId && !slug && acceptedInputIds?.length) {
     return createAutomationForInputs({
       ...writeFields,
+      requestedAt,
       acceptedInputIds,
       claimedAutomationIds,
     });
   }
   return upsertAutomation({
     ...writeFields,
+    requestedAt,
     ...(automationId ? { automationId } : {}),
     ...(slug ? { slug } : {}),
     createOnly: true,
@@ -1127,8 +1132,7 @@ function createHostedAssistantAutomationTool(input: {
         };
         const result = await saveHostedAutomation(
           writeFields,
-          request.automationId,
-          request.slug,
+          request,
           context?.acceptedInputIds,
           claimedAutomationIds,
         );
