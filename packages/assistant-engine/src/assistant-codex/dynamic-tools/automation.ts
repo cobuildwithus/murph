@@ -764,6 +764,8 @@ function resolveAutomationDynamicToolRequest(
     const { localAtRecoveryKey: _localAtRecoveryKey, schedule, ...rest } = args
     return {
       ...rest,
+      ...(schedule.kind === 'at' && relativeDateReferenceWindow
+        ? { requestedAt: relativeDateReferenceWindow.latestAt } : {}),
       schedule: resolveDynamicAutomationSchedule(
         schedule,
         relativeDateReferenceWindow,
@@ -1056,16 +1058,20 @@ export async function executeAutomationDynamicTool(input: {
         : {}),
     }
   } catch (error) {
+    const code = automationErrorCode(error)
     if (
       input.request.request.action === 'inspect'
-      && isAutomationNotFoundError(error)
+      && code === 'automation_not_found'
     ) {
       return automationTextResult(
         true,
         JSON.stringify({ action: 'inspect', found: false }),
       )
     }
-    if (isAutomationConflictError(error)) {
+    if (code === 'VAULT_AUTOMATION_TIME_PAST') {
+      return automationTextResult(false, 'That time had already passed when requested. Ask for a future time.', 'invalid_input')
+    }
+    if (code === 'VAULT_AUTOMATION_CONFLICT') {
       return automationTextResult(false, 'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying', 'conflict')
     }
     return withAutomationToolFailureDetails(
@@ -1109,23 +1115,15 @@ async function executeAutomationModelReviewBatch(
       }
     } catch (error) {
       signal?.throwIfAborted()
-      if (isAutomationNotFoundError(error)) results.push({ lookup, found: false })
+      if (automationErrorCode(error) === 'automation_not_found') results.push({ lookup, found: false })
       else throw error
     }
   }
   return automationTextResult(true, JSON.stringify(payload()))
 }
 
-function isAutomationNotFoundError(
-  error: unknown,
-): error is { code: 'automation_not_found' } {
-  return isUnknownRecord(error) && error.code === 'automation_not_found'
-}
-
-function isAutomationConflictError(
-  error: unknown,
-): error is { code: 'VAULT_AUTOMATION_CONFLICT' } {
-  return isUnknownRecord(error) && error.code === 'VAULT_AUTOMATION_CONFLICT'
+function automationErrorCode(error: unknown): unknown {
+  return isUnknownRecord(error) ? error.code : undefined
 }
 
 function serializeAutomationToolResponse(

@@ -228,6 +228,8 @@ export type AssistantHostedAutomationToolRequest =
     }
   | {
       action: 'save'
+      /** Host-owned time of the accepted request for a one-shot reminder. */
+      requestedAt?: string
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string

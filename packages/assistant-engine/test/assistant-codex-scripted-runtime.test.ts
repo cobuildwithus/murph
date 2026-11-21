@@ -4668,6 +4668,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2031-02-15T09:59:59.900Z',
       instructions: 'Send the group a short reminder.',
       schedule: {
         at: '2031-02-15T09:20:00.000Z',
@@ -4934,6 +4935,7 @@ text(JSON.stringify(result));
     await steered
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: steerAt,
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
       title: retryTitle,
@@ -5244,6 +5246,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'save',
+      requestedAt: '2026-03-08T04:59:00.000Z',
       instructions: 'Send the reminder.',
       schedule: { at: '2026-03-09T07:30:00.000Z', kind: 'at' },
       title: 'Replacement reminder',
@@ -5582,6 +5585,7 @@ text(JSON.stringify(result));
       'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2026-03-08T04:59:00.000Z',
       instructions: 'Send the breakfast reminder tomorrow.',
       schedule: { at: '2026-03-08T08:00:00.000Z', kind: 'at' },
       title: 'Breakfast reminder',
@@ -6626,6 +6630,7 @@ text(JSON.stringify(result));
     await steered
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2031-02-15T09:59:59.900Z',
       instructions: 'Send the reminder tonight.',
       schedule: {
         at: '2031-02-15T09:20:00.000Z',

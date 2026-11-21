@@ -158,6 +158,19 @@ it("returns fresh replay purpose when the stored record changes before timing re
   });
 });
 
+it("rejects an already-due one-shot but honors a future time accepted before processing", async () => {
+  await withAutomationRuns(async ({ vaultRoot, run }) => {
+    const once = (at: string) => ({ ...saveRequest, requestedAt: "2025-07-28T12:00:00Z", schedule: { kind: "at" as const, at } });
+    await expect(run(tool => tool.request(once("2025-07-28T11:59:00Z"), accepted)))
+      .rejects.toMatchObject({ code: "VAULT_AUTOMATION_TIME_PAST" });
+    expect((await listAutomations({ vaultRoot })).items).toHaveLength(0);
+    const future = once("2025-07-28T12:01:00Z");
+    expect(await run(tool => tool.request(future, accepted))).toMatchObject({ created: true });
+    const replay = await run(tool => tool.request(once("2025-07-28T11:59:00Z"), accepted));
+    expect(replay).toMatchObject({ created: false, schedule: future.schedule });
+  });
+});
+
 it.each(["active", "archived"] as const)("replays the current %s edited record without changing bytes or updatedAt", async status => {
   await withAutomationRuns(async ({ vaultRoot, run }) => {
     const saved = await run(tool => tool.request(saveRequest, accepted));

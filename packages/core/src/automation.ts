@@ -154,6 +154,7 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  requestedAt?: string;
   resumeAt?: Date;
   /** Scheduler-only lower bound for the first occurrence after a cadence migration. */
   scheduleNotBefore?: Date;
@@ -1820,6 +1821,12 @@ function resolveAutomationScheduleAnchorAt(input: {
   )).toISOString();
 }
 
+function assertNewAutomationTime(schedule: AutomationSchedule, requestedAt?: string): void {
+  if (schedule.kind === "at" && requestedAt && !(Date.parse(schedule.at) > Date.parse(requestedAt))) {
+    throw new VaultError("VAULT_AUTOMATION_TIME_PAST", "Choose a future time for this reminder.");
+  }
+}
+
 async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationWithLatestRegistryInput,
   records?: AutomationRecord[],
@@ -1872,6 +1879,7 @@ async function upsertAutomationWithLatestRegistry(
     ? existingRecord?.activeUntil ?? null
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
+  assertNewAutomationTime(schedule, input.requestedAt);
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
   const scheduleAnchorAt = resolveAutomationScheduleAnchorAt({ existingRecord, schedule, status, now,
     resumeAt: input.resumeAt, scheduleNotBefore: input.scheduleNotBefore });
