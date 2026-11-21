@@ -220,21 +220,21 @@ function createJournalSourceReader(input: PreparationInput, locators: Map<string
         const data = connectedReadData(await read.request(request))
         const record = readRecord(data)!
         if ((record.id ?? record.messageId) !== source.id) throw new ConnectedReadFailure('shape_mismatch', ['id'])
-        if (!serializeHostedConnectedAppsResult(data)) return { status: 'unverified' }
-        if (source.calendar) {
-          const item = normalizeConnectedCalendarEvent(data, source.provider as CalendarProvider, source.calendar)
-          // Exact confirmation may need the full compacted source text, but
-          // participant identities still do not belong in model context.
-          return item ? { status: 'verified', readAt: input.now.toISOString(), item: {
-            ...record, attendees: undefined, organizer: undefined, ...item,
-          } } : { status: 'unverified' }
-        }
-        // Web already compacted this once; a second compaction can destroy
-        // literal escaped markup in the message. Retain the independent budget.
-        return { status: 'verified', readAt: input.now.toISOString(), item: data }
+        const item = source.calendar
+          ? exactCalendarItem(record, source.provider as CalendarProvider, source.calendar)
+          : data
+        if (!item || !serializeHostedConnectedAppsResult(item)) return { status: 'unverified' }
+        return { status: 'verified', readAt: input.now.toISOString(), item }
       } finally { read.close() }
     } catch { signal?.throwIfAborted(); input.signal?.throwIfAborted(); return { status: 'unverified' } }
   }
+}
+
+function exactCalendarItem(record: Record<string, unknown>, provider: CalendarProvider, calendar: ConnectedCalendar) {
+  const item = normalizeConnectedCalendarEvent(record, provider, calendar)
+  if (!item) return null
+  const description = record.description ?? readRecord(record.body)?.content ?? record.bodyPreview
+  return { ...item, ...(typeof description === 'string' && { description }) }
 }
 
 function combineReadSignals(preparation?: AbortSignal | null, turn?: AbortSignal | null) {
@@ -392,6 +392,7 @@ function sourceNotOptedOut(source: Locator, optOuts: ConnectedContextPolicy['opt
 function exactSourceRequest(source: Locator): HostedConnectedAppsRequest {
   return { operation: 'read', input: {
     account: source.account,
+    ...(source.calendar && { calendarMemberAddress: source.calendar.memberAddress ?? null }),
     toolSlug: source.calendar ? source.provider === 'googlecalendar' ? 'GOOGLECALENDAR_EVENTS_GET' : 'OUTLOOK_GET_CALENDAR_EVENT'
       : source.provider === 'gmail' ? 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID' : 'OUTLOOK_GET_MESSAGE',
     arguments: source.calendar ? { calendar_id: source.calendar.id, event_id: source.id }

@@ -1469,7 +1469,7 @@ test("downloads past the restore budget are reported, not attempted", async () =
     const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { put: async () => {}, get } });
     const result = await materialize(entries.map(entry => entry.relativePath), { maxTotalDownloadBytes: bytes.length * 2 });
     expect(get).toHaveBeenCalledTimes(2);
-    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${entries[2]!.relativePath}`]: "size" });
+    expect(Object.fromEntries(result.missingArtifactPaths)).toEqual({ [`vault:${entries[2]!.relativePath}`]: "download_budget" });
   } finally { await rm(vaultRoot, { recursive: true, force: true }); }
 });
 

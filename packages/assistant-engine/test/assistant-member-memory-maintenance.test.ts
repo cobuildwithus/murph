@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -81,6 +81,51 @@ describe('member-memory maintenance boundary', () => {
     })
   })
 
+  it('pages large maintenance reads in whole versioned records', async () => {
+    const { createEmptyMemoryDocument, createMemoryRecordId, renderMemoryDocument } = await import('@murphai/contracts')
+    const vaultRoot = await makeVaultRoot()
+    const document = createEmptyMemoryDocument()
+    const at = '2026-03-14T14:00:00.000Z'
+    for (let index = 0; index < 400; index++) {
+      const fields = { section: 'Context' as const, text: `Entry ${index} ${'🌱'.repeat(80)}` }
+      document.records.push({ ...fields, id: createMemoryRecordId(fields), createdAt: at, updatedAt: at,
+        sourcePath: 'bank/memory.md', sourceLine: index + 1 })
+    }
+    await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'bank/memory.md'), renderMemoryDocument({ document }))
+    const records = []
+    let cursor: string | undefined
+    do {
+      const text = readResultText(await execute(vaultRoot, { action: 'show', cursor }))
+      expect(Buffer.byteLength(text)).toBeLessThan(48_000)
+      const page = JSON.parse(text)
+      expect(page.document.records.length).toBeGreaterThan(0)
+      records.push(...page.document.records)
+      expect(records.length).toBeLessThanOrEqual(document.records.length)
+      cursor = page.nextCursor
+    } while (cursor)
+    expect(records).toEqual(document.records.map(({ id, section, text, updatedAt }) => ({ id, section, text, updatedAt }))
+      .sort((a, b) => a.id.localeCompare(b.id)))
+  })
+
+  it('continues past a single record too large to show in full', async () => {
+    const vaultRoot = await makeVaultRoot()
+    for (const text of ['Prefers pottery.', 'Collects glaze samples.']) {
+      await execute(vaultRoot, { action: 'upsert', section: 'Context', text })
+    }
+    const [first, later] = (await readMemoryDocument(vaultRoot)).records.sort((a, b) => a.id.localeCompare(b.id))
+    const oversizedId = first!.id
+    await execute(vaultRoot, { action: 'update', memoryId: oversizedId, expectedUpdatedAt: first!.updatedAt, text: 'x'.repeat(51_000) })
+    expect(readResult(await execute(vaultRoot, { action: 'show' }))).toEqual({
+      document: { exists: true, records: [] }, oversizedRecordId: oversizedId, nextCursor: oversizedId,
+    })
+    expect(readResult(await execute(vaultRoot, { action: 'show', cursor: oversizedId }))).toEqual({
+      document: { exists: true, records: [{
+        id: later!.id, section: later!.section, text: later!.text, updatedAt: later!.updatedAt,
+      }] },
+    })
+  })
+
   it('echoes stored text only when it differs from what the write sent', async () => {
     const vaultRoot = await makeVaultRoot()
     const first = readResult(await execute(vaultRoot, {
@@ -136,7 +181,7 @@ describe('member-memory maintenance boundary', () => {
     expect(JSON.parse(showText)).toEqual({
       document: {
         exists: true,
-        records: canonicalShow.records.map(({ id, section, text, updatedAt }) => ({
+        records: canonicalShow.records.sort((a, b) => a.id.localeCompare(b.id)).map(({ id, section, text, updatedAt }) => ({
           id,
           section,
           text,

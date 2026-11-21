@@ -70,6 +70,25 @@ describe("engine connected-app read lane", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["googlecalendar", "outlook"])("bounds the exact %s event after selecting participation fields", async toolkit => {
+    const google = toolkit === "googlecalendar";
+    const member = google
+      ? { email: "sam@example.invalid", responseStatus: "accepted" }
+      : { emailAddress: { address: "sam@example.invalid" }, status: { response: "accepted" } };
+    const attendees = [...Array.from({ length: 2000 }, () => ({ email: "ava@example.invalid", comment: "x".repeat(80) })), member];
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith("/connected_accounts")
+      ? json({ items: [{ id: "account", status: "ACTIVE", toolkit: { slug: toolkit } }], next_cursor: null })
+      : json({ successful: true, data: { id: "event", description: "Bring a towel", colorId: "2", attendees } }));
+    const result = await executeHostedConnectedAppsRequest({
+      memberId: "synthetic-member", prisma: {} as never, fetchImpl,
+      request: { operation: "read", input: {
+        account: "account", toolSlug: google ? "GOOGLECALENDAR_EVENTS_GET" : "OUTLOOK_GET_CALENDAR_EVENT",
+        calendarMemberAddress: "sam@example.invalid", arguments: { calendar_id: "shared", event_id: "event" },
+      } },
+    });
+    expect(result).toEqual({ data: { id: "event", description: "Bring a towel", attendees: [member] } });
+  });
+
   it('maps oversized reads to the existing 413 contract and never reports unsuccessful data as not-found', async () => {
     for (const unsuccessful of [false, true]) {
       const fetchImpl = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/connected_accounts')

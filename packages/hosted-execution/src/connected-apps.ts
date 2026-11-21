@@ -125,6 +125,7 @@ export const hostedConnectedAppsRequestSchema = z.discriminatedUnion("operation"
   z.object({
     operation: z.literal("read"),
     input: z.object({
+      calendarMemberAddress: z.string().max(1024).nullable().optional(),
       account: hostedConnectedAppsAccountSelectorSchema,
       toolSlug: hostedConnectedAppsToolSlugSchema,
       arguments: z.record(z.string(), z.unknown()).default({}),

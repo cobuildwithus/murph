@@ -58,10 +58,11 @@ export async function materializeVaultMedia(input: {
   const unavailable: { path: string; reason: string }[] = []
   let available = 0
   let removed = 0
-  // The port already processes media sequentially and reads the catalogue once.
-  // Keep a bulk request together rather than re-reading it for every batch.
+  // The port restores sequentially under the per-file cap. A full export has
+  // no total allowance; only explicit path reads share one.
   const result = await input.materialize(paths.map(ref => `vault:${ref}`), {
-    maxFileBytes: assistantVaultFileMaxBytes, maxTotalDownloadBytes: assistantVaultFileMaxBytes, signal: input.signal,
+    maxFileBytes: assistantVaultFileMaxBytes, signal: input.signal,
+    ...(input.args.all ? {} : { maxTotalDownloadBytes: assistantVaultFileMaxBytes }),
   })
   for (const ref of paths) {
     const key = `vault:${ref}`

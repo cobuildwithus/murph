@@ -6809,10 +6809,10 @@ describe('scheduled poll advertisement', () => {
       messageInput, session: createSession(),
     })
     await executeConversationPollTool({ context, request: { action: 'list' } })
-    expect(request).toHaveBeenLastCalledWith({ assistantInputId: inputId, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ includePollDetails: true, assistantInputId: inputId, request: { action: 'list' } })
     acceptedInputIds = []
     await executeConversationPollTool({ context, request: { action: 'list' } })
-    expect(request).toHaveBeenLastCalledWith({ origin: { kind: 'automation_occurrence', automationId: 'automation_poll', occurrenceAt }, route: { channel: 'telegram', target: 'authorized-binding' }, request: { action: 'list' } })
+    expect(request).toHaveBeenLastCalledWith({ includePollDetails: true, origin: { kind: 'automation_occurrence', automationId: 'automation_poll', occurrenceAt }, route: { channel: 'telegram', target: 'authorized-binding' }, request: { action: 'list' } })
     delete messageInput.bindingDeliveryTarget
     expect(context.currentConversationPollRoute?.()).toEqual({ channel: 'telegram', target: 'authorized-fallback' })
     messageInput.bindingDeliveryTarget = ''

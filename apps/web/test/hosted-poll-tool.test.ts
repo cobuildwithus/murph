@@ -102,8 +102,8 @@ describe("hosted poll effects", () => {
   it.each(["provider", "persistence"])("retains the scheduled claim after interrupted %s", async (failure) => {
     if (failure === "provider") m.telegram.mockRejectedValueOnce(new Error("Lost acknowledgement"));
     else m.update.mockRejectedValueOnce(new Error("Lost persistence acknowledgement"));
-    expect(await scheduledCall(create)).toEqual({ status: "unknown", polls: [] });
-    expect(await scheduledCall(create)).toEqual({ status: "unknown", polls: [] });
+    expect(await scheduledCall(create)).toMatchObject({ status: "unknown", polls: [], unknownPolls: [{ question: create.question }] });
+    expect(await scheduledCall(create)).toMatchObject({ status: "unknown", polls: [], unknownPolls: [{ question: create.question }] });
     expect(m.telegram).toHaveBeenCalledTimes(1);
   });
   it("dispatches once across concurrent scheduled creates and reauthorizes replay", async () => {
@@ -126,10 +126,33 @@ describe("hosted poll effects", () => {
   });
   it("retains ambiguous-send claims and refuses changed replay arguments", async () => {
     m.telegram.mockRejectedValueOnce(new Error("Lost acknowledgement"));
-    expect(await call(create)).toEqual({ status: "unknown", polls: [] });
-    expect(await call(create)).toEqual({ status: "unknown", polls: [] });
+    const attempted = await call(create);
+    const pollRef = [...m.rows.keys()][0]!;
+    const unknownPolls = [{ pollRef, question: create.question }];
+    expect(attempted).toEqual({ status: "unknown", polls: [], unknownPolls });
+    expect(await call(create)).toEqual(attempted);
+    expect(await call({ action: "read", pollRef })).toEqual(attempted);
+    expect(await call({ action: "list" })).toEqual({ status: "listed", polls: [], unknownPolls });
     await expect(call({ ...create, question: "Changed" })).rejects.toThrow("different poll");
     expect(m.telegram).toHaveBeenCalledTimes(1);
+  });
+  it("pages older polls by creation time and poll id", async () => {
+    for (let i = 1; i <= 11; i++) await call(create, "ain_" + i.toString(16).padStart(32, "0"));
+    const rows = [...m.rows.values()].sort((a, b) => b.id.localeCompare(a.id));
+    const createdAt = new Date("2026-05-20T14:00:00.000Z");
+    for (const row of rows) row.createdAt = createdAt;
+    m.findMany.mockResolvedValueOnce(rows).mockResolvedValueOnce(rows.slice(10));
+    const first = await call({ action: "list" });
+    const cursor = { createdAt: createdAt.toISOString(), pollRef: rows[9]!.id };
+    expect(first.polls.map(p => p.pollRef)).toEqual(rows.slice(0, 10).map(row => row.id));
+    expect(first.nextCursor).toEqual(cursor);
+    const last = await call({ action: "list", cursor });
+    expect(m.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      take: 11, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      where: expect.objectContaining({ OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: cursor.pollRef } }] }),
+    }));
+    expect(last.polls.map(p => p.pollRef)).toEqual([rows[10]!.id]);
+    expect(last.nextCursor).toBeUndefined();
   });
   it("allows only one provider send across concurrent requests", async () => {
     const responses = await Promise.all([call(create), call(create)]);

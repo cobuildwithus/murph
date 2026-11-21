@@ -598,7 +598,7 @@ export class AssistantWorkspaceArtifactMaterializationError extends Error {
 }
 
 export type AssistantWorkspaceArtifactUnavailableReason =
-  | 'missing' | 'expired' | 'integrity' | 'size' | 'transport' | 'obsolete'
+  | 'missing' | 'expired' | 'integrity' | 'size' | 'download_budget' | 'transport' | 'obsolete'
 
 /** Keys are canonical root-qualified paths, e.g. vault:raw/inbox/photo.jpg.
  * A rejection is authoritative even when a local file remains at that path. */
