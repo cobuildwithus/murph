@@ -92,8 +92,11 @@ invitees keep their seats. Bearer joiners use separate seats, and ten total
 admissions includes departures. There is no rejoin. Late joiners share the
 existing calendar and can score only from their local joining day, capped by
 the common schedule. A live group accepts a new seat only while a scheduled
-day remains in the joining time zone. A signed-in preview uses the profile time
-zone and returns `status: "expired"` with `noPlayableDay: true` after that cutoff.
+day remains in the joining time zone. Home and the signed-in invite preview
+accept the device’s current IANA zone in the optional `timeZone` query parameter.
+After the local cutoff, Home omits the invitation and the preview returns
+`status: "expired"` with `noPlayableDay: true`. Without a valid zone, the reads
+leave this decision to the join command, which checks the submitted zone.
 While invited, the starter alone can edit full terms
 directly. Waiting invitations retain only their latest terms and encrypted words;
 version numbers still increase, so stale acceptance remains invalid. Once live,

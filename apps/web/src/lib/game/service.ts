@@ -3486,7 +3486,7 @@ async function readWalletTickets(memberId: string, multiplayer: boolean, clock: 
   });
 }
 
-export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
+export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth, timeZone: string | null = null): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
@@ -3546,7 +3546,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     games: views,
     canStartGames: isGameEnabled(),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled(),
-      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, profile?.timeZone ?? null, current.clock, blocks) } : {}),
+      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, timeZone, current.clock, blocks) } : {}),
     me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
@@ -3685,7 +3685,7 @@ export async function readGameInviteForMember(memberId: string): Promise<string 
 }
 
 /** Only open invites expose details publicly; closed links look like missing ones. */
-export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
+export async function readInvitePreview(token: string, multiplayer = false, memberId?: string, timeZone: string | null = null): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
     include: { invitees: true, creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 }, players: true },
@@ -3697,7 +3697,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const closed = await closedInvitePreview(row, now, memberId);
+  const closed = await closedInvitePreview(row, now, memberId, timeZone);
   if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
@@ -3733,7 +3733,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
-async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: string): Promise<GameInvitePreview | null> {
+async function closedInvitePreview(row: PreviewGame, now: Date, memberId: string | undefined, timeZone: string | null): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
   if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
@@ -3744,10 +3744,8 @@ async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: strin
     return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
-  if (groupOpen && memberId && !row.players.some(player => player.memberId === memberId)) {
-    const profile = await getPrisma().gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
-    if (profile && !hasPlayableGroupDay(toRuleState(row, []), profile.timeZone, now)) return { status: "expired", noPlayableDay: true };
-  }
+  if (groupOpen && memberId && timeZone && !row.players.some(player => player.memberId === memberId)
+    && !hasPlayableGroupDay(toRuleState(row, []), timeZone, now)) return { status: "expired", noPlayableDay: true };
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
   return null;
 }

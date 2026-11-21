@@ -554,6 +554,22 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await db.gameEvent.findFirst({ where: { gameId: game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId, reason: "The start date locks once someone checks in." } });
   });
 
+  it("keeps an addressed invitation open after westward travel before a profile refresh", async () => {
+    const starter = await person(), partner = await person("Pacific/Honolulu"), traveler = await person("Pacific/Kiritimati");
+    const game = await create(starter, [partner, traveler]);
+    await ok(partner.id, join(game.token, "Pacific/Honolulu"));
+    const now = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(now.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect((await readHome(traveler.id, true)).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Honolulu")).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Kiritimati")).groupInvitations).toEqual([]);
+    expect(await readInvitePreview(game.token, true, traveler.id, "Pacific/Honolulu")).toMatchObject({ status: "open" });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
+    await ok(traveler.id, join(game.token, "Pacific/Honolulu"), now);
+    expect(await db.gamePlayer.findFirst({ where: { gameId: game.id, memberId: traveler.id } })).toMatchObject({ timeZone: "Pacific/Honolulu" });
+  });
+
   it("accepts a late day after 20:00 without resetting the calendar, across DST and refuses joins without a playable day", async () => {
     const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person("Pacific/Kiritimati");
     const game = await create(a, [b]);
@@ -565,7 +581,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const ownEnd = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
     await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(ownEnd.getTime() - Date.now()) } });
     const { readInvitePreview } = await import("@/src/lib/game/service");
-    expect(await readInvitePreview(game.token, true, zero.id)).toMatchObject({ status: "expired", noPlayableDay: true });
+    expect(await readInvitePreview(game.token, true, zero.id, "Pacific/Kiritimati")).toMatchObject({ status: "expired", noPlayableDay: true });
     await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
     expect(await run(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd)).toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
     const row = await gameRow(game.id);

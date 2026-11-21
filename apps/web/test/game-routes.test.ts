@@ -449,12 +449,12 @@ describe("weekly game routes", () => {
       mocks.reviewMember.mockResolvedValue(true);
       mocks.refreshReviewGame.mockResolvedValue(refreshed);
       mocks.readHome.mockResolvedValueOnce(initial).mockResolvedValue({ ...initial, games: [VIEW] });
-      const response = await routes.home.GET(new Request(`${BASE}/home`, { headers: { "x-murph-game-multiplayer": "1" } }));
+      const response = await routes.home.GET(new Request(`${BASE}/home?timeZone=Pacific/Honolulu`, { headers: { "x-murph-game-multiplayer": "1" } }));
       expect(response.status).toBe(200);
       expect((await response.json()).games).toEqual(refreshed ? [VIEW] : []);
       expect(mocks.refreshReviewGame).toHaveBeenCalledExactlyOnceWith({ memberId: LEO, homeGameIds: [], readPhoto: expect.any(Function) });
       expect(mocks.readHome).toHaveBeenCalledTimes(refreshed ? 2 : 1);
-      expect(mocks.readHome).toHaveBeenLastCalledWith(LEO, true, expect.objectContaining({ member: { id: LEO } }));
+      expect(mocks.readHome).toHaveBeenLastCalledWith(LEO, true, expect.objectContaining({ member: { id: LEO } }), "Pacific/Honolulu");
     });
   });
 
@@ -673,7 +673,7 @@ describe("weekly game routes", () => {
       const history = await routes.history.GET(new Request(`${BASE}/history?memberId=${AVA}`, { headers: { "x-member-id": AVA } }));
       const game = await routes.game.GET(new Request(`${BASE}/games/${GAME_ID}?memberId=${AVA}`), params({ id: GAME_ID }));
 
-      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false, expect.objectContaining({ member: { id: LEO } }));
+      expect(mocks.readHome).toHaveBeenCalledWith(LEO, false, expect.objectContaining({ member: { id: LEO } }), null);
       expect(mocks.readHistory).toHaveBeenCalledWith(LEO, false);
       expect(mocks.readGame).toHaveBeenCalledWith(GAME_ID, LEO, false);
       expect(await home.json()).toEqual({ games: [VIEW], me: { memberId: LEO }, ok: true, wallet: { held: [], owed: [], redeemed: [] } });
@@ -1045,6 +1045,15 @@ describe("weekly game routes", () => {
   });
 
   describe("invite preview", () => {
+    it("passes the current device zone to the signed-in invite preview", async () => {
+      mocks.readInvitePreview.mockResolvedValue({ status: "open" });
+      const request = new Request(`${BASE}/invites/tok_1?timeZone=Pacific/Honolulu`, {
+        headers: { authorization: "Bearer synthetic-session", "x-murph-game-multiplayer": "1" },
+      });
+      expect((await routes.invite.GET(request, params({ token: "tok_1" }))).status).toBe(200);
+      expect(mocks.readInvitePreview).toHaveBeenCalledWith("tok_1", true, LEO, "Pacific/Honolulu");
+    });
+
     it("serves the invite preview without sign-in", async () => {
       mocks.readInvitePreview.mockResolvedValueOnce(null);
       const missing = await routes.invite.GET(new Request(`${BASE}/invites/tok_1`), params({ token: "tok_1" }));
