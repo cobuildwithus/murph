@@ -16,6 +16,7 @@ export const MURPH_POLL_TOOL = {
     'create needs a question and 2 to 12 distinct options of up to 100 characters each, and it sends at once. Do not repeat the question and options in a message afterward.',
     'On iMessage, votes are public, several choices are allowed, and a poll cannot be anonymous.',
     'On Telegram, each voter picks one choice. anonymous defaults to true, and anonymous=false makes votes named. Only Telegram supports close, which ends voting and returns final results.',
+    'Pass nextCursor as cursor to list older polls. unknownPolls identifies attempted polls whose delivery is unconfirmed.',
     'read takes pollRef from create or list and returns counts plus up to 50 voters with their optionIndexes. Pass nextVoterCursor as voterCursor to read more.',
     'Anonymous polls return counts only. iMessage shows voter handles, and named Telegram polls show the user or chat identities received.',
     'Telegram tallies and voter lists can lag, even after close, so never call a voter list complete or guess who is behind a chat-level vote or a missing identity.',
@@ -33,6 +34,8 @@ export const MURPH_POLL_TOOL = {
       operation: { type: 'string', enum: ['add', 'remove'], description: 'Vote only. Add or remove Murph’s own selection; never toggles another voter’s choice.' },
       question: { type: 'string', minLength: 1, maxLength: 300 },
       anonymous: { type: 'boolean', description: 'Create only. Telegram defaults to true; false makes votes identifiable. iMessage supports false only.' },
+      cursor: { type: 'object', description: 'List only. Copy nextCursor from the previous page.', additionalProperties: false,
+        required: ['createdAt', 'pollRef'], properties: { createdAt: { type: 'string' }, pollRef: { type: 'string' } } },
       voterCursor: { type: 'string', description: 'Read only. Exact nextVoterCursor from the previous read page.' },
       options: { type: 'array', minItems: 2, maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 100 } },
       pollRef: { type: 'string', description: 'Exact pollRef returned by create or list.' },
@@ -43,7 +46,7 @@ export const MURPH_POLL_TOOL = {
 
 export function readConversationPollDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
   if (input.tool !== MURPH_POLL_TOOL.name) return null
-  const parsed = parseDynamicToolArguments({ schema: conversationPollActionSchema, value: input.arguments, schemaRootKeys: ['action', 'question', 'options', 'pollRef', 'anonymous', 'voterCursor', 'optionIndex', 'operation'], toolName: 'murph.poll' })
+  const parsed = parseDynamicToolArguments({ schema: conversationPollActionSchema, value: input.arguments, schemaRootKeys: ['action', 'cursor', 'question', 'options', 'pollRef', 'anonymous', 'voterCursor', 'optionIndex', 'operation'], toolName: 'murph.poll' })
   return parsed.ok ? { kind: 'poll' as const, request: parsed.args } : { kind: 'invalid-poll-arguments' as const, validationDigest: parsed.validationDigest }
 }
 
@@ -62,10 +65,12 @@ export async function executeConversationPollTool(input: {
   try {
     const result = await tool.request(scope.origin.kind === 'accepted_input' ? {
       assistantInputId: scope.origin.assistantInputId,
+      includePollDetails: true,
       request: input.request,
     } : {
       origin: scope.origin,
       route: route!,
+      includePollDetails: true,
       request: input.request,
     })
     return toolTextResult(true, JSON.stringify(projectConversationPollResponse(result)))

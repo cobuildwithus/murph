@@ -115,6 +115,7 @@ describe('scheduled native poll completion', () => {
     expect(result.run.outcome).toBe('no_op')
     expect(poll).toHaveBeenCalledTimes(interrupt ? 2 : 1)
     for (const [request] of poll.mock.calls) expect(request).toEqual({
+      includePollDetails: true,
       origin: { kind: 'automation_occurrence', automationId: 'automation_01K00000000000000000000000', occurrenceAt },
       route: { channel, target: authorizedTarget }, request: create,
     })

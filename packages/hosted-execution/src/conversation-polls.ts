@@ -1,6 +1,8 @@
 import * as z from "@murphai/contracts/zod-runtime";
 
 const pollRef = z.string().regex(/^poll_[a-f0-9]{32}$/u);
+const pollCursor = z.object({ createdAt: z.isoDateTime(), pollRef }).strict();
+export const CONVERSATION_POLL_PAGE_SIZE = 10;
 const optionText = z.string().trim().min(1).max(100);
 export const conversationPollActionSchema = z.discriminatedUnion("action", [
   z.object({
@@ -12,7 +14,7 @@ export const conversationPollActionSchema = z.discriminatedUnion("action", [
       "Poll options must be distinct.",
     ),
   }).strict(),
-  z.object({ action: z.literal("list") }).strict(),
+  z.object({ action: z.literal("list"), cursor: pollCursor.optional() }).strict(),
   z.object({ action: z.literal("read"), pollRef, voterCursor: z.string().min(1).max(256).optional() }).strict(),
   z.object({ action: z.literal("close"), pollRef }).strict(),
   z.object({ action: z.literal("vote"), pollRef, optionIndex: z.number().int().min(0).max(99), operation: z.enum(["add", "remove"]) }).strict(),
@@ -21,6 +23,7 @@ export type ConversationPollAction = z.infer<typeof conversationPollActionSchema
 export const conversationPollRequestSchema = z.union([
   z.object({
     assistantInputId: z.string().regex(/^ain_[a-f0-9]{32}$/u),
+    includePollDetails: z.literal(true).optional(),
     request: conversationPollActionSchema,
   }).strict(),
   z.object({
@@ -33,6 +36,7 @@ export const conversationPollRequestSchema = z.union([
       channel: z.enum(["linq", "telegram"]),
       target: z.string().min(1).max(256),
     }).strict(),
+    includePollDetails: z.literal(true).optional(),
     request: conversationPollActionSchema,
   }).strict(),
 ]);
@@ -70,7 +74,9 @@ export const conversationPollSnapshotSchema = z.object({
 export type ConversationPollSnapshot = z.infer<typeof conversationPollSnapshotSchema>;
 export const conversationPollResponseSchema = z.object({
   status: z.enum(["sent", "results", "listed", "closed", "vote_submitted", "unknown"]),
-  polls: z.array(conversationPollSnapshotSchema).max(10),
+  polls: z.array(conversationPollSnapshotSchema).max(CONVERSATION_POLL_PAGE_SIZE),
+  unknownPolls: z.array(z.object({ pollRef, question: z.string().max(300) }).strict()).max(CONVERSATION_POLL_PAGE_SIZE).optional(),
+  nextCursor: pollCursor.optional(),
 }).strict();
 export type ConversationPollResponse = z.infer<typeof conversationPollResponseSchema>;
 export interface ConversationPollTool {

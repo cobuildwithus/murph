@@ -1493,8 +1493,10 @@ are encrypted in the existing member private lane, and member deletion cascades
 receipts. Provider calls and encryption stay outside short database transactions.
 One creation per accepted input has a durable dispatch claim; replay returns its
 receipt or an explicit unknown outcome without sending again. A lost response may
-leave an unknown receipt. List is capped at ten polls created by Murph in this
-conversation. Arbitrary provider IDs cannot select another poll. Read exposes
+leave an unknown receipt. Create, list and read identify an unconfirmed poll
+by its reference and question. List returns up to ten entries from the current
+conversation per page, newest first, with a cursor ordered by creation time and
+poll ID. Arbitrary provider IDs cannot select another poll. Read exposes
 provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
 
 Linq uses its SDK's native poll create/read/vote methods. The question is a separate

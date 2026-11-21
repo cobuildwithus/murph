@@ -10,9 +10,10 @@ export const POST = withJsonError(async (request: Request) => {
   const parsed = conversationPollRequestSchema.safeParse(payload);
   if (!parsed.success) throw new RequestInputError("Invalid conversation poll request.");
   const authority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
-  return jsonOk(await handleHostedConversationPollTool({
+  const result = await handleHostedConversationPollTool({
     memberId: userId,
     runtimeIdentity: authority ? { ...authority, userId } : null,
     request: parsed.data,
-  }));
+  });
+  return jsonOk(parsed.data.includePollDetails ? result : { status: result.status, polls: result.polls });
 });
