@@ -3326,7 +3326,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
-  let requiredFinalResponseSuffix: string | null = null
+  const requiredFinalResponseSuffixes = new Set<string>()
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3444,7 +3444,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
-    requiredFinalResponseSuffix !== null ||
+    requiredFinalResponseSuffixes.size > 0 ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -4883,7 +4883,7 @@ async function runCodexAppServerTurnOnProcess(
         result.requiredFinalResponseSuffix,
       )
       if (finalResponseSuffix !== null) {
-        requiredFinalResponseSuffix = finalResponseSuffix
+        requiredFinalResponseSuffixes.add(finalResponseSuffix)
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -6109,7 +6109,7 @@ async function runCodexAppServerTurnOnProcess(
     cardTextFallback: finalResponseCardTextFallback,
     requiredClarifications: [...requiredAutomationLocalAtClarifications.values()],
     requiredApprovalUrls: requiredVaultFileApprovalUrls,
-    requiredSuffix: requiredFinalResponseSuffix,
+    requiredSuffix: [...requiredFinalResponseSuffixes].join('\n'),
     requiredFallback: requiredFinalResponseFallback,
   })
   const filteredPrecedingAgentMessageSegments = precedingAgentMessageSegments

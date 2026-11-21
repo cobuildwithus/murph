@@ -9109,6 +9109,23 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('delivers each distinct calendar link in request order', { timeout: TURN_TIMEOUT_MS }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const first = { title: 'Yoga class', startsAt: '2027-02-10T12:00:00Z', endsAt: '2027-02-10T13:00:00Z' }
+    const second = { ...first, title: 'Studio tour', startsAt: '2027-02-11T12:00:00Z', endsAt: '2027-02-11T13:00:00Z' }
+    scenario.stub.queue(...[first, second, first].map(event => ({
+      functionCall: { name: 'create_calendar_link', namespace: 'murph', arguments: event },
+    })), { text: 'Here are both events.' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({ calendarLinkAvailable: true }),
+      prompt: 'Make calendar links for my class and tour.',
+    })
+    const message = ['Here are both events.', buildCalendarEventUrl(first), buildCalendarEventUrl(second)].join('\n')
+    expect(result.finalMessage).toBe(message)
+    expect(result.transcriptMessage).toBe(message)
+  })
+
   it('delivers the exact runtime-owned calendar link instead of model-copied text', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
