@@ -128,7 +128,7 @@ import {
   type TermWords,
 } from "./rules";
 import { acceptanceStartDate, addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
-import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { projectChatTaskSeats, agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
 import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
@@ -2801,7 +2801,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const { checkInKind, ...terms } = termsView(state, words, row.maxPlayers === 10);
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
-    return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
+    return projectChatTaskSeats({ ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       // A finished game carries its days only while its players can still correct them, as they stood when it ended.
       ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
         : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
@@ -2815,7 +2815,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
         ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && areGroupTermsOpen(state, gameNow(clock, row)), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
         : gameChangeControls(state, gameNow(clock, row), pendingChange, actorMemberId),
-    };
+    });
   }) };
 }
 

@@ -172,6 +172,29 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it.each([false, true])("matches every pending task to its player in a forwarded-link chat (override=%s)", async override => {
+    const starter = await person(), addressed = await person(), forwarded = await person();
+    const people = [starter, addressed, forwarded];
+    const game = await create(starter, [addressed]);
+    await ok(addressed.id, join(game.token));
+    await ok(forwarded.id, join(game.token));
+    const context = await groupContext(game.id, people);
+    const next = { ...terms, defaultTask: "Stretch", tasks: override ? [{ seat: 10, text: "Swim" }] : [] };
+    expect(await runGameCommand({ ...context, actorMemberId: starter.id, now: createdAt, command: {
+      type: "editTerms", gameId: game.id, expectedTermsVersion: 1, proposalId: randomUUID(), terms: next,
+    } })).toMatchObject({ ok: true });
+    const state = await readGameChatState(context.chatContainerMemberId, people.map(p => p.id));
+    const card = hostedGameChatStateSchema.parse(state).games.find(card => card.id === game.id)!;
+    const change = card.pendingChange?.change;
+    expect(change?.kind).toBe("edit");
+    for (const player of card.players) {
+      const expected = override && player.memberId === forwarded.id ? "Swim" : "Stretch";
+      expect(change?.kind === "edit" && change.tasks).toContainEqual({ seat: player.seat, text: expected });
+      expect(card.terms.tasks.some(task => task.seat === player.seat)).toBe(true);
+    }
+    expect((await readGame(game.id, forwarded.id, true))?.players.find(p => p.memberId === forwarded.id)?.seat).toBe(10);
+  });
+
   it("shows complete streaks with bounded history previews", async () => {
     const { game, people } = await majorityGame(4);
     for (const player of people) for (let day = 0; day < terms.lengthDays!; day++) await entry(game.id, player.id, day);
