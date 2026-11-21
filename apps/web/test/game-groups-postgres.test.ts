@@ -172,6 +172,29 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it.each([false, true])("matches every pending task to its player in a forwarded-link chat (override=%s)", async override => {
+    const starter = await person(), addressed = await person(), forwarded = await person();
+    const people = [starter, addressed, forwarded];
+    const game = await create(starter, [addressed]);
+    await ok(addressed.id, join(game.token));
+    await ok(forwarded.id, join(game.token));
+    const context = await groupContext(game.id, people);
+    const next = { ...terms, defaultTask: "Stretch", tasks: override ? [{ seat: 10, text: "Swim" }] : [] };
+    expect(await runGameCommand({ ...context, actorMemberId: starter.id, now: createdAt, command: {
+      type: "editTerms", gameId: game.id, expectedTermsVersion: 1, proposalId: randomUUID(), terms: next,
+    } })).toMatchObject({ ok: true });
+    const state = await readGameChatState(context.chatContainerMemberId, people.map(p => p.id));
+    const card = hostedGameChatStateSchema.parse(state).games.find(card => card.id === game.id)!;
+    const change = card.pendingChange?.change;
+    expect(change?.kind).toBe("edit");
+    for (const player of card.players) {
+      const expected = override && player.memberId === forwarded.id ? "Swim" : "Stretch";
+      expect(change?.kind === "edit" && change.tasks).toContainEqual({ seat: player.seat, text: expected });
+      expect(card.terms.tasks.some(task => task.seat === player.seat)).toBe(true);
+    }
+    expect((await readGame(game.id, forwarded.id, true))?.players.find(p => p.memberId === forwarded.id)?.seat).toBe(10);
+  });
+
   it("shows complete streaks with bounded history previews", async () => {
     const { game, people } = await majorityGame(4);
     for (const player of people) for (let day = 0; day < terms.lengthDays!; day++) await entry(game.id, player.id, day);
@@ -301,6 +324,31 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await erase(people[0].id);
     expect(await Promise.all(people.slice(1, 3).map(linkFor))).toEqual([true, true]);
     expect((await run(people[3].id, join(game.token))).ok).toBe(true);
+  });
+
+  it("shares the settled result with exactly the remaining players after the room owner deletes", async () => {
+    const owner = await person(), survivors = [await person(), await person()];
+    const room = await exactRoom([owner, ...survivors]);
+    const game = await create(owner, survivors);
+    for (const player of survivors) await ok(player.id, join(game.token));
+    await entry(game.id, owner.id, 0);
+    await settle(game.id, survivors[0].id);
+    const memberIds = [room, owner.id];
+    const prepared = await prepareGameAccountDeletion({ memberIds, prisma: db });
+    await db.$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds, prepared, tx, now: createdAt });
+      await tx.hostedThreadContainer.delete({ where: { memberId: room } });
+      await tx.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+    });
+    const replacement = await exactRoom(survivors);
+    const read = async () => (await readGameChatState(replacement, survivors.map(p => p.id))).games.find(card => card.id === game.id);
+    expect((await read())?.result?.scores).toContainEqual(expect.objectContaining({ memberId: "departed-seat-0", score: 1 }));
+    chatProof.rooms.set(replacement, [...survivors.map(p => p.email), "nora@example.test"]);
+    expect(await read()).toBeUndefined();
+    chatProof.rooms.set(replacement, survivors.map(p => p.email));
+    await db.gameEvent.updateMany({ where: { gameId: game.id, type: "player_left" },
+      data: { payload: { v: 1, seat: 0, calledOff: false } } });
+    expect(await read()).toBeUndefined();
   });
 
   it("preserves the anonymous winning score in the surviving chat", async () => {
@@ -554,6 +602,22 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await db.gameEvent.findFirst({ where: { gameId: game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId, reason: "The start date locks once someone checks in." } });
   });
 
+  it("keeps an addressed invitation open after westward travel before a profile refresh", async () => {
+    const starter = await person(), partner = await person("Pacific/Honolulu"), traveler = await person("Pacific/Kiritimati");
+    const game = await create(starter, [partner, traveler]);
+    await ok(partner.id, join(game.token, "Pacific/Honolulu"));
+    const now = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(now.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect((await readHome(traveler.id, true)).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Honolulu")).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Kiritimati")).groupInvitations).toEqual([]);
+    expect(await readInvitePreview(game.token, true, traveler.id, "Pacific/Honolulu")).toMatchObject({ status: "open" });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
+    await ok(traveler.id, join(game.token, "Pacific/Honolulu"), now);
+    expect(await db.gamePlayer.findFirst({ where: { gameId: game.id, memberId: traveler.id } })).toMatchObject({ timeZone: "Pacific/Honolulu" });
+  });
+
   it("accepts a late day after 20:00 without resetting the calendar, across DST and refuses joins without a playable day", async () => {
     const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person("Pacific/Kiritimati");
     const game = await create(a, [b]);
@@ -565,7 +629,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const ownEnd = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
     await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(ownEnd.getTime() - Date.now()) } });
     const { readInvitePreview } = await import("@/src/lib/game/service");
-    expect(await readInvitePreview(game.token, true, zero.id)).toMatchObject({ status: "expired", noPlayableDay: true });
+    expect(await readInvitePreview(game.token, true, zero.id, "Pacific/Kiritimati")).toMatchObject({ status: "expired", noPlayableDay: true });
     await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
     expect(await run(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd)).toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
     const row = await gameRow(game.id);

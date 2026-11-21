@@ -128,10 +128,10 @@ import {
   type TermWords,
 } from "./rules";
 import { acceptanceStartDate, addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
-import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { projectChatTaskSeats, agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { canReadGameChatProjection, gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, reserveGameChallengeTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInRuns, morningAfterLastDay, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
@@ -2763,11 +2763,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     orderBy: { createdAt: "desc" }, include: { invitees: true, players: true } });
   const audience = prepared ?? (candidates.some(row => row.maxPlayers === 10) ? await readGameChatAudience(containerMemberId) : undefined);
   const context = { chatContainerMemberId: containerMemberId, chatPlayerMemberIds: playerMemberIds, chatAudience: audience };
-  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await gameChatContextCurrent(row, context) ? row.id : null));
+  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await canReadGameChatProjection(row, context) ? row.id : null));
   const current = await loadCurrent(allowed.filter((id): id is string => id !== null), true, actorMemberId, actorMemberId ? containerMemberId : undefined);
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = [];
-  for (const { row } of current.games) if (isGameEnabled() && await gameChatContextCurrent(row, context)) rows.push(row);
+  for (const { row } of current.games) if (isGameEnabled() && await canReadGameChatProjection(row, context)) rows.push(row);
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -2801,7 +2801,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const { checkInKind, ...terms } = termsView(state, words, row.maxPlayers === 10);
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
-    return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
+    return projectChatTaskSeats({ ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       // A finished game carries its days only while its players can still correct them, as they stood when it ended.
       ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
         : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
@@ -2815,7 +2815,7 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
         ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && areGroupTermsOpen(state, gameNow(clock, row)), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
         : gameChangeControls(state, gameNow(clock, row), pendingChange, actorMemberId),
-    };
+    });
   }) };
 }
 
@@ -3486,7 +3486,7 @@ async function readWalletTickets(memberId: string, multiplayer: boolean, clock: 
   });
 }
 
-export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
+export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth, timeZone: string | null = null): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
@@ -3546,7 +3546,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     games: views,
     canStartGames: isGameEnabled(),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled(),
-      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, profile?.timeZone ?? null, current.clock, blocks) } : {}),
+      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, timeZone, current.clock, blocks) } : {}),
     me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
@@ -3685,7 +3685,7 @@ export async function readGameInviteForMember(memberId: string): Promise<string 
 }
 
 /** Only open invites expose details publicly; closed links look like missing ones. */
-export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
+export async function readInvitePreview(token: string, multiplayer = false, memberId?: string, timeZone: string | null = null): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
     include: { invitees: true, creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 }, players: true },
@@ -3697,7 +3697,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const closed = await closedInvitePreview(row, now, memberId);
+  const closed = await closedInvitePreview(row, now, memberId, timeZone);
   if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
@@ -3733,7 +3733,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
-async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: string): Promise<GameInvitePreview | null> {
+async function closedInvitePreview(row: PreviewGame, now: Date, memberId: string | undefined, timeZone: string | null): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
   if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
@@ -3744,10 +3744,8 @@ async function closedInvitePreview(row: PreviewGame, now: Date, memberId?: strin
     return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
-  if (groupOpen && memberId && !row.players.some(player => player.memberId === memberId)) {
-    const profile = await getPrisma().gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
-    if (profile && !hasPlayableGroupDay(toRuleState(row, []), profile.timeZone, now)) return { status: "expired", noPlayableDay: true };
-  }
+  if (groupOpen && memberId && timeZone && !row.players.some(player => player.memberId === memberId)
+    && !hasPlayableGroupDay(toRuleState(row, []), timeZone, now)) return { status: "expired", noPlayableDay: true };
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
   return null;
 }

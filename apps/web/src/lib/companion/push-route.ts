@@ -22,10 +22,18 @@ export const companionPushRouteDeletionSchema = z.object({ installationId: z.str
 
 const transactionOptions = { maxWait: 5_000, timeout: 5_000 };
 
+export function preservesOtherInstallationAlerts(
+  current: { installationId: string; alertsAllowed: boolean } | null,
+  registration: CompanionPushRouteRegistration,
+): boolean {
+  return Boolean(current?.alertsAllowed && current.installationId !== registration.installationId && !registration.alertsAllowed);
+}
+
 export async function registerCompanionPushRoute(memberId: string, registration: CompanionPushRouteRegistration): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
     await requirePersonalMember(tx, memberId);
     const current = await tx.companionPushRoute.findUnique({ where: { userId: memberId } });
+    if (preservesOtherInstallationAlerts(current, registration)) return;
     const sameAddress = current
       && current.installationId === registration.installationId
       && current.token === registration.token

@@ -158,6 +158,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the member row after child stores are explicitly deleted; Prisma cascade remains a safety net.",
   },
   {
+    slug: "prisma.hosted_account_deletion_request",
+    label: "Confirmed account deletion",
+    deletion: "live-delete",
+    note: "Holds the member ID and next retry time until member deletion removes the request by cascade.",
+  },
+  {
     slug: "prisma.hosted_sensitive_action_challenge",
     label: "Short-lived sensitive-action challenges",
     deletion: "live-delete",
@@ -919,6 +925,30 @@ export async function deleteHostedLinqProductionCanaryAccountData(input: {
   return deleteHostedAccountDataInternal({ ...input, exitFeedback: null, retainRuntimeDiagnostics: true });
 }
 
+// Both the browser route and the retention invocation have a five-minute execution limit.
+const DELETION_RETRY_DELAY_MS = 10 * 60_000;
+
+/** Claim one confirmed request. A failed or interrupted attempt becomes due again. */
+export async function resumeConfirmedAccountDeletion(input: { prisma: PrismaClient; request: Request; now: Date }) {
+  const nextAttemptAt = new Date(input.now.getTime() + DELETION_RETRY_DELAY_MS);
+  const [claimed] = await input.prisma.$queryRaw<{ memberId: string }[]>`
+    UPDATE hosted_account_deletion_request SET next_attempt_at = ${nextAttemptAt}
+    WHERE member_id = (
+      SELECT r.member_id FROM hosted_account_deletion_request r
+      JOIN hosted_member m ON m.id = r.member_id
+      WHERE r.next_attempt_at <= ${input.now} AND m.suspended_at IS NOT NULL
+      ORDER BY r.next_attempt_at, r.member_id LIMIT 1 FOR UPDATE OF r SKIP LOCKED
+    ) RETURNING member_id AS "memberId"
+  `;
+  if (!claimed) return "idle";
+  try {
+    await deleteHostedAccountData({ memberId: claimed.memberId, prisma: input.prisma, request: input.request });
+    return "completed";
+  } catch {
+    return "pending";
+  }
+}
+
 async function deleteHostedAccountDataInternal(input: {
   retainRuntimeDiagnostics: boolean;
   exitFeedback?: HostedAccountExitFeedback | null;
@@ -970,6 +1000,7 @@ async function deleteHostedAccountDataInternal(input: {
   const deletionMemberIds = await markHostedMembersSuspendedForAccountDeletion({
     now: deletionStartedAt,
     ownerMemberId: input.memberId,
+    resumeOnRetention: !input.retainRuntimeDiagnostics,
     prisma: input.prisma,
     providerAccessRemovalConfirmationToken:
       input.providerAccessRemovalConfirmationToken ?? null,
@@ -1632,6 +1663,7 @@ async function prepareHostedAccountDeletionExternalTargets(input: {
 }
 
 async function markHostedMembersSuspendedForAccountDeletion(input: {
+  resumeOnRetention: boolean;
   now: Date;
   ownerMemberId: string;
   prisma: PrismaClient;
@@ -1763,6 +1795,13 @@ async function markHostedMembersSuspendedForAccountDeletion(input: {
         id: buildStringInFilter(memberIds),
       },
     });
+    if (input.resumeOnRetention) {
+      const memberId = input.ownerMemberId;
+      const nextAttemptAt = new Date(input.now.getTime() + DELETION_RETRY_DELAY_MS);
+      await tx.hostedAccountDeletionRequest.upsert({
+        where: { memberId }, create: { memberId, nextAttemptAt }, update: { nextAttemptAt },
+      });
+    }
     // Suspension is the account-deletion authority fence for group replies.
     // A group-aware provider effect that already owns the drain finishes before
     // this commits. Every later preparation acquires it after commit and rejects

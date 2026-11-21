@@ -132,11 +132,14 @@ describe("computer handoff route and page", () => {
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
   });
 
-  it("renders an auth-required handoff state without reading handoff details", async () => {
+  it.each([
+    ["AUTH_REQUIRED", 401],
+    ["HOSTED_ACCESS_REQUIRED", 403],
+  ] as const)("offers sign-in on the handoff for %s without reading private details", async (code, httpStatus) => {
     mocks.requireActiveHostedAppSession.mockRejectedValueOnce(
       hostedOnboardingError({
-        code: "AUTH_REQUIRED",
-        httpStatus: 401,
+        code,
+        httpStatus,
         message: "Sign in to continue.",
       }),
     );

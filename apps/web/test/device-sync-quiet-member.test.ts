@@ -16,7 +16,7 @@ const RECENT = new Date("2026-11-01T00:00:00.000Z");
 const CONNECTED_AT = "2026-05-02T15:30:00.000Z";
 
 const QUIET_MEMBER = {
-  billingRef: null, billingStatus: "canceled", companionLastForegroundAt: null, createdAt: LONG_AGO, suspendedAt: null,
+  accountGroupMemberships: [], billingRef: null, billingStatus: "canceled", companionLastForegroundAt: null, createdAt: LONG_AGO, suspendedAt: null,
 };
 
 function quietPrisma(overrides: {
@@ -64,6 +64,13 @@ describe("quiet member device sync", () => {
     expect(await read(quietPrisma({ groupParticipant: true }))).toBe(false);
     expect(await read(quietPrisma({ linqInbound: true }))).toBe(false);
     expect(await read(quietPrisma({ mailboxEngagement: true }))).toBe(false);
+  });
+
+  it("releases a quiet wearable when paid Family coverage resumes", async () => {
+    const prisma = quietPrisma({ member: { ...QUIET_MEMBER, accountGroupMemberships: [{ id: "membership" }] } });
+    expect(await resolveHostedDeviceSyncQuietDirtyReleaseAt({
+      connectedAt: CONNECTED_AT, memberId: "member_quiet", now: NOW, prisma: asClient(prisma),
+    })).toBeNull();
   });
 
   it("checks the 60-day Linq and mailbox windows", async () => {

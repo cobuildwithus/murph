@@ -1,4 +1,4 @@
-import { companionPushRouteRegistrationSchema } from "@/src/lib/companion/push-route";
+import { companionPushRouteRegistrationSchema, preservesOtherInstallationAlerts } from "@/src/lib/companion/push-route";
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "@/src/lib/game/http/auth";
 import { invalidGameRequest } from "@/src/lib/game/http/errors";
 import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -19,6 +19,12 @@ export const POST = withJsonError(async (request: Request) => {
     gameSessionId: auth.sessionId, updatedAt: new Date() };
   await getPrisma().$transaction(async (tx) => {
     await assertGameMemberAuthCurrentTx(auth, tx);
+    if (!data.alertsAllowed) {
+      const current = await tx.companionPushRoute.findUnique({
+        where: { userId: memberId }, select: { alertsAllowed: true, installationId: true },
+      });
+      if (preservesOtherInstallationAlerts(current, parsed.data)) return;
+    }
     await tx.companionPushRoute.upsert({
       where: { userId: memberId }, create: { userId: memberId, ...data }, update: data,
     });

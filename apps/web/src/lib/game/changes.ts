@@ -1,3 +1,4 @@
+import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
@@ -270,6 +271,24 @@ export function pendingGameChangeView(state: RuleState, pending: GamePendingChan
   const seatedChange = change.kind === "edit" && change.tasks ? { ...change,
     tasks: [...players].sort((a, b) => a.seat - b.seat).map(player => ({ seat: player.seat, text: change.tasks!.find(task => task.seat === player.seat)?.text ?? change.defaultTask! })) } : change;
   return { ...view, change: seatedChange, votes, yesNeeded: gameChangeMajority(state, Object.fromEntries(votes.map(({ memberId, vote }) => [memberId, vote])), change).yesNeeded };
+}
+
+/** The runner accepts ten display seats in a pending task vote. Group edits return by member ID. */
+export function projectChatTaskSeats(card: HostedGameChatState["games"][number]): typeof card {
+  const pending = card.pendingChange;
+  if (pending?.change.kind !== "edit") return card;
+  const tasks = pending.change.tasks;
+  if (!tasks?.some(task => task.seat >= 10)) return card;
+
+  // pendingGameChangeView lists the remaining players' tasks in canonical seat order.
+  const seats = new Map(tasks.map((task, index) => [task.seat, index]));
+  const displaySeat = <T extends { seat: number }>(item: T) => ({ ...item, seat: seats.get(item.seat)! });
+  return {
+    ...card,
+    players: card.players.map(displaySeat),
+    terms: { ...card.terms, tasks: card.terms.tasks.map(displaySeat) },
+    pendingChange: { ...pending, change: { ...pending.change, tasks: tasks.map(displaySeat) } },
+  };
 }
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */

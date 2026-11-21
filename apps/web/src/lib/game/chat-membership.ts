@@ -69,6 +69,21 @@ export function gameChatPlayerIds(game: { maxPlayers?: number; status: string; p
     ? [...seated, invitee] : seated;
 }
 
+const lostSharedRoomEvent = { type: "player_left", payload: { path: ["lostSharedRoom"], equals: true } };
+
+function settledGameChatWhere(players: readonly string[], room?: string): Prisma.GameWhereInput {
+  const pair = { maxPlayers: 2, ...gamePairWhere(players) };
+  if (!room) return pair;
+  const candidates: Prisma.GameWhereInput[] = [pair, { chatContainerMemberId: room }];
+  if (isGameMemberSet(players)) candidates.push({
+    maxPlayers: 10, chatContainerMemberId: null,
+    events: { some: lostSharedRoomEvent },
+    AND: players.map(memberId => ({ players: { some: { memberId, leftAt: null } } })),
+    players: { none: { leftAt: null, memberId: { notIn: [...players] } } },
+  });
+  return { OR: candidates };
+}
+
 /** Bounded candidates; projection rechecks each game against the room authority. */
 export async function readGameChatCandidateIds(playerMemberIds: readonly string[], multiplayer = true, containerMemberId?: string): Promise<string[]> {
   // Group projections require a bound room; roomless notice context stays pair-only.
@@ -87,7 +102,7 @@ export async function readGameChatCandidateIds(playerMemberIds: readonly string[
   const [pairs, groups, settled] = await Promise.all([
     active({ maxPlayers: 2 }),
     multiplayer ? active({ maxPlayers: 10, chatContainerMemberId: containerMemberId }) : [],
-    prisma.game.findMany({ where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), ...(multiplayer && containerMemberId ? { OR: [{ maxPlayers: 2, ...gamePairWhere(playerMemberIds) }, { chatContainerMemberId: containerMemberId }] } : gamePairWhere(playerMemberIds)), status: "settled" },
+    prisma.game.findMany({ where: { ...settledGameChatWhere(playerMemberIds, multiplayer ? containerMemberId : undefined), status: "settled" },
       orderBy: [{ settledAt: "desc" }, { id: "asc" }], take: 5, select: { id: true } }),
   ]);
   // Pairs first, so groups can't crowd a pair out of its own chat.
@@ -103,7 +118,19 @@ export async function readPairGameChatTx(tx: Prisma.TransactionClient, players: 
     where: { maxPlayers: 2, ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled"] }, chatContainerMemberId: { not: null } },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: { chatContainerMemberId: true },
   });
-  return bound?.chatContainerMemberId ?? null;
+  const room = bound?.chatContainerMemberId;
+  if (!room) return null;
+  // A participant row can outlive the verified address that identified its player.
+  const current = await tx.$queryRaw<{ participant_member_id: string }[]>`
+    SELECT p.participant_member_id FROM hosted_thread_container_participant p
+    LEFT JOIN hosted_member_identity i ON i.member_id = p.participant_member_id
+    LEFT JOIN hosted_member_email_authorization e ON e.member_id = p.participant_member_id
+    WHERE p.container_member_id = ${room} AND p.removed_at IS NULL
+      AND p.participant_member_id IN (${players[0]}, ${players[1]})
+      AND ((p.handle_lookup_key = i.phone_lookup_key AND i.phone_number_verified_at IS NOT NULL)
+        OR (p.handle_lookup_key = e.verified_email_lookup_key AND e.verified_email_verified_at IS NOT NULL))
+  `;
+  return current.length === 2 ? room : null;
 }
 
 /** Recheck discovery under the pair lock so simultaneous kickoffs share a room. */
@@ -314,6 +341,11 @@ export async function readGameChatAuthority(game: GameRoomGame, containerMemberI
     if (game.maxPlayers === 10 ? game.chatContainerMemberId || !game.audienceKey || !audience.keys.candidates.includes(game.audienceKey)
       : audience.contacts.length !== 2 || !sameGamePlayers(players, audience.memberIds)) return null;
   }
+  return checkGameChatAudience(game, containerMemberId, audience, players, prisma, waitOnBlock);
+}
+
+async function checkGameChatAudience(game: GameRoomGame, containerMemberId: string, audience: GameChatAudience,
+  players: readonly (string | null)[], prisma: Prisma.TransactionClient, waitOnBlock: boolean): Promise<GameChatAudience | null> {
   const route = await readHostedThreadRouteByThreadIdentity({ channel: "linq", threadId: audience.threadId, prisma });
   if (route?.containerMemberId !== containerMemberId) return null;
   if (players.some(memberId => !memberId || !audience.memberIds.includes(memberId))) return null;
@@ -458,6 +490,18 @@ async function bindGameInviteRoomTx(input: Parameters<typeof associateGameChatIn
   if (!current.audienceKey || !prepared.keys.candidates.includes(current.audienceKey)
     || !await readGameChatAuthority(current, containerMemberId, prepared, tx)) { inviteFailure("authority_unavailable"); return; }
   await tx.game.update({ where: { id: current.id }, data: { chatContainerMemberId: containerMemberId } });
+}
+
+/** A deleted room can no longer authorize writes. Its settled result is shared by the exact surviving roster. */
+export async function canReadGameChatProjection(row: GameRoomGame & { id: string }, context: Parameters<typeof gameChatContextCurrent>[1]) {
+  if (row.maxPlayers !== 10 || row.status !== "settled" || row.chatContainerMemberId !== null) return gameChatContextCurrent(row, context);
+  const audience = context.chatAudience;
+  if (!audience || !context.chatContainerMemberId || !row.players.some(player => player.memberId === null && player.leftAt)) return false;
+  const remaining = row.players.filter(player => !player.leftAt).map(player => player.memberId);
+  if (audience.contacts.length !== remaining.length || !sameGamePlayers(remaining, audience.memberIds)) return false;
+  const prisma = getPrisma();
+  const shared = await prisma.gameEvent.findFirst({ where: { gameId: row.id, ...lostSharedRoomEvent }, select: { id: true } });
+  return Boolean(shared && await checkGameChatAudience(row, context.chatContainerMemberId, audience, remaining, prisma, false));
 }
 
 export async function gameChatContextCurrent(row: GameRoomGame,

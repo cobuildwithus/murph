@@ -117,6 +117,17 @@ async function deleteAccount(memberId: string) {
 }
 
 describe.skipIf(!runPostgresProof)("weekly game when a player deletes their account", () => {
+  it("keeps the departure notice when deletion voids the first shared game", async () => {
+    const { readFriendCohort } = await import("@/src/lib/game/progress/friend-cohort");
+    const owner = await member("Nora"), friend = await member("Leo");
+    await live(owner, friend);
+    expect((await readFriendCohort(owner)).people).toHaveLength(2);
+    await deleteAccount(friend);
+    const cohort = await readFriendCohort(owner);
+    expect(cohort.people.map(person => person.memberId)).toEqual([owner]);
+    expect(cohort.departureNotice).toContain("left Murph");
+  });
+
   it.each(["owner", "subject"] as const)("revokes contact-photo recaps and retires their media when the %s deletes", async role => {
     const owner = await member("Owner"), subject = await member("Subject"), db = getPrisma();
     const gameId = await live(owner, subject);

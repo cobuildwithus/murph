@@ -75,6 +75,42 @@ describe.skipIf(!enabled)("game roster leases and pointer recovery on migrated P
     return receipt.id;
   }
   const rows = () => db.hostedThreadContainerParticipant.findMany({ where: { containerMemberId: room } });
+  it("chooses the current conversation for a new pair after a verified number changes", async () => {
+    const { bindPairGameChat, readGameChatAudience, readGameChatAuthority } = await import("@/src/lib/game/chat-membership");
+    await pointer();
+    const replacement = syntheticPhone();
+    await rosterPhoneIdentity(db, b, replacement, now);
+    const freshRoom = randomUUID();
+    const freshChat = randomUUID();
+    const freshGame = randomUUID();
+    const freshLine = syntheticPhone();
+    await db.hostedMember.create({ data: { id: freshRoom, billingStatus: "not_started" } });
+    try {
+      await db.hostedThreadContainer.create({ data: { memberId: freshRoom, ownerMemberId: a } });
+      await rosterRoute(db, freshRoom, freshChat, freshLine);
+      provider.read.mockImplementation(async ({ chatId }: { chatId: string }) => linqRoster({
+        observedAt: now, handles: [
+          { handle: chatId === freshChat ? freshLine : line, isMe: true, status: "active" },
+          ...[phones[0], chatId === freshChat ? replacement : phones[1]].map(handle => ({ handle, isMe: false, status: "active" })),
+        ],
+      }));
+      expect((await readGameChatAudience(freshRoom)).memberIds.sort()).toEqual([a, b].sort());
+      const pair = await db.game.create({ data: { id: freshGame, maxPlayers: 2, status: "live", createdBy: a,
+        wordsOwnerMemberId: a, terms: storedTerms, termsWordsEncrypted: "synthetic",
+        players: { create: [a, b].map((memberId, seat) => ({ memberId, seat, joinedAt: now, timeZone: "UTC" })) } },
+        include: { players: true, invitees: true } });
+      expect(await bindPairGameChat(freshGame, [a, b], freshRoom)).toBe(freshRoom);
+      expect(await readGameChatAuthority({ ...pair, chatContainerMemberId: room }, room)).toBeNull();
+      expect(await readGameChatAuthority({ ...pair, chatContainerMemberId: freshRoom }, freshRoom)).not.toBeNull();
+    } finally {
+      await db.game.deleteMany({ where: { id: freshGame } });
+      await db.hostedThreadContainer.deleteMany({ where: { memberId: freshRoom } });
+      await db.hostedMember.deleteMany({ where: { id: freshRoom } });
+      await db.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: createHostedPhoneLookupKey(freshLine)! } });
+      await db.hostedGroupParticipantObservation.deleteMany({ where: { contactLookupKey: createHostedPhoneLookupKey(replacement)! } });
+    }
+  });
+
   it.each([false, true])("renews expired game-only funding before recovering a published pointer, group=%s", async group => {
     await pointer(group);
     expect(await readGameChatFundingRooms({ memberIds: [room], now, prisma: db })).toEqual(new Map());

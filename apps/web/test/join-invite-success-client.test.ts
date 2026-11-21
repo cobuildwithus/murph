@@ -306,6 +306,27 @@ test("active success page redirects to Settings even when returned session recon
   await view.cleanup();
 });
 
+test.each([
+  { retryable: true, recovers: true, attempts: 2 },
+  { retryable: true, recovers: false, attempts: 3 },
+  { retryable: false, recovers: false, attempts: 1 },
+])("checkout reconciliation makes $attempts attempts for retryable=$retryable, recovers=$recovers", async ({ retryable, recovers, attempts }) => {
+  vi.useFakeTimers();
+  let calls = 0;
+  const fetchMock = vi.fn<typeof fetch>(async () => {
+    if (++calls > 1 && recovers) return Response.json(createStatus("active"));
+    return Response.json({ error: { message: "Verification unavailable", retryable } }, { status: retryable ? 503 : 403 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const view = await renderJoinInviteSuccessClientForEffects({ initialStatus: createStatus("checkout") });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(attempts);
+  if (recovers) expect(view.routerReplace).toHaveBeenCalledWith("/home");
+  else expect(view.container.textContent).toContain("Verification unavailable");
+  await view.cleanup();
+});
+
 test("pending success page shows email support after the setup delay", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(

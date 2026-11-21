@@ -2728,6 +2728,15 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().hostedThreadContainer.createMany({ data: rooms.map(memberId => ({ memberId, ownerMemberId: a })) });
     await getPrisma().hostedThreadRoute.createMany({ data: rooms.map(id => ({ channel: "linq", containerMemberId: id,
       threadIdentityLookupKey: `synthetic-identity-${id}`, threadLookupKey: `synthetic-thread-${id}`, deliveryRouteEncrypted: "synthetic" })) });
+    for (const memberId of [a, b]) {
+      const key = `synthetic-email-${memberId}`;
+      await getPrisma().hostedMemberEmailAuthorization.create({ data: {
+        memberId, verifiedEmailLookupKey: key, verifiedEmailVerifiedAt: new Date(),
+      } });
+      await getPrisma().hostedThreadContainerParticipant.createMany({ data: rooms.map(containerMemberId => ({
+        containerMemberId, participantMemberId: memberId, handleLookupKey: key, firstSeenAt: new Date(), lastSeenAt: new Date(),
+      })) });
+    }
     const bound = await Promise.all(games.map((game, index) => bindPairGameChat(game.gameId, [a, b], rooms[index]!)));
     expect(bound[0]).toBe(bound[1]);
     expect(rooms).toContain(bound[0]);

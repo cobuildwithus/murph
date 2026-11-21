@@ -207,8 +207,9 @@ async function retainGameTx(tx: Prisma.TransactionClient, row: GameRow, plan: No
   await tx.gameEntry.deleteMany({ where: { gameId: row.id, memberId: { in: leaving } } });
   await retainDeparturesTx(tx, row, plan, leaving, now);
   if (active) await tx.gameTicket.deleteMany({ where: { gameId: row.id } });
+  const lostSharedRoom = row.maxPlayers === 10 && row.status === "settled" && row.chatContainerMemberId && leaving.includes(row.chatContainerMemberId);
   for (const departure of plan.departures) await tx.gameEvent.create({ data: { actor: "system", gameId: row.id,
-    payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
+    payload: { v: 1, calledOff: active, seat: departure.seat, ...(lostSharedRoom ? { lostSharedRoom: true } : {}) }, type: "player_left" } });
   return active;
 }
 
