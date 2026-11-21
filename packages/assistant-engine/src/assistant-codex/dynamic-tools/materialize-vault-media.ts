@@ -58,27 +58,18 @@ export async function materializeVaultMedia(input: {
   const unavailable: { path: string; reason: string }[] = []
   let available = 0
   let removed = 0
-  let pending = paths
-  while (pending.length) {
-    input.signal?.throwIfAborted()
-    const result = await input.materialize(pending.map(ref => `vault:${ref}`), {
-      maxFileBytes: assistantVaultFileMaxBytes, maxTotalDownloadBytes: assistantVaultFileMaxBytes, signal: input.signal,
-    })
-    const deferred: string[] = []
-    for (const ref of pending) {
-      const key = `vault:${ref}`
-      const reason = result.missingArtifactPaths.get(key)
-      if (input.args.all && reason === 'download_budget') deferred.push(ref)
-      else if (!reason && result.materializedArtifactPaths.has(key)) available += 1
-      else if (input.args.all && await wasVaultMediaRemoved(input.vaultRoot, ref, reason)) removed += 1
-      else unavailable.push({ path: ref, reason: reason ?? 'missing' })
-    }
-    // A fresh allowance fits any eligible file. Never spin on a port that cannot advance.
-    if (deferred.length === pending.length) {
-      for (const path of deferred) unavailable.push({ path, reason: 'download_budget' })
-      break
-    }
-    pending = deferred
+  // The port restores sequentially under the per-file cap. A full export has
+  // no total allowance; only explicit path reads share one.
+  const result = await input.materialize(paths.map(ref => `vault:${ref}`), {
+    maxFileBytes: assistantVaultFileMaxBytes, signal: input.signal,
+    ...(input.args.all ? {} : { maxTotalDownloadBytes: assistantVaultFileMaxBytes }),
+  })
+  for (const ref of paths) {
+    const key = `vault:${ref}`
+    const reason = result.missingArtifactPaths.get(key)
+    if (!reason && result.materializedArtifactPaths.has(key)) available += 1
+    else if (input.args.all && await wasVaultMediaRemoved(input.vaultRoot, ref, reason)) removed += 1
+    else unavailable.push({ path: ref, reason: reason ?? 'missing' })
   }
   input.signal?.throwIfAborted()
   return { requested: paths.length, available, removed, unavailable }

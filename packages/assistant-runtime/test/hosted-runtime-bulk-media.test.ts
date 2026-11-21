@@ -23,7 +23,7 @@ function descriptor(name: string, bytes: Uint8Array) {
     mediaKind: "video" as const, mimeType: "video/mp4", recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null as string | null };
 }
 
-test.each(["all", "paths"] as const)("finishes all download passes only for a full export (%s)", async mode => {
+test.each(["all", "paths"] as const)("restores every file in one pass only for a full export (%s)", async mode => {
   const vaultRoot = await setup();
   const bytes = Buffer.alloc(8192, 32);
   const entries = ["one", "two", "three"].map(name => descriptor(name, bytes));
@@ -32,7 +32,11 @@ test.each(["all", "paths"] as const)("finishes all download passes only for a fu
   const restore = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { get, put: async () => {} } });
   const report = await materializeVaultMedia({ vaultRoot,
     args: mode === "all" ? { all: true } : { paths: entries.map(entry => entry.relativePath) },
-    materialize: (refs, options) => restore(refs, { ...options, maxTotalDownloadBytes: bytes.length * 2 }) });
+    materialize: (refs, options) => {
+      // Shrink whatever allowance the tool asks for, so the path read runs out at two files.
+      const shrunk = options?.maxTotalDownloadBytes === undefined ? {} : { maxTotalDownloadBytes: bytes.length * 2 };
+      return restore(refs, { ...options, ...shrunk });
+    } });
   const expected = mode === "all" ? entries : entries.slice(0, 2);
   expect(report).toEqual({ requested: 3, available: expected.length, removed: 0,
     unavailable: mode === "all" ? [] : [{ path: entries[2]!.relativePath, reason: "download_budget" }] });
