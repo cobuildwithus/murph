@@ -46,6 +46,24 @@ describe("recap presentation compatibility", () => {
     expect(gameRecapWriterSchema.safeParse(stored.story).success).toBe(false);
   });
 
+  it("gives a new show's cover one short title and keeps every other headline glanceable, while stored shows still read", () => {
+    const cover = (...titles: string[]) => ({ background: "night" as const, blocks: [...titles.map(text => ({ kind: "headline" as const, text })), story.pages[0].blocks[1]] });
+    const later = (text: string) => ({ background: "paper" as const, blocks: [{ kind: "headline" as const, text }] });
+    type Pages = GameRecapEnvelope["story"]["pages"];
+    const draft = (pages: Pages) => gameRecapDraftSchema.safeParse({ story: { ...story, pages }, files: [] });
+    const messages = (pages: Pages) => { const parsed = draft(pages); return parsed.success ? [] : parsed.error.issues.map(issue => issue.message); };
+    expect(draft([cover("x".repeat(24)), later("y".repeat(48))]).success).toBe(true);
+    expect(messages([cover("Mira never left the couch")])).toEqual([`The cover's title "Mira never left the couch" is 25 characters; keep it to 24, the week's story in a few words.`]);
+    expect(messages([cover("Day one", "Squats for Mira and stretches for Theo")])).toEqual(["The cover takes exactly one headline, its title; it has 2.",
+      `The cover's title "Squats for Mira and stretches for Theo" is 38 characters; keep it to 24, the week's story in a few words.`]);
+    expect(messages([{ background: "night", blocks: [story.pages[0].blocks[1]] }])).toEqual(["The cover takes exactly one headline, its title; it has 0."]);
+    expect(messages([cover("Theo hid"), later("y".repeat(49))])).toEqual([`The headline "${"y".repeat(49)}" on page 2 is 49 characters; keep it to 48.`]);
+    // Web accepts with the same rules, and recaps written before them stay readable.
+    expect(gameRecapEnvelopeSchema.safeParse({ ...envelope, story: { ...story, pages: [cover("Day one", "Squats for Mira and stretches for Theo")] } }).success).toBe(false);
+    const old = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: { ...story, pages: [cover("Day one", "Squats for Mira and stretches for Theo")] } });
+    expect(presentGameRecap({ ...input, stored: old }).show?.pages[0].blocks.map(block => block.text)).toEqual(["Day one", "Squats for Mira and stretches for Theo"]);
+  });
+
   it("drops a trailing full stop so the app's starring line reads cleanly", () => {
     const draft = gameRecapDraftSchema.parse({ story: { ...story, treatment: "A polar-expedition comedy." }, files: [] });
     const stored = storedGameRecapEnvelopeSchema.parse({ ...envelope, story: draft.story });
@@ -126,7 +144,7 @@ describe("recap presentation compatibility", () => {
     }
   });
   it("accepts only bounded face positions and keeps timing facts out of editable file selections", () => {
-    const withFace = (faceY: number) => ({ story: { ...story, pages: [{ background: 'paper', blocks: [{ kind: 'scene', scene: { ...story.pages[0].blocks[1]!.scene, faceY } }] }] }, files: [] });
+    const withFace = (faceY: number) => ({ story: { ...story, pages: [{ background: 'paper', blocks: [story.pages[0].blocks[0], { kind: 'scene', scene: { ...story.pages[0].blocks[1]!.scene, faceY } }] }] }, files: [] });
     for (const y of [0, 0.25, 1]) expect(gameRecapDraftSchema.safeParse(withFace(y)).success).toBe(true);
     for (const y of [-0.01, 1.01, NaN, Infinity]) expect(gameRecapDraftSchema.safeParse(withFace(y)).success).toBe(false);
     expect(gameRecapDraftSchema.safeParse({ story, files: [{ slot: 'song', path: 'media/song.mp3', wordsTimestamps: [] }] }).success).toBe(false);

@@ -56,8 +56,11 @@ in attempt-local memory. Changing that sequence, style or lyrics requires a new
 song; text edits, same-kind page swaps and card swaps remain valid. The host keeps
 raw provider timings with the hash, then uploads and stores them on the encrypted
 song asset. Editable draft files
-still select only `{slot,path}`. New authoring caps `treatment` at 40 characters;
-transport, stored reads and accepted replay retain historical longer treatments.
+still select only `{slot,path}`. New authoring caps `treatment` at 40 characters,
+gives the cover exactly one headline (its title) of at most 24 characters, and caps
+every other headline at 48; transport, stored reads and accepted replay retain
+historical longer treatments and headlines. The app sets only a cover's first
+headline, stepping it down from 58 points to keep it to three lines.
 
 A score adds optional `show.score: { media }` and `show.pages[].cueMs: number`.
 All times are milliseconds. The score media has the same ready-media shape and

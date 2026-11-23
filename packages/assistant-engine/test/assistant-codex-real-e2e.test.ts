@@ -49354,6 +49354,124 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     }
   }, 900_000)
 
+  // A fictional lopsided week where each player had their own task, and Murph's kickoff spelled out
+  // both. The app sets the cover's one title huge over the picture, so it must be the week's story in a
+  // few words, never the rules restated. It prints every headline so the titles can be read.
+  // Production writes recaps as flex jobs, where a Sol member's turn is served by the flex Sol model;
+  // the standard take runs the member-selectable model directly.
+  it.each(['production flex', 'standard'] as const)('pair recap show cover title stays short and tells the story: %s', async tier => {
+    const config = await resolveRealCodexE2eConfig()
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-title-'))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-recap-title-catalog-'))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    if (tier === 'production flex') {
+      config.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot, includeFlexCatalog: true })
+    }
+    const served: { model: string | null; serviceTier: string | null }[] = []
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
+      served.push({ model: input.model ?? null, serviceTier: input.serviceTier ?? null })
+      return nativeExecute(input)
+    })
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts')
+    const gameId = 'synthetic-umbrella', eventId = `game-recap:${gameId}`, pairFingerprint = '00112233445566778899aabbccddeeff'
+    const players = [{ memberId: 'synthetic-noor', name: 'Noor' }, { memberId: 'synthetic-felix', name: 'Felix' }]
+    const tasks = { Noor: 'Fifteen minutes of jump rope, with a photo', Felix: 'A two mile walk, with a photo' }
+    const friday = Date.now() - ((new Date().getUTCDay() + 1) % 7 + 1) * 86_400_000
+    const dates = Array.from({ length: 5 }, (_, day) => new Date(friday - (4 - day) * 86_400_000).toISOString().slice(0, 10))
+    const offset = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')!.value.replace('GMT', '')
+    const at = (day: number, time: string) => `${dates[day]}T${time}:00${offset(dates[day]!)}`
+    const posts: [string, number, string, string | null][] = [
+      ['Noor', 0, '06:52', null], ['Felix', 0, '21:30', 'zero rain. suspicious'], ['Noor', 1, '06:35', null], ['Noor', 2, '06:41', null],
+      ['Noor', 3, '06:38', 'rope is fraying'], ['Felix', 3, '23:49', 'walked with the umbrella'], ['Noor', 4, '06:33', null],
+    ]
+    const entries = posts.map(([playerName, day, , text]) => ({ entryId: `synthetic-${playerName.toLowerCase()}-${day}`, playerName, kind: 'photo', text, visibleToBoth: true }))
+    const evening = 'Noor is done for today. Felix, you have until midnight.'
+    const chat: [number, string, string, string][] = [
+      [0, '08:00', 'Murph', 'Day one. Noor, fifteen minutes of jump rope. Felix, a two mile walk. A photo each by midnight. The winner gets a picnic packed by the loser.'],
+      [0, '08:03', 'Noor', 'done before coffee'], [0, '12:10', 'Felix', 'murph is it going to rain later'],
+      [0, '12:11', 'Murph', 'I can’t see the forecast, but your walk counts any time before midnight.'], [0, '18:40', 'Felix', 'weather app says 40% so im waiting'],
+      [0, '20:00', 'Murph', evening], [0, '21:31', 'Felix', 'walked. zero rain. suspicious'],
+      [1, '17:20', 'Felix', 'it looks like rain'], [1, '17:21', 'Noor', 'its sunny felix'], [1, '19:05', 'Felix', 'the clouds are plotting something'],
+      [1, '20:00', 'Murph', evening], [1, '22:30', 'Felix', 'still plotting'],
+      [2, '07:00', 'Murph', 'Felix missed Tuesday, so Noor leads 2 to 1.'], [2, '12:00', 'Felix', 'bought an umbrella'], [2, '12:02', 'Noor', 'for the walk?'],
+      [2, '12:03', 'Felix', 'for the principle'], [2, '20:00', 'Murph', evening], [2, '23:40', 'Felix', 'it finally rained so i stayed in'],
+      [2, '23:41', 'Noor', 'that is the opposite of what an umbrella is for'],
+      [3, '07:00', 'Murph', 'Felix missed Wednesday, so Noor leads 3 to 1.'], [3, '18:00', 'Felix', 'umbrella is drying in the hallway'],
+      [3, '20:00', 'Murph', evening], [3, '23:52', 'Noor', 'proud of you'],
+      [4, '07:00', 'Murph', 'Noor leads 4 to 2. Last day.'], [4, '06:34', 'Noor', 'picnic menu incoming'], [4, '16:00', 'Felix', 'murph does a walk to the store count'],
+      [4, '16:01', 'Murph', 'If it’s two miles and you post a photo, yes.'], [4, '20:00', 'Murph', evening], [4, '22:15', 'Felix', 'forecast says rain at 11'], [4, '23:59', 'Noor', 'felix'],
+    ]
+    // Most of a real week's chat is about other things.
+    const talk = ['did you see the game', 'only the end', 'my train was late again', 'are we still on for saturday', 'yes, noon', 'send me that soup recipe',
+      'the lentil one?', 'my brother is in town', 'what are you reading', 'a mystery, its slow', 'coffee?', 'already had two', 'the heater is making a noise again',
+      'call the building', 'i lost my keys', 'check the coat', 'found them', 'lunch tomorrow?', 'cant, dentist', 'how was the dentist', 'fine, no cavities',
+      'my phone is at 3%', 'charge it', 'the bakery has the good bread today', 'get two', 'what time is dinner', 'seven', 'should i bring anything', 'just yourself',
+      'my sister got a puppy', 'send pics', 'sending']
+    const filler = ['lol', 'ok', 'yeah', 'haha', 'nice', 'true', 'sure']
+    const banter: [number, string, string, string][] = Array.from({ length: 5 * 18 }, (_, index) => {
+      const minutes = 9 * 60 + 20 + (index % 18) * 35
+      return [Math.floor(index / 18), `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, index % 2 ? 'Felix' : 'Noor',
+        index % 3 ? filler[index % filler.length]! : talk[index / 3]!]
+    })
+    const score = [{ name: 'Noor', score: 5 }, { name: 'Felix', score: 2 }]
+    const providers = await createRecapShowLiveProviders({
+      game: { id: gameId, recapShow: true, players: players.map(player => ({ ...player, task: tasks[player.name as keyof typeof tasks] })), lengthDays: 5,
+        schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets', item: 'A picnic packed by the loser' }], score,
+        days: dates.map((date, day) => ({ dayNumber: day + 1, dates: { Noor: date, Felix: date }, posts: Object.fromEntries(players.map(({ name }) => {
+          const post = posts.find(([who, postDay]) => who === name && postDay === day)
+          return [name, post ? { entryId: `synthetic-${name.toLowerCase()}-${day}`, postedAt: { local: at(day, post[2]), timeZone: 'America/Chicago', instant: new Date(at(day, post[2])).toISOString() },
+            kind: 'photo', text: post[3], data: null } : 'missed']
+        })) })) },
+      players, entries, result: [{ ...players[0]!, score: 5 }, { ...players[1]!, score: 2 }], startedAt: new Date(at(0, '00:00')).toISOString(),
+      chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+        .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
+    })
+    const events: unknown[] = []
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(path.join(vault, 'games'), { recursive: true })
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nTheir first game together.\n')
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!target) throw new Error('Expected real Codex target.')
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        ...(tier === 'production flex' ? { serviceTier: 'flex' as const } : {}),
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: config.env.OPENAI_API_KEY ?? 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      })
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([vault, catalogRoot, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+    const story = providers.saved[0]
+    const rejections = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && action.tool === 'write_recap' && !action.success ? [action.output.slice(0, 400)] : [])
+    const headlines = (story?.pages ?? []).map(page => page.blocks.flatMap(block => block.kind === 'headline' ? [block.text ?? ''] : []))
+    process.stdout.write(`[recap cover title] ${JSON.stringify({ tier, served, treatment: story?.treatment, cover: headlines[0], headlines: headlines.slice(1), rejections })}\n`)
+    expect(served.length).toBeGreaterThan(0)
+    if (tier === 'production flex') expect(served.every(turn => turn.serviceTier === 'flex' && turn.model === 'gpt-6.1-sol'), JSON.stringify(served)).toBe(true)
+    expect(providers.saved).toHaveLength(1)
+    expect(headlines[0]).toHaveLength(1)
+    const title = headlines[0]![0]!
+    expect(title.length, title).toBeLessThanOrEqual(24)
+    // The week's story, never its rules: no counts, tasks, schedule or matchup.
+    expect(title).not.toMatch(/\d|\b(?:rope|miles?|minutes?|daily|every day|each day|a day|versus|vs)\b/iu)
+    for (const [index, lines] of headlines.entries()) for (const line of lines) expect(line.length, `page ${index + 1}: ${line}`).toBeLessThanOrEqual(index ? 48 : 24)
+    // The instructions get the titles right the first time: no write is turned back over a headline.
+    expect(rejections.filter(output => /cover|headline/iu.test(output))).toEqual([])
+  }, 900_000)
+
 })
 
 describeRealCodex('real Codex game bootstrap e2e', () => {

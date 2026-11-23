@@ -91,8 +91,27 @@ export const recapShowStorySchema = gameRecapWriterSchema.extend({
   song: z.object({ title: z.string().trim().min(1).max(200), style: z.string().trim().min(1).max(2000), lyrics: z.array(z.string().trim().min(1).max(500)).min(1).max(20) }).strict().optional(),
   chatLine: z.string().trim().min(1).max(1000),
 });
+/** A new show's cover carries one title the app sets large, and every other headline reads at a glance.
+ * Stored shows keep whatever they were written with. */
+export const RECAP_COVER_TITLE_MAX = 24;
+export const RECAP_HEADLINE_MAX = 48;
+const newShowPagesSchema = recapShowStorySchema.shape.pages.superRefine((pages, context) => {
+  pages.forEach((page, index) => {
+    const headlines = page.blocks.flatMap(block => block.kind === "headline" ? [(block.text ?? "").trim()] : []);
+    if (index === 0 && headlines.length !== 1) {
+      context.addIssue({ code: "custom", path: [index], message: `The cover takes exactly one headline, its title; it has ${headlines.length}.` });
+    }
+    const limit = index === 0 ? RECAP_COVER_TITLE_MAX : RECAP_HEADLINE_MAX;
+    for (const text of headlines.filter(text => text.length > limit)) {
+      context.addIssue({ code: "custom", path: [index], message: index === 0
+        ? `The cover's title "${text}" is ${text.length} characters; keep it to ${limit}, the week's story in a few words.`
+        : `The headline "${text}" on page ${index + 1} is ${text.length} characters; keep it to ${limit}.` });
+    }
+  });
+});
 export const recapShowWriterSchema = recapShowStorySchema.extend({
   treatment: z.string().trim().min(1).max(40).optional(),
+  pages: newShowPagesSchema,
 });
 export const gameRecapDraftSchema = z.object({
   story: recapShowWriterSchema,

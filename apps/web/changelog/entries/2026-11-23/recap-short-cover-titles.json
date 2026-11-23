@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-23",
+  "order": 100,
+  "item": {
+    "id": "recap-short-cover-titles",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Recap covers get one short title",
+    "summary": "A pair recap's cover now has a single title of a few words that names the story of your week, instead of restating the game's rules. Every other line in the show stays short enough to read at a glance.",
+    "details": "In the app, a longer cover title steps down in size, and a prize that takes two lines shows in full on the last page.",
+    "relevanceTags": ["games", "recaps"],
+    "sourcePullRequests": []
+  }
+}
