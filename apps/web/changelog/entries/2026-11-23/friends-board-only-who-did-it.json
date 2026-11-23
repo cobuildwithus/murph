@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-23",
+  "order": 100,
+  "item": {
+    "id": "friends-board-only-who-did-it",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Friends boards show who actually did it",
+    "summary": "An exercise's Friends board now leaves off friends with none of it in that week, month or all time, instead of listing them at 0.",
+    "details": "Your own row always stays, and so does the friend you opened to compare with.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": [5271]
+  }
+}
