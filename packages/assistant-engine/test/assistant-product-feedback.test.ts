@@ -1,6 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_ROLEPLAY_REVIEW_SUMMARY,
 } from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
@@ -409,7 +410,10 @@ describe("assistant product feedback", () => {
     expect(deliverProductSupportEscalation).toHaveBeenCalledOnce();
   });
 
-  it("rejects a support escalation outside a verified direct conversation scope", async () => {
+  it.each([
+    { kind: "frustration", summary: "Support escalation: an import is stuck." },
+    { kind: "moderation_review", summary: HOSTED_ROLEPLAY_REVIEW_SUMMARY },
+  ])("rejects $kind outside a verified direct conversation scope", async (feedback) => {
     const deliverProductSupportEscalation = vi.fn();
     const productFeedbackRecorder = createAssistantProductFeedbackRecorder({
       acceptedInputItems: [{ id: "assistant_input_1", source: "assistant-input" }],
@@ -424,17 +428,13 @@ describe("assistant product feedback", () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
-        arguments: {
-          kind: "frustration",
-          summary:
-            "Support escalation: a connected source reports success but Murph does not finish the connection.",
-        },
+        arguments: feedback,
         namespace: "murph",
         tool: "submit_product_feedback",
       },
     });
     if (!request) {
-      throw new Error("Expected a parsed support escalation request.");
+      throw new Error("Expected a parsed feedback request.");
     }
 
     for (const conversationScope of [
@@ -659,6 +659,18 @@ describe("assistant product feedback", () => {
       },
       kind: "submit-product-feedback",
     });
+  });
+
+  it.each([
+    { summary: "Extra details" },
+    { summary: HOSTED_ROLEPLAY_REVIEW_SUMMARY, relatedChangelogItemIds: ["example"] },
+  ])("rejects added context on a moderation flag", (extra) => {
+    expect(readTestMurphDynamicToolRequest({
+      method: "item/tool/call", params: {
+        namespace: "murph", tool: "submit_product_feedback",
+        arguments: { kind: "moderation_review", ...extra },
+      },
+    })?.kind).toBe("invalid-tool-arguments");
   });
 
   it("rejects malformed generalized feedback tool arguments", () => {

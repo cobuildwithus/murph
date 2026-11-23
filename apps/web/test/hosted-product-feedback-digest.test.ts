@@ -1,3 +1,4 @@
+import { HOSTED_ROLEPLAY_REVIEW_SUMMARY, type HostedProductFeedbackKind } from "@murphai/hosted-execution/runtime-control";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,6 +95,7 @@ describe("hosted product feedback digest", () => {
         memberId: "member_group_runtime",
         summary: "Asked for treadmill workout support.",
       },
+      { kind: "moderation_review", memberId: "member_alpha", summary: HOSTED_ROLEPLAY_REVIEW_SUMMARY },
     ]));
     const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
 
@@ -104,7 +106,7 @@ describe("hosted product feedback digest", () => {
       sendEmail,
     })).resolves.toMatchObject({
       dayKey: "2026-07-30",
-      feedbackCount: 4,
+      feedbackCount: 5,
       outcome: "sent",
       windowEndAt: "2026-07-30T22:00:00.000Z",
       windowStartAt: "2026-07-29T22:00:00.000Z",
@@ -130,6 +132,9 @@ describe("hosted product feedback digest", () => {
         "",
         "Product frustrations (1)",
         "- Reminder cadence felt too frequent this week.",
+        "",
+        "Moderation review (1)",
+        `- ${HOSTED_ROLEPLAY_REVIEW_SUMMARY}`,
         "",
         "Member / group 2",
         "",
@@ -208,6 +213,7 @@ describe("hosted product feedback digest", () => {
         feature_interest: 0,
         feature_request: 2,
         frustration: 1,
+        moderation_review: 0,
       },
       rows: [
         {
@@ -228,7 +234,7 @@ describe("hosted product feedback digest", () => {
         lt: new Date("2026-07-30T22:00:00.000Z"),
       },
       kind: {
-        in: ["feature_interest", "feature_request", "frustration"],
+        in: ["feature_interest", "feature_request", "frustration", "moderation_review"],
       },
       NOT: [
         {
@@ -745,15 +751,11 @@ type CapturedResendRequest = {
 
 function createFeedbackDigestBatch(
   rows: Array<{
-    kind: "feature_interest" | "feature_request" | "frustration";
+    kind: HostedProductFeedbackKind;
     memberId: string | null;
     summary: string;
   }> = [],
-  countOverrides: Partial<{
-    feature_interest: number;
-    feature_request: number;
-    frustration: number;
-  }> = {},
+  countOverrides: Partial<Record<HostedProductFeedbackKind, number>> = {},
 ) {
   return {
     counts: {
@@ -763,6 +765,7 @@ function createFeedbackDigestBatch(
       feature_request:
         countOverrides.feature_request
         ?? rows.filter((row) => row.kind === "feature_request").length,
+      moderation_review: countOverrides.moderation_review ?? rows.filter((row) => row.kind === "moderation_review").length,
       frustration:
         countOverrides.frustration
         ?? rows.filter((row) => row.kind === "frustration").length,

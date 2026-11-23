@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH } from "@murphai/hosted-execution/runtime-control";
+import { HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH, HOSTED_ROLEPLAY_REVIEW_SUMMARY, type HostedProductFeedbackKind } from "@murphai/hosted-execution/runtime-control";
 
 const prismaMocks = vi.hoisted(() => ({
   createMany: vi.fn(),
@@ -28,6 +28,31 @@ describe("recordHostedProductFeedback", () => {
   beforeEach(() => {
     prismaMocks.createMany.mockReset();
     prismaMocks.findThreadContainer.mockReset().mockResolvedValue(null);
+  });
+
+  it("accepts only a fixed review marker bound to a person", async () => {
+    const feedback = makeFeedback({
+      kind: "moderation_review", summary: HOSTED_ROLEPLAY_REVIEW_SUMMARY, relatedChangelogItemIds: [],
+    });
+    const memberId = "synthetic-private-account";
+    const error = { code: "HOSTED_PRODUCT_FEEDBACK_REJECTED" };
+    await expect(recordHostedProductFeedback({ feedback })).rejects.toMatchObject(error);
+    await expect(recordHostedProductFeedback({
+      memberId, feedback: { ...feedback, summary: "An untrusted explanation" },
+    })).rejects.toMatchObject(error);
+    await expect(recordHostedProductFeedback({
+      memberId, feedback: { ...feedback, relatedChangelogItemIds: ["example"] },
+    })).rejects.toMatchObject(error);
+    prismaMocks.findThreadContainer.mockResolvedValueOnce({ memberId });
+    await expect(recordHostedProductFeedback({ memberId, feedback })).rejects.toMatchObject(error);
+    expect(prismaMocks.createMany).not.toHaveBeenCalled();
+    prismaMocks.createMany.mockResolvedValue({ count: 1 });
+    await expect(recordHostedProductFeedback({ memberId, feedback })).resolves.toMatchObject({ recorded: true });
+    expect(prismaMocks.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [{ id: expect.any(String), memberId, kind: "moderation_review",
+        summary: HOSTED_ROLEPLAY_REVIEW_SUMMARY, relatedChangelogItemIdsJson: [] }],
+      skipDuplicates: true,
+    });
   });
 
   it("keeps weekly usage audits anonymous even with a bound member", async () => {
@@ -318,7 +343,7 @@ describe("normalizeHostedProductFeedback", () => {
 
 function makeFeedback(input: {
   idempotencyKey?: string;
-  kind?: "feature_interest" | "feature_request" | "frustration";
+  kind?: HostedProductFeedbackKind;
   relatedChangelogItemIds?: string[];
   summary?: string;
 } = {}) {

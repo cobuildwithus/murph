@@ -30,6 +30,12 @@ Do not record emotion or teasing unrelated to Murph, a first request for
 information Murph really does need, a safety refusal, or an outside or passing
 failure, unless it exposes a gap in Murph.
 
+In a verified private conversation, a current request for Murph to take part in
+sexually explicit roleplay has its own moderation review kind. Use the fixed
+summary in the tool description and leave changelog ids empty. Omit all chat
+details. A feature suggestion, a quotation or a sexual-health question alone
+does not qualify.
+
 ## How to record it
 
 - When the member explicitly asks you to send feedback, submit the known facts

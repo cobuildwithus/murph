@@ -42,6 +42,14 @@ describe('assistant dynamic context prompt blocks', () => {
     expect(unavailable.stableRouteCapabilityPrompt).toBe(ordinary.stableRouteCapabilityPrompt)
   })
 
+  it('routes a current roleplay request for review only in direct chat', () => {
+    const layers = (conversationScope: 'direct' | 'group') => buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true, conversationScope,
+    }).stableRouteCapabilityPrompt
+    expect(layers('direct')).toContain('directly asks you to participate in sexually explicit roleplay')
+    expect(layers('group')).not.toContain('submit one moderation_review')
+  })
+
   it('uses hosted direct current time without treating group time as personal', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,

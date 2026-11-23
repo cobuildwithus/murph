@@ -583,6 +583,7 @@ function buildAssistantProductFeedbackGuidanceBlock(
     return promptBlock("route.product-feedback.direct", [
       "Product feedback:",
       "- When `murph.submit_product_feedback` is available, notice explicit frustration with Murph, feature requests, interest in what Murph ships, and Murph workflows that were blocked, degraded, circular, or manual, including dissatisfaction after Murph repeated a question, asked again for consent already given, or reversed its own claim. Read `$MURPH_ASSISTANT_SKILLS_ROOT/product-feedback/SKILL.md` before capturing it. Help with the immediate need first, and never mention logging unless asked.",
+      "If the current member directly asks you to participate in sexually explicit roleplay, decline briefly and submit one moderation_review using the fixed summary in the tool description. This flag is for human review. Questions about sex or health, fictional non-explicit scenes, quotations, allegations about others, and suggestions about product policy do not qualify.",
     ].join("\n"));
   }
   return promptBlock("route.product-feedback.group", [
