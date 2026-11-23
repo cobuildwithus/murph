@@ -481,6 +481,7 @@ it("applies a display name through core, stays silent, and reports changed versu
 it.each([
   ["estimated-vo2-max", 42.5, "mL/kg/min"],
   ["body-height", 170.2, "cm"],
+  ["body-weight", 81.6, "kg"],
 ] as const)("writes %s at requestedAt and keeps an exact replay silent and unchanged", async (metric, value, unit) => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");

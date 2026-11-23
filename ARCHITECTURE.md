@@ -4433,7 +4433,8 @@ existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
 
 The closed `measurement.add` V1 action admits `estimated-vo2-max` values from
-10 through 90 and `body-height` from 50 through 272 cm, including decimals.
+10 through 90, `body-height` from 50 through 272 cm and `body-weight` from 20
+through 350 kg, including decimals.
 One per-metric range table validates both the action and native request.
 Runtime writes a manual measurement with the
 catalog unit, envelope `requestedAt` as `occurredAt`, and an event id derived
@@ -4443,22 +4444,24 @@ exists, including a corrected record or tombstone. Ordinary same-id measurement
 upserts retain their existing behavior. Created actions report `applied`; kept
 actions report `unchanged`. Neither outcome proves replica publication.
 
-About you reads `heightCm` from the existing companion Numbers response.
-`readCompanionBodyHeight` uses `metricsIndex`'s canonical `body-height`
-selection, so latest-valid source precedence and unit normalization stay at
-the metric owner. It returns null without a usable selection or when its date
-is more than the catalog's 365 days before today's vault-local date, even if
-the selection was fresh at publication. No extra bucket, profile field,
+About you reads `heightCm` and `weightKg` from the existing companion Numbers
+response. `readCompanionBody` uses `metricsIndex`'s canonical `body-height` and
+`body-weight` selections, so latest-valid source precedence and unit
+normalization stay at the metric owner. Each is null without a usable selection
+or when its date is older than the catalog's staleness window (365 days for
+height, 45 for weight) before today's vault-local date, even if the selection
+was fresh at publication. No extra bucket, profile field,
 projection generation or endpoint is added. The Numbers read retains native
 session and health-authority checks before and after loading private data.
 
-Height introduces no persisted fields. The existing measurement's metric,
+Height and weight introduce no persisted fields. The existing measurement's metric,
 value, unit, source, title and occurrence time are private health content in
 the canonical vault; the hosted checkpoint and browser replica seal them.
 The queued action payload is encrypted member-action content. The opaque
 action/event identity and terminal status remain operational metadata, not
-health values or lookup keys derived from them. `heightCm` is an owner-only,
-no-store response field, never a profile column or friend-sharing field.
+health values or lookup keys derived from them. `heightCm` and `weightKg` are
+owner-only, no-store response fields, never profile columns or friend-sharing
+fields.
 
 Ship this decoder, canonical writer and runtime handler before enabling the
 companion measurement producer. Deploy and verify the Worker and runner first,
@@ -4471,6 +4474,9 @@ contracts decoder in Worker and runner (including warm bundle replacement)
 before Web can enqueue it, then ship the app. Old VO2 requests and manual
 measurement records retain their shapes; older apps ignore the additive
 Numbers field. Retain height-capable consumers while height requests remain.
+`body-weight` follows the same order: Worker and runner first, then Web, then
+the app that sends it. Retain weight-capable consumers while weight requests
+remain.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
@@ -6151,13 +6157,15 @@ Only the insertion winner schedules Next after(), with its own secure-box unwrap
 scope and prepared in-memory reference. The Node route declares maxDuration 300.
 One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
 reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
-logging are off. After admission, generation reads height once through the existing
-Companion replica loader and latest-valid body-height helper, outside transactions
-and under Browser Vault health authority. A height no older than 365 days is sent
-to OpenAI as whole centimeters in the prompt framing to preserve real proportions.
-Missing height or a failed read leaves the prompt unchanged; share authority is
-rechecked before provider dispatch. Height is never added to card or Messages
-text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
+logging are off. After admission, generation reads height and weight once through
+the existing Companion replica loader and latest-valid body helper, outside
+transactions and under Browser Vault health authority. A height no older than
+365 days and a weight no older than 45 days are sent to OpenAI in the prompt
+framing, as whole feet and inches with centimeters and whole pounds with
+kilograms, so the picture keeps their real body. Either may be missing alone.
+Missing values or a failed read leave the prompt without them; share authority
+is rechecked before provider dispatch. Height and weight are never added to
+card or Messages text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
 independent of client disconnect. Output is decoded and encoded once at quality
 90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
 The existing store enforces the 3 MiB envelope bound.
