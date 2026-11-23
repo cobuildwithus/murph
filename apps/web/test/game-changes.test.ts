@@ -215,8 +215,12 @@ describe("weekly game mutually agreed changes", () => {
         // Extending into a Friday is fine; shortening onto only off days is not.
         expect(decideGameChange(s, actor, { kind: "edit", schedule: { days: [4] }, lengthDays: 7 }, sunday).effectiveFromDay).toBe(2);
       }
-      const offTail = twoZones(7, "2026-11-07", ["America/New_York", "America/New_York"], { days: [5] });
+      // Saturdays and Thursdays: cutting to four days leaves Mon and Tue, both off.
+      const offTail = twoZones(7, "2026-11-07", ["America/New_York", "America/New_York"], { days: [3, 5] });
       expect(() => decideGameChange(offTail, "player_a", { kind: "edit", lengthDays: 4 }, sunday)).toThrow("at least one scheduled day");
+      // With no check-in day left after Saturday, the game ended when Saturday closed.
+      const saturdayOnly = twoZones(7, "2026-11-07", ["America/New_York", "America/New_York"], { days: [5] });
+      expect(() => decideGameChange(saturdayOnly, "player_a", { kind: "edit", lengthDays: 4 }, sunday)).toThrow("no longer open for changes");
       // Before play, the same edit is allowed: Day 1 moves onto the schedule when it lands.
       expect(decideGameChange(s, "player_a", { kind: "edit", schedule: { days: [4] } }, noon("2026-11-06", "America/New_York")).effectiveFromDay).toBe(0);
     });

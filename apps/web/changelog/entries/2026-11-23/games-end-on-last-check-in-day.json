@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-23",
+  "order": 100,
+  "item": {
+    "id": "games-end-on-last-check-in-day",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Games end on your last check-in day",
+    "summary": "A game with days off at the end, like Monday to Friday over a week, now ends when your last check-in day closes, so the results and recap come the next morning instead of after the weekend.",
+    "details": "The score can't change once that day's late-post hour passes, so Murph settles the game then. Games that count any days you choose still run their full length.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5268]
+  }
+}

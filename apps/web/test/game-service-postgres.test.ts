@@ -2199,9 +2199,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   it("time-travels by moving only the game's clock: posts keep their real dates, and passing the end settles", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "UTC");
-    // Only today's weekday counts, so tomorrow is a day off.
+    // Today and the day after tomorrow count, so tomorrow is a day off inside the game.
     const today = gameLocalDate(new Date(), "America/New_York");
-    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today), weekdayOf(addDays(today, 2))] } } });
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "today");
     await ok(leo, shot);
@@ -2766,6 +2766,34 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     } finally {
       await getPrisma().hostedLinqDelivery.deleteMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) } });
       await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "settled", settledAt: now } });
+    }
+  });
+
+  it("ends a weekday pair on Saturday morning with the recap, not a missed-Friday message", async () => {
+    const a = await member("Ava", "UTC"), b = await member("Leo", "UTC");
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b, { terms: { ...TERMS, schedule: { days: [0, 1, 2, 3, 4] } } }, "UTC");
+    const room = `synthetic_room_${randomUUID()}`;
+    await db.hostedMember.create({ data: { id: room, billingStatus: "not_started" } }); memberIds.push(room);
+    // Monday Day 1 of seven. Both post Thursday, then both miss Friday.
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date("2030-03-04T00:00:00Z"), timeZone: "UTC" } });
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(Date.parse("2030-03-07T18:00:00Z") - Date.now()) } });
+    for (const actor of [a, b]) await ok(actor, await photo(actor, gameId, `thursday-${actor === a ? "first" : "second"}`));
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room, devClockOffsetMs: null } });
+    const [row] = await db.$queryRaw<Array<{ shard: bigint }>>`SELECT mod(abs(hashtext(${room})::bigint), 60) AS shard`;
+    const saturdayMorning = new Date(Date.parse("2030-03-09T09:00:00Z") + Number(row.shard) * 60_000);
+    const receipts = () => db.hostedLinqDelivery.findMany({ where: { template: { in: ["game_missed", "game_recap"] },
+      OR: [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }] }, select: { template: true } });
+    try {
+      // Friday closed at 04:00 with its late-post hour, but the sweep holds settlement for the morning.
+      await reserveDueGameMissedDayCheckIns(new Date(saturdayMorning.getTime() - 60 * 60_000));
+      expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).status).toBe("live");
+      expect(await receipts()).toEqual([]);
+      await reserveDueGameMissedDayCheckIns(saturdayMorning);
+      expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "settled", settledAt: saturdayMorning });
+      expect(await receipts()).toEqual([{ template: "game_recap" }]);
+    } finally {
+      await db.hostedLinqDelivery.deleteMany({ where: { OR: [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }] } });
     }
   });
 

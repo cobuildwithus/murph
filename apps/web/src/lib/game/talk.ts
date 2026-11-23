@@ -5,7 +5,7 @@ import type { Game, GameInvitee, GamePlayer, Prisma } from "@prisma/client";
 import { isRecord } from "../primitives";
 import { isPairRoster } from "./roster";
 import { addressedGameInvite, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
-import { currentTerms, isGameDue, type RuleState } from "./rules";
+import { currentTerms, isGameDue, lastCheckInDay, type RuleState } from "./rules";
 import { readGroupGameNoticeAuthority, type GameChatAudience } from "./chat-membership";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
@@ -78,7 +78,7 @@ export async function readCurrentGameTalk(db: Prisma.TransactionClient, gameId: 
     const contacts = await talkAuthorContacts(request.actor, prepared);
     const keys = await verifiedGameContactKeys(db, request.actor, contacts);
     if (!(await verifiedGameContactKeys(db, request.actor, audience.contacts)).length) return null;
-    const entries = await db.gameEntry.findMany({ where: { gameId, dayIndex: game.lengthDays - 1 } });
+    const entries = await db.gameEntry.findMany({ where: { gameId, dayIndex: lastCheckInDay(toRuleState(game, [])) } });
     const state = toRuleState(game, entries);
     const clock = new Date(now.getTime() + Number(game.devClockOffsetMs ?? 0));
     const invitation = await readGroupTalkInvitation(db, game, state, request.actor, keys, clock);

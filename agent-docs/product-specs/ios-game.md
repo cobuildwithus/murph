@@ -155,12 +155,19 @@ withdrawal, Prove it and score edits close as soon as the pair is decided;
 duplicate post retries still succeed. The last post's push still arrives.
 Group timing is unchanged.
 
-Replies remain available until `settleDueAt`, the original natural end including
-applicable offline grace, even while the pair is settled. `settlesAt` keeps its
-existing natural-time meaning. Foreground reads settle due games; background
-chat reads do not. Without a foreground read, the room sweep settles due pairs
-at or after 9am following the last day in the latest remaining player's frozen
-zone, including count schedules and mixed rooms. Due pairs get no check-ins.
+A game's natural end is the close of its last scheduled day, plus applicable
+offline grace, for pairs and groups. Off days after it can't take a post, so
+they don't extend the game: a Monday-to-Friday schedule over seven days ends
+when Friday closes, not after the weekend. Count schedules have no off days and
+run their full length.
+
+Replies remain available until `settleDueAt`, that natural end, even while the
+pair is settled. `settlesAt` keeps its natural-time meaning. Foreground reads
+settle due games; background chat reads do not. Without a foreground read, the
+room sweep settles due pairs at or after 9am following the last scheduled day in
+the latest remaining player's frozen zone, including count schedules and mixed
+rooms. Due pairs get no check-ins, so the recap replaces a missed-last-day
+check-in.
 
 `GameView` adds `recapPending?: true`. It is present only for a settled,
 chat-bound game with a null recap during the first 10 minutes after `settledAt`.

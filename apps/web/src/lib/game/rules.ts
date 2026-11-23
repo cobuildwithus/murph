@@ -431,15 +431,12 @@ export function isGameDecided(state: RuleState, now: Date): boolean {
   const entries = indexGameEntries(state.entries);
   const schedule = currentTerms(state.game.terms).schedule;
   if ("count" in schedule) return players.every(player => scorePlayer(state, player, undefined, entries).score >= schedule.count);
-  for (let day = state.game.lengthDays - 1; day >= 0; day--) {
-    if (!isScheduledDay(state, day)) continue;
-    return players.every(player => {
-      if (!completedEntry(entries, player.memberId, day)) return false;
-      const start = dayStartInstant(addDays(player.dayOne!, day), player.timeZone).getTime();
-      return now.getTime() >= start + GAME_GRACE_MS || !graceOpen(state, player, day - 1, entries);
-    });
-  }
-  return false;
+  const day = lastCheckInDay(state);
+  return players.every(player => {
+    if (!completedEntry(entries, player.memberId, day)) return false;
+    const start = dayStartInstant(addDays(player.dayOne!, day), player.timeZone).getTime();
+    return now.getTime() >= start + GAME_GRACE_MS || !graceOpen(state, player, day - 1, entries);
+  });
 }
 
 /** The acceptance deadline shared by invited and negotiating games. */
@@ -448,9 +445,9 @@ export function isGameInviteExpired(game: { status: string; inviteExpiresAt: Dat
     && game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
 }
 
-/** This player's last day is over: the game is done for them, whatever the other player's clock says. */
+/** This player's last check-in day is over: the game is done for them, whatever the other player's clock says. */
 export function hasFinishedGame(state: RuleState, player: RulePlayer, now: Date): boolean {
-  return (dayIndexAt(player, now) ?? -1) >= state.game.lengthDays;
+  return (dayIndexAt(player, now) ?? -1) > lastCheckInDay(state);
 }
 
 /** A live game is waiting on this player today: a scheduled day they haven't posted yet. */
@@ -462,18 +459,27 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
 }
 
 /**
- * The settle time: when the last player's last day ends. The grace hour is
- * added only for a player whose last day can still take a late post.
+ * The last scheduled day. Off days after it can't take a post, so the game is
+ * over once it closes: a Monday-to-Friday week ends on Friday, not Sunday.
+ */
+export function lastCheckInDay(state: RuleState): number {
+  for (let day = state.game.lengthDays - 1; day >= 0; day -= 1) if (isScheduledDay(state, day)) return day;
+  return state.game.lengthDays - 1;
+}
+
+/**
+ * The settle time: when the last player's last check-in day ends. The grace
+ * hour is added only for a player whose last check-in day can still take a late post.
  */
 export function settleDueAt(state: RuleState): Date {
-  const { lengthDays } = state.game;
+  const lastDay = lastCheckInDay(state);
   let due = 0;
   // One index keeps ten-player settlement checks linear in entries.
   const entries = indexGameEntries(state.entries);
   for (const player of remainingPlayers(state)) {
     if (!player.dayOne) continue;
-    const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
-    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1, entries) ? GAME_GRACE_MS : 0));
+    const end = dayStartInstant(addDays(player.dayOne, lastDay + 1), player.timeZone).getTime();
+    due = Math.max(due, end + (graceOpen(state, player, lastDay, entries) ? GAME_GRACE_MS : 0));
   }
   return new Date(due);
 }
