@@ -1065,7 +1065,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       { memberId: b, title: "Object to burpees", line: "PlayerB files a motion for recess." },
     ].slice(0, cardCount);
     const { recapShowWriterSchema } = await import('@murphai/contracts/recap-show');
-    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama", pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The mat testified" }, { kind: "scene" as const,
       scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches.", faceY: 0.3 } }] }], chatLine: "The mat entered evidence.",
       song: { title: "The train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
@@ -1186,7 +1186,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
     const { sealGameMedia } = await import("@/src/lib/game/crypto");
     const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-    const recap = recapShowWriterSchema.parse({ treatment: "A silent-film courtroom melodrama", chatLine: "The mat entered evidence.", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+    const recap = recapShowWriterSchema.parse({ treatment: "A silent-film courtroom melodrama", chatLine: "The mat entered evidence.", pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The mat testified" }, { kind: "scene" as const,
       scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }] });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     const generationId = recapGenerationId(eventId);
