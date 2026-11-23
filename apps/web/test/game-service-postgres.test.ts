@@ -2199,9 +2199,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   it("time-travels by moving only the game's clock: posts keep their real dates, and passing the end settles", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "UTC");
-    // Only today's weekday counts, so tomorrow is a day off.
+    // Today and the day after tomorrow count, so tomorrow is a day off inside the game.
     const today = gameLocalDate(new Date(), "America/New_York");
-    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today), weekdayOf(addDays(today, 2))] } } });
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "today");
     await ok(leo, shot);
