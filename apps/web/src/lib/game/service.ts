@@ -121,6 +121,7 @@ import {
   playerFor,
   reject,
   settleDueAt,
+  lastCheckInDay,
   type RuleState,
   type Schedule,
   type StoredResult,
@@ -3719,7 +3720,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
   const db = getPrisma();
   const contacts = await readGameVerifiedContacts(actor);
   const keys = await verifiedGameContactKeys(db, actor, contacts);
-  const entries = await db.gameEntry.findMany({ where: { gameId: row.id, dayIndex: row.lengthDays - 1 } });
+  const entries = await db.gameEntry.findMany({ where: { gameId: row.id, dayIndex: lastCheckInDay(toRuleState(row, [])) } });
   const invitation = await readGroupTalkInvitation(db, row, toRuleState(row, entries), actor, keys, now);
   if (!invitation) return false;
   const accepted = await db.gameEvent.findMany({ where: { gameId: row.id, type: "talk_requested" }, select: { actor: true, payload: true }, take: 10 });
@@ -3750,10 +3751,10 @@ async function closedInvitePreview(row: PreviewGame, now: Date, memberId: string
   return null;
 }
 
-/** Final-day artifacts decide whether the existing offline grace still applies. */
+/** Last check-in day artifacts decide whether the existing offline grace still applies. */
 async function groupInviteOpen(row: GameRow, now: Date): Promise<boolean> {
   if (row.maxPlayers !== 10 || row.status !== "live" || row.players.length >= 10) return false;
-  const entries = await getPrisma().gameEntry.findMany({ where: { gameId: row.id, dayIndex: row.lengthDays - 1 } });
+  const entries = await getPrisma().gameEntry.findMany({ where: { gameId: row.id, dayIndex: lastCheckInDay(toRuleState(row, [])) } });
   return !isGameDue(toRuleState(row, entries), now);
 }
 

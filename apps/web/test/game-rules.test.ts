@@ -20,6 +20,7 @@ import {
   decideWithdraw,
   dayIndexAt,
   GameRuleError,
+  hasFinishedGame,
   isGameDue,
   isGameDecided,
   isSettledGameCorrectable,
@@ -37,6 +38,7 @@ import {
   type Schedule,
   type StoredStake,
 } from "@/src/lib/game/rules";
+import { gameMissedCheckInRuns, morningAfterLastDay } from "@/src/lib/game/missed-check-in";
 import { addDays, dayStartInstant, weekdayOf } from "@/src/lib/game/time";
 
 const LEO = "hbm_leo";
@@ -1182,6 +1184,33 @@ describe("decided pair endings", () => {
     const friday = new Date("2026-10-23T16:00:00Z");
     for (const member of [LEO, AVA]) state = post(state, member, friday);
     expect(isGameDecided(state, friday)).toBe(true);
+  });
+  it("ends a weekday week when Friday closes, not after the weekend, even with a Friday missed", () => {
+    let state = live(invited({ days: [0, 1, 2, 3, 4] }), NYC);
+    for (const player of state.players) player.dayOne = "2026-10-19";
+    // Leo posts on Friday, Ava doesn't, so the game isn't decided early.
+    state = post(state, LEO, new Date("2026-10-23T16:00:00Z"));
+    expect(isGameDecided(state, new Date("2026-10-24T07:59:59Z"))).toBe(false);
+    // Friday's game day ends at 3am Saturday in New York (07:00Z); Ava's late-post hour runs to 08:00Z.
+    expect(isGameDue(state, new Date("2026-10-24T07:59:59Z"))).toBe(false);
+    expect(isGameDue(state, new Date("2026-10-24T08:00:00Z"))).toBe(true);
+    expect(hasFinishedGame(state, playerFor(state, LEO)!, new Date("2026-10-24T06:59:59Z"))).toBe(false);
+    expect(hasFinishedGame(state, playerFor(state, LEO)!, new Date("2026-10-24T07:00:00Z"))).toBe(true);
+    // The morning sweep settles at 9am Saturday; no missed-Friday message goes out first.
+    expect(morningAfterLastDay(state)).toEqual(new Date("2026-10-24T13:00:00Z"));
+    expect(gameMissedCheckInRuns(state, new Date("2026-10-24T13:00:00Z"))).toEqual([]);
+  });
+  it("keeps playing to the last day of an any-days week or onto a weekend day added later", () => {
+    const any = live(invited({ count: 3 }), NYC);
+    for (const player of any.players) player.dayOne = "2026-10-19";
+    expect(isGameDue(any, new Date("2026-10-26T07:59:59Z"))).toBe(false);
+    expect(isGameDue(any, new Date("2026-10-26T08:00:00Z"))).toBe(true);
+    const weekdays = live(invited({ days: [0, 1, 2, 3, 4] }), NYC);
+    for (const player of weekdays.players) player.dayOne = "2026-10-19";
+    weekdays.game.terms.versions.push({ ...weekdays.game.terms.versions[0], n: 2, fromDay: 5, schedule: { days: [5] } });
+    expect(isGameDue(weekdays, new Date("2026-10-24T08:00:00Z"))).toBe(false);
+    expect(isGameDue(weekdays, new Date("2026-10-25T07:59:59Z"))).toBe(false);
+    expect(isGameDue(weekdays, new Date("2026-10-25T08:00:00Z"))).toBe(true);
   });
   it("ends any-3-of-7 only after both reach three, excluding incomplete posts", () => {
     let state = live(invited({ count: 3 }), NYC);
