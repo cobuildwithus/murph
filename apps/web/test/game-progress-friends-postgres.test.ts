@@ -210,13 +210,14 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
     }
   });
 
-  it("shows a photo-only friend immediately, then stores the read's inference under that friend", async () => {
+  it("doesn't wait on a photo-only friend, then stores the read's inference and shows them", async () => {
     const { ava, leo } = await fixture("10 pushups");
     await db.gameEntry.deleteMany({ where: { memberId: leo, kind: "reps" } });
     const fetch = provider({ name: "pushups", quantity: 10, unit: "reps" });
     const first = friendsSchema.parse(await (await readFriends()).json());
     expect(first.incomplete).toBe(false);
-    expect(first.rows.map(row => [row.memberId, row.total?.value])).toEqual([[ava, 120], [leo, 0]]);
+    // Leo's photo isn't read yet: he joins the board once it is, never at 0.
+    expect(first.rows.map(row => [row.memberId, row.total?.value])).toEqual([[ava, 120]]);
     expect(first.pills.map(pill => pill.id)).toContain("pushups.reps");
     expect(await readAwards(ava)).toEqual([]);
     await mocks.after.mock.calls[0][0]();

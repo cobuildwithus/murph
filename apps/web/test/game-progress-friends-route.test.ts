@@ -230,11 +230,12 @@ it("uses each untyped post's terms version and group seat override", async () =>
   expect(mocks.openGameTexts.mock.calls[0][0].map((row: { table: string }) => row.table)).toEqual(["game"]);
 });
 
-it("shows pending friends without settling them as zero-amount opponents", async () => {
+it("leaves a pending friend off the board without settling them as a zero-amount opponent", async () => {
   mocks.entries.mockResolvedValue([{ ...entry("photo", "shared", "leo", 0, 0), kind: "photo", payloadEncrypted: null }]);
   const body = friendsSchema.parse(await (await GET(request())).json());
   expect(body.incomplete).toBe(false);
-  expect(body.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 0], ["leo", 0]]);
+  // Leo's photo isn't read yet: he joins the board once it is, never at 0.
+  expect(body.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 0]]);
   expect(mocks.settle).not.toHaveBeenCalled();
   expect(mocks.after).toHaveBeenCalledTimes(1);
 });
