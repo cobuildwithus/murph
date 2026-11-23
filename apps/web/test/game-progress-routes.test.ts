@@ -196,10 +196,12 @@ describe("Progress HTTP contracts", () => {
     expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
   });
-  it("starts the charts on the day they started the app, or Oct 19 for anyone on it before", async () => {
+  it("starts the charts on the day they started the app, or Oct 1 for anyone on it before", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     mocks.profileCreatedAt.value = new Date("2026-02-10T12:00:00Z");
-    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-19");
+    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-01");
+    mocks.profileCreatedAt.value = new Date("2026-10-12T12:00:00Z");
+    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-12");
   });
   it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);

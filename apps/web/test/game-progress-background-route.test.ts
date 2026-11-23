@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   ownGames: vi.fn(), friendGames: vi.fn(), cohort: vi.fn(), ids: vi.fn(), rooms: vi.fn(),
   pairLock: vi.fn(), resolve: vi.fn(), states: vi.fn(), state: vi.fn(), createState: vi.fn(), updateState: vi.fn(),
   awards: vi.fn(), createAwards: vi.fn(), profile: vi.fn(), transaction: vi.fn(), inference: vi.fn(),
+  artRows: vi.fn(), ensureArt: vi.fn(),
 }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
@@ -28,6 +29,9 @@ vi.mock("@/src/lib/game/progress/friend-sharing", () => ({ readFriendRooms: mock
 vi.mock("@/src/lib/game/progress/friend-health", () => ({ readFriendHealthSeries: () => { throw new Error("Background must not read friends' private health."); } }));
 vi.mock("@/src/lib/game/blocks", () => ({ lockGamePair: mocks.pairLock }));
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolve }));
+vi.mock("@/src/lib/game/progress/place-art", async original => ({
+  ...await original<typeof import("@/src/lib/game/progress/place-art")>(), readArtRows: mocks.artRows, ensureArt: mocks.ensureArt,
+}));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   gameProfile: { findUnique: mocks.profile, findUniqueOrThrow: mocks.profile },
   gameProgressMeasure: { findMany: mocks.states, findUnique: mocks.state },
@@ -44,6 +48,8 @@ import * as crypto from "@/src/lib/game/progress/crypto";
 import { readAwards, settleAwards } from "@/src/lib/game/progress/awards";
 import { healthSettlementCurrent } from "@/src/lib/game/progress/health-reader";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
+import { mapKey } from "@/src/lib/game/progress/place-art-make";
+import { describeMeasure } from "@/src/lib/game/progress/series";
 import { patchMeasureState, type MeasureState } from "@/src/lib/game/progress/state";
 import type { Candidate } from "@/src/lib/game/progress/registry";
 import type { FriendGameSeries } from "@/src/lib/game/progress/friend-games";
@@ -86,6 +92,7 @@ beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(savedAt));
   states = []; awards = [];
   mocks.pictures.mockResolvedValue([]);
+  mocks.artRows.mockResolvedValue(new Map()); mocks.ensureArt.mockResolvedValue(new Map());
   mocks.profile.mockResolvedValue({ timeZone: "UTC", createdAt: new Date(`${joinedOn}T12:00:00Z`) });
   mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" });
   mocks.raw.mockResolvedValue(healthSnapshot());
@@ -471,4 +478,18 @@ it("retries a missing Steps map on the same replica after settling other awards"
   await GET(request()); await drain();
   expect((await healthState())?.healthSettlement).toBeDefined();
   expect(mocks.resolve).toHaveBeenCalledTimes(2);
+});
+
+it("paints Running's map on the Progress read, as the Health read paints Steps'", async () => {
+  const polyline = encodePolyline([[40.71, -74.01], [39.95, -75.17], [38.9, -77.04]]);
+  mocks.resolve.mockResolvedValue({ from: "New York", to: "Washington", distanceM: 360_000, polyline, towns: [], straightLine: false });
+  mocks.ownGames.mockImplementation(async () => ({ checkIns: [], successors: new Map(), states: new Map(), pending: [], awards: await readAwards("ava"),
+    measures: [{ ...describeMeasure("run.meters", "run", "Run 5 km"), pending: false, gameOn: true, needsPerDay: false,
+      amounts: [{ measureId: "run.meters", date: "2026-11-14", amount: 5000 }] }] }));
+  const card = mapKey(polyline, "card");
+  mocks.artRows.mockResolvedValue(new Map([[card, { key: card, status: "ready", startedAt: new Date(savedAt) }]]));
+  const view = progressSchema.parse(await (await GET(request())).json());
+  expect(view.measures.find(measure => measure.id === "run.meters")?.route).toMatchObject({ mapArt: { state: "ready" }, drawerMapArt: null });
+  expect(mocks.ensureArt).toHaveBeenCalledWith(
+    expect.arrayContaining([expect.objectContaining({ key: mapKey(polyline, "drawer"), kind: "map" })]), expect.any(Map));
 });
