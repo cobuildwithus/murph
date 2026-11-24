@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 100,
+  "item": {
+    "id": "recap-videos-keep-long-words",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Long prizes no longer cost a recap its video",
+    "summary": "Prizes, titles and lyrics that run long now wrap and shrink as they do in the app, and end with an ellipsis if they still don't fit.",
+    "details": "A prize can take up to three lines on its ticket. Before, a long prize or title meant the recap went out without its video.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5283]
+  }
+}
