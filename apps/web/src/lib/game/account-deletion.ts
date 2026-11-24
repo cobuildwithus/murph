@@ -1,10 +1,12 @@
 import "server-only";
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 
-import { Prisma, type Game, type GamePlayer, type GameInvitee } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { isRecord } from "../primitives";
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
+import { departedLabels, type DepartedLabel, type GameRow } from "./row";
+import { settleGameBeforeDeletionTx } from "./service";
 import { parseGameTalkPayload } from "./talk";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { labelTarget, openGameTexts, sealGameText } from "./crypto";
@@ -13,20 +15,7 @@ import { readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
 
 const GAME_DELETION_PAGE_SIZE = 100;
 const ACTIVE = new Set(["invited", "negotiating", "live"]);
-type GameRow = Game & { players: GamePlayer[]; invitees: GameInvitee[] };
 type Db = Pick<Prisma.TransactionClient, "game" | "gameEvent" | "gameContactLabel" | "gameProfile">;
-
-/** Each viewer keeps only their own encrypted name for a deleted person. */
-export type DepartedLabel = { ownerMemberId: string; nameEncrypted: string | null };
-export function departedLabels(value: Prisma.JsonValue | null): DepartedLabel[] {
-  if (value === null) return [];
-  if (!Array.isArray(value) || value.length > 9) throw new Error("Stored departure labels are malformed.");
-  return value.map(label => {
-    if (!isRecord(label) || typeof label.ownerMemberId !== "string"
-      || (label.nameEncrypted !== null && typeof label.nameEncrypted !== "string")) throw new Error("Stored departure label is malformed.");
-    return { ownerMemberId: label.ownerMemberId, nameEncrypted: label.nameEncrypted };
-  });
-}
 
 interface PreparedGame {
   id: string;
@@ -34,6 +23,8 @@ interface PreparedGame {
   kept: null | {
     owner: string;
     termsWordsEncrypted: string;
+    inviteTokenEncrypted: string | null;
+    pendingChange?: Prisma.InputJsonObject;
     departures: { seat: number; joined: boolean; labels: DepartedLabel[] }[];
   };
 }
@@ -75,6 +66,23 @@ function fingerprint(row: GameRow): string {
   return JSON.stringify([row.updatedAt, row.maxPlayers, row.status, row.createdBy, row.wordsOwnerMemberId, row.termsWordsEncrypted,
     row.inviteTokenEncrypted, row.pendingChange, row.result, row.recapEncrypted,
     [...row.players].sort((a, b) => a.seat - b.seat), [...row.invitees].sort((a, b) => a.seat - b.seat)]);
+}
+
+async function transferGroupFields(row: GameRow, owner: string, leaving: Set<string>) {
+  if (row.wordsOwnerMemberId === owner) return { inviteTokenEncrypted: row.inviteTokenEncrypted };
+  if (row.maxPlayers !== 10 || row.status !== "live") return { inviteTokenEncrypted: null };
+  const target = { table: "game" as const, rowId: row.id, memberId: row.wordsOwnerMemberId };
+  const pending = row.pendingChange;
+  const keepProposal = !row.players.some(player => player.memberId && leaving.has(player.memberId) && !player.leftAt);
+  const pendingWords = keepProposal && isRecord(pending) && typeof pending.termsWordsEncrypted === "string" ? pending.termsWordsEncrypted : null;
+  const [token, words] = await openGameTexts([
+    { ...target, field: "invite_token", value: row.inviteTokenEncrypted },
+    { ...target, field: "terms_words", value: pendingWords },
+  ]);
+  const inviteTokenEncrypted = await sealGameText({ ...target, memberId: owner, field: "invite_token" }, token);
+  if (!words || !isRecord(pending)) return { inviteTokenEncrypted };
+  const encrypted = await sealGameText({ ...target, memberId: owner, field: "terms_words" }, words);
+  return { inviteTokenEncrypted, pendingChange: toPrismaJsonObject({ ...pending, termsWordsEncrypted: encrypted }) };
 }
 
 /** Prepare one residual page, with crypto outside transactions and game locks. */
@@ -122,7 +130,7 @@ export async function prepareGameAccountDeletion(input: { memberIds: readonly st
     const termsWordsEncrypted = plainWords === undefined ? row.termsWordsEncrypted
       : await sealGameText({ field: "terms_words", memberId: owner, rowId: row.id, table: "game" }, plainWords);
     if (!termsWordsEncrypted) throw new Error("Game words transfer returned no ciphertext.");
-    games.push({ id: row.id, fingerprint: fingerprint(row), kept: { owner, termsWordsEncrypted, departures } });
+    games.push({ id: row.id, fingerprint: fingerprint(row), kept: { owner, termsWordsEncrypted, departures, ...await transferGroupFields(row, owner, leaving) } });
   }
   return { games, more, contacts };
 }
@@ -157,28 +165,12 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
   if (current.length !== prepared.size || current.some(row => prepared.get(row.id)?.fingerprint !== fingerprint(row))) gameStateChanged();
   let calledOff = 0;
   let deleted = 0;
-  for (const row of current) {
-    await retireGameRecapAssetsTx(tx, row.id, row.wordsOwnerMemberId, input.now);
-    const plan = prepared.get(row.id)!.kept;
-    if (!plan) { await tx.game.delete({ where: { id: row.id } }); deleted += 1; continue; }
-    const remaining = row.players.filter(player => player.memberId && !leaving.includes(player.memberId) && player.leftAt === null);
-    const active = ACTIVE.has(row.status) && (row.maxPlayers === 2 || (row.status !== "invited" && remaining.length < 2));
-    if (active) calledOff += 1;
-    await resolveGroupGameChangeTx({ tx, game: row, actor: "system", now: input.now,
-      outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON });
-    await tx.game.update({ where: { id: row.id }, data: {
-      wordsOwnerMemberId: plan.owner, termsWordsEncrypted: plan.termsWordsEncrypted,
-      recapEncrypted: null, pendingChange: Prisma.DbNull,
-      ...(active ? { status: "void", result: Prisma.DbNull } : {}),
-      ...(row.createdBy && leaving.includes(row.createdBy) ? { createdBy: null, inviteTokenEncrypted: null } : {}),
-      ...(!active && row.result !== null ? { result: withoutMembers(row.result, leaving) } : {}),
-    } });
-    // Remove entries before changing the member key referenced by their FK.
-    await tx.gameEntry.deleteMany({ where: { gameId: row.id, memberId: { in: leaving } } });
-    await retainDeparturesTx(tx, row, plan, leaving, input.now);
-    if (active) await tx.gameTicket.deleteMany({ where: { gameId: row.id } });
-    for (const departure of plan.departures) await tx.gameEvent.create({ data: { actor: "system", gameId: row.id,
-      payload: { v: 1, calledOff: active, seat: departure.seat }, type: "player_left" } });
+  for (const original of current) {
+    await retireGameRecapAssetsTx(tx, original.id, original.wordsOwnerMemberId, input.now);
+    const plan = prepared.get(original.id)!.kept;
+    if (!plan) { await tx.game.delete({ where: { id: original.id } }); deleted += 1; continue; }
+    const row = await settleGameBeforeDeletionTx(tx, original, input.now);
+    if (await retainGameTx(tx, row, plan, leaving, input.now)) calledOff += 1;
   }
   await redactTalkNotesTx(tx, notes, input.now);
   // Anonymizing after redaction is what moves a note out of the selector.
@@ -194,6 +186,31 @@ export async function applyGameAccountDeletionTx(input: { memberIds: readonly st
   await tx.gameInvitee.updateMany({ where: { memberId: { in: leaving } }, data: { memberId: null, recipientLookupKey: null, pendingLabel: Prisma.DbNull } });
   await tx.gameEvent.updateMany({ where: { actor: { in: leaving } }, data: { actor: "system" } });
   return counts;
+}
+
+/** Preserve the surviving game and report whether the departure called it off. */
+async function retainGameTx(tx: Prisma.TransactionClient, row: GameRow, plan: NonNullable<PreparedGame["kept"]>, leaving: string[], now: Date) {
+  const remaining = row.players.filter(player => player.memberId && !leaving.includes(player.memberId) && player.leftAt === null);
+  const active = ACTIVE.has(row.status) && (row.maxPlayers === 2 || (row.status !== "invited" && remaining.length < 2));
+  const electorateChanged = row.players.some(player => player.memberId && leaving.includes(player.memberId) && !player.leftAt);
+  if (electorateChanged) await resolveGroupGameChangeTx({ tx, game: row, actor: "system", now,
+    outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON });
+  await tx.game.update({ where: { id: row.id }, data: {
+    wordsOwnerMemberId: plan.owner, termsWordsEncrypted: plan.termsWordsEncrypted,
+    recapEncrypted: null, inviteTokenEncrypted: plan.inviteTokenEncrypted,
+    pendingChange: active || row.status !== "live" ? Prisma.DbNull : plan.pendingChange,
+    ...(active ? { status: "void", result: Prisma.DbNull } : {}),
+    ...(row.createdBy && leaving.includes(row.createdBy) ? { createdBy: null } : {}),
+    ...(!active && row.result !== null ? { result: withoutMembers(row.result, leaving) } : {}),
+  } });
+  // Remove entries before changing the member key referenced by their FK.
+  await tx.gameEntry.deleteMany({ where: { gameId: row.id, memberId: { in: leaving } } });
+  await retainDeparturesTx(tx, row, plan, leaving, now);
+  if (active) await tx.gameTicket.deleteMany({ where: { gameId: row.id } });
+  const lostSharedRoom = row.maxPlayers === 10 && row.status === "settled" && row.chatContainerMemberId && leaving.includes(row.chatContainerMemberId);
+  for (const departure of plan.departures) await tx.gameEvent.create({ data: { actor: "system", gameId: row.id,
+    payload: { v: 1, calledOff: active, seat: departure.seat, ...(lostSharedRoom ? { lostSharedRoom: true } : {}) }, type: "player_left" } });
+  return active;
 }
 
 /** Prove no residual dependency needs the keys before clearing global references. */

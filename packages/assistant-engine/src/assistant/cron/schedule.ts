@@ -472,6 +472,7 @@ function findNextAssistantDailyLocalOccurrence(
 
   return findNextAssistantTimeZoneOccurrence({
     after,
+    dailyLocal: true,
     hours: [parsedTime.hour],
     minutes: [parsedTime.minute],
     timeZone,
@@ -482,6 +483,7 @@ function findNextAssistantDailyLocalOccurrence(
 }
 
 function findNextAssistantTimeZoneOccurrence(input: {
+  dailyLocal?: boolean
   after: Date
   hours: readonly number[]
   matchesDate: (dateTime: {
@@ -520,7 +522,8 @@ function findNextAssistantTimeZoneOccurrence(input: {
     }
 
     const occurrence = findAssistantTimeZoneOccurrenceOnDate({
-      afterOrAt: searchStart,
+      // A daily reminder owns one slot per local date, including a clock fold.
+      afterOrAt: input.dailyLocal ? Number.NEGATIVE_INFINITY : searchStart,
       before: searchEnd,
       day: dateTime.day,
       hours: input.hours,
@@ -530,7 +533,7 @@ function findNextAssistantTimeZoneOccurrence(input: {
       timeZone,
       year: calendarDate.getUTCFullYear(),
     })
-    if (occurrence !== null) {
+    if (occurrence !== null && occurrence >= searchStart) {
       return new Date(occurrence).toISOString()
     }
   }

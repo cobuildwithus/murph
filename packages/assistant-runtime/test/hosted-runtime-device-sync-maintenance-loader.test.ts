@@ -103,6 +103,35 @@ test("device-sync maintenance import is lazy, reports load failures, and retries
     scheduled: 0,
   });
 
+  let admittingReply = true;
+  const shouldYieldDeviceImportPreparation = vi.fn(() => admittingReply);
+  const controller = new AbortController();
+  const interrupted = executeHostedMailboxEvent({
+    wake: buildHostedExecutionDeviceSyncWake({
+      eventId: "sync-interrupted",
+      occurredAt: "2026-04-25T17:00:00.000Z",
+      reason: "reconcile_due",
+      userId: "member_device_sync_lazy",
+    }),
+    executionContext: createExecutionContext(),
+    runtime: createRuntime(),
+    runtimeEnv: {},
+    shouldYieldDeviceImportPreparation,
+    signal: controller.signal,
+    vaultRoot: "/tmp/assistant-runtime-device-sync-loader",
+  });
+  await waitFor(() => shouldYieldDeviceImportPreparation.mock.calls.length > 0);
+  assert.equal(moduleLoadCount, 0);
+  controller.abort();
+  const retained = await interrupted;
+  assert.equal(retained.backgroundMaintenanceYielded, true);
+  assert.equal(retained.nextWakeReason, "device-sync.reconcile");
+  assert.ok(retained.nextWakeAt);
+  assert.equal(moduleLoadCount, 0);
+  assert.equal(runHostedDeviceSyncWakeLane.mock.calls.length, 0);
+  expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
+
+  shouldYieldDeviceImportPreparation.mockClear();
   const firstWake = executeHostedMailboxEvent({
     wake: buildHostedExecutionDeviceSyncWake({
       eventId: "evt_device_sync_lazy_failure",
@@ -113,9 +142,13 @@ test("device-sync maintenance import is lazy, reports load failures, and retries
     executionContext: createExecutionContext(),
     runtime: createRuntime(),
     runtimeEnv: {},
+    shouldYieldDeviceImportPreparation,
     vaultRoot: "/tmp/assistant-runtime-device-sync-loader",
   });
-  await waitFor(() => moduleLoadCount === 1);
+  await waitFor(() => shouldYieldDeviceImportPreparation.mock.calls.length > 0);
+  assert.equal(moduleLoadCount, 0);
+  admittingReply = false;
+  await vi.waitFor(() => assert.equal(moduleLoadCount, 1));
   failedModuleLoad.reject(new Error("synthetic device-sync maintenance module load failure"));
 
   const firstError = await firstWake.then(
@@ -190,6 +223,7 @@ test("device-sync maintenance import is lazy, reports load failures, and retries
     executionContext: createExecutionContext(),
     runtime: createRuntime(),
     runtimeEnv: {},
+    shouldYieldDeviceImportPreparation: () => true,
     vaultRoot: "/tmp/assistant-runtime-device-sync-loader",
   });
   assert.equal(memoizedOutcome.mailboxLane, "device-sync");

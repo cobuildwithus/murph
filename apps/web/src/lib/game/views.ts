@@ -43,7 +43,6 @@ import {
   hasFinishedGame,
   hasUnlockedDay,
   isScheduledDay,
-  isTicketExpired,
   liveEntry,
   outcomeFor,
   attemptsUsed,
@@ -52,7 +51,6 @@ import {
   scorePlayer,
   playerStreak,
   settleDueAt,
-  ticketUseBy,
   type RuleEntry,
   type GameEntryIndex,
   type RulePlayer,
@@ -102,6 +100,7 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  completedDays?: Map<string, Set<number>>;
   /** Request-local verified phones, loaded only for eligible ticket counterparties. */
   verifiedPhones?: ReadonlyMap<string, string>;
   entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
@@ -210,8 +209,7 @@ function groupTasksView(state: RuleState, words: TermWords["versions"][number]) 
   ];
 }
 
-/** `now` is the ticket's game clock: it decides whether an open ticket has expired. */
-export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, now: Date, terms?: StoredTerms, hiddenMembers: ReadonlySet<string> = NO_HIDDEN, input?: GameViewInput): GameTicketView {
+export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId: string, terms?: StoredTerms, hiddenMembers: ReadonlySet<string> = NO_HIDDEN, input?: GameViewInput): GameTicketView {
   // Legacy scalar parties, including the pair block/departure presentation.
   const party = (seats: readonly number[]) => {
     const member = seats.length === 1 ? row.players.find(player => player.seat === seats[0])?.memberId : null;
@@ -235,26 +233,25 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
     ...(!group && (owedBy === null || owedTo === null) ? { left: true as const } : {}),
     owedByMemberId: group ? "" : owedBy ?? "",
-    ...ticketPhoneView(row, viewerId, now, hiddenMembers, input),
+    ...ticketPhoneView(row, viewerId, hiddenMembers, input),
     owedToMemberId: group ? "" : owedTo ?? "",
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
-    status: isTicketExpired(row, now) ? "expired" : row.status,
-    useBy: ticketUseBy(row.createdAt).toISOString(),
+    status: row.status,
     what: words ? stakeItem(words, row.stakeKey) : "",
     youHold: group ? row.players.some(player => player.memberId === viewerId && row.owedToSeats.includes(player.seat)) : owedTo === viewerId,
   };
 }
 
-function ticketPhoneView(row: GameTicketRow, viewerId: string, now: Date, hiddenMemberIds: ReadonlySet<string>, input?: GameViewInput): Pick<GameTicketView, "owedByPhone"> {
+function ticketPhoneView(row: GameTicketRow, viewerId: string, hiddenMemberIds: ReadonlySet<string>, input?: GameViewInput): Pick<GameTicketView, "owedByPhone"> {
   if (!input) return {};
-  const recipient = ticketMessageRecipient(row, { state: input.state, viewerId, now, hiddenMemberIds });
+  const recipient = ticketMessageRecipient(row, { state: input.state, viewerId, hiddenMemberIds });
   const owedByPhone = recipient ? input.verifiedPhones?.get(recipient) : undefined;
   return owedByPhone ? { owedByPhone } : {};
 }
 
 /** Shared admission for the identity read and the final phone projection. */
-export function ticketMessageRecipient(row: GameTicketRow, input: Pick<GameViewInput, "state" | "viewerId" | "now" | "hiddenMemberIds">): string | null {
-  if (input.state.game.seats !== 2 || row.status !== "open" || isTicketExpired(row, input.now)
+export function ticketMessageRecipient(row: GameTicketRow, input: Pick<GameViewInput, "state" | "viewerId" | "hiddenMemberIds">): string | null {
+  if (input.state.game.seats !== 2 || row.status !== "open"
     || row.owedBySeats.length !== 1 || row.owedToSeats.length !== 1) return null;
   const owedBy = row.players.find(player => player.seat === row.owedBySeats[0])?.memberId;
   const owedTo = row.players.find(player => player.seat === row.owedToSeats[0])?.memberId;
@@ -264,7 +261,7 @@ export function ticketMessageRecipient(row: GameTicketRow, input: Pick<GameViewI
 }
 
 function canRedeemTicketView(row: GameTicketRow, input: GameViewInput, owedBy: string | null, owedTo: string | null): boolean {
-  if (row.status !== "open" || isTicketExpired(row, input.now)) return false;
+  if (row.status !== "open") return false;
   return input.state.game.seats === 10 ? canRedeemGroupTicket(row, row.players, input.result, input.viewerId) : owedTo === input.viewerId && owedBy !== null;
 }
 
@@ -361,6 +358,16 @@ function canShowHistoryRoster(input: GameViewInput, other: RulePlayer | undefine
   return input.state.game.seats === 10 ? input.multiplayer === true : !!other && isPairRoster(input.state.players) && !input.hiddenMemberIds?.has(other.memberId);
 }
 
+function viewerChangeControls(input: GameViewInput) {
+  const { state, viewerId } = input;
+  const controls = gameChangeControls(state, input.now, input.pendingChange ?? null, viewerId);
+  const player = playerFor(state, viewerId);
+  if (state.game.seats === 10 && state.game.status === "live" && !state.game.chatContainerMemberId && player && !player.leftAt) {
+    return { ...controls, requiresGroupChat: true };
+  }
+  return controls;
+}
+
 export function buildGameView(input: GameViewInput): GameView {
   const { state, viewerId } = input;
   const { game } = state;
@@ -371,7 +378,7 @@ export function buildGameView(input: GameViewInput): GameView {
     ...(input.multiplayer ? { maxPlayers: game.seats === 10 ? 10 as const : 2 as const, invitedCount: game.invitees?.length ?? 1,
       permissions: permissions(input), ...(game.seats === 10 ? { group: groupView(input) } : {}) } : {}),
     // Live groups share pending asks across app and chat; controls belong to the viewer.
-    changeControls: gameChangeControls(state, input.now, input.pendingChange ?? null, input.viewerId),
+    changeControls: viewerChangeControls(input),
     pendingChange: pendingGameChangeView(state, input.pendingChange ?? null, input.now),
     ...(input.talkDelivery ? { talkDelivery: input.talkDelivery } : {}),
     ...recapView(input),
@@ -395,7 +402,7 @@ export function buildGameView(input: GameViewInput): GameView {
     tickets: input.tickets
       .filter((ticket) => ticket.players.some(player => player.memberId === viewerId
         && [...ticket.owedBySeats, ...ticket.owedToSeats].includes(player.seat)))
-      .map((ticket) => ticketView(ticket, input.words, viewerId, input.now, state.game.terms, input.hiddenMemberIds, input)),
+      .map((ticket) => ticketView(ticket, input.words, viewerId, state.game.terms, input.hiddenMemberIds, input)),
   };
 }
 
@@ -478,7 +485,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
     relationship: isMe ? null : input.relationships.get(player.memberId) ?? null,
     score: resultScore ?? (started ? scorePlayer(input.state, player, today, entries).score : 0),
     seat: player.seat,
-    streak: playerStreak(input.state, player, now),
+    streak: playerStreak(input.state, player, now, input.completedDays?.get(player.memberId)),
   };
 }
 

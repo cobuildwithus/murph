@@ -87,7 +87,7 @@ describe('murph.labs dynamic tool', () => {
   it('forwards cancellation and returns only the strict normalized response', async () => {
     const abortController = new AbortController()
     const labsTool = {
-      request: vi.fn(async () => createSearchResponse()),
+      request: vi.fn(async () => ({ ...createSearchResponse(), partial: true as const })),
     }
     const request = readLabsRequest({
       action: 'search',
@@ -110,6 +110,7 @@ describe('murph.labs dynamic tool', () => {
 
     expect(labsTool.request).toHaveBeenCalledWith(
       {
+        includeCoverage: true,
         action: 'search',
         limit: 3,
         query: 'cholesterol',
@@ -121,6 +122,7 @@ describe('murph.labs dynamic tool', () => {
     // description; markers become names and null fields are omitted.
     expect(readResultPayload(result)).toEqual({
       action: 'search',
+      partial: true,
       checkedAt: '2026-07-16T12:00:00.000Z',
       items: [{
         name: 'Total cholesterol',
@@ -248,7 +250,7 @@ describe('murph.labs dynamic tool', () => {
       nextUsageOrdinal: () => 0, progressDelivery: null, request: search,
     })
     expect(labsTool.request).toHaveBeenCalledWith(
-      { action: 'search', limit: 5, query: 'cholesterol' }, { signal: null },
+      { action: 'search', limit: 5, query: 'cholesterol', includeCoverage: true }, { signal: null },
     )
     // Twenty maximal descriptions used to exceed the result cap and fail.
     expect(searched.rpcResult.success).toBe(true)
@@ -266,7 +268,7 @@ describe('murph.labs dynamic tool', () => {
       nextUsageOrdinal: () => 0, progressDelivery: null, request: locations,
     })
     expect(labsTool.request).toHaveBeenLastCalledWith(
-      { action: 'locations', zipCode: '10001' }, { signal: null },
+      { action: 'locations', zipCode: '10001', includeCoverage: true }, { signal: null },
     )
     expect(readResultPayload(located)).toEqual({
       action: 'locations', checkedAt: '2026-07-16T12:00:00.000Z', status: 'available',

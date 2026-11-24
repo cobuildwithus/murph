@@ -20,13 +20,13 @@ async function read() {
 }
 beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
-  mocks.raw.mockResolvedValue({ heightCm: 170, numbers: { sleep: { daily: [day] } } });
+  mocks.raw.mockResolvedValue({ heightCm: 170, weightKg: 81.6, numbers: { sleep: { daily: [day] } } });
   mocks.shared.mockResolvedValue({ people: [{ memberId: "leo", projections: [
     { state: "not_granted", records: [] },
     { state: "available", records: [{ data: { date: day.date, metricKey: "total-sleep-minutes", value: 7.5, unit: "hours" },
       occurredAt: day.observedAt, recordKey: "sleep-day", source: { source: "garmin", label: "Garmin" } }] },
   ] }] });
-  mocks.rooms.mockResolvedValue({ rooms, incomplete: false });
+  mocks.rooms.mockResolvedValue(rooms);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -35,7 +35,7 @@ it("converts raw own minutes and shared-board normalized minutes to seconds once
   expect(result[0].daily).toEqual([{ measureId: "sleep", date: day.date, amount: 25230 }]);
   expect(result[1].daily).toEqual([{ date: day.date, amount: 27000 }]);
   expect(result[2].daily).toBeNull(); // A group-only friend has no pair grant.
-  expect(JSON.stringify(result)).not.toContain("heightCm");
+  expect(JSON.stringify(result)).not.toMatch(/heightCm|weightKg/u);
   expect(mocks.shared).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ otherId: "leo", otherMetric: "sleep" }));
   expect(mocks.raw.mock.calls[0][2]).toEqual(["sleep"]);
 });
@@ -48,25 +48,19 @@ it("a private grant never returns its records even when stale bytes remain", asy
 });
 
 it("removes numbers if the pair room is no longer eligible after decryption", async () => {
-  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: false });
+  mocks.rooms.mockResolvedValue([]);
   expect((await read()).people[1].daily).toBeNull();
-});
-
-it("marks the result incomplete if the post-decryption room read reaches its cap", async () => {
-  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: true });
-  expect(await read()).toEqual({ people: [], incomplete: true, rooms: [] });
 });
 
 it("reads each of 500 pair rooms once, six shared reads at a time", async () => {
   const friends = Array.from({ length: 500 }, (_, index) => ({ ...people[1], memberId: `friend-${index}` }));
   const maximumRooms = friends.map(person => ({ ...rooms[0], otherMemberId: person.memberId, runtimeMemberId: `room-${person.memberId}` }));
-  mocks.rooms.mockResolvedValue({ rooms: maximumRooms, incomplete: false });
+  mocks.rooms.mockResolvedValue(maximumRooms);
   let active = 0, peak = 0;
   mocks.shared.mockImplementation(async () => { peak = Math.max(peak, ++active); await Promise.resolve(); active--; return null; });
   const result = await readFriendHealthSeries({ auth: await requireGameMemberAuth(request), people: [people[0], ...friends],
     rooms: maximumRooms, metric: "sleep", timeZone: "UTC", signal: request.signal });
   expect(result.people).toHaveLength(501);
-  expect(result.incomplete).toBe(false);
   expect(mocks.raw).toHaveBeenCalledTimes(1);
   expect(mocks.shared).toHaveBeenCalledTimes(500);
   expect(mocks.rooms).toHaveBeenCalledTimes(1);

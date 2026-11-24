@@ -114,6 +114,16 @@ describe("action approval page", () => {
     ]);
   });
 
+  it("offers sign-in to an inactive member before reading the approval", async () => {
+    const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+    mocks.requireActiveHostedAppSession.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED", httpStatus: 403, message: "Setup required.",
+    }));
+    const markup = renderToStaticMarkup(await actionApprovalPage.default({ params: Promise.resolve({ approvalId: "synthetic" }) }));
+    expect(markup).toContain("Sign in to review this request");
+    expect(mocks.readHostedActionApproval).not.toHaveBeenCalled();
+  });
+
   it("renders one focused recovery action for an expired approval", async () => {
     const view = await actionApprovalPage.default({
       params: Promise.resolve({ approvalId: "haa_test" }),

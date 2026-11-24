@@ -24,7 +24,7 @@ export function friendRangeStart(range: FriendsQuery["range"], today: string) {
 export function friendsView(input: {
   people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
-  incomplete: boolean; departureNotice: string | null;
+  departureNotice: string | null;
   units: ClientUnits; challenge: Friends["challenge"];
 }): Friends {
   const { measure, query, today } = input;
@@ -38,7 +38,8 @@ export function friendsView(input: {
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(day => [day.date, total += day.amount]);
     return { person, total, points, ranked: person.daily !== null && (!health || points.length > 0) };
-  });
+  }) // A friend with none of this exercise in the range isn't on its board; the friend you opened stays.
+    .filter(row => health || row.person.me || row.total > 0 || row.person.memberId === query.with);
   const ranked = series.filter(row => row.ranked)
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));
   // A friend who keeps this number private isn't on the board; your own row always is.
@@ -51,7 +52,7 @@ export function friendsView(input: {
         total: hasTotal ? friendAmount(total, measure, input.units) : null };
   });
   const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
-  return { incomplete: input.incomplete, departureNotice: input.departureNotice,
+  return { incomplete: false, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     shareAsk: health && input.shareAudience.length > 0,
     shareAudience: input.shareAudience, challenge: input.challenge };

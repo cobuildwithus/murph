@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import {
   eventSourceSchema,
+  measurementAddMemberActionV1Schema,
   type MeasurementEntry,
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
@@ -364,6 +365,15 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
         measurementNote: options.measurementNote,
         note: typeof options.note === 'string' ? options.note : undefined,
       })
+      if (options.source === undefined || options.source === 'manual') {
+        for (const { metric, value } of measurements) {
+          if (metric === 'estimated-vo2-max' && !measurementAddMemberActionV1Schema.safeParse({
+            kind: 'measurement.add', version: 1, metric, value,
+          }).success) {
+            throw new VaultCliError('invalid_option', 'Recheck the reported VO2 max value before saving.')
+          }
+        }
+      }
       const draft = buildMeasurementEventDraft({
         occurredAt,
         title: typeof options.title === 'string' ? options.title : undefined,

@@ -119,9 +119,9 @@ it("processes the 500-room maximum sequentially and proves every recipient", asy
 
 it("skips room discovery without friends and skips roster and grant reads without pair games", async () => {
   mocks.roomGames.mockResolvedValue([]);
-  expect(await readFriendRooms("ava", [])).toEqual({ rooms: [], incomplete: false });
+  expect(await readFriendRooms("ava", [])).toEqual([]);
   expect(mocks.roomGames).not.toHaveBeenCalled();
-  expect(await readFriendRooms("ava", ["leo"])).toEqual({ rooms: [], incomplete: false });
+  expect(await readFriendRooms("ava", ["leo"])).toEqual([]);
   expect(mocks.roomGames).toHaveBeenCalledOnce();
   expect(mocks.groups).not.toHaveBeenCalled();
   expect(mocks.containers).not.toHaveBeenCalled();
@@ -134,9 +134,9 @@ it("loads outgoing grants only for the sharing preview", async () => {
   mocks.containers.mockResolvedValue([{ memberId: "room", participants: [{ participantMemberId: "ava" }, { participantMemberId: "leo" }] }]);
   mocks.shares.mockResolvedValue([]);
   const initial = await readFriendRooms("ava", ["leo"], false);
-  expect(initial.rooms).toHaveLength(1);
+  expect(initial).toHaveLength(1);
   expect(mocks.shares).not.toHaveBeenCalled();
-  expect((await readFriendRooms("ava", ["leo"])).rooms).toEqual([{ ...initial.rooms[0], sharingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
+  expect(await readFriendRooms("ava", ["leo"])).toEqual([{ ...initial[0], sharingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
   expect(mocks.shares).toHaveBeenCalledOnce();
 });
 
@@ -149,6 +149,6 @@ it.each([true, false])("uses only the latest bound game per friend, including wh
     participants: (!eligible && id === "recent" ? [...pair, { memberId: "nora" }] : pair)
       .map(person => ({ participantMemberId: person.memberId })) })));
   mocks.shares.mockResolvedValue([]);
-  const { rooms } = await readFriendRooms("ava", ["leo"]);
+  const rooms = await readFriendRooms("ava", ["leo"]);
   expect(rooms.map(room => room.gameId)).toEqual(eligible ? ["recent"] : []);
 });

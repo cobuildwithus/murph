@@ -1,4 +1,4 @@
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameAreaCode } from "./area-code";
 import { readHostedMemberIdentity, readHostedMemberVerifiedPhoneNumbers } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
@@ -14,7 +14,8 @@ import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/reca
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { after } from "next/server";
-import { fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
+import { GAME_GRACE_MS } from "./time";
+import { departedLabels, fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
@@ -102,15 +103,14 @@ import {
   GAME_INVITE_TTL_MS,
   GAME_MAX_LENGTH_DAYS,
   GameRuleError,
+  hasPlayableGroupDay,
   gameOffDayMessage,
   isGameDue,
   isGameDecided,
   isSettledGameCorrectable,
   settledGameEnd,
   isGameInviteExpired,
-  isTicketExpired,
   GAME_MAX_OPEN_PER_PAIR,
-  GAME_TICKET_USE_DAYS,
   needsPostToday,
   parseStoredResult,
   parseStoredTerms,
@@ -119,6 +119,7 @@ import {
   playerFor,
   reject,
   settleDueAt,
+  lastCheckInDay,
   type RuleState,
   type Schedule,
   type StoredResult,
@@ -126,10 +127,10 @@ import {
   type TermWords,
 } from "./rules";
 import { acceptanceStartDate, addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
-import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
+import { projectChatTaskSeats, agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
-import { gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
+import { canReadGameChatProjection, gameChatContextCurrent, prepareGameChat, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatBlock, gameChatNames, gamePairWhere, gameChatPlayerIds, readGameChatCandidateIds, sameGamePlayers } from "./chat-membership";
 import { reserveGameChatLifecycleTx, reserveGameChatProposalTx, reserveGameChallengeTx, skipGameChatLifecycleTx } from "./chat-lifecycle-receipt";
 import { reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInRuns, morningAfterLastDay, isMissedCheckInDueNow, visitGameMissedCheckInPages } from "./missed-check-in";
@@ -158,7 +159,6 @@ import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
-import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
 import { GAME_REPORT_ALERTS_PER_REPORTER_DAY, sendGameReportAlert } from "./report-alert";
@@ -168,6 +168,7 @@ export { mediaKeyPrefixFor } from "./access";
 type Tx = Prisma.TransactionClient;
 type Db = Tx | ReturnType<typeof getPrisma>;
 interface LoadedGame {
+  completedDays?: Map<string, Set<number>>;
   row: GameRow;
   entries: GameEntry[];
   state: RuleState;
@@ -198,15 +199,48 @@ const ACTIVE_STATUSES = ["invited", "negotiating", "live"];
 const BLOCK_GAME_LIMIT = 50;
 
 export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
+  return { ...await readReminderSettings(memberId, db), canText: await canTextGameReminders(memberId, db) };
+}
+
+async function readReminderSettings(memberId: string, db: Db) {
   const [profile, seats] = await Promise.all([
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
     db.gamePlayer.findMany({ where: { memberId, OR: [{ reminderOff: true }, { reminderMinutes: { not: null } }], game: { status: "live" } },
       select: { gameId: true, reminderOff: true, reminderMinutes: true }, orderBy: { gameId: "asc" } }),
   ]);
-  const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText, offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
+    offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
     gameMinutes: Object.fromEntries(seats.flatMap(seat => seat.reminderMinutes === null ? [] : [[seat.gameId, seat.reminderMinutes]])) };
+}
+
+async function rememberReminderRead(db: Db, sessionId: string, settings: Awaited<ReturnType<typeof readReminderSettings>>) {
+  const digest = sha256Hex(JSON.stringify(settings));
+  await db.gameReminderSessionRead.upsert({ where: { model_sessionId: { model: "session", sessionId } },
+    create: { sessionId, digest }, update: { digest } });
+}
+
+export async function readSessionGameReminders(memberId: string, sessionId: string, beforeMutationTx: (tx: Tx) => Promise<void>) {
+  const db = getPrisma(), canText = await canTextGameReminders(memberId, db);
+  const settings = await db.$transaction(async tx => {
+    await beforeMutationTx(tx);
+    await lockReminderProfile(tx, memberId);
+    const current = await readReminderSettings(memberId, tx);
+    await rememberReminderRead(tx, sessionId, current);
+    return current;
+  });
+  return { ...settings, canText };
+}
+
+function lockReminderProfile(tx: Tx, memberId: string) {
+  return tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${memberId} FOR UPDATE`;
+}
+
+async function checkReminderRead(tx: Tx, memberId: string, sessionId: string) {
+  await lockReminderProfile(tx, memberId);
+  const previous = await tx.gameReminderSessionRead.findUnique({ where: { model_sessionId: { model: "session", sessionId } } });
+  if (previous?.digest !== sha256Hex(JSON.stringify(await readReminderSettings(memberId, tx)))) {
+    throw hostedOnboardingError({ code: "GAME_REMINDERS_CHANGED", httpStatus: 409, message: "Your reminders changed. Reopen Reminders and try again." });
+  }
 }
 
 /** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
@@ -244,6 +278,7 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
  */
 export async function runGameCommand(input: {
   actorMemberId: string;
+  reminderSessionId?: string;
   multiplayer?: boolean;
   command: unknown;
   chatContainerMemberId?: string;
@@ -291,6 +326,7 @@ async function activatePrivateAfterGameCommand(command: GameCommand, gameId: str
 async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], command: Extract<GameCommand, { type: "setReminders" }>): Promise<GameReminders> {
   return commandTransaction(input, async tx => {
     const actor = input.actorMemberId;
+    if (input.reminderSessionId) await checkReminderRead(tx, actor, input.reminderSessionId);
     if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     // A time for some games is theirs alone: the default time and every other game stay.
     const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
@@ -317,20 +353,22 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
         AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
           AND choice.actor = ${actor} AND choice.type = ${GAME_REMINDER_OFF_CHOICE_EVENT})
     `;
-    return readGameReminders(actor, tx);
+    const settings = await readReminderSettings(actor, tx);
+    if (input.reminderSessionId) await rememberReminderRead(tx, input.reminderSessionId, settings);
+    return { ...settings, canText: await canTextGameReminders(actor, tx) };
   });
 }
 
 /** Chat edits carry only the fields the member asked to change. App saves lock the same profile first. */
 export async function editGameReminders(input: Pick<Parameters<typeof runGameCommand>[0], "actorMemberId" | "beforeMutationTx">,
-  edit: { minutes?: number; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
+  edit: { minutes?: number | null; push?: boolean; text?: boolean; on?: boolean; everyDay?: boolean }, gameIds?: string[]) {
   const actor = input.actorMemberId;
   return commandTransaction(input, async tx => {
-    const profile = await tx.$queryRaw<Array<{ member_id: string }>>`SELECT member_id FROM game_profile WHERE member_id = ${actor} FOR UPDATE`;
+    const profile = await lockReminderProfile(tx, actor);
     if (!profile.length) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
     if (edit.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
     await tx.gameProfile.update({ where: { memberId: actor }, data: {
-      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes,
+      reminderPush: edit.push, reminderText: edit.text, reminderMinutes: gameIds ? undefined : edit.minutes ?? undefined,
     } });
     if (edit.minutes !== undefined || edit.on !== undefined || edit.everyDay !== undefined) {
       await recordGameReminderPreferencesTx(tx, actor, { gameIds, minutes: edit.minutes !== undefined,
@@ -570,18 +608,12 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
     case "editTerms": return editTerms(context, command);
     case "setDayCompletion":
       return setDayCompletion(context, command);
-    case "cancelInvite":
-      return cancelInvite(context, command.gameId);
     case "proposeChange":
       return proposeChange(context, command);
     case "respondChange":
       return respondChange(context, command);
     case "createGame":
       return createGame(context, command);
-    case "join":
-      return join(context, command);
-    case "negotiate":
-      return negotiate(context, command);
     case "post":
       return post(context, command);
     case "withdraw":
@@ -596,6 +628,17 @@ async function runCommand(context: CommandContext, command: Exclude<GameCommand,
       return setPlayerPhoto(context, command);
     case "unblock":
       return unblock(context, command.memberId);
+    default:
+      return respondToInvite(context, command);
+  }
+}
+
+function respondToInvite(context: CommandContext, command: Extract<GameCommand, { type: "join" | "negotiate" | "cancelInvite" | "dismissInvite" }>) {
+  switch (command.type) {
+    case "join": return join(context, command);
+    case "negotiate": return negotiate(context, command);
+    case "cancelInvite": return cancelInvite(context, command.gameId);
+    case "dismissInvite": return dismissGroupInvitation(context, command.gameId);
   }
 }
 
@@ -620,7 +663,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -1172,17 +1215,19 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */
 async function withCurrentTimeZones(tx: Tx, state: RuleState): Promise<RuleState> {
+  return { ...state, players: await currentTimeZones(tx, state.players) };
+}
+
+/** Each player with their profile's time zone as of now, or their seat's when they have no profile. */
+async function currentTimeZones<Player extends { memberId: string | null; timeZone: string | null }>(tx: Tx, players: Player[]): Promise<Player[]> {
   const zones = await tx.gameProfile.findMany({
     select: { memberId: true, timeZone: true },
-    where: { memberId: { in: state.players.map((player) => player.memberId) } },
+    where: { memberId: { in: players.flatMap((player) => player.memberId ? [player.memberId] : []) } },
   });
-  return {
-    ...state,
-    players: state.players.map((player) => ({
-      ...player,
-      timeZone: zones.find((zone) => zone.memberId === player.memberId)?.timeZone ?? player.timeZone,
-    })),
-  };
+  return players.map((player) => ({
+    ...player,
+    timeZone: zones.find((zone) => zone.memberId === player.memberId)?.timeZone ?? player.timeZone,
+  }));
 }
 
 /** Writes each player's frozen time zone and Day 1. */
@@ -1215,6 +1260,20 @@ async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: nu
       relationship_encrypted = COALESCE(EXCLUDED.relationship_encrypted, game_contact_label.relationship_encrypted),
       photo_key = COALESCE(EXCLUDED.photo_key, game_contact_label.photo_key),
       updated_at = EXCLUDED.updated_at`;
+}
+
+async function dismissGroupInvitation(context: CommandContext, gameId: string): Promise<null> {
+  const contacts = await readGameVerifiedContacts(context.actor);
+  await runLocked(gameId, context, async ({ loaded: { row }, tx }) => {
+    if (row.maxPlayers !== 10 || !areGameGroupsEnabled()) reject("GAME_NOT_FOUND", "Group invitation not found.");
+    const keys = await verifiedGameContactKeys(tx, context.actor, contacts);
+    if (!addressedGameInvite(row.invitees, context.actor, keys) || row.players.some(player => player.memberId === context.actor)) {
+      reject("NOT_A_PLAYER", "Only an unanswered invitation can be dismissed.");
+    }
+    const prior = await tx.gameEvent.findFirst({ where: { gameId, actor: context.actor, type: "invite_dismissed" }, select: { id: true } });
+    return prior ? [] : [{ type: "invite_dismissed", payload: {} }];
+  });
+  return null;
 }
 
 async function cancelInvite(context: CommandContext, gameId: string): Promise<string> {
@@ -1403,7 +1462,8 @@ async function assertGroupProposalPreparedTx(locked: LockedStep,
   prepared: (PreparedGameChangeWords & { rosterBasis?: string }) | null,
   groupContext: { before: LoadedGame; audience: GameChatAudience | null | undefined } | undefined): Promise<void> {
   const { loaded, tx } = locked;
-  if (!groupContext?.audience || !loaded.row.chatContainerMemberId
+  if (!loaded.row.chatContainerMemberId) reject("GAME_CHAT_REQUIRED", "Share the game invitation in a group text with the invited players and Murph before proposing a change.");
+  if (!groupContext?.audience
     || !await readGameChatAuthority(loaded.row, loaded.row.chatContainerMemberId, groupContext.audience, tx)) reject("NOT_A_PLAYER", "Open this game’s bound group chat before requesting a change.");
   if (!prepared || loaded.row.wordsOwnerMemberId !== groupContext.before.row.wordsOwnerMemberId
     || prepared.rosterBasis !== groupChangeRosterBasis(loaded.state)) reject("TERMS_CHANGED", "The game changed. Take another look.");
@@ -1748,7 +1808,7 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true }, where: { id: ticketId } });
   if (!ticket) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
-  await runLocked(ticket.gameId, context, async ({ clock, now, tx, loaded }) => {
+  await runLocked(ticket.gameId, context, async ({ clock, tx, loaded }) => {
     // A day correction on the finished game can remove an open ticket that is no longer owed.
     const current = await tx.gameTicket.findUnique({ where: { id: ticketId } });
     if (!current) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
@@ -1757,7 +1817,6 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
     const authorized = group ? canRedeemGroupTicket(current, loaded.row.players, loaded.row.result ? parseStoredResult(loaded.row.result) : null, actor)
       : holder && current.owedToSeats.includes(holder.seat);
     if (!authorized) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
-    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This prize expired before it was used.");
     const debtor = loaded.row.players.find(player => current.owedBySeats.includes(player.seat))?.memberId;
     if (!group && current.status === "open" && (!debtor || await areGamePlayersBlocked(tx, actor, debtor))) {
       reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
@@ -2127,6 +2186,18 @@ async function settleGame(gameId: string, actor = SYSTEM_ACTOR, morningClock?: D
     if (morningClock && (loaded.row.maxPlayers !== 2 || gameNow(clock, loaded.row) < morningAfterLastDay(loaded.state))) return;
     await settleLoaded({ loaded, tx, clock, now: gameNow(clock, loaded.row) }, actor);
   });
+}
+
+/** Caller holds the game lock. Freeze scores before erasing any of their evidence. */
+export async function settleGameBeforeDeletionTx(tx: Tx, row: GameRow, clock: Date): Promise<GameRow> {
+  if (row.status !== "live") return row;
+  const now = gameNow(clock, row);
+  // Groups can only finish at their deadline. Pairs can finish early on completed posts.
+  if (row.maxPlayers === 10 && now.getTime() < settleDueAt(toRuleState(row, [])).getTime() - GAME_GRACE_MS) return row;
+  const [loaded] = await loadGames(tx, [row.id]);
+  if (!await settleLoaded({ tx, loaded, clock, now }, SYSTEM_ACTOR)) return row;
+  const settled = await tx.game.findUniqueOrThrow({ where: { id: row.id }, select: { result: true, status: true, pendingChange: true } });
+  return { ...row, ...settled };
 }
 
 /** Reused by reads, join and leave, after the same game row lock. */
@@ -2690,11 +2761,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     orderBy: { createdAt: "desc" }, include: { invitees: true, players: true } });
   const audience = prepared ?? (candidates.some(row => row.maxPlayers === 10) ? await readGameChatAudience(containerMemberId) : undefined);
   const context = { chatContainerMemberId: containerMemberId, chatPlayerMemberIds: playerMemberIds, chatAudience: audience };
-  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await gameChatContextCurrent(row, context) ? row.id : null));
+  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await canReadGameChatProjection(row, context) ? row.id : null));
   const current = await loadCurrent(allowed.filter((id): id is string => id !== null), true, actorMemberId, actorMemberId ? containerMemberId : undefined);
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = [];
-  for (const { row } of current.games) if (isGameEnabled() && await gameChatContextCurrent(row, context)) rows.push(row);
+  for (const { row } of current.games) if (isGameEnabled() && await canReadGameChatProjection(row, context)) rows.push(row);
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -2716,9 +2787,9 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const gameNames = row.maxPlayers === 10 ? gameChatNames(nameProfiles.filter(profile => players.some(player => player.memberId === profile.memberId))) : names;
     const words = parseTermWords(plain[index] ?? "");
     const result = row.result === null ? null : parseStoredResult(row.result);
-    const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; owedBySeats?: number[]; owedToSeats?: number[]; what: string; status: "open" | "redeemed" | "expired"; count: number }>();
+    const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; owedBySeats?: number[]; owedToSeats?: number[]; what: string; status: "open" | "redeemed"; count: number }>();
     for (const ticket of tickets.filter((ticket) => ticket.gameId === row.id)) {
-      const view = ticketView(toTicketRow(ticket, row.players), words, "", gameNow(clock, row));
+      const view = ticketView(toTicketRow(ticket, row.players), words, "");
       const key = JSON.stringify([view.owedByMemberId, view.owedToMemberId, view.what, view.status]);
       const existing = ticketGroups.get(key);
       if (existing) existing.count += 1;
@@ -2728,18 +2799,21 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const { checkInKind, ...terms } = termsView(state, words, row.maxPlayers === 10);
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
-    return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
+    return projectChatTaskSeats({ ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
       // A finished game carries its days only while its players can still correct them, as they stood when it ended.
       ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
         : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
           ? { progress: gameChatProgress(state, gameNow(clock, row), settledGameEnd(state, clock, gameNow(clock, row))) } : {}),
-      result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
+      result: result ? { scores: result.scores.flatMap(score => {
+        if (row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)) return [score];
+        return score.memberId === "" && score.eligible !== false ? [{ ...score, memberId: `departed-seat-${score.seat}` }] : [];
+      }), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(calendarPlayers(state)) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: gameNames.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
       pendingChange, changeControls: row.maxPlayers === 10 && row.status === "invited"
         ? { canStartNow: false, canEdit: actorMemberId === row.createdBy && areGroupTermsOpen(state, gameNow(clock, row)), canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
         : gameChangeControls(state, gameNow(clock, row), pendingChange, actorMemberId),
-    };
+    });
   }) };
 }
 
@@ -3148,9 +3222,9 @@ async function loadGames(db: Db, gameIds: readonly string[], multiplayer = true)
 }
 
 /** Loads only visible, non-withdrawn, unreported posts that can appear in history previews. */
-async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
+async function loadHistoryGames(db: Db, gameIds: readonly string[], groupIds: readonly string[], viewerId: string): Promise<LoadedGame[]> {
   if (gameIds.length === 0) return [];
-  const [rows, entries] = await Promise.all([
+  const [rows, entries, postedDays] = await Promise.all([
     db.game.findMany({ include: { invitees: true, players: true }, where: { id: { in: [...gameIds] } } }),
     db.$queryRaw<GameEntry[]>(Prisma.sql`
       WITH ranked_entry AS (
@@ -3193,7 +3267,21 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
       WHERE preview_rank <= ${GAME_HISTORY_PREVIEW_LIMIT}
       ORDER BY game_id, preview_rank
     `),
+    // One bounded list of credited days per group seat, independent of preview selection.
+    groupIds.length === 0 ? [] : db.$queryRaw<{ gameId: string; memberId: string; days: number[] }[]>(Prisma.sql`
+      SELECT entry.game_id AS "gameId", entry.member_id AS "memberId", array_agg(DISTINCT entry.day_index) AS days
+      FROM game_entry entry
+      WHERE entry.game_id IN (${Prisma.join(groupIds)})
+        AND entry.attempt > 0 AND entry.withdrawn_at IS NULL AND entry.incomplete IS NOT TRUE
+      GROUP BY entry.game_id, entry.member_id
+    `),
   ]);
+  const daysByGame = new Map<string, Map<string, Set<number>>>();
+  for (const { gameId, memberId, days } of postedDays) {
+    const players = daysByGame.get(gameId) ?? new Map<string, Set<number>>();
+    players.set(memberId, new Set(days));
+    daysByGame.set(gameId, players);
+  }
   const byId = new Map(rows.map((row) => [row.id, row]));
   const entriesByGame = new Map<string, GameEntry[]>();
   for (const entry of entries) {
@@ -3205,7 +3293,7 @@ async function loadHistoryGames(db: Db, gameIds: readonly string[], viewerId: st
     const row = byId.get(id);
     if (!row) return [];
     const gameEntries = entriesByGame.get(id) ?? [];
-    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries) }];
+    return [{ entries: gameEntries, row, state: toRuleState(row, gameEntries), completedDays: daysByGame.get(id) }];
   });
 }
 
@@ -3275,7 +3363,7 @@ function canView(game: LoadedGame, memberId: string): boolean {
   if (player) return !player.leftAt;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.invitees.some(invitee => invitee.memberId === memberId)
-    && (game.row.status === "invited" || game.row.players.some(player => player.leftAt !== null));
+    && (game.row.status === "invited" || game.row.status === "void" && game.row.players.some(player => player.leftAt !== null));
 }
 
 /**
@@ -3334,18 +3422,47 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
   }
 }
 
-/** Open obligations outlive the history window. Expiry uses each game's own clock. */
-async function readWalletTickets(memberId: string, multiplayer: boolean, clock: Date) {
+async function readOpenGroupInvitationIds(memberId: string, multiplayer: boolean) {
+  if (!multiplayer || !areGameGroupsEnabled()) return { games: [], keys: [] };
+  const db = getPrisma();
+  const keys = await verifiedGameContactKeys(db, memberId, await readGameVerifiedContacts(memberId));
+  const games = await db.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, orderBy: [{ createdAt: "desc" }, { id: "asc" }], where: {
+    AND: [gameOnWhere()], maxPlayers: 10, status: { in: ["invited", "live"] }, players: { none: { memberId } },
+    invitees: { some: { OR: [{ memberId }, { memberId: null, recipientLookupKey: { in: keys } }] } },
+    events: { none: { actor: memberId, type: "invite_dismissed" } },
+  } });
+  return { games, keys };
+}
+
+/** Keep unseated readers on the invite preview, which owns the pre-join disclosure rules. */
+async function homeGroupInvitationLinks(games: LoadedGame[], ids: Set<string>, keys: string[], viewer: string, zone: string | null, clock: Date, blocks: GameBlocks) {
+  const open = games.filter(({ row, state }) => {
+    if (!ids.has(row.id) || row.createdBy && isHiddenBy(blocks, row.createdBy)) return false;
+    const invitation = addressedGameInvite(row.invitees, viewer, keys);
+    if (!invitation || row.players.some(player => player.memberId === viewer || player.seat === invitation.seat)) return false;
+    return row.status === "invited" || row.status === "live" && row.players.length < 10
+      && (!zone || hasPlayableGroupDay(state, zone, gameNow(clock, row)));
+  });
+  const tokens = await openGameTexts(open.map(({ row }) => ({ ...gameTarget(row, "invite_token"), value: row.inviteTokenEncrypted })));
+  return open.flatMap(({ row }, i) => tokens[i] ? [{ gameId: row.id, token: tokens[i] }] : []);
+}
+
+/** Open tickets never expire, so they all outlive the history window. */
+async function readWalletTickets(memberId: string, multiplayer: boolean) {
   const prisma = getPrisma();
   const tickets = await prisma.$queryRaw<GameTicket[]>(Prisma.sql`
     WITH visible AS (
       SELECT ticket.id, ticket.created_at,
-        ticket.status = 'open' AND ticket.created_at + ${GAME_TICKET_USE_DAYS} * interval '1 day'
-          >= (${clock}::timestamptz AT TIME ZONE 'UTC') + COALESCE(game.dev_clock_offset_ms, 0) * interval '1 millisecond' AS actionable
+        ticket.status = 'open' AS actionable
       FROM game_player seat JOIN game ON game.id = seat.game_id
       JOIN game_ticket ticket ON ticket.game_id = game.id
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL AND ${gameOnSql()}
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+        AND (game.max_players <> 2 OR NOT EXISTS (
+          SELECT 1 FROM game_player opponent JOIN game_block block
+            ON block.blocked_member_id = opponent.member_id AND block.blocker_member_id = seat.member_id
+          WHERE opponent.game_id = game.id AND opponent.member_id <> seat.member_id
+        ))
     ), wallet AS (
       SELECT id FROM visible WHERE actionable
       UNION ALL
@@ -3366,25 +3483,27 @@ async function readWalletTickets(memberId: string, multiplayer: boolean, clock: 
   });
 }
 
-export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
+export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth, timeZone: string | null = null): Promise<GameHomeView> {
   const prisma = getPrisma();
   const [profile, seats, addressed, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
-    // Apply active-game priority before the bounded history window, so new
-    // invitations and completed games cannot displace an older live game.
+    // Only finished seats have a history window.
     prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
-      SELECT seat.game_id AS "gameId" FROM game_player seat
-      JOIN game ON game.id = seat.game_id
-      WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
-        AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
-        AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
-        AND ${gameOnSql()}
-        AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
-      ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
-        seat.joined_at DESC, seat.game_id DESC
-      LIMIT ${HOME_CANDIDATE_LIMIT}
+      WITH seats AS (
+        SELECT seat.game_id, seat.joined_at, game.status FROM game_player seat
+        JOIN game ON game.id = seat.game_id
+        WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
+          AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+          AND ${gameOnSql()}
+          AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
+      )
+      SELECT game_id AS "gameId" FROM seats WHERE status IN ('invited', 'negotiating', 'live')
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'settled' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
+      UNION ALL
+      (SELECT game_id FROM seats WHERE status = 'void' ORDER BY joined_at DESC, game_id DESC LIMIT ${HOME_CANDIDATE_LIMIT})
     `),
-    prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } },
+    prisma.game.findMany({ select: { id: true }, take: HOME_CANDIDATE_LIMIT, where: { ...(!multiplayer ? { maxPlayers: 2 } : {}), invitees: { some: { memberId } }, events: { none: { actor: memberId, type: "invite_dismissed" } },
       OR: [{ status: "invited" }, { status: "void", players: { some: { leftAt: { not: null } } } }] } }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
@@ -3392,12 +3511,14 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     // leaves it unknown instead of failing home.
     readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
-  const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
-  const tickets = await readWalletTickets(memberId, multiplayer, current.clock);
+  const invitations = await readOpenGroupInvitationIds(memberId, multiplayer);
+  const invitationIds = new Set(invitations.games.map(game => game.id));
+  const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id), ...invitationIds])], true, memberId);
+  const tickets = await readWalletTickets(memberId, multiplayer);
   const visible = current.games.filter((game) => canView(game, memberId));
   const counterpartyOf = (ticket: (typeof tickets)[number]) => ticket.game.players.find(player => player.memberId !== memberId)?.memberId;
   const blocks = await readGameBlocks(prisma, memberId, [
-    ...visible.flatMap(participantsOf), ...tickets.flatMap(ticket => gameMemberIds(ticket.game.players)),
+    ...current.games.flatMap(participantsOf), ...tickets.flatMap(ticket => gameMemberIds(ticket.game.players)),
   ]);
   // Someone you blocked is gone from your Home: their games and tickets too.
   const shown = visible.filter((game) => game.row.maxPlayers === 10 || !participantsOf(game).some((id) => blocks.blocked.has(id)));
@@ -3413,7 +3534,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   const views = games.map(game => buildGameView(inputsById.get(game.row.id)!));
   const wallet = kept.map(ticket => {
     const input = inputsById.get(ticket.gameId)!;
-    return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
+    return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId,
       input.state.game.terms, input.hiddenMemberIds, input);
   });
   const areaCode = gameAreaCode(identity);
@@ -3421,10 +3542,10 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     blocked,
     games: views,
     canStartGames: isGameEnabled(),
-    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
+    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled(),
+      groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, timeZone, current.clock, blocks) } : {}),
     me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
-      // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
       owed: wallet.filter((ticket) => ticket.status !== "redeemed" && !ticket.youHold),
       redeemed: wallet.filter((ticket) => ticket.status === "redeemed"),
@@ -3439,7 +3560,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
  */
 export async function readHistory(memberId: string, multiplayer = false): Promise<GameHistoryView> {
   const prisma = getPrisma();
-  const candidates = await prisma.$queryRaw<Array<{ gameId: string }>>(Prisma.sql`
+  const candidates = await prisma.$queryRaw<Array<{ gameId: string; maxPlayers: number }>>(Prisma.sql`
     WITH settled_games AS (
       SELECT game.id AS game_id, game.max_players,
         CASE WHEN game.max_players = 10 THEN game.audience_key ELSE opponent.member_id END AS opponent_id,
@@ -3470,7 +3591,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
       FROM settled_games
       GROUP BY max_players, opponent_id
     )
-    SELECT settled_games.game_id AS "gameId"
+    SELECT settled_games.game_id AS "gameId", settled_games.max_players AS "maxPlayers"
     FROM settled_games
     JOIN recent_audiences USING (max_players, opponent_id)
     WHERE recent_audiences.audience_rank <= CASE WHEN max_players = 10 THEN ${HISTORY_GROUP_LIMIT}::int ELSE ${HISTORY_PEOPLE_LIMIT}::int END
@@ -3484,7 +3605,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
 
   const gameIds = candidates.map((candidate) => candidate.gameId);
   const [games, clock] = await Promise.all([
-    loadHistoryGames(prisma, gameIds, memberId),
+    loadHistoryGames(prisma, gameIds, candidates.filter(game => game.maxPlayers === 10).map(game => game.gameId), memberId),
     databaseNow(prisma),
   ]);
   const built = await buildHistoryViews(games, memberId, clock, multiplayer);
@@ -3560,7 +3681,7 @@ export async function readGameInviteForMember(memberId: string): Promise<string 
 }
 
 /** Only open invites expose details publicly; closed links look like missing ones. */
-export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
+export async function readInvitePreview(token: string, multiplayer = false, memberId?: string, timeZone: string | null = null): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
     include: { invitees: true, creator: true, events: { where: { type: "cancelled" }, select: { actor: true }, take: 1 }, players: true },
@@ -3572,7 +3693,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
-  const closed = await closedInvitePreview(row, now);
+  const closed = await closedInvitePreview(row, now, memberId, timeZone);
   if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
@@ -3594,7 +3715,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
   const db = getPrisma();
   const contacts = await readGameVerifiedContacts(actor);
   const keys = await verifiedGameContactKeys(db, actor, contacts);
-  const entries = await db.gameEntry.findMany({ where: { gameId: row.id, dayIndex: row.lengthDays - 1 } });
+  const entries = await db.gameEntry.findMany({ where: { gameId: row.id, dayIndex: lastCheckInDay(toRuleState(row, [])) } });
   const invitation = await readGroupTalkInvitation(db, row, toRuleState(row, entries), actor, keys, now);
   if (!invitation) return false;
   const accepted = await db.gameEvent.findMany({ where: { gameId: row.id, type: "talk_requested" }, select: { actor: true, payload: true }, take: 10 });
@@ -3608,7 +3729,7 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
 
 type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
-async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
+async function closedInvitePreview(row: PreviewGame, now: Date, memberId: string | undefined, timeZone: string | null): Promise<GameInvitePreview | null> {
   // Its challenger deleted their account: never open again.
   if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
@@ -3619,14 +3740,16 @@ async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInv
     return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
+  if (groupOpen && memberId && timeZone && !row.players.some(player => player.memberId === memberId)
+    && !hasPlayableGroupDay(toRuleState(row, []), timeZone, now)) return { status: "expired", noPlayableDay: true };
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
   return null;
 }
 
-/** Final-day artifacts decide whether the existing offline grace still applies. */
+/** Last check-in day artifacts decide whether the existing offline grace still applies. */
 async function groupInviteOpen(row: GameRow, now: Date): Promise<boolean> {
   if (row.maxPlayers !== 10 || row.status !== "live" || row.players.length >= 10) return false;
-  const entries = await getPrisma().gameEntry.findMany({ where: { gameId: row.id, dayIndex: row.lengthDays - 1 } });
+  const entries = await getPrisma().gameEntry.findMany({ where: { gameId: row.id, dayIndex: lastCheckInDay(toRuleState(row, [])) } });
   return !isGameDue(toRuleState(row, entries), now);
 }
 
@@ -3649,7 +3772,7 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     inviterFirstName: inviterFirstName ?? "",
     ...(memberId !== undefined && row.maxPlayers === 2 ? { inviterAvatarUrl: await inviterAvatar(row, memberId) } : {}),
     startsOn: game.startsOn,
-    ...(row.maxPlayers === 2 && !game.startsOn ? { earliestStart: earliestPairStart(row, now) } : {}),
+    ...(row.maxPlayers === 2 && !game.startsOn ? { earliestStart: await earliestPairStart(row, now) } : {}),
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
     ...(row.maxPlayers === 2 ? { supportsTalk: true } : {}),
@@ -3663,8 +3786,10 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
  * own start days (`decideJoin`). The reader's phone takes the later of this
  * and its own, so a challenger past 3pm makes "Starts tomorrow".
  */
-function earliestPairStart(row: PreviewGame, now: Date): string | null {
-  const starts = row.players.flatMap(player => !player.leftAt && player.timeZone ? [acceptanceStartDate(now, player.timeZone)] : []).sort();
+async function earliestPairStart(row: PreviewGame, now: Date): Promise<string | null> {
+  // Accepting reads each zone from the profile (`withCurrentTimeZones`), so a challenger who has travelled counts from where they are.
+  const players = await currentTimeZones(getPrisma(), row.players);
+  const starts = players.flatMap(player => !player.leftAt && player.timeZone ? [acceptanceStartDate(now, player.timeZone)] : []).sort();
   return starts.at(-1) ?? null;
 }
 
@@ -4023,7 +4148,7 @@ async function buildViewInputs(
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
     return {
-      multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
+      completedDays: game.completedDays, multiplayer, home, groupsEnabled: areGameGroupsEnabled(), audienceKey: game.row.audienceKey,
       challenges: challenges.get(game.row.id) ?? [],
       pendingChange: pendingViews.get(game.row.id) ?? null,
       talkDelivery: talkViews.get(game.row.id),

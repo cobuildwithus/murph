@@ -47,7 +47,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(hash.hash).not.toBe(oldHash);
       const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: hash.hash });
       expect(replica.displayName).toBe("Avery");
-      expect(replica.generation).toBe(18);
+      expect(replica.generation).toBe(19);
       const publishRef = vi.fn().mockResolvedValue({ published: true });
       const write = vi.fn(async ({ replica }: { replica: unknown }) => createReplicaRefFromReplica(replica));
       const workspace = createWorkspaceState();
@@ -90,7 +90,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await upsertMemory(root, { section: "Preferences", text: "Private unrelated preference" });
       expect(await hashHostedBrowserVaultReplicaSources(root)).toEqual(changed);
       const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: changed.hash });
-      expect(replica.generation).toBe(18);
+      expect(replica.generation).toBe(19);
       expect(replica.demographics).toEqual(await readMemoryDemographics(root));
       const shards = await splitBrowserVaultReplica(replica);
       const decoded = await parseBrowserVaultReplicaShards(JSON.parse(JSON.stringify(shards)));
@@ -114,7 +114,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       await writeFile(path.join(root, "bank/memory.md"), "broken memory");
       const hashed = await hashHostedBrowserVaultReplicaSources(root);
       const replica = await createHostedBrowserVaultReplicaForSourceState({ vaultRoot: root, sourceStateHash: hashed.hash });
-      expect(replica.generation).toBe(18);
+      expect(replica.generation).toBe(19);
       expect(replica.demographics).toBeUndefined();
     } finally { await rm(root, { force: true, recursive: true }); }
   });

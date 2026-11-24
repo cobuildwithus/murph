@@ -23,10 +23,31 @@ function descriptor(name: string, bytes: Uint8Array) {
     mediaKind: "video" as const, mimeType: "video/mp4", recordedAt: "2030-01-01T00:00:00.000Z", expiresAt: null as string | null };
 }
 
+test.each(["all", "paths"] as const)("restores every file in one pass only for a full export (%s)", async mode => {
+  const vaultRoot = await setup();
+  const bytes = Buffer.alloc(8192, 32);
+  const entries = ["one", "two", "three"].map(name => descriptor(name, bytes));
+  await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
+  const get = vi.fn(async () => bytes);
+  const restore = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { get, put: async () => {} } });
+  const report = await materializeVaultMedia({ vaultRoot,
+    args: mode === "all" ? { all: true } : { paths: entries.map(entry => entry.relativePath) },
+    materialize: (refs, options) => {
+      // Shrink whatever allowance the tool asks for, so the path read runs out at two files.
+      const shrunk = options?.maxTotalDownloadBytes === undefined ? {} : { maxTotalDownloadBytes: bytes.length * 2 };
+      return restore(refs, { ...options, ...shrunk });
+    } });
+  const expected = mode === "all" ? entries : entries.slice(0, 2);
+  expect(report).toEqual({ requested: 3, available: expected.length, removed: 0,
+    unavailable: mode === "all" ? [] : [{ path: entries[2]!.relativePath, reason: "download_budget" }] });
+  for (const entry of expected) expect(await readFile(path.join(vaultRoot, entry.relativePath))).toEqual(bytes);
+  expect(get).toHaveBeenCalledTimes(expected.length);
+});
+
 test.each(["all", "paths"] as const)("%s reports a file past the budget without blocking the files after it", async mode => {
   const vaultRoot = await setup();
   const bytes = Buffer.from("synthetic video");
-  const entries = [descriptor("first", bytes), { ...descriptor("over-budget", bytes), byteSize: assistantVaultFileMaxBytes }, descriptor("last", bytes)];
+  const entries = [descriptor("first", bytes), { ...descriptor("over-budget", bytes), byteSize: assistantVaultFileMaxBytes + 1 }, descriptor("last", bytes)];
   await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
   const get = vi.fn(async (_entry: { mediaId: string }) => bytes);
   const materialize = createHostedArtifactMaterializer({ vaultRoot, operatorHomeRoot: vaultRoot, mediaStore: { get, put: async () => {} } });
@@ -42,7 +63,7 @@ test.each(["all", "paths"] as const)("%s reports a file past the budget without 
 test("a partial bulk download reports transport and budget gaps and preserves cancellation", async () => {
   const vaultRoot = await setup();
   const bytes = Buffer.from("synthetic video");
-  const entries = [descriptor("first", bytes), descriptor("interrupted", bytes), { ...descriptor("over-budget", bytes), byteSize: assistantVaultFileMaxBytes }];
+  const entries = [descriptor("first", bytes), descriptor("interrupted", bytes), { ...descriptor("over-budget", bytes), byteSize: assistantVaultFileMaxBytes + 1 }];
   await writeHostedMediaReferenceCatalogue({ vaultRoot, catalogue: { schema: "murph.hosted-media-refs.v1", entries } });
   const get = vi.fn(async (entry: { mediaId: string }) => {
     if (entry.mediaId === entries[1]!.mediaId) throw new HostedRuntimeMediaReadError({ retryable: true, cause: new Error("Synthetic transport interruption") });

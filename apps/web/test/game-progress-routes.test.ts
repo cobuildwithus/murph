@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({ profile: vi.fn(), games: vi.fn(), entries: vi.
 vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
+  $queryRaw: async () => [{ version: "synthetic" }],
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
   gameProfile: { findUnique: mocks.profile, findUniqueOrThrow: async () => {
     const profile = await mocks.profile();
@@ -146,16 +147,13 @@ describe("Progress HTTP contracts", () => {
     expect(after.medals.find(item => item.id === medal.id)).toEqual(medal);
     expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });
-  it("composes only a picture's own measure pin and stops all settlement at the picture cap", async () => {
+  it("composes only a picture's own measure pin", async () => {
     const id = "11111111-1111-4111-8111-111111111111";
     mocks.pictures.mockResolvedValue([{ id, takenAt: new Date("2026-11-02T12:00:00Z"),
       metaEncrypted: await sealProgress({ memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: "pushups.reps" }) }]);
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].pics).toEqual([{ id, takenOn: "2026-11-02", at: 40 }]);
     expect(view.picCount).toBe(1);
-    mocks.transaction.mockClear(); mocks.pictures.mockResolvedValue(Array.from({ length: 10001 }, () => ({ id })));
-    expect(progressSchema.parse(await (await GET(request())).json()).incomplete).toBe(true);
-    expect(mocks.transaction).not.toHaveBeenCalled(); expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });
   it("resolves a checked bank route through the same setter and rolls over at the current total", async () => {
     mocks.entries.mockResolvedValue([routeEntry()]); await savedRoute({ legs: [routeLeg] });
@@ -198,10 +196,12 @@ describe("Progress HTTP contracts", () => {
     expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
   });
-  it("starts the charts on the day they started the app, or Oct 19 for anyone on it before", async () => {
+  it("starts the charts on the day they started the app, or Oct 1 for anyone on it before", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     mocks.profileCreatedAt.value = new Date("2026-02-10T12:00:00Z");
-    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-19");
+    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-01");
+    mocks.profileCreatedAt.value = new Date("2026-10-12T12:00:00Z");
+    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-12");
   });
   it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
@@ -222,8 +222,9 @@ describe("Progress HTTP contracts", () => {
     expect(mocks.awards).toHaveBeenCalledOnce();
     expect(awards).toEqual(original);
     expect(mocks.current).toHaveBeenCalled();
-    expect(mocks.games).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }));
-    expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ take: 10001, where: expect.objectContaining({ memberId }) }));
+    expect(mocks.games.mock.calls[0][0]).not.toHaveProperty("take");
+    expect(mocks.entries.mock.calls[0][0]).not.toHaveProperty("take");
+    expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ memberId }) }));
   });
   it("rereads an insert lost to another writer and renders its seen state", async () => {
     mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
@@ -314,14 +315,6 @@ describe("Progress HTTP contracts", () => {
     await GET(request());
     expect(awards).toEqual(original);
     expect(mocks.after).toHaveBeenCalledTimes(1);
-  });
-  it.each(["games", "entries"])("marks %s overflow incomplete and makes no settling or inference writes", async cap => {
-    if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, (_, i) => gameRow(`game-${i}`)));
-    else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ ...entryRow(0), id: `entry-${i}` })));
-    const response = await GET(request());
-    expect(response.status).toBe(200);
-    expect(progressSchema.parse(await response.json()).incomplete).toBe(true);
-    expect(mocks.transaction).not.toHaveBeenCalled(); expect(mocks.after).not.toHaveBeenCalled();
   });
   it("keeps passed landmarks even after the final contributing post is withdrawn", async () => {
     const entry = { ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) };
@@ -470,7 +463,7 @@ describe("Progress HTTP contracts", () => {
   it("writes a checked goal only through patchMeasureState and rejects a route on a rep measure", async () => {
     const response = await PUT(request("/measures/pushups.reps", { goal: { rungId: "half-dome" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(response.status).toBe(200);
-    expect(mocks.patch).toHaveBeenCalledWith(memberId, "pushups.reps", { goal: { rungId: "half-dome" } }, expect.any(Function));
+    expect(mocks.patch).toHaveBeenCalledWith(memberId, "pushups.reps", { goal: { rungId: "half-dome" } }, expect.any(Function), expect.any(Function));
     const route = await PUT(request("/measures/pushups.reps", { goal: { from: "London", to: "Paris" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(route.status).toBe(400); expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });

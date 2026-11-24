@@ -228,6 +228,8 @@ export type AssistantHostedAutomationToolRequest =
     }
   | {
       action: 'save'
+      /** Host-owned time of the accepted request for a one-shot reminder. */
+      requestedAt?: string
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
@@ -596,7 +598,7 @@ export class AssistantWorkspaceArtifactMaterializationError extends Error {
 }
 
 export type AssistantWorkspaceArtifactUnavailableReason =
-  | 'missing' | 'expired' | 'integrity' | 'size' | 'transport' | 'obsolete'
+  | 'missing' | 'expired' | 'integrity' | 'size' | 'download_budget' | 'transport' | 'obsolete'
 
 /** Keys are canonical root-qualified paths, e.g. vault:raw/inbox/photo.jpg.
  * A rejection is authoritative even when a local file remains at that path. */

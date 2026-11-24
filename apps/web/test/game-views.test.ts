@@ -98,7 +98,7 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 
 describe("weekly game views: tickets", () => {
   it.each([
-    "eligible", "owed by viewer", "redeemed", "expired", "deleted player", "left player",
+    "eligible", "a year old", "owed by viewer", "redeemed", "deleted player", "left player",
     "hidden owing player", "hidden holder", "group", "unverified phone", "missing phone", "own number",
   ])("projects the ticket message address only when eligible: %s", scenario => {
     const state = liveState();
@@ -112,7 +112,7 @@ describe("weekly game views: tickets", () => {
     switch (scenario) {
       case "owed by viewer": input.viewerId = AVA; break;
       case "redeemed": row.status = "redeemed"; row.redeemedAt = JOIN_AT; break;
-      case "expired": input.now = new Date(JOIN_AT.getTime() + 14 * 86_400_000 + 1); break;
+      case "a year old": row.createdAt = new Date(JOIN_AT.getTime() - 365 * 86_400_000); break;
       case "deleted player": row.players = [{ seat: 0, memberId: LEO }, { seat: 1, memberId: null }]; break;
       case "left player": state.players[1].leftAt = JOIN_AT; break;
       case "hidden owing player": input.hiddenMemberIds = new Set([AVA]); break;
@@ -123,12 +123,10 @@ describe("weekly game views: tickets", () => {
       case "missing phone": input.verifiedPhones = undefined; break;
       case "own number": row.owedBySeats = [0]; break;
     }
-    const ticket = ticketView(row, WORDS, input.viewerId, input.now, state.game.terms, input.hiddenMemberIds, input);
-    if (scenario === "eligible") {
+    const ticket = ticketView(row, WORDS, input.viewerId, state.game.terms, input.hiddenMemberIds, input);
+    if (scenario === "eligible" || scenario === "a year old") {
       expect(ticket).toMatchObject({ owedByPhone: phones.get(AVA), youHold: true, status: "open" });
-      const useBy = new Date(JOIN_AT.getTime() + 14 * 86_400_000);
-      expect(ticketView(row, WORDS, LEO, useBy, state.game.terms, undefined, input).owedByPhone).toBe(phones.get(AVA));
-      expect(ticketView(row, WORDS, LEO, JOIN_AT)).not.toHaveProperty("owedByPhone");
+      expect(ticketView(row, WORDS, LEO)).not.toHaveProperty("owedByPhone");
     } else {
       expect(ticket).not.toHaveProperty("owedByPhone");
     }
@@ -261,7 +259,7 @@ describe("weekly game views: tickets", () => {
     expect(removed.avatarUrl).toContain(encodeURIComponent(privatePhoto));
   });
 
-  it("expires an open ticket just after its 14-day use-by time, and never a redeemed one", () => {
+  it("never expires a ticket: an open one has no use-by date and stays open", () => {
     const row = {
       createdAt: new Date("2026-10-24T17:00:00Z"),
       gameId: "game_views_1",
@@ -272,16 +270,11 @@ describe("weekly game views: tickets", () => {
       stakeKey: "gsk_breakfast",
       status: "open" as const,
     };
-    const useBy = new Date("2026-11-07T17:00:00Z");
-    expect(ticketView(row, WORDS, LEO, useBy)).toMatchObject({
-      status: "open",
-      useBy: useBy.toISOString(),
-      what: "Breakfast in bed",
-      youHold: true,
-    });
-    expect(ticketView(row, WORDS, LEO, new Date(useBy.getTime() + 1)).status).toBe("expired");
+    const view = ticketView(row, WORDS, LEO);
+    expect(view).toMatchObject({ status: "open", what: "Breakfast in bed", youHold: true });
+    expect(view).not.toHaveProperty("useBy");
     const redeemed = { ...row, redeemedAt: new Date("2026-10-25T09:00:00Z"), status: "redeemed" as const };
-    expect(ticketView(redeemed, WORDS, AVA, new Date("2027-01-01T00:00:00Z")).status).toBe("redeemed");
+    expect(ticketView(redeemed, WORDS, AVA).status).toBe("redeemed");
   });
 });
 
@@ -442,7 +435,7 @@ it("derives streaks from scheduled live posts, ignoring off days and unposted to
 it.each(["prize","dare","winner_gets","per_miss"] as const)("returns ticket kind %s from its canonical stake key", (kind) => {
   const state=liveState();state.game.terms.versions[0].stakes[0].kind=kind;
   const row={id:"ticket_kind",gameId:state.game.id,stakeKey:"gsk_breakfast",owedBySeats: [1],owedToSeats: [0], players: state.players,status:"open" as const,createdAt:JOIN_AT,redeemedAt:null};
-  expect(ticketView(row,WORDS,LEO,JOIN_AT,state.game.terms)).toMatchObject({kind,youHold:true});
+  expect(ticketView(row,WORDS,LEO,state.game.terms)).toMatchObject({kind,youHold:true});
 });
 
 

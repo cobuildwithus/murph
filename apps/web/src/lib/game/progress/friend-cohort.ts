@@ -5,30 +5,33 @@ import { getPrisma } from "../../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { isHiddenBy, readGameBlocks } from "../blocks";
 import { labelTarget, openGameTexts } from "../crypto";
-import { departedLabels } from "../account-deletion";
+import { departedLabels } from "../row";
 import { gameMediaUrl } from "../views";
 import { gameHttpError } from "../http/errors";
 import type { FriendSeries } from "./friends";
 
-type Db = Pick<Prisma.TransactionClient, "game" | "gameBlock" | "gameProfile">;
+type Db = Pick<Prisma.TransactionClient, "game" | "gamePlayer" | "gameBlock" | "gameProfile">;
 
 /** Current, unblocked players from games the member has played. */
 export async function friendCohortIds(memberId: string, db: Db) {
   const games = await db.game.findMany({ where: { events: { none: { type: "cancelled" } },
     status: { in: ["live", "settled"] }, players: { some: { memberId, leftAt: null, joinedAt: { not: null } } } },
-    take: 501, orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    select: { players: { take: 10, select: { memberId: true, joinedAt: true, leftAt: true, departedLabel: true,
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    select: { players: { take: 10, select: { memberId: true, joinedAt: true, leftAt: true,
       profile: { select: { member: { select: { suspendedAt: true } } } } } } } });
-  if (games.length > 500) return { ids: [memberId], incomplete: true, departure: null };
   const ids = [...new Set([memberId, ...games.flatMap(game => game.players.flatMap(player =>
     player.memberId && player.joinedAt && !player.leftAt && !player.profile!.member.suspendedAt ? [player.memberId] : []))])];
   const blocks = await readGameBlocks(db, memberId, ids);
-  const departure = games.flatMap(game => game.players.flatMap(player => {
-    if (player.memberId !== null || !player.leftAt) return [];
-    const label = departedLabels(player.departedLabel).find(label => label.ownerMemberId === memberId);
-    return label ? [{ on: player.leftAt, nameEncrypted: label.nameEncrypted }] : [];
-  })).sort((a, b) => b.on.getTime() - a.on.getTime())[0] ?? null;
-  return { ids: ids.filter(id => !isHiddenBy(blocks, id)), incomplete: false, departure };
+  const latest = await db.gamePlayer.findFirst({
+    where: { memberId: null, leftAt: { not: null }, departedLabel: { array_contains: [{ ownerMemberId: memberId }] },
+      game: { events: { none: { type: "cancelled" } }, players: { some: { memberId, joinedAt: { not: null }, leftAt: null } } },
+      OR: [{ game: { status: { in: ["live", "settled"] } } }, { game: { status: "void" }, joinedAt: { not: null } }] },
+    orderBy: [{ leftAt: "desc" }, { gameId: "asc" }, { seat: "asc" }],
+    select: { leftAt: true, departedLabel: true },
+  });
+  const label = departedLabels(latest?.departedLabel ?? null).find(label => label.ownerMemberId === memberId);
+  const departure = latest?.leftAt && label ? { on: latest.leftAt, nameEncrypted: label.nameEncrypted } : null;
+  return { ids: ids.filter(id => !isHiddenBy(blocks, id)), departure };
 }
 
 export async function readFriendCohort(memberId: string) {
@@ -47,7 +50,7 @@ export async function readFriendCohort(memberId: string) {
     memberId: profile.memberId, firstName: names[index]!, avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     me: profile.memberId === memberId, joinedOn: toLocalDayKey(profile.createdAt, profile.timeZone), daily: null,
   }));
-  return { people, incomplete: cohort.incomplete, departure: cohort.departure,
+  return { people, departure: cohort.departure,
     timeZone: ownProfile.timeZone,
     departureNotice: cohort.departure
       ? `${names[profiles.length] ?? "A friend"} left Murph on ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: ownProfile.timeZone }).format(cohort.departure.on)}. Your games with them still count in your totals.` : null };

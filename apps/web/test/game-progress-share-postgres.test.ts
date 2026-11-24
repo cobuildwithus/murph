@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { beforeEach, afterEach, afterAll, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ after: vi.fn(), make: vi.fn(), read: vi.fn(), readProfile: vi.fn(), put: vi.fn(), purge: vi.fn(), height: vi.fn() }));
-vi.mock('../src/lib/device-sync/companion-numbers', () => ({ readSavedCompanionBodyHeight: mocks.height }));
+vi.mock('../src/lib/device-sync/companion-numbers', () => ({ readSavedCompanionBody: mocks.height }));
 vi.mock('next/server', async original => ({ ...await original<object>(), after: mocks.after }));
 vi.mock('../src/lib/game/progress/share-image', async original => ({ ...await original<object>(), makeShareImage: mocks.make }));
 vi.mock('../src/lib/game/media', () => ({ readGameMedia: mocks.readProfile }));
@@ -19,6 +19,7 @@ import { decideProgressShareConsent } from '../src/lib/game/progress/share-conse
 import { putSharePhoto, readSharePhoto } from '../src/lib/game/progress/share-photo';
 import { sealProgress, progressLookup } from '../src/lib/game/progress/crypto';
 import { ShareImageError } from '../src/lib/game/progress/share-image';
+import { shareViewSchema } from '../src/lib/game/progress/contract';
 import type { Candidate } from '../src/lib/game/progress/registry';
 import { lockHostedMemberRow } from '../src/lib/hosted-onboarding/shared';
 
@@ -30,7 +31,7 @@ let tasks: (() => Promise<void>)[] = [], source: Buffer, reference: Uint8Array |
 const key = (userId: string, mediaId: string) => `${userId}:${mediaId}`;
 beforeEach(async () => {
   vi.resetAllMocks(); tasks = []; stored.clear(); tombstones.clear(); reference = undefined; output = undefined;
-  mocks.height.mockResolvedValue(null);
+  mocks.height.mockResolvedValue({ heightCm: null, weightKg: null });
   // Keep real byte encryption/AAD; replace only the provider-backed root lookup.
   const root = async ({ userId, domain }: { userId: string; domain: HostedCryptoDomain }) => {
     const envelope: HostedDomainRootKeyEnvelopeV1 = { userId, domain, rootKeyId: 'synthetic-root', generation: 1,
@@ -98,18 +99,21 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
       // This lock can be acquired only after the share's authority transaction releases it.
       await db.$transaction(tx => lockHostedMemberRow(tx, f.memberId), { timeout: 1000 });
       if (state === 'read failure') throw new Error('PRIVATE_REPLICA_SENTINEL');
-      return state === 'height' ? 170.4 : null;
+      return state === 'height' ? { heightCm: 170.4, weightKg: 81.6 } : { heightCm: null, weightKg: null };
     });
     await tasks[0]();
     expect(mocks.height).toHaveBeenCalledExactlyOnceWith(f.memberId, expect.any(AbortSignal));
     expect(mocks.make).toHaveBeenCalledTimes(1);
     const prompt = mocks.make.mock.calls[0][1] as string;
-    expect(prompt.includes('The person is 170 cm tall; keep their real height and build.')).toBe(state === 'height');
+    expect(prompt.includes('The person is 5 ft 7 in (170 cm) tall and weighs 180 lb (82 kg). Make their body match this height and weight.')).toBe(state === 'height');
     expect(prompt).not.toContain('PRIVATE_REPLICA_SENTINEL');
     expect(await f.share()).toMatchObject({ status: 'ready', failureCode: null });
+    expect(before.card.line).not.toBe('');
     expect(admitted.card).toEqual(before.card);
-    expect((await readProgressShare(f.input)).card).toEqual(before.card);
-    await startProgressShare(f.input);
+    const ready = shareViewSchema.parse(await readProgressShare(f.input));
+    expect(ready.presentation.state).toBe('photo');
+    expect(ready.card).toEqual({ ...before.card, line: '' });
+    expect(await startProgressShare(f.input)).toEqual(ready);
     expect(mocks.height).toHaveBeenCalledTimes(1);
   });
   it.each(['session', 'health consent'])('rechecks %s after the height read before provider dispatch', async authority => {
@@ -119,7 +123,7 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     mocks.height.mockImplementationOnce(async () => {
       if (authority === 'session') await db.hostedAuthRecord.delete({ where: { model_id: { model: 'session', id: f.sessionId } } });
       else await revokeHostedConsentScope({ memberId: f.memberId, prisma: db, scope: 'launch.health-data' });
-      return 170;
+      return { heightCm: 170, weightKg: 81.6 };
     });
     await tasks[0]();
     expect(mocks.make).not.toHaveBeenCalled();

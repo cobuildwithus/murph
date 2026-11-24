@@ -9,6 +9,7 @@ import {
   hasHostedPaidBillingRefEvidence,
 } from "@/src/lib/hosted-onboarding/entitlement";
 import {
+  activeHostedMemberAccessWithParticipantsWhere,
   hasActiveHostedMemberAccess,
   hasActiveHostedThreadContainerAccess,
   hasActiveHostedThreadContainerAccessWithParticipants,
@@ -304,111 +305,50 @@ describe("hosted member access (single resolver)", () => {
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(allowed ? 0 : 1);
   });
 
-  it("resolves owner and current-participant access for a member set without per-member reads", async () => {
+  it("reads ordinary batch access IDs in one statement without enumerating participants", async () => {
     const now = new Date("2026-07-26T12:00:00.000Z");
-    const findManyMembers = vi.fn().mockResolvedValue([]).mockResolvedValueOnce([
-      {
-        ...person({ billingStatus: HostedBillingStatus.not_started }),
-        id: "container_owner_backed",
-        threadContainer: {
-          owner: person({ billingStatus: HostedBillingStatus.active }),
-        },
-      },
-      {
-        ...person({ billingStatus: HostedBillingStatus.not_started }),
-        id: "container_participant_backed",
-        threadContainer: {
-          owner: person({ billingStatus: HostedBillingStatus.paused }),
-        },
-      },
-      {
-        ...person({ billingStatus: HostedBillingStatus.not_started }),
-        id: "container_inactive",
-        threadContainer: {
-          owner: person({ billingStatus: HostedBillingStatus.paused }),
-        },
-      },
-      {
-        ...person({ billingStatus: HostedBillingStatus.active, suspendedAt: SUSPENDED_AT }),
-        id: "container_suspended",
-        threadContainer: {
-          owner: person({ billingStatus: HostedBillingStatus.active }),
-        },
-      },
-    ]);
-    const findManyParticipants = vi.fn(async () => [{
-      containerMemberId: "container_participant_backed",
-    }]);
     const prisma = {
-      $queryRaw: vi.fn(async () => []),
-      hostedMember: { findMany: findManyMembers },
-      hostedThreadContainerParticipant: { findMany: findManyParticipants },
+      hostedMember: { findMany: vi.fn().mockResolvedValue([{ id: "room" }]) },
+      hostedThreadContainerParticipant: { findMany: vi.fn() },
+      $queryRaw: vi.fn(),
     };
 
     await expect(readActiveHostedMemberAccessIds({
-      memberIds: [
-        "container_owner_backed",
-        "container_participant_backed",
-        "container_inactive",
-        "container_suspended",
-        "container_owner_backed",
-      ],
+      memberIds: [],
       now,
       prisma: prisma as never,
-    })).resolves.toEqual(new Set([
-      "container_owner_backed",
-      "container_participant_backed",
-    ]));
-    expect(findManyMembers).toHaveBeenCalledTimes(1);
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.objectContaining({
-      values: expect.arrayContaining(["container_inactive"]),
-    }));
-    expect(findManyParticipants).toHaveBeenCalledTimes(1);
-    expect(findManyParticipants).toHaveBeenCalledWith(expect.objectContaining({
-      select: { containerMemberId: true },
-      take: 97,
-      where: expect.objectContaining({
-        containerMemberId: {
-          in: [
-            "container_owner_backed",
-            "container_participant_backed",
-            "container_inactive",
-          ],
-        },
-        lastSeenAt: { gte: new Date("2026-07-19T12:00:00.000Z") },
-        removedAt: null,
-        participant: expect.objectContaining({
-          suspendedAt: null,
-        }),
-      }),
-    }));
+    })).resolves.toEqual(new Set());
+    expect(prisma.hostedMember.findMany).not.toHaveBeenCalled();
+
+    await expect(readActiveHostedMemberAccessIds({
+      memberIds: ["room", "room"],
+      now,
+      prisma: prisma as never,
+    })).resolves.toEqual(new Set(["room"]));
+    expect(prisma.hostedMember.findMany).toHaveBeenCalledExactlyOnceWith({
+      select: { id: true },
+      where: { ...activeHostedMemberAccessWithParticipantsWhere(now, false), id: { in: ["room"] } },
+    });
+    expect(prisma.hostedThreadContainerParticipant.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("fails closed when current participant rows exceed the admitted roster bound", async () => {
+  it("checks exact game access only for unmatched IDs and includes funded rooms", async () => {
+    const now = new Date("2026-07-26T12:00:00.000Z");
     const prisma = {
-      hostedMember: {
-        findMany: vi.fn(async () => [{
-          ...person({ billingStatus: HostedBillingStatus.not_started }),
-          id: "container_overflow",
-          threadContainer: {
-            owner: person({ billingStatus: HostedBillingStatus.paused }),
-          },
-        }]),
-      },
-      hostedThreadContainerParticipant: {
-        findMany: vi.fn(async () => Array.from(
-          { length: 33 },
-          () => ({ containerMemberId: "container_overflow" }),
-        )),
-      },
+      hostedMember: { findMany: vi.fn().mockResolvedValue([{ id: "ordinary" }]) },
+      $queryRaw: vi.fn().mockResolvedValue([{ memberId: "game_room", beneficiaryMemberId: "primary_room" }]),
     };
 
     await expect(readActiveHostedMemberAccessIds({
-      memberIds: ["container_overflow"],
-      now: new Date("2026-07-26T12:00:00.000Z"),
+      memberIds: ["ordinary", "game_room", "missing", "game_room"],
+      now,
       prisma: prisma as never,
-    })).rejects.toThrow("participant read exceeded its admitted bound");
+    })).resolves.toEqual(new Set(["ordinary", "game_room"]));
+    expect(prisma.$queryRaw).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      values: expect.arrayContaining(["game_room", "missing", now]),
+    }));
+    expect(prisma.$queryRaw.mock.calls[0][0].values).not.toContain("ordinary");
   });
 
   it("reads active Family sponsorship without treating own billing as sponsorship", async () => {

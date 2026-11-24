@@ -48,50 +48,66 @@ export const gameEveningEventId = (roomId: string, date: string) => `game-evenin
 
 async function readRoom(roomId: string, gameIds?: readonly string[], now = new Date(), worthProving?: (games: Games) => boolean) {
   const prisma = getPrisma();
-  const ids = gameIds ?? (await prisma.game.findMany({ where: { status: "live", chatContainerMemberId: roomId },
-    select: { id: true }, take: GAME_MISSED_ROOM_MAX_GAMES + 1 })).map(row => row.id);
-  if (!ids.length || ids.length > GAME_MISSED_ROOM_MAX_GAMES) return null;
+  const admission = await roomEveningPlayers(roomId, prisma, now);
+  const ids = [...admission.keys()].filter(id => !gameIds || gameIds.includes(id));
+  if (!ids.length) return null;
   const room = await readEligibleRoomGames(roomId, ids, worthProving);
   if (!room) return null;
-  const { games, zonesByMember } = await gamesInNearbyZones(room.games, prisma, now);
-  if (!games.length) return null;
-  const memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
-  return { games, audience: room.audience, memberIds, zones: memberIds.map(id => zonesByMember.get(id)!) };
+  const memberIds = [...new Set(room.games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
+  return { ...room, memberIds, zones: room.games.flatMap(game => admission.get(game.row.id)!) };
 }
 
-async function gamesInNearbyZones(candidates: Games, db: Prisma.TransactionClient, now: Date) {
-  const memberIds = [...new Set(candidates.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
-  const profiles = await db.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, timeZone: true } });
-  const zonesByMember = new Map(profiles.map(profile => [profile.memberId, normalizeIanaTimeZone(profile.timeZone)]));
-  const games = candidates.filter(game => {
-    const zones = remainingPlayers(game.state).map(player => zonesByMember.get(player.memberId));
-    return zones.length > 0 && zones.every(Boolean) && gameZoneSpreadHours(zones, now) < GAME_ROOM_FAR_APART_HOURS;
-  });
-  return { games, zonesByMember };
+/** In game-ID order, admit each roster whose current profile zones still fit the room's evening. */
+async function roomEveningPlayers(roomId: string, db: Prisma.TransactionClient, now: Date) {
+  const games = await db.game.findMany({ where: { status: "live", chatContainerMemberId: roomId },
+    orderBy: { id: "asc" }, take: GAME_MISSED_ROOM_MAX_GAMES + 1,
+    select: { id: true, players: { where: { leftAt: null, memberId: { not: null } }, select: { profile: { select: { timeZone: true } } } } } });
+  const admitted = new Map<string, string[]>();
+  if (games.length > GAME_MISSED_ROOM_MAX_GAMES) return admitted;
+  const zones: string[] = [];
+  for (const game of games) {
+    const own = game.players.map(player => normalizeIanaTimeZone(player.profile?.timeZone));
+    if (!own.length || !own.every((zone): zone is string => Boolean(zone))
+      || gameZoneSpreadHours([...zones, ...own], now) >= GAME_ROOM_FAR_APART_HOURS) continue;
+    admitted.set(game.id, own);
+    zones.push(...own);
+  }
+  return admitted;
 }
 
-/** A private check-in is only eligible when the room's own check-in cannot cover this game. */
-export async function roomCoversEveningGame(roomId: string | null, gameId: string, now: Date): Promise<boolean> {
-  if (!roomId || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return false;
-  const room = await readRoom(roomId, undefined, now).catch(skipUnprovableRoom);
-  return Boolean(room?.games.some(game => game.row.id === gameId));
+export type RoomEvidence = Map<string, GameChatAudience | null | "unknown">;
+
+async function prepareRoomEvidence(room: string): Promise<GameChatAudience | null | "unknown"> {
+  try { return await readGameChatAudience(room); }
+  catch (error) { return readGameChatAudienceRefusal(error) ? null : "unknown"; }
 }
 
-/**
- * The games that would get the private evening text, from stored facts only, for describing reminders: a game
- * in a group chat whose players live close together gets that chat's check-in instead. Delivery still asks
- * `roomCoversEveningGame`, which also proves the chat itself.
- */
+/** Each database pass recomputes admission. Only preparation may fetch missing provider evidence. */
+export function privateRoomCheck(db: Prisma.TransactionClient, now: Date, evidence: RoomEvidence, prepare: boolean) {
+  const admissions = new Map<string, Map<string, string[]>>();
+  return async (game: Games[number]) => {
+    const room = game.row.chatContainerMemberId;
+    if (!room || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return false;
+    if (prepare && !evidence.has(room)) evidence.set(room, await prepareRoomEvidence(room));
+    const audience = evidence.get(room);
+    if (audience === null) return false;
+    if (!audience || audience === "unknown") return true;
+    if (!admissions.has(room)) admissions.set(room, await roomEveningPlayers(room, db, now));
+    return admissions.get(room)!.has(game.row.id) && Boolean(await readGameChatAuthority(game.row, room, audience, db));
+  };
+}
+
+/** Settings describe admission from stored room facts. Delivery also proves the provider audience. */
 export async function readPrivatelyTextedGameIds(gameIds: readonly string[], now: Date): Promise<Set<string>> {
   if (!gameIds.length || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return new Set(gameIds);
   const prisma = getPrisma();
-  const games = await prisma.game.findMany({ where: { id: { in: [...gameIds] } }, select: { id: true, chatContainerMemberId: true,
-    players: { where: { leftAt: null, memberId: { not: null } }, select: { memberId: true } } } });
-  const memberIds = [...new Set(games.flatMap(game => game.players.map(player => player.memberId!)))];
-  const zones = new Map((await prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, timeZone: true } }))
-    .map(profile => [profile.memberId, profile.timeZone]));
-  return new Set(games.filter(game => !game.chatContainerMemberId
-    || gameZoneSpreadHours(game.players.map(player => zones.get(player.memberId!)), now) >= GAME_ROOM_FAR_APART_HOURS).map(game => game.id));
+  const games = await prisma.game.findMany({ where: { id: { in: [...gameIds] } }, select: { id: true, chatContainerMemberId: true } });
+  const privateIds = new Set(games.map(game => game.id));
+  const rooms = new Set(games.flatMap(game => game.chatContainerMemberId ? [game.chatContainerMemberId] : []));
+  for (const room of rooms) {
+    for (const id of (await roomEveningPlayers(room, prisma, now)).keys()) privateIds.delete(id);
+  }
+  return privateIds;
 }
 
 /** Each game's current players determine eligibility, independently of other games. */
@@ -238,12 +254,16 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   if (now >= new Date(policy.expiresAt)) return false;
   const ids = [...new Set(policy.batch.map(game => game.gameId))].sort();
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
-  const games = await loadGameMissedCheckInGames(tx, ids);
-  if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameEnabled())) return false;
-  if (!audience) return false;
-  for (const { row } of games) if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
-  if ((await gamesInNearbyZones(games, tx, now)).games.length !== games.length) return false;
-  // Only the addressed games are loaded here, so the room's horizon can't be rebuilt; the frozen expiry above stands.
+  if (!audience || !isGameEnabled()) return false;
+  const admission = await roomEveningPlayers(policy.roomId, tx, now);
+  if (ids.some(id => !admission.has(id))) return false;
+  const games: Games = [];
+  for (const game of await loadGameMissedCheckInGames(tx, [...admission.keys()])) {
+    if (game.row.status === "live" && game.row.chatContainerMemberId === policy.roomId
+      && await readGameChatAuthority(game.row, policy.roomId, audience, tx)) games.push(game);
+  }
+  const dueAt = gameEveningCheckInHorizons(games.map(game => game.state), new Set([policy.date])).get(policy.date);
+  if (!dueAt || !gameEveningWindow(dueAt, now) || dueAt.getTime() + WINDOW_MS !== Date.parse(policy.expiresAt)) return false;
   return JSON.stringify(addressedBatch(games, policy.date, now)) === JSON.stringify(policy.batch);
 }
 

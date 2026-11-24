@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({ games: vi.fn(), blocks: vi.fn(), profiles: vi.fn(), open: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
-  gameBlock: { findMany: mocks.blocks }, gameProfile: { findMany: mocks.profiles } }) }));
+  gamePlayer: { findFirst: async () => null }, gameBlock: { findMany: mocks.blocks }, gameProfile: { findMany: mocks.profiles } }) }));
 vi.mock("@/src/lib/game/crypto", async importOriginal => ({ ...await importOriginal<typeof import("@/src/lib/game/crypto")>(), openGameTexts: mocks.open }));
 import { readFriendCohort } from "@/src/lib/game/progress/friend-cohort";
 
@@ -38,12 +38,10 @@ it("opens the admitted names with one cohort and block read before the caller's 
   expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: "ava", leftAt: null, joinedAt: { not: null } });
 });
 
-it("marks a limit-plus-one cohort incomplete without exposing truncated rankings", async () => {
+it("reads every game the member has played, past 500", async () => {
   mocks.games.mockResolvedValue(Array.from({ length: 501 }, () => game));
-  const result = await readFriendCohort("ava");
-  expect(result.incomplete).toBe(true);
-  expect(result.people.map(person => person.memberId)).toEqual(["ava"]);
-  expect(mocks.games.mock.calls[0][0].take).toBe(501);
+  expect((await readFriendCohort("ava")).people.map(person => person.memberId)).toEqual(["ava", "leo", "sam"]);
+  expect(mocks.games.mock.calls[0][0]).not.toHaveProperty("take");
 });
 
 

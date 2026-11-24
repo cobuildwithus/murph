@@ -87,12 +87,12 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     const input = { id: randomUUID(), measureId: "squats.reps", takenAt: "2026-08-09T12:00:00Z" };
     const upload = () => putProgressPic(owner, input, Uint8Array.of(1, 2), authorized);
     await expect(upload()).rejects.toMatchObject({ httpStatus: 503 });
-    expect(await readProgressPics(owner)).toEqual({ incomplete: false, pics: [] });
+    expect(await readProgressPics(owner)).toEqual([]);
     stage.mockResolvedValue(Response.json({ stored: true }));
     await upload();
     stage.mockResolvedValue(Response.json({ stored: true }));
     await upload();
-    expect((await readProgressPics(owner)).pics).toEqual([{ ...input, takenAt: new Date(input.takenAt) }]);
+    expect(await readProgressPics(owner)).toEqual([{ ...input, takenAt: new Date(input.takenAt) }]);
   });
 
   it("opens an uppercase legacy picture alongside an unreadable neighbor and finishes its replay", async () => {
@@ -108,7 +108,7 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     await db.gameProgressPic.createMany({ data: [id, randomUUID()].map(rowId => ({
       id: rowId, memberId: owner, takenAt, metaEncrypted: encrypted, storageKey: `progress/${randomBytes(16).toString("hex")}.jpg`,
     })) });
-    expect(await readProgressPics(owner)).toEqual({ incomplete: true, pics: [{ id, takenAt, ...meta }] });
+    expect(await readProgressPics(owner)).toEqual([{ id, takenAt, ...meta }]);
     vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", "https://control.example.test");
     vi.spyOn(controlAuth, "createHostedExecutionVercelOidcBearerTokenProvider").mockReturnValue(async () => "synthetic");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ stored: true }));

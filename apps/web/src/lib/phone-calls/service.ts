@@ -749,7 +749,9 @@ async function resolveExistingHostedPhoneCall(input: {
   ) {
     throw new Error("Hosted phone call request key collision.");
   }
-  assertHostedPhoneCallBriefMatches({
+  // A replay of the same message may reword the brief. It gets the first
+  // call's receipt, so only the number it dialed has to match.
+  assertHostedPhoneCallDestinationMatches({
     actual: await readHostedPhoneCallBrief({
       call: input.call,
       crypto: input.crypto,
@@ -962,33 +964,12 @@ function resolveHostedPhoneCallStore(
   };
 }
 
-function assertHostedPhoneCallBriefMatches(input: {
+function assertHostedPhoneCallDestinationMatches(input: {
   actual: unknown;
   expected: HostedPhoneCallBrief;
 }): void {
   const actual = hostedPhoneCallBriefSchema.safeParse(input.actual);
-  if (!actual.success || stableJson(actual.data) !== stableJson(input.expected)) {
+  if (!actual.success || actual.data.to.phoneNumber !== input.expected.to.phoneNumber) {
     throw new Error("Hosted phone call request key collision.");
   }
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(stabilizeJsonValue(value));
-}
-
-function stabilizeJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => stabilizeJsonValue(item));
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => entryValue !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entryValue]) => [key, stabilizeJsonValue(entryValue)]),
-  );
 }

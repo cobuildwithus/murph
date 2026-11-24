@@ -1074,6 +1074,12 @@ default ownership so imported heads dormant behind enrichment, or left pending
 by an old runner, remain eligible for its existing usage-denial exemption.
 Actual AI-allowed stalls and unimported aged rows remain alertable.
 
+For a lone, fully imported game recap, the progress monitor allows a short
+assistant retry recorded by a system-progress checkpoint after acceptance.
+This covers the recap show's twenty-minute Flex budget and time for its
+standard-tier attempt. Grace ends fifteen minutes after the checkpoint or
+thirty minutes after acceptance, whichever comes first.
+
 No wire field or processing mode changes. New Web with an old runner can admit
 fresh work that the runner leaves pending. Once that runner publishes a current
 empty model-free projection, imported rows stay dormant rather than repeatedly
@@ -1247,10 +1253,12 @@ Ordinary replies do not cancel independent device work. Observing a real
 conversation row opens an import-preparation yield window until provider start
 or phase/pass completion, with a 30-second fail-open cap per new row;
 repeated observations of that row do not reopen it.
-Only device-import preparation receives this deferral signal. The import waits
-while admission is open and retries the same downloaded snapshot in the same
-job after admission closes. Downloads, job ownership, attempts, partial progress,
-and canonical publication already underway are unchanged. Existing job yield,
+The first load of the device maintenance module also waits for this window to
+close, because evaluating the provider SDK occupies the runner event loop.
+An interrupted wait retains the mailbox item for the usual device retry. Once
+the module has started loading, sync passes share it. Downloads can overlap the
+assistant, and import preparation waits for admission to close before processing
+the same downloaded snapshot in the same job. Existing job yield,
 lease, timeout, and shutdown checks still interrupt the wait.
 Snapshot and workspace release boundaries stop admission and settle owned mutations.
 Canonical commits already underway finish persistence or rollback before the

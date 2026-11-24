@@ -93,6 +93,15 @@ describe("hosted connected-app connect page and start route", () => {
     expect(mocks.readHostedConnectedAppIntent).not.toHaveBeenCalled();
   });
 
+  it("offers sign-in to an inactive member before reading the integration", async () => {
+    mocks.requireActiveHostedAppSession.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED", httpStatus: 403, message: "Setup required.",
+    }));
+    const markup = renderToStaticMarkup(await connectPage.default({ params: Promise.resolve({ claim: CLAIM }) }));
+    expect(markup).toContain("Sign in to connect your app");
+    expect(mocks.readHostedConnectedAppIntent).not.toHaveBeenCalled();
+  });
+
   it("does not hide non-auth page errors behind the auth-required state", async () => {
     const accessError = hostedOnboardingError({
       code: "HOSTED_MEMBER_ACCESS_REQUIRED",

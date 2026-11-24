@@ -103,6 +103,7 @@ import {
 } from "./background-maintenance-cancellation.ts";
 import {
   HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
+  resolveHostedDeviceSyncYieldRetryAt,
 } from "./device-sync-maintenance-limits.ts";
 import {
   createDeviceSyncPassTimings,
@@ -111,7 +112,6 @@ import {
   withDeviceSyncPassTimings,
   type DeviceSyncPassTimings,
 } from "./device-sync-pass-timing.ts";
-import { resolveHostedDeviceSyncYieldRetryAt } from "./device-sync-wake-projection.ts";
 
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;

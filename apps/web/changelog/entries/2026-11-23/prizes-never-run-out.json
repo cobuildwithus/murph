@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-23",
+  "order": 200,
+  "item": {
+    "id": "prizes-never-run-out",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Prizes you win never run out",
+    "summary": "A prize ticket from a game no longer expires two weeks after you win it, so it stays yours until you cash it in or mark it done.",
+    "details": "Tickets that had already passed their old date are open again. The app stops showing use-by dates in its next build.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5273]
+  }
+}

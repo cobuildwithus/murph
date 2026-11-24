@@ -81,8 +81,27 @@ describe("hosted signup referral UX", () => {
     }));
 
     assert.match(markup, /This link isn’t available/);
-    assert.match(markup, /send their current Murph link/);
-    assert.doesNotMatch(markup, />Join Murph</);
+    assert.match(markup, /their current Murph link, or join without one/);
+    // Plain signup, not a claim of the dead link.
+    assert.match(markup, /<a[^>]*href="\/"[^>]*>Join Murph<\/a>/);
+    assert.doesNotMatch(markup, /\/claim"/);
+  });
+
+  it("offers plain signup when the person who shared the link has left", async () => {
+    mocks.readHostedSignupReferralLink.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_SIGNUP_REFERRER_NOT_FOUND",
+        httpStatus: 404,
+        message: "That Murph referral link is no longer available.",
+      }),
+    );
+    const page = await import("../app/r/[referralCode]/page");
+    const markup = renderToStaticMarkup(await page.default({
+      params: Promise.resolve({ referralCode: "left_referral" }),
+    }));
+
+    assert.match(markup, /This link isn’t available/);
+    assert.match(markup, /<a[^>]*href="\/"[^>]*>Join Murph<\/a>/);
   });
 
   it("keeps the bounded claim limit directly retryable", async () => {

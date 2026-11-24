@@ -44,6 +44,12 @@ describe('host-built sleep summary attachment', () => {
     const zero = await resolveTrustedSleepSummaryCard({ vaultRoot: await seed('garmin', { totalSleepMinutes: 436, deepMinutes: 0, remMinutes: 0, lightMinutes: 0, awakeMinutes: 0, sleepEfficiency: 0 }), date: '2026-11-03' })
     expect(zero).toMatchObject({ stages: null, awakeMinutes: null, efficiencyPercent: null })
   })
+  it('omits sleep stages that exceed the measured night', async () => {
+    const vaultRoot = await seed('garmin', { totalSleepMinutes: 215, deepMinutes: 130, remMinutes: 95, lightMinutes: 75 })
+    expect(await resolveTrustedSleepSummaryCard({ vaultRoot, date: '2026-11-03' }))
+      .toMatchObject({ totalSleepMinutes: 215, stages: null })
+  })
+
   it('has a tiny selector-only schema and shares private card availability', () => {
     expect(JSON.stringify(MURPH_ATTACH_SLEEP_CARD_TOOL.inputSchema).length).toBeLessThan(5000)
     expect(resolveMurphDynamicTools({ responseCardsAvailable: true })).toContain(MURPH_ATTACH_SLEEP_CARD_TOOL)

@@ -67,7 +67,7 @@ describe('native poll dynamic tool', () => {
     if (!request) throw new Error('Expected vote request')
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(result.rpcResult.success).toBe(true)
-    expect(port).toHaveBeenCalledExactlyOnceWith({ assistantInputId: inputId, request: args })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ includePollDetails: true, assistantInputId: inputId, request: args })
     port.mockClear()
     const denied = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), currentInvocationScope: () => null }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(denied.rpcResult.success).toBe(false)
@@ -82,6 +82,17 @@ describe('native poll dynamic tool', () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain('may have applied')
     expect(result.rpcResult.contentItems[0]?.text).toContain('Read the poll to check before voting again')
   })
+  it('passes the list cursor and exposes unconfirmed poll references', async () => {
+    const cursor = { pollRef, createdAt: snapshot.observedAt }
+    const args = { action: 'list', cursor }
+    const request = parse(args)!
+    const page = { status: 'listed' as const, polls: [], unknownPolls: [{ pollRef, question: snapshot.question }] }
+    const read = vi.fn(async () => page)
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), pollTool: { request: read } },
+      env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(read).toHaveBeenCalledExactlyOnceWith({ includePollDetails: true, assistantInputId: inputId, request: args })
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual(page)
+  })
   it('accepts a returned voter cursor on read only', () => {
     expect(parse({ action: 'read', pollRef, voterCursor: '50' })).toMatchObject({ kind: 'poll', request: { voterCursor: '50' } })
     expect(parse({ action: 'close', pollRef, voterCursor: '50' })?.kind).toBe('invalid-poll-arguments')
@@ -91,7 +102,7 @@ describe('native poll dynamic tool', () => {
     const request = parse({ action: 'read', pollRef })
     if (!request) throw new Error('Expected poll request')
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
-    expect(port).toHaveBeenCalledExactlyOnceWith({ assistantInputId: inputId, request: { action: 'read', pollRef } })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ includePollDetails: true, assistantInputId: inputId, request: { action: 'read', pollRef } })
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('provider_update')
   })
@@ -137,7 +148,7 @@ describe('native poll dynamic tool', () => {
     }
     const execute = () => executeMurphDynamicToolRequest({ request, hostedToolContext, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect((await execute()).rpcResult.success).toBe(true)
-    expect(port).toHaveBeenCalledExactlyOnceWith({ origin, route, request: { action: 'create', question: 'Day?', options: ['Saturday', 'Sunday'] } })
+    expect(port).toHaveBeenCalledExactlyOnceWith({ includePollDetails: true, origin, route, request: { action: 'create', question: 'Day?', options: ['Saturday', 'Sunday'] } })
     port.mockClear()
     hostedToolContext.currentConversationPollRoute = () => null
     expect((await execute()).rpcResult.success).toBe(false)

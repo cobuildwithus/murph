@@ -2055,6 +2055,33 @@ text(result.output);
     })
   })
 
+  it('delivers whole memory pages and their cursors through the maintenance transport', async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = scenario.turnInput.workingDirectory
+    for (const label of ['Pottery', 'Sketching']) {
+      await upsertMemory(vaultRoot, { section: 'Preferences', text: label + ' details'.repeat(5500) })
+    }
+    const records = (await readMemoryDocument(vaultRoot)).records.sort((a, b) => a.id.localeCompare(b.id))
+    const cursor = records[0]!.id
+    scenario.stub.queue(
+      { functionCall: { arguments: { action: 'show' }, name: 'member_memory', namespace: 'murph' } },
+      { functionCall: { arguments: { action: 'show', cursor }, name: 'member_memory', namespace: 'murph' } },
+      { text: '{"kind":"skip"}' },
+    )
+    await executeCodexAppServerTurn({
+      ...scenario.turnInput, approvalPolicy: 'never', dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+      memberMemoryMaintenanceAuthorized: true, processLifetime: 'one-shot', ephemeral: true,
+      prompt: 'Review saved preferences.', runtimeWorkspaceRoots: [vaultRoot], sandbox: 'read-only',
+      threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG, vaultRoot,
+    })
+    const outputs = scenario.stub.requestSummariesSinceBaseline().flatMap(summary => summary.functionCallOutputs ?? [])
+    const pages = [...new Set(outputs)].map(output => JSON.parse(output))
+    expect(pages).toEqual(records.map(({ id, section, text, updatedAt }, index) => ({
+      document: { exists: true, records: [{ id, section, text, updatedAt }] },
+      ...(index === 0 && { nextCursor: cursor }),
+    })))
+  }, TURN_TIMEOUT_MS)
+
   it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
     const scenario = await prepareScriptedTurnScenario()
     const vaultRoot = scenario.turnInput.workingDirectory
@@ -4668,6 +4695,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2031-02-15T09:59:59.900Z',
       instructions: 'Send the group a short reminder.',
       schedule: {
         at: '2031-02-15T09:20:00.000Z',
@@ -4934,6 +4962,7 @@ text(JSON.stringify(result));
     await steered
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: steerAt,
       instructions: 'Send the reminder tomorrow.',
       schedule: { at: expectedAt, kind: 'at' },
       title: retryTitle,
@@ -5244,6 +5273,7 @@ text(JSON.stringify(result));
     expect(automationRequest).toHaveBeenCalledTimes(1)
     expect(automationRequest).toHaveBeenCalledWith({
       action: 'save',
+      requestedAt: '2026-03-08T04:59:00.000Z',
       instructions: 'Send the reminder.',
       schedule: { at: '2026-03-09T07:30:00.000Z', kind: 'at' },
       title: 'Replacement reminder',
@@ -5582,6 +5612,7 @@ text(JSON.stringify(result));
       'For reminder "Medication reminder", the trusted date is 2026-03-08. What other local time on 2026-03-08 should I use?'
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2026-03-08T04:59:00.000Z',
       instructions: 'Send the breakfast reminder tomorrow.',
       schedule: { at: '2026-03-08T08:00:00.000Z', kind: 'at' },
       title: 'Breakfast reminder',
@@ -6626,6 +6657,7 @@ text(JSON.stringify(result));
     await steered
     expect(automationRequests).toEqual([{
       action: 'save',
+      requestedAt: '2031-02-15T09:59:59.900Z',
       instructions: 'Send the reminder tonight.',
       schedule: {
         at: '2031-02-15T09:20:00.000Z',
@@ -9107,6 +9139,23 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('delivers each distinct calendar link in request order', { timeout: TURN_TIMEOUT_MS }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const first = { title: 'Yoga class', startsAt: '2027-02-10T12:00:00Z', endsAt: '2027-02-10T13:00:00Z' }
+    const second = { ...first, title: 'Studio tour', startsAt: '2027-02-11T12:00:00Z', endsAt: '2027-02-11T13:00:00Z' }
+    scenario.stub.queue(...[first, second, first].map(event => ({
+      functionCall: { name: 'create_calendar_link', namespace: 'murph', arguments: event },
+    })), { text: 'Here are both events.' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({ calendarLinkAvailable: true }),
+      prompt: 'Make calendar links for my class and tour.',
+    })
+    const message = ['Here are both events.', buildCalendarEventUrl(first), buildCalendarEventUrl(second)].join('\n')
+    expect(result.finalMessage).toBe(message)
+    expect(result.transcriptMessage).toBe(message)
   })
 
   it('delivers the exact runtime-owned calendar link instead of model-copied text', {

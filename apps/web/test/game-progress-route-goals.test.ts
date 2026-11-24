@@ -13,7 +13,7 @@ import { encodePolyline } from '../src/lib/game/progress/route-geometry';
 
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: 'synthetic', towns: [], straightLine: false, startTotal: 0 };
 const next = { ...leg, from: 'B', to: 'C', distanceM: 200 };
-const context = () => ({ points: [['2026-11-02', 120]] as [string, number][], awards: [], incomplete: false, today: '2026-11-19', beforeMutationTx: mocks.authorize });
+const context = () => ({ points: [['2026-11-02', 120]] as [string, number][], awards: [], today: '2026-11-19', beforeMutationTx: mocks.authorize });
 beforeEach(() => { vi.resetAllMocks(); mocks.write.mockResolvedValue({ count: 1 }); mocks.seal.mockResolvedValue('sealed-next'); mocks.resolve.mockResolvedValue(next); });
 
 describe('Progress route goal mutation', () => {
@@ -55,10 +55,6 @@ describe('Progress route goal mutation', () => {
     mocks.find.mockResolvedValue({ stateEncrypted: '{}' }); mocks.write.mockResolvedValue({ count: 0 });
     await expect(setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, context())).rejects.toMatchObject({ code: 'GAME_PROGRESS_STATE_CONFLICT', retryable: true });
     expect(mocks.write).toHaveBeenCalledTimes(1); expect(mocks.resolve).toHaveBeenCalledTimes(1);
-  });
-  it('does not freeze a rollover from an incomplete input', async () => {
-    await expect(setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, { ...context(), incomplete: true })).rejects.toMatchObject({ httpStatus: 503, retryable: true });
-    expect(mocks.resolve).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled();
   });
   it.each([
     ['London to Paris', { from: 'London', to: 'Paris' }], ['5k', null], ['To the Moon', null],

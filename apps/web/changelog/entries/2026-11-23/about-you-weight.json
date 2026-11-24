@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-23",
+  "order": 200,
+  "item": {
+    "id": "about-you-weight",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your weight in About you, and in Progress pictures",
+    "summary": "About you now has Weight next to Height, and Progress share pictures use your saved height and weight so your body looks like you.",
+    "details": "Pick your weight in pounds, or kilograms on a phone set to metric, and Murph saves it with your other health data. A weight already in Apple Health shows there too. Pictures use it without putting it on the card or in Messages, and still work when no weight is saved.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": [5272]
+  }
+}

@@ -273,7 +273,9 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(scorePlayer(state, players[0])).toMatchObject({ score: started && !view.days[0].off ? 1 : 0,
       misses: requiredDays - (started && !view.days[0].off ? 1 : 0) });
     expect(scorePlayer(state, players[1])).toMatchObject({ score: 0, misses: requiredDays });
-    expect(gameLocalDate(settleDueAt(state), "America/New_York")).toBe(addDays(dayOne, lengthDays));
+    // The game ends when its last scheduled day closes; off days after it don't extend it.
+    const lastCheckIn = view.days.map((day) => !day.off).lastIndexOf(true);
+    expect(gameLocalDate(settleDueAt(state), "America/New_York")).toBe(addDays(dayOne, lastCheckIn + 1));
   });
 
   it("starts both players on the agreed date only after the other approves", async () => {

@@ -1217,6 +1217,25 @@ test('measurement add typed repeatable qualifiers and media stage onto one event
   assert.ok(result.manifestFile?.startsWith('raw/measurements/2026/03/'))
 })
 
+test('measurement add asks to recheck an out-of-range reported VO2 estimate', async ({ onTestFinished }) => {
+  const { measurement } = await createMeasurementVault(onTestFinished)
+  for (const value of ['510', '', '9.9']) {
+    const result = await measurement<MeasurementAddResult>([
+      'add', '--metric', 'estimated-vo2-max', '--value', value, '--unit', 'ml/kg/min', '--source', 'manual',
+    ])
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) assert.match(result.envelope.error.message ?? '', /recheck/i)
+  }
+  const listed = await measurement<MeasurementListResult>(['list'])
+  assert.deepEqual(requireData(listed.envelope).items, [])
+  for (const value of ['10', '90']) {
+    const result = await measurement<MeasurementAddResult>([
+      'add', '--metric', 'estimated-vo2-max', '--value', value, '--unit', 'ml/kg/min', '--source', 'manual',
+    ])
+    assert.equal(requireData(result.envelope).measurements[0]?.value, Number(value))
+  }
+})
+
 test('measurement add rejects incomplete typed measurement groups before writing', async ({ onTestFinished }) => {
   const { measurement } = await createMeasurementVault(onTestFinished)
 

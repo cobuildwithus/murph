@@ -29,6 +29,7 @@ export const MURPH_LABS_TOOL = {
   description: [
     "Search Murph's live lab test catalog of panels and biomarkers, or list collection sites near a 5-digit ZIP the user gave.",
     'It only reads the catalog. It cannot order, book, reserve, pay for, or start checkout for a test.',
+    'When partial is true, only some results were checked. An empty list then leaves availability unknown.',
     'A listing does not show member eligibility, appointment availability, the final price, or that a listed site collects a given test.',
   ].join(' '),
   inputSchema: z.toJSONSchema(hostedRuntimeLabsToolRequestSchema, { io: 'input' }),
@@ -82,9 +83,11 @@ export async function executeLabsDynamicTool(input: {
   let failureReason: ToolFailureReason = 'handler_exception'
   try {
     const request = input.request.request
-    const rawResponse = await input.labsTool.request(request.action === 'search' && request.limit === undefined
-      ? { ...request, limit: LABS_SEARCH_DEFAULT_LIMIT }
-      : request, {
+    const rawResponse = await input.labsTool.request({
+      ...request,
+      ...(request.action === 'search' ? { limit: request.limit ?? LABS_SEARCH_DEFAULT_LIMIT } : {}),
+      includeCoverage: true,
+    }, {
       signal: input.abortSignal ?? null,
     })
     failureReason = 'action_result_mismatch'
@@ -114,6 +117,7 @@ function projectLabsToolResponse(response: HostedRuntimeLabsToolResponse) {
     return {
       action: response.action,
       checkedAt: response.checkedAt,
+      ...(response.partial && { partial: true }),
       status: response.status,
       zipCode: response.zipCode,
       radiusMiles: response.radiusMiles,
@@ -135,6 +139,7 @@ function projectLabsToolResponse(response: HostedRuntimeLabsToolResponse) {
   return {
     action: response.action,
     checkedAt: response.checkedAt,
+    ...(response.partial && { partial: true }),
     items: response.items.map((item) => ({
       name: item.name,
       kind: item.kind,

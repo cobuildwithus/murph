@@ -1,6 +1,6 @@
 import "server-only";
 
-import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
+import { formatTimeZoneDateTimeParts, resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 import { Prisma } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { buildGamePrivateEveningInstructions, gamePrivateEveningCheckInPolicySchema, type HostedGamePrivateEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
@@ -12,43 +12,57 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { getPrisma } from "../prisma";
 import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
-import { answeredSince, roomCoversEveningGame } from "./evening-check-in";
+import { answeredSince, privateRoomCheck, type RoomEvidence } from "./evening-check-in";
 import { collectReminderGames, REMINDER_GAME_LIMIT, reminderSeatsAt, gameReminderWindow, reminderOpenDay } from "./reminders";
 import { currentTerms, dayIndexAt } from "./rules";
 import { canTextGameReminders, loadGameMissedCheckInGames } from "./service";
 import { addDays } from "./time";
+import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 
-const WINDOW_MS = 30 * 60_000;
 const enabled = () => process.env.MURPH_GAME_PRIVATE_REMINDERS_ENABLED === "true";
+const HOUR_MS = 3_600_000;
 /** One text a day for each reminder time: the games at that time, an hour after it. */
 export const privateEveningEventId = (memberId: string, date: string, minutes: number) => `game-evening-private:${memberId}:${date}:${minutes}`;
 const eventMinutes = (eventId: string) => Number(eventId.slice(eventId.lastIndexOf(":") + 1));
 
-async function currentEvening(memberId: string, date: string, minutes: number, now: Date, db: Prisma.TransactionClient | ReturnType<typeof getPrisma>) {
+async function currentEvening(memberId: string, date: string, minutes: number, now: Date, db: Prisma.TransactionClient, evidence: RoomEvidence, prepare = false) {
   if (!enabled() || !await canTextGameReminders(memberId, db)) return null;
   const profile = await db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderText: true, timeZone: true } });
   if (!profile?.reminderText) return null;
   const window = gameReminderWindow(now, profile.timeZone, (minutes + 60) % 1440);
   if (!window || window.day !== date) return null;
-  const slotDate = minutes >= 23 * 60 ? addDays(date, -1) : date;
-  const slotClock = new Date(minutes * 60_000).toISOString().slice(11, 19);
-  const slot = resolveFloatingIsoTimestampInTimeZone(`${slotDate}T${slotClock}`, profile.timeZone);
+  const slot = reminderSlot(minutes >= 23 * 60 ? addDays(date, -1) : date, minutes, profile.timeZone);
   if (!slot) return null;
+  const covered = privateRoomCheck(db, now, evidence, prepare);
   const batch = await collectReminderGames(after => db.gamePlayer.findMany({
     where: reminderSeatsAt(memberId, minutes, profile.reminderMinutes, after), select: { gameId: true, reminderEveryDay: true },
     orderBy: { gameId: "asc" }, take: REMINDER_GAME_LIMIT,
-  }), seats => privateSubjects(db, memberId, seats, now, new Date(slot.timestamp)));
+  }), seats => privateSubjects(db, memberId, seats, now, slot, covered));
   return batch.length ? { batch, expiresAt: window.expiresAt } : null;
 }
 
-async function privateSubjects(db: Prisma.TransactionClient, memberId: string, seats: { gameId: string; reminderEveryDay: boolean }[], now: Date, slot: Date) {
+/**
+ * The reminder's own instant. When the clocks go back its local time happens twice, both on the same game
+ * day, so take the first: an hour after the hour before. A time the clocks skip still has none.
+ */
+function reminderSlot(date: string, minutes: number, timeZone: string): Date | null {
+  const clock = `${date}T${new Date(minutes * 60_000).toISOString().slice(11, 19)}`;
+  const once = resolveFloatingIsoTimestampInTimeZone(clock, timeZone);
+  if (once) return new Date(once.timestamp);
+  const before = resolveFloatingIsoTimestampInTimeZone(new Date(Date.parse(`${clock}Z`) - HOUR_MS).toISOString().slice(0, 19), timeZone);
+  const first = before && new Date(Date.parse(before.timestamp) + HOUR_MS);
+  const local = first && formatTimeZoneDateTimeParts(first, timeZone);
+  return local && local.dayKey === date && local.hour * 60 + local.minute === minutes ? first : null;
+}
+
+async function privateSubjects(db: Prisma.TransactionClient, memberId: string, seats: { gameId: string; reminderEveryDay: boolean }[], now: Date, slot: Date, covered: ReturnType<typeof privateRoomCheck>) {
   const loaded = await loadGameMissedCheckInGames(db, seats.map(seat => seat.gameId));
   const batch = [];
   for (const game of loaded.sort((a, b) => a.row.id.localeCompare(b.row.id))) {
     const seat = seats.find(seat => seat.gameId === game.row.id);
     const player = game.state.players.find(player => player.memberId === memberId && !player.leftAt);
     // An unreadable room cannot authorize a private fallback for this game.
-    if (!seat || !player || !isGameEnabled() || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now).catch(() => true)) continue;
+    if (!seat || !player || !isGameEnabled() || await covered(game)) continue;
     const dayIndex = reminderOpenDay(game.state, player, new Date(now.getTime() + Number(game.row.devClockOffsetMs)), seat.reminderEveryDay);
     if (dayIndex !== null && dayIndex === dayIndexAt(player, new Date(slot.getTime() + Number(game.row.devClockOffsetMs)))) batch.push({ gameId: game.row.id, termsVersion: currentTerms(game.state.game.terms).n, dayIndex });
   }
@@ -93,40 +107,50 @@ export async function reserveDuePrivateEveningCheckIns(now = new Date(), options
       if (options.signal?.aborted || Date.now() >= (options.deadlineMs ?? Infinity)) break;
       const date = gameReminderWindow(now, profile.timeZone, (minutes + 60) % 1440)?.day;
       if (!date) continue;
-      const current = await currentEvening(profile.memberId, date, minutes, now, db);
-      if (!current) continue;
-      const eventId = privateEveningEventId(profile.memberId, date, minutes), key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
-      const created = await db.$transaction(async tx => {
-        if (!await currentEvening(profile.memberId, date, minutes, now, tx) || await privateEveningPaused(profile.memberId, date, tx)) return false;
-        const row = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
-          source: "game_lifecycle", sourceRef: `${profile.memberId}:${date}:${minutes}`, template: "game_private_evening", status: "awaiting_generation",
-          targetKind: "thread", payloadOwnerMemberId: profile.memberId, attemptedAt: now, retryAfterAt: now, createdAt: now }], skipDuplicates: true });
-        return row.count === 1;
-      });
-      if (created) reserved += 1;
+      try {
+        if (await reservePrivateSlot(profile.memberId, date, minutes, now)) reserved++;
+      } catch {
+        logHostedOnboardingWarning("game.evening.private-reservation-failed");
+      }
     }
     if (profiles.length < 100) break;
   }
   return reserved;
 }
 
-export async function isPrivateEveningCurrentTx(policy: HostedGamePrivateEveningCheckInPolicy, tx: Prisma.TransactionClient, now: Date) {
+async function reservePrivateSlot(memberId: string, date: string, minutes: number, now: Date) {
+  const db = getPrisma(), evidence: RoomEvidence = new Map();
+  if (!await currentEvening(memberId, date, minutes, now, db, evidence, true)) return false;
+  const eventId = privateEveningEventId(memberId, date, minutes), key = createHostedLinqDeliveryIdempotencyLookupKey(eventId)!;
+  return db.$transaction(async tx => {
+    if (!await currentEvening(memberId, date, minutes, now, tx, evidence) || await privateEveningPaused(memberId, date, tx)) return false;
+    const row = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
+      source: "game_lifecycle", sourceRef: `${memberId}:${date}:${minutes}`, template: "game_private_evening", status: "awaiting_generation",
+      targetKind: "thread", payloadOwnerMemberId: memberId, attemptedAt: now, retryAfterAt: now, createdAt: now }], skipDuplicates: true });
+    return row.count === 1;
+  });
+}
+
+export async function isPrivateEveningCurrentTx(policy: HostedGamePrivateEveningCheckInPolicy, tx: Prisma.TransactionClient, now: Date, evidence: RoomEvidence = new Map()) {
   if (now >= new Date(policy.expiresAt)) return false;
-  const current = await currentEvening(policy.memberId, policy.date, eventMinutes(policy.eventId), now, tx);
+  const current = await currentEvening(policy.memberId, policy.date, eventMinutes(policy.eventId), now, tx, evidence);
   if (current?.expiresAt.toISOString() !== policy.expiresAt || JSON.stringify(current.batch) !== JSON.stringify(policy.batch)) return false;
   return !await privateEveningPaused(policy.memberId, policy.date, tx);
 }
 
-export async function readPrivateEveningDeliveryAuthority(eventId: string, memberId: string) {
+export async function readPrivateEveningDeliveryAuthority(eventId: string, memberId: string, now = new Date()) {
   const wake = await readHostedMailboxWakeByDedupeKey({ dedupeKey: eventId, userId: memberId });
   const policy = wake?.kind === "assistant.notification.requested" ? wake.notification.responsePolicy : null;
   if (policy?.kind !== "game_private_evening_check_in" || wake?.eventId !== eventId || policy.eventId !== eventId || policy.memberId !== memberId) return null;
-  return gamePrivateEveningCheckInPolicySchema.parse(policy);
+  const evidence: RoomEvidence = new Map();
+  if (!await currentEvening(memberId, policy.date, eventMinutes(eventId), now, getPrisma(), evidence, true)) return null;
+  return { policy: gamePrivateEveningCheckInPolicySchema.parse(policy), evidence };
 }
 
 export async function publishPrivateEveningCheckIn(memberId: string, date: string, minutes: number, now: Date): Promise<boolean> {
   const db = getPrisma(), eventId = privateEveningEventId(memberId, date, minutes);
-  const current = await currentEvening(memberId, date, minutes, now, db);
+  const evidence: RoomEvidence = new Map();
+  const current = await currentEvening(memberId, date, minutes, now, db, evidence, true);
   if (!current) return false;
   const policy = gamePrivateEveningCheckInPolicySchema.parse({ kind: "game_private_evening_check_in", eventId, memberId, date,
     expiresAt: current.expiresAt.toISOString(), conversationLaneSeq: "0", batch: current.batch });
@@ -145,7 +169,7 @@ export async function publishPrivateEveningCheckIn(memberId: string, date: strin
   const appended = await db.$transaction(async tx => {
     await assertHostedDirectAssistantNotificationRouteAuthority({ authority: { channel: "linq",
       containerMemberId: memberId, threadId: destination.route.delivery.target }, prisma: tx, requireThreadDelivery: true });
-    if (!await isPrivateEveningCurrentTx(policy, tx, now)) return null;
+    if (!await isPrivateEveningCurrentTx(policy, tx, now, evidence)) return null;
     const result = await appendPreparedHostedMailboxEnvelopeTx({ prepared, tx });
     await tx.hostedLinqDelivery.updateMany({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)!, status: "awaiting_generation" },
       data: { status: "generation_queued", retryAfterAt: now } });

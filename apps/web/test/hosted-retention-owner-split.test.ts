@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  resumeConfirmedAccountDeletion: vi.fn(),
   cleanupExpiredRuns: vi.fn(),
   sweepHostedLinqGroupLeaves: vi.fn(),
   redriveHostedHealthDataConsentStops: vi.fn(),
@@ -10,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   deleteExpiredHostedCallbackRequestNonces: vi.fn(),
   drainHostedAccountDeletionCleanupBatch: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-privacy/account-data-service", () => ({ resumeConfirmedAccountDeletion: mocks.resumeConfirmedAccountDeletion }));
 
 vi.mock("@/src/lib/hosted-routing/linq-group-leave", () => ({ sweepHostedLinqGroupLeaves: mocks.sweepHostedLinqGroupLeaves }));
 
@@ -55,6 +58,7 @@ describe("hosted retention owner split", () => {
   const request = new Request("https://app.example.test/api/internal/hosted-execution/retention/external/cron");
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resumeConfirmedAccountDeletion.mockResolvedValue("idle");
     mocks.sweepHostedLinqGroupLeaves.mockResolvedValue(2);
     mocks.redriveHostedHealthDataConsentStops.mockResolvedValue({ configured: true, reconciled: 2, failed: 1 });
     mocks.redriveHostedHealthDataConsentCleanups.mockResolvedValue({ selected: 3 });
@@ -131,6 +135,7 @@ describe("hosted retention owner split", () => {
       prisma: prisma as never,
       request,
     })).resolves.toEqual({
+      confirmedAccountDeletion: "idle",
       linqGroupLeaveAttempts: 2,
       healthDataConsentStopRedrive: { configured: true, reconciled: 2, failed: 1 },
       healthDataConsentCleanupRedrive: { selected: 3 },
@@ -148,6 +153,7 @@ describe("hosted retention owner split", () => {
       now,
       prisma,
     });
+    expect(mocks.resumeConfirmedAccountDeletion).toHaveBeenCalledExactlyOnceWith({ now, prisma, request });
     expect(mocks.cleanupExpiredRuns).toHaveBeenCalledWith({ now });
     expect(mocks.runHostedRuntimeResourceCleanup).toHaveBeenCalledWith({ now, prisma });
     expect(mocks.redriveHostedHealthDataConsentCleanups).toHaveBeenCalledExactlyOnceWith({ now, prisma, request });

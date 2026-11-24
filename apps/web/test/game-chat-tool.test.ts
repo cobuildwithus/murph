@@ -463,7 +463,7 @@ describe("game chat tool authority", () => {
   });
   it("keeps show completion, replay and recovery compatible with old response readers", async () => {
     const story = { treatment: "A train mystery", chatLine: "The train arrived.", pages: [
-      { background: "paper" as const, blocks: [{ kind: "scene" as const, scene: { cast: ["Leo", "Ava"], prompt: "Synthetic train scene.", faceY: 0.3 } }] },
+      { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The train was late" }, { kind: "scene" as const, scene: { cast: ["Leo", "Ava"], prompt: "Synthetic train scene.", faceY: 0.3 } }] },
     ], song: { title: "Train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } };
     m.recapMaterial.mockResolvedValue({ entries: [], game: {}, players: ["Leo", "Ava"], validation: { show: true, result: [], playerNamesByMemberId: [{ memberId: actor, name: "Leo" }, { memberId: "other_synthetic", name: "Ava" }], startedAt: new Date("2030-03-01T00:00:00Z") } });
     const origin = { kind: "game_recap" as const, gameId: "game_synthetic", eventId: "game-recap:game_synthetic" };

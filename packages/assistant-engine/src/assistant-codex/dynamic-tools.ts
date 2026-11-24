@@ -63,6 +63,7 @@ import {
   getHostedGroupWearableReportingGaps,
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_ROLEPLAY_REVIEW_SUMMARY,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
@@ -1007,6 +1008,12 @@ const submitProductFeedbackArgumentsSchema = z
   })
   .strict()
   .superRefine((value, context) => {
+    if (value.kind === 'moderation_review' && (
+      value.summary !== HOSTED_ROLEPLAY_REVIEW_SUMMARY || value.relatedChangelogItemIds.length > 0
+    )) {
+      context.addIssue({ code: 'custom', message: 'moderation review requires the fixed summary and no changelog ids' })
+      return
+    }
     if (value.summary === 'Support escalation' || value.summary === HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX) {
       context.addIssue({
         code: 'custom',
@@ -4201,6 +4208,10 @@ async function executeSubmitProductFeedbackTool(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   if (!input.productFeedbackRecorder?.recordProductFeedback) {
     return toolTextResult(false, 'product feedback recording is not available for this turn', 'unavailable')
+  }
+  if (input.feedback.kind === 'moderation_review'
+    && input.hostedToolContext?.currentUserActionScope?.()?.conversationScope !== 'direct') {
+    return toolTextResult(false, 'moderation review requires a verified private direct conversation', 'authority_rejected')
   }
   if (input.feedback.summary.startsWith(HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX)) {
     if (!isHostedProductSupportEscalationFeedback(input.feedback)) {

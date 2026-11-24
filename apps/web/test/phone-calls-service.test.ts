@@ -2394,7 +2394,7 @@ describe("createHostedPhoneCall", () => {
     expect(reconciliationWorkflowStarter).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when a duplicate request key carries a different brief", async () => {
+  it("returns the first call when a replay rewords its brief", async () => {
     const existing = buildHostedPhoneCall({
       providerCallId: "retell_existing",
       status: "calling",
@@ -2410,6 +2410,26 @@ describe("createHostedPhoneCall", () => {
         goal: "Ask whether the office is open on Friday, June 26, 2026.",
         successCriteria: "The office confirms whether it is open that Friday.",
       },
+      memberId: existing.memberId,
+      prisma: store.prisma,
+      requestKey: existing.requestKey,
+      runtime: runtime.runtime,
+    })).resolves.toMatchObject({ phoneCallId: existing.id, status: "calling" });
+
+    expect(runtime.startCalls).toEqual([]);
+    expect(store.updateManyCalls).toEqual([]);
+  });
+
+  it("fails closed when a duplicate request key names another number", async () => {
+    const existing = buildHostedPhoneCall({
+      providerCallId: "retell_existing",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
+
+    await expect(createHostedPhoneCall({
+      brief: { ...VALID_BRIEF, to: { ...VALID_BRIEF.to, phoneNumber: "+15555550188" } },
       memberId: existing.memberId,
       prisma: store.prisma,
       requestKey: existing.requestKey,
@@ -2520,7 +2540,7 @@ describe("createHostedPhoneCall", () => {
     expect(store.createCalls).toEqual([]);
   });
 
-  it("fails closed when a scheduled occurrence retry changes the brief", async () => {
+  it("returns the first call when a scheduled occurrence retry changes the brief", async () => {
     const existing = buildHostedPhoneCall({
       providerCallId: "retell_existing",
       requestKey: SCHEDULED_REQUEST_KEY,
@@ -2539,7 +2559,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       requestKey: SCHEDULED_REQUEST_KEY,
       runtime: runtime.runtime,
-    })).rejects.toThrow("request key collision");
+    })).resolves.toMatchObject({ phoneCallId: existing.id, status: "calling" });
 
     expect(runtime.startCalls).toEqual([]);
     expect(store.createCalls).toEqual([]);

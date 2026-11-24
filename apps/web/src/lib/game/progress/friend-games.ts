@@ -1,7 +1,7 @@
 import "server-only";
 import { ProgressReadTiming } from "./read-timing";
 import { addDaysToIsoDate } from "@murphai/contracts";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { daysBetween } from "../time";
 import { getPrisma } from "../../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
@@ -14,11 +14,10 @@ import { EXERCISES, type DayAmount } from "./registry";
 import type { FriendMeasure } from "./friends";
 
 import { normalizeTask, type InferredMeasure } from "./infer";
-import { entryContribution, taskMeasureId, type ProgressTask, type PendingProgressTask, GAME_LIMIT, ENTRY_LIMIT } from "./series";
+import { entryContribution, taskMeasureId, type ProgressTask, type PendingProgressTask } from "./series";
 import type { MeasureState } from "./state";
 
 export interface FriendGameSeries {
-  incomplete: boolean;
   /** Peer contributions cover only the requested dates. Never settle lifetime passes from these. */
   windowed?: true;
   amounts: Map<string, DayAmount[]>;
@@ -30,6 +29,7 @@ export interface FriendGameSeries {
 
 type FriendScope = { viewer: string; period: { from: string; to: string } | null };
 type GameSeats = { id: string; players: { memberId: string | null; dayOne: Date | null }[] };
+const GAME_PAGE = 500;
 
 function periodEntries(games: readonly GameSeats[], viewer: string, period: NonNullable<FriendScope["period"]>): Prisma.GameEntryWhereInput {
   // All viewer entries retain their exercise catalog and latest challenge. Each peer's
@@ -43,34 +43,58 @@ function periodEntries(games: readonly GameSeats[], viewer: string, period: NonN
   return { OR: [{ memberId: viewer }, ...peers] };
 }
 
-async function readFriendEntries(games: readonly GameSeats[], memberIds: string[], scope?: FriendScope) {
+/** Find contributing games before loading their encrypted words. The viewer keeps
+ * their lifetime catalog. Check for omitted peer days before settling lifetime passes. */
+async function friendGameIds(memberIds: string[], scope?: FriendScope) {
+  const inRange = scope?.period
+    ? Prisma.sql`(member_id = ${scope.viewer} OR credited BETWEEN ${scope.period.from}::date AND ${scope.period.to}::date)`
+    : Prisma.sql`TRUE`;
+  return getPrisma().$queryRaw<{ id: string; windowed: boolean }[]>(Prisma.sql`
+    WITH eligible AS NOT MATERIALIZED (
+      SELECT e.game_id, e.member_id, p.day_one + e.day_index AS credited
+      FROM game_entry e
+      JOIN game_player p USING (game_id, member_id)
+      JOIN game g ON g.id = e.game_id
+      WHERE e.member_id = ANY(${memberIds}::text[]) AND p.day_one IS NOT NULL
+        AND g.status IN ('live', 'settled', 'void')
+        AND e.attempt > 0 AND e.withdrawn_at IS NULL AND e.incomplete IS NOT TRUE
+    )
+    SELECT DISTINCT game_id AS id, EXISTS (SELECT 1 FROM eligible WHERE NOT ${inRange}) AS windowed
+    FROM eligible WHERE ${inRange} ORDER BY id
+  `);
+}
+
+async function friendInputPage(gameIds: string[], memberIds: string[], scope?: FriendScope) {
   const db = getPrisma();
-  const load = (filter?: Prisma.GameEntryWhereInput) => db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
-    memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, AND: filter, OR: [{ incomplete: false }, { incomplete: null }] },
-    take: ENTRY_LIMIT + 1, orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+  const games = await db.game.findMany({ where: { id: { in: gameIds } },
+    select: { id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
+      players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } } } });
+  const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
+    memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }],
+    AND: scope?.period ? periodEntries(games, scope.viewer, scope.period) : undefined },
+    orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
     select: { id: true, memberId: true, gameId: true, kind: true, dayIndex: true, attempt: true, payloadEncrypted: true } });
-  const entries = await load();
-  if (entries.length <= ENTRY_LIMIT || !scope) return { entries, incomplete: false, windowed: false };
-  if (!scope.period) return { entries: await load({ memberId: scope.viewer }), incomplete: true, windowed: false };
-  return { entries: await load(periodEntries(games, scope.viewer, scope.period)), incomplete: false, windowed: true };
+  return { games, entries };
+}
+
+async function friendInputs(memberIds: string[], scope?: FriendScope) {
+  const ids = await friendGameIds(memberIds, scope);
+  const result: Awaited<ReturnType<typeof friendInputPage>> = { games: [], entries: [] };
+  for (let start = 0; start < ids.length; start += GAME_PAGE) {
+    const page = await friendInputPage(ids.slice(start, start + GAME_PAGE).map(row => row.id), memberIds, scope);
+    result.games.push(...page.games);
+    result.entries.push(...page.entries);
+  }
+  return { ...result, windowed: ids[0]?.windowed ?? false };
 }
 
 /** D7: load each current friend's own posts, including games the viewer never joined. */
 export async function readFriendGameSeries(memberIds: string[], timing = new ProgressReadTiming(), scope?: FriendScope): Promise<FriendGameSeries> {
   return runWithHostedDomainRootUnwrapCache(async () => {
     const db = getPrisma();
-    const games = await db.game.findMany({ where: { status: { in: ["live", "settled", "void"] },
-      players: { some: { memberId: { in: memberIds } } } }, take: GAME_LIMIT + 1,
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: {
-        id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
-        players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } },
-      } });
-    const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
+    const { games, entries, windowed } = await friendInputs(memberIds, scope);
     timing.counts.games = games.length;
-    if (games.length > GAME_LIMIT) return empty;
-    const { entries, incomplete, windowed } = await readFriendEntries(games, memberIds, scope);
     timing.counts.entries = entries.length;
-    if (entries.length > ENTRY_LIMIT) return empty;
     const typedEntries = entries.filter(entry => entry.kind === "reps" || entry.kind === "route");
     const plain = await openGameTexts([
       ...games.map(game => ({ memberId: game.wordsOwnerMemberId, table: "game" as const,
@@ -114,7 +138,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
       const own = states.get(row.memberId) ?? new Map<string, MeasureState>();
       own.set(stateLookups.get(row.lookup)!, openedStates[index]); states.set(row.memberId, own);
     });
-    const result: FriendGameSeries = { incomplete, ...(windowed && { windowed: true }), amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
+    const result: FriendGameSeries = { ...(windowed && { windowed: true }), amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
     const pending = new Map<string, PendingProgressTask>();
     // Retakes have the same obligation key; only the latest surviving attempt counts.
     const surviving = new Map<string, typeof prepared[number]>();
@@ -136,7 +160,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
       result.measures.set(contribution.id, friendMeasure(contribution.id));
       keepLatestTask(result.tasks, entry.memberId, contribution.id, { date, text: task.text });
     }
-    if (!incomplete) result.pending = [...pending.values()];
+    result.pending = [...pending.values()];
     return result;
   });
 }

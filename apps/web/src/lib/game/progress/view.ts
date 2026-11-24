@@ -19,9 +19,10 @@ import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
 import { healthAgeTitle } from "./health";
+import { attachRouteArt } from "./route-art";
 
-// Charts moved their day 0 to the app on Nov 19, 2026; anyone on it earlier starts a month before.
-const CHARTS_FROM = "2026-10-19";
+// Charts start the day someone started the app, and Oct 1, 2026 for anyone on it before then.
+const CHARTS_FROM = "2026-10-01";
 
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
   return { measures: measures.map(measure => {
@@ -61,6 +62,16 @@ export function visibleAwards(awards: readonly StoredAward[], healthAuthority: b
 
 type MeasureLabel = Pick<Progress["measures"][number], "id" | "label">;
 
+/** A total's number and what it counts. Steps say steps, even on medals saved with the activity's name. */
+function totalMedal(award: StoredAward, units: ClientUnits): Pick<Medal, "face" | "title" | "detail"> {
+  const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
+  const amount = formatAmount(value, unit, "compact", units);
+  const title = unit === "seconds" ? value < 3600 ? `${value / 60} ${value === 60 ? "minute" : "minutes"}`
+    : `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
+    : unit === "days" ? `${amount.text} days` : amount.text;
+  return { face: { number: amount.text }, title, detail: unit === "steps" ? unit : award.data.noun as string };
+}
+
 /** A friend pass says what it was in; a health number's medal opens Health. */
 export function medalView(award: StoredAward, gold: boolean, units: ClientUnits, measures: readonly MeasureLabel[] = []): Medal {
   let face: Medal["face"], title: string, detail: string;
@@ -71,13 +82,7 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits,
     // Both name their exercise: a pushups landmark and a pull-ups one can be the same tower.
     detail = award.kind === "time" ? `${rung.atText} ${award.data.noun}` : `${formatNumber(Math.ceil(rung.at), "compact")} ${award.data.noun}`;
   } else if (award.kind === "total" || award.kind === "days") {
-    const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
-    const amount = formatAmount(value, unit, "compact", units);
-    face = { number: amount.text };
-    title = unit === "seconds" ? value < 3600 ? `${value / 60} ${value === 60 ? "minute" : "minutes"}`
-      : `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
-      : unit === "days" ? `${amount.text} days` : amount.text;
-    detail = award.data.noun as string;
+    ({ face, title, detail } = totalMedal(award, units));
   } else if (award.kind === "route") {
     face = { drawing: "route" }; title = routeAwardName(award, award.data.to as string);
     detail = `${formatAmount(award.data.distanceM as number, "meters", "full", units).text} from ${award.data.from}`;
@@ -161,7 +166,7 @@ export function checkInView(checkIn: TodayCheckIn, snapshot: { measures: readonl
     ?? { ...describeMeasure(checkIn.measureId, checkIn.name, checkIn.text), pending: false, gameOn: true, needsPerDay: checkIn.needsPerDay, amounts: [] };
   const after = measureView({ ...series, amounts: [...series.amounts, { measureId: checkIn.measureId, date: checkIn.date, amount: checkIn.adds }] },
     snapshot.states.get(checkIn.measureId) ?? {}, awards, today, units);
-  return [{ ...entry, after: { ...after, label: shown?.label ?? after.label, pics: shown?.pics ?? [] } }];
+  return [{ ...entry, after: { ...after, label: shown?.label ?? after.label } }];
 }
 
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
@@ -170,28 +175,25 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
-  // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 19.
+  // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 1.
   const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
   const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
-  const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
-  snapshot.incomplete ||= pictures.incomplete;
+  const pics = await timing.measure("pictures", () => readProgressPics(memberId));
   let attemptedInsert = false;
-  if (!snapshot.incomplete) {
-    const firstRoutes = snapshot.measures.filter(measure => !measure.pending
-      && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
-    if (firstRoutes.length) {
-      const places = routePlaces(BANK.find(entry => entry.kind === "route" && entry.id === firstRouteId(profile.timeZone))!.name)!;
-      // Mapbox down: the page still loads without a map; the next read sets the first route.
-      const route = await timing.measure("journeys", () => resolveRoute(places.from, places.to)).catch(() => null);
-      if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
-        await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
-    }
-    if (snapshot.pending.length === 0) {
-      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, gameCandidates(snapshot), beforeMutationTx,
-        { awards: snapshot.awards, timeZone: profile.timeZone }));
-    }
-    scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
+  const firstRoutes = snapshot.measures.filter(measure => !measure.pending
+    && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
+  if (firstRoutes.length) {
+    const places = routePlaces(BANK.find(entry => entry.kind === "route" && entry.id === firstRouteId(profile.timeZone))!.name)!;
+    // Mapbox down: the page still loads without a map; the next read sets the first route.
+    const route = await timing.measure("journeys", () => resolveRoute(places.from, places.to)).catch(() => null);
+    if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
+      await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
   }
+  if (snapshot.pending.length === 0) {
+    attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, gameCandidates(snapshot), beforeMutationTx,
+      { awards: snapshot.awards, timeZone: profile.timeZone }));
+  }
+  scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   // Deleting a friend can cascade-delete their awards after the snapshot.
   const stored = attemptedInsert || snapshot.awards.some(award => award.subjectMemberId !== null)
     ? await timing.measure("awards", () => readAwards(memberId)) : snapshot.awards;
@@ -200,12 +202,24 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     const successor = award.measureId && snapshot.successors.get(award.measureId);
     return successor ? { ...award, measureId: successor } : award;
   });
-  return timing.measure("render", () => {
-    const measures = snapshot.measures.map(measure => {
-      const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
-      view.pics = pictures.pics.filter(pic => (snapshot.successors.get(pic.measureId) ?? pic.measureId) === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
-      return view;
-    });
+  const progress = await timing.measure("render", () => {
+    const byId = new Map(snapshot.measures.map(measure => [measure.id,
+      measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units)]));
+    for (const pic of pics) {
+      const id = snapshot.successors.get(pic.measureId) ?? pic.measureId;
+      let view = byId.get(id);
+      if (!view) {
+        // Picture metadata outlives the post. Only synthesize recognized game measure units.
+        if (!/^[^.]+\.(reps|seconds|steps|meters|days)$/u.test(id)) continue;
+        const task = snapshot.checkIns.find(checkIn => checkIn.measureId === id);
+        const name = task?.name ?? id.split(".")[0];
+        view = measureView({ ...describeMeasure(id, name, task?.text ?? name), amounts: [], pending: false,
+          gameOn: Boolean(task), needsPerDay: false }, snapshot.states.get(id) ?? {}, awards, today, units);
+        byId.set(id, view);
+      }
+      view.pics.push(picturePin(pic, view.points, profile.timeZone));
+    }
+    const measures = [...byId.values()];
     // Two units of the same exercise need distinct pills (row 15).
     for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
     const medals = medalsView(destinations, units, measures);
@@ -218,9 +232,12 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       if (shelf.length === 6) break;
     }
     const checkIns = snapshot.checkIns.flatMap(checkIn => checkInView(checkIn, snapshot, measures, awards, today, units));
-    return { joinedOn, today, incomplete: snapshot.incomplete, measures,
-      medals, shelf, moments: momentsView(destinations, measures, units), picCount: pictures.pics.length, checkIns };
+    return { joinedOn, today, incomplete: false, measures,
+      medals, shelf, moments: momentsView(destinations, measures, units), picCount: pics.length, checkIns };
   });
+  // Running's map and any other game route's, painted as Steps' is: start what's missing, after the response.
+  await timing.measure("art", () => attachRouteArt(progress.measures, snapshot.states, { memberId, beforeMutationTx }));
+  return progress;
 }
 
 export async function seeMoments(memberId: string, momentIds: readonly string[], beforeMutationTx: BeforeProgressMutation): Promise<void> {

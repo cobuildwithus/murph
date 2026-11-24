@@ -35,6 +35,7 @@ import {
   writeAssistantCronStore,
   type AssistantCronStore,
 } from '../src/assistant/cron/store.ts'
+import { resolveAssistantCronNextRunAfterSuccess } from '../src/assistant/cron/finalization.ts'
 import { listAssistantQuarantineEntriesAtPaths } from '../src/assistant/quarantine.ts'
 import { listAssistantRuntimeEventsAtPath } from '../src/assistant/runtime-events.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -240,6 +241,15 @@ describe('assistant cron schedule helpers', () => {
         'UTC',
       ),
     ).toBe('2026-04-12T00:00:00.000Z')
+  })
+
+  it('advances a completed daily reminder beyond the repeated local hour', () => {
+    const schedule = { kind: 'dailyLocal', timeZone: 'America/New_York', localTime: '01:20' } as const
+    const nextRunAt = computeAssistantCronNextRunAt(schedule, new Date('2027-11-07T04:00:00Z'))
+    expect(nextRunAt).toBe('2027-11-07T05:20:00.000Z')
+    const job = createCronJob({ schedule, nextRunAt, jobId: 'cron_daily', name: 'Daily reminder' })
+    expect(resolveAssistantCronNextRunAfterSuccess(job, new Date('2027-11-07T05:21:00Z')))
+      .toBe('2027-11-08T06:20:00.000Z')
   })
 
   it('preserves DST, leap-day, and day-of-month/day-of-week semantics', () => {

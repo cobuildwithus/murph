@@ -41,6 +41,23 @@ describe('hosted domain dynamic tools', () => {
     expect(JSON.stringify(automationTool.request.mock.calls)).not.toContain('ain_model_forged')
   })
 
+  it('asks for a future time after a rejected one-shot save', async () => {
+    const request = readToolRequest('automation', {
+      action: 'save', title: 'Practice', instructions: 'Leave for practice.',
+      schedule: { kind: 'at', localAt: { date: '2027-01-05', time: '16:00', timeZone: 'UTC' } },
+    })
+    if (!request || request.kind !== 'automation') throw new Error('Expected a one-shot save.')
+    expect(request.request).toMatchObject({ requestedAt: expect.any(String) })
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
+      hostedToolContext: createHostedToolContext({ automationTool: {
+        request: vi.fn().mockRejectedValue({ code: 'VAULT_AUTOMATION_TIME_PAST' }),
+      } }),
+    })
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.rpcResult.contentItems[0]?.text).toMatch(/future time/iu)
+  })
+
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)
@@ -147,6 +164,7 @@ describe('hosted domain dynamic tools', () => {
         request: {
           action: 'save',
           instructions: 'Send the reminder tonight.',
+          requestedAt: '2031-02-15T09:59:59.900Z',
           schedule: {
             at: '2031-02-15T09:20:00.000Z',
             kind: 'at',

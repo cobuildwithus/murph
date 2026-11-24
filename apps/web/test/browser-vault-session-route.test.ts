@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   afterResponse: vi.fn((callback: () => void | Promise<void>) => {
     void callback();
   }),
+  assertHostedConsentScopeGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedConsentScopeGranted: mocks.assertHostedConsentScopeGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
   readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
 }));
@@ -461,10 +463,10 @@ describe("browser vault session route", () => {
     );
   });
 
-  it("exports the latest available replica after health-data withdrawal", async () => {
+  it.each(["missing", "revoked"])("exports retained data without processing when health consent is %s", async (consent) => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
-    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.readHostedHealthDataConsentState.mockResolvedValue(consent);
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
@@ -506,6 +508,9 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    if (consent === "missing") {
+      expect(mocks.assertHostedConsentScopeGranted).toHaveBeenCalledWith(expect.objectContaining({ scope: "launch.legal" }));
+    }
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     expect(createBrowserVaultExportSession).toHaveBeenCalledWith({
       browserPublicKeyJwk: browser.publicKeyJwk,
@@ -561,12 +566,12 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("does not wake processing when consent is withdrawn during export authorization", async () => {
+  it.each(["missing", "revoked"])("does not wake processing when consent becomes %s during export authorization", async (consent) => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedHealthDataConsentState
       .mockResolvedValueOnce("granted")
-      .mockResolvedValueOnce("revoked");
+      .mockResolvedValueOnce(consent);
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,

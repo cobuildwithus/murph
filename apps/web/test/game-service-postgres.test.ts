@@ -287,6 +287,34 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("keeps every live seat beyond the Home history window", async () => {
+    const owner = await member("Sam", "UTC"), peers = [];
+    for (let i = 0; i < 6; i++) peers.push(await member("Maya", "UTC"));
+    const ids = [];
+    for (let i = 0; i < 51; i++) {
+      ids.push((await seedSettledGame({ challenger: owner, opponent: peers[i % peers.length]!, settledAt: new Date() })).gameId);
+    }
+    await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "live", settledAt: null, result: Prisma.DbNull } });
+    expect((await readHome(owner)).games.map(game => game.id).sort()).toEqual(ids.sort());
+  });
+
+  it("keeps redeemed tickets from visible opponents past the wallet window", async () => {
+    const owner = await member("Ava", "UTC"), kept = await member("Maya", "UTC"), hidden = await member("Leo", "UTC");
+    const settledAt = new Date();
+    const retained = await seedSettledGame({ challenger: owner, opponent: kept, settledAt });
+    const blocked = await seedSettledGame({ challenger: owner, opponent: hidden, settledAt });
+    const record = { stakeKey: "prize", owedBySeats: [1], owedToSeats: [0], status: "redeemed", redeemedAt: settledAt };
+    const retainedId = randomUUID();
+    const db = getPrisma();
+    await db.gameTicket.create({ data: { ...record, id: retainedId, gameId: retained.gameId, createdAt: new Date(settledAt.getTime() - 1000) } });
+    await db.gameTicket.createMany({ data: Array.from({ length: 199 }, () => ({ ...record, id: randomUUID(), gameId: blocked.gameId, createdAt: settledAt })) });
+    await ok(owner, { type: "block", memberId: hidden });
+    expect((await readHome(owner)).wallet.redeemed.map(ticket => ticket.id)).toEqual([retainedId]);
+    await db.gameTicket.create({ data: { ...record, id: randomUUID(), gameId: blocked.gameId, createdAt: settledAt } });
+    expect((await readHome(owner)).wallet.redeemed.map(ticket => ticket.id)).toEqual([retainedId]);
+    expect(await db.gameTicket.count({ where: { id: retainedId } })).toBe(1);
+  });
+
   it("projects only the caller's verified area code in Home", async () => {
     const self = await member("Player One", "UTC");
     const other = await member("Player Two", "UTC");
@@ -377,7 +405,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(phoneBatch).not.toHaveBeenCalled();
   });
 
-  it.each(["expired", "left", "blocked", "hidden", "group"] as const)("does not read ticket phones for %s games", async scenario => {
+  it.each(["left", "blocked", "hidden", "group"] as const)("does not read ticket phones for %s games", async scenario => {
     const db = getPrisma();
     const holder = await member("Holder", "UTC");
     const debtor = await member("Debtor", "UTC");
@@ -385,7 +413,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await db.gameTicket.create({ data: {
       id: randomUUID(), gameId, stakeKey: "synthetic-prize", owedBySeats: [1], owedToSeats: [0],
     } });
-    if (scenario === "expired") await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(15 * 86_400_000) } });
     if (scenario === "left") await db.gamePlayer.updateMany({ where: { gameId, memberId: debtor }, data: { leftAt: new Date() } });
     if (scenario === "blocked" || scenario === "hidden") await db.gameBlock.create({ data: {
       blockerMemberId: scenario === "blocked" ? holder : debtor,
@@ -1037,7 +1064,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       { memberId: b, title: "Object to burpees", line: "PlayerB files a motion for recess." },
     ].slice(0, cardCount);
     const { recapShowWriterSchema } = await import('@murphai/contracts/recap-show');
-    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+    const recap = recapShowWriterSchema.parse({ ...(cards.length ? { superlatives: cards } : {}), treatment: "A silent-film courtroom melodrama", pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The mat testified" }, { kind: "scene" as const,
       scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches.", faceY: 0.3 } }] }], chatLine: "The mat entered evidence.",
       song: { title: "The train", style: "Folk", lyrics: ["Leo goes", "Ava stays"] } });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
@@ -1158,7 +1185,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
     const { sealGameMedia } = await import("@/src/lib/game/crypto");
     const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-    const recap = recapShowWriterSchema.parse({ treatment: "A silent-film courtroom melodrama", chatLine: "The mat entered evidence.", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+    const recap = recapShowWriterSchema.parse({ treatment: "A silent-film courtroom melodrama", chatLine: "The mat entered evidence.", pages: [{ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The mat testified" }, { kind: "scene" as const,
       scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }] });
     const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
     const generationId = recapGenerationId(eventId);
@@ -2090,7 +2117,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await errorCode(kat, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("INVITE_USED");
   });
 
-  it.each(["prize", "dare"] as const)("issues a long-game %s ticket for fourteen days on the dev clock", async (kind) => {
+  it.each(["prize", "dare"] as const)("issues a long-game %s ticket on the dev clock that never expires", async (kind) => {
     const holder = await member("Sam", "America/New_York");
     const debtor = await member("Maya", "America/New_York");
     const {gameId} = await startGame(holder, debtor, {terms:{...TERMS,lengthDays:75,stakes:[{kind,item:"Pick a film"}]}});
@@ -2103,7 +2130,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(offset).toBeGreaterThan(44 * 86_400_000);
     expect(ticket).toMatchObject({kind,status:"open",youHold:true});
     expect(Math.abs(Date.parse(ticket.createdAt) - (Date.now() + offset))).toBeLessThan(10_000);
-    expect(Date.parse(ticket.useBy) - Date.parse(ticket.createdAt)).toBe(14 * 86_400_000);
+    expect(ticket).not.toHaveProperty("useBy");
     expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
     expect((await readHome(debtor)).wallet.owed).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
     expect((await readGameChatState("synthetic-room",[holder,debtor])).games.find((game) => game.id === gameId)?.result?.tickets).toContainEqual(expect.objectContaining({status:"open",count:1}));
@@ -2111,15 +2138,14 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await ok(holder,{type:"redeem",ticketId:ticket.id});
       expect((await readHome(holder)).wallet.redeemed).toContainEqual(expect.objectContaining({id:ticket.id,status:"redeemed"}));
     } else {
-      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 13 * 86_400_000)}});
+      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 400 * 86_400_000)}});
       expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
-      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 14 * 86_400_000)}});
-      expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"expired"}));
-      expect(await errorCode(holder,{type:"redeem",ticketId:ticket.id})).toBe("TICKET_EXPIRED");
+      await ok(holder,{type:"redeem",ticketId:ticket.id});
+      expect((await readHome(holder)).wallet.redeemed).toContainEqual(expect.objectContaining({id:ticket.id,status:"redeemed"}));
     }
   });
 
-  it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
+  it("keeps a ticket open months after it's issued, and its holder can still mark it done", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
     const { gameId } = await startGame(leo, ava);
@@ -2127,17 +2153,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(leo, await photo(leo, gameId, "only-leo"));
     const [ticket] = (await devSettleNow(gameId, leo)).tickets;
     expect(ticket).toMatchObject({ status: "open", youHold: true });
-    expect(new Date(ticket.useBy).getTime() - new Date(ticket.createdAt).getTime()).toBe(14 * 24 * 60 * 60 * 1000);
+    expect(ticket).not.toHaveProperty("useBy");
 
     await getPrisma().gameTicket.update({
-      data: { createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000) },
+      data: { createdAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000) },
       where: { id: ticket.id },
     });
-    expect((await readHome(leo)).wallet.held).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
-    expect((await readHome(ava)).wallet.owed).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
-    const refused = await run(leo, { ticketId: ticket.id, type: "redeem" });
-    expect(refused).toMatchObject({ error: { code: "TICKET_EXPIRED" }, ok: false, status: 410 });
-    expect((await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("open");
+    expect((await readHome(leo)).wallet.held).toEqual([expect.objectContaining({ id: ticket.id, status: "open" })]);
+    expect((await readHome(ava)).wallet.owed).toEqual([expect.objectContaining({ id: ticket.id, status: "open" })]);
+    await ok(leo, { ticketId: ticket.id, type: "redeem" });
+    expect((await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("redeemed");
   });
 
   it("starts on the challenger's picked date, shown before and after accept", async () => {
@@ -2171,9 +2196,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
   it("time-travels by moving only the game's clock: posts keep their real dates, and passing the end settles", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "UTC");
-    // Only today's weekday counts, so tomorrow is a day off.
+    // Today and the day after tomorrow count, so tomorrow is a day off inside the game.
     const today = gameLocalDate(new Date(), "America/New_York");
-    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today)] } } });
+    const { gameId, token } = await startGame(leo, ava, { terms: { ...TERMS, schedule: { days: [weekdayOf(today), weekdayOf(addDays(today, 2))] } } });
     await devStartNow(gameId, leo);
     const shot = await photo(leo, gameId, "today");
     await ok(leo, shot);
@@ -2700,6 +2725,15 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await getPrisma().hostedThreadContainer.createMany({ data: rooms.map(memberId => ({ memberId, ownerMemberId: a })) });
     await getPrisma().hostedThreadRoute.createMany({ data: rooms.map(id => ({ channel: "linq", containerMemberId: id,
       threadIdentityLookupKey: `synthetic-identity-${id}`, threadLookupKey: `synthetic-thread-${id}`, deliveryRouteEncrypted: "synthetic" })) });
+    for (const memberId of [a, b]) {
+      const key = `synthetic-email-${memberId}`;
+      await getPrisma().hostedMemberEmailAuthorization.create({ data: {
+        memberId, verifiedEmailLookupKey: key, verifiedEmailVerifiedAt: new Date(),
+      } });
+      await getPrisma().hostedThreadContainerParticipant.createMany({ data: rooms.map(containerMemberId => ({
+        containerMemberId, participantMemberId: memberId, handleLookupKey: key, firstSeenAt: new Date(), lastSeenAt: new Date(),
+      })) });
+    }
     const bound = await Promise.all(games.map((game, index) => bindPairGameChat(game.gameId, [a, b], rooms[index]!)));
     expect(bound[0]).toBe(bound[1]);
     expect(rooms).toContain(bound[0]);
@@ -2729,6 +2763,34 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     } finally {
       await getPrisma().hostedLinqDelivery.deleteMany({ where: { template: "game_missed", OR: ids.map(id => ({ sourceRef: { startsWith: `${id}:` } })) } });
       await getPrisma().game.updateMany({ where: { id: { in: ids } }, data: { status: "settled", settledAt: now } });
+    }
+  });
+
+  it("ends a weekday pair on Saturday morning with the recap, not a missed-Friday message", async () => {
+    const a = await member("Ava", "UTC"), b = await member("Leo", "UTC");
+    const db = getPrisma();
+    const { gameId } = await startGame(a, b, { terms: { ...TERMS, schedule: { days: [0, 1, 2, 3, 4] } } }, "UTC");
+    const room = `synthetic_room_${randomUUID()}`;
+    await db.hostedMember.create({ data: { id: room, billingStatus: "not_started" } }); memberIds.push(room);
+    // Monday Day 1 of seven. Both post Thursday, then both miss Friday.
+    await db.gamePlayer.updateMany({ where: { gameId }, data: { dayOne: new Date("2030-03-04T00:00:00Z"), timeZone: "UTC" } });
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(Date.parse("2030-03-07T18:00:00Z") - Date.now()) } });
+    for (const actor of [a, b]) await ok(actor, await photo(actor, gameId, `thursday-${actor === a ? "first" : "second"}`));
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room, devClockOffsetMs: null } });
+    const [row] = await db.$queryRaw<Array<{ shard: bigint }>>`SELECT mod(abs(hashtext(${room})::bigint), 60) AS shard`;
+    const saturdayMorning = new Date(Date.parse("2030-03-09T09:00:00Z") + Number(row.shard) * 60_000);
+    const receipts = () => db.hostedLinqDelivery.findMany({ where: { template: { in: ["game_missed", "game_recap"] },
+      OR: [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }] }, select: { template: true } });
+    try {
+      // Friday closed at 04:00 with its late-post hour, but the sweep holds settlement for the morning.
+      await reserveDueGameMissedDayCheckIns(new Date(saturdayMorning.getTime() - 60 * 60_000));
+      expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).status).toBe("live");
+      expect(await receipts()).toEqual([]);
+      await reserveDueGameMissedDayCheckIns(saturdayMorning);
+      expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "settled", settledAt: saturdayMorning });
+      expect(await receipts()).toEqual([{ template: "game_recap" }]);
+    } finally {
+      await db.hostedLinqDelivery.deleteMany({ where: { OR: [{ sourceRef: gameId }, { sourceRef: { startsWith: `${gameId}:` } }] } });
     }
   });
 

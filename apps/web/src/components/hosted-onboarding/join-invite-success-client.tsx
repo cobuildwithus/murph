@@ -19,8 +19,7 @@ import {
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
 
-import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
-import { requestHostedBillingSuccess } from "./client-api";
+import { HostedOnboardingApiError, requestHostedBillingSuccess } from "./client-api";
 import { useHostedInviteStatusRefresh } from "./invite-status-client";
 
 const HOSTED_CHECKOUT_SUCCESS_SUPPORT_DELAY_MS = 60_000;
@@ -53,7 +52,8 @@ export function JoinInviteSuccessClient({
     HostedInviteStatusPayload["stage"] | null
   >(null);
   const homeRedirectStartedRef = useRef(false);
-  const successSyncStartedRef = useRef(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const reconcile = !preview && status.session.matchesInvite && shouldRequestHostedBillingSuccess(status.stage);
   const shouldPoll = isHostedOnboardingPendingStage(status.stage);
   const shouldRedirectToHome = shouldRedirectHostedInviteSuccessToHome({
     sessionId,
@@ -74,43 +74,30 @@ export function JoinInviteSuccessClient({
   });
 
   useEffect(() => {
-    if (
-      preview ||
-      successSyncStartedRef.current ||
-      !sessionId ||
-      !status.session.matchesInvite ||
-      !shouldRequestHostedBillingSuccess(status.stage)
-    ) {
-      return;
-    }
-
+    if (!reconcile || !sessionId) return;
     let cancelled = false;
-    successSyncStartedRef.current = true;
-
-    void requestHostedBillingSuccess({
-      inviteCode,
-      sessionId,
-    })
-      .then((payload) => {
-        if (cancelled) {
-          return;
-        }
-
+    let timer: number | undefined;
+    const sync = async (attempt: number) => {
+      if (cancelled) return;
+      try {
+        const payload = await requestHostedBillingSuccess({ inviteCode, sessionId });
+        if (cancelled) return;
+        setBillingError(null);
         setErrorMessage(null);
         setStatus(payload);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
-
-        setErrorMessage(error instanceof Error ? error.message : "Unable to refresh setup status.");
-      });
-
+      } catch (error) {
+        if (cancelled) return;
+        setBillingError(error instanceof Error ? error.message : "Unable to refresh setup status.");
+        const retryable = error instanceof HostedOnboardingApiError ? error.retryable : error instanceof TypeError;
+        if (retryable && attempt < 3) timer = window.setTimeout(() => void sync(attempt + 1), attempt * 2_000);
+      }
+    };
+    void Promise.resolve().then(() => sync(1));
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [inviteCode, preview, sessionId, status.session.matchesInvite, status.stage]);
+  }, [inviteCode, reconcile, sessionId]);
 
   useEffect(() => {
     if (preview || !shouldPoll || !sessionId) {
@@ -149,22 +136,15 @@ export function JoinInviteSuccessClient({
     && Boolean(sessionId)
     && shouldPoll
     && delayedSetupSupportStage === status.stage;
-  const shouldShowSuccessUi = shouldShowHostedInviteSuccessUi({
-    errorMessage,
-    preview,
-    sessionId,
-    showSetupDelaySupport,
-    status,
-  });
-
-  if (!shouldShowSuccessUi) {
+  if (!preview && shouldRedirectToHome && sessionId && errorMessage === null) {
     return null;
   }
 
   return (
     <LinkPageFrame>
       <JoinInviteSuccessScreen
-        errorMessage={errorMessage}
+        errorMessage={reconcile ? billingError ?? errorMessage : errorMessage}
+        hasCheckoutSession={Boolean(sessionId)}
         onAction={() => {
           if (!preview && shouldRedirectToHome) {
             router.replace(resolveHostedInviteSuccessRedirectPath());
@@ -183,18 +163,20 @@ export function JoinInviteSuccessClient({
 
 export function JoinInviteSuccessScreen({
   errorMessage = null,
+  hasCheckoutSession = true,
   onAction,
   onEmailSupport,
   showSetupDelaySupport = false,
   status,
 }: {
   errorMessage?: string | null;
+  hasCheckoutSession?: boolean;
   onAction?: () => void;
   onEmailSupport?: () => void;
   showSetupDelaySupport?: boolean;
   status: HostedInviteStatusPayload;
 }) {
-  const successState = resolveHostedInviteSuccessState(status);
+  const successState = resolveHostedInviteSuccessState(status, hasCheckoutSession);
   const setupDelayed = showSetupDelaySupport && successState.pending;
   const ActionControl = successState.pending ? LinkPageLink : LinkPagePill;
 
@@ -234,26 +216,6 @@ function shouldRedirectHostedInviteSuccessToHome(input: {
     && input.status.session.matchesInvite;
 }
 
-function shouldShowHostedInviteSuccessUi(input: {
-  errorMessage: string | null;
-  preview: boolean;
-  sessionId: string | null;
-  showSetupDelaySupport: boolean;
-  status: HostedInviteStatusPayload;
-}): boolean {
-  return input.preview
-    || input.errorMessage !== null
-    || isHostedInviteSuccessTerminalStage(input.status.stage)
-    || input.sessionId === null
-    || !input.status.session.authenticated
-    || !input.status.session.matchesInvite
-    || input.showSetupDelaySupport;
-}
-
-function isHostedInviteSuccessTerminalStage(stage: HostedInviteStatusPayload["stage"]): boolean {
-  return stage === "blocked" || stage === "expired" || stage === "invalid";
-}
-
 function buildHostedCheckoutSuccessSupportMailto(input: {
   inviteCode: string;
   stage: HostedInviteStatusPayload["stage"];
@@ -273,7 +235,18 @@ function buildHostedCheckoutSuccessSupportMailto(input: {
   return `mailto:${HOSTED_CHECKOUT_SUCCESS_SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): HostedInviteSuccessState {
+function resolveHostedInviteSuccessState(
+  status: HostedInviteStatusPayload,
+  hasCheckoutSession: boolean,
+): HostedInviteSuccessState {
+  if (status.stage === "checkout" && !hasCheckoutSession) {
+    return {
+      buttonLabel: "Back to invite",
+      description: "Head back to your invite for next steps.",
+      pending: false,
+      title: "Finish setting up Murph.",
+    };
+  }
   switch (status.stage) {
     case "active":
       return {
@@ -282,19 +255,24 @@ function resolveHostedInviteSuccessState(status: HostedInviteStatusPayload): Hos
         pending: false,
         title: "You’re all set.",
       };
-    case "verify":
+    case "checkout":
       return {
         buttonLabel: "Back to invite",
         description: "Checking your signup status.",
         pending: true,
         title: "Finishing verification.",
       };
-    case "checkout":
+    // This browser isn't signed in to the invite, often a different browser
+    // than the one checkout opened from. Nothing here can finish setup
+    // until they sign in, so no spinner.
+    case "verify":
       return {
-        buttonLabel: "Back to invite",
-        description: JOIN_INVITE_ACTIVATION_PENDING_COPY.subtitle,
-        pending: true,
-        title: "Payment received.",
+        buttonLabel: "Sign in",
+        description: status.session.authenticated
+          ? "This browser is signed in to a different account. Go back to your invite and sign in as yourself to finish."
+          : "Go back to your invite and sign in to finish setting up.",
+        pending: false,
+        title: "Sign in to finish.",
       };
     case "expired":
       return {

@@ -1100,6 +1100,32 @@ describe("Clinical Records status page", () => {
     expect(disconnectNotice.className).not.toContain("focus:ring-2");
   });
 
+  it("refreshes import eligibility after disconnecting a queued run", async () => {
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
+    const connection = makeConnection();
+    const queued = { ...connection, canImport: false, latestRun: {
+      ...connection.latestRun!, completedAt: null, status: "queued" as const,
+    } };
+    const props = { authenticated: true, initialCallback: null, initialLoadError: false };
+    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
+      ...props, initialConnections: [queued],
+    }), { requireButton: false });
+    cleanup = rendered.cleanup;
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      ok: true, connectionId: queued.connectionId, status: "disconnected",
+    });
+    await clickButton(rendered, "Disconnect");
+    const confirm = Array.from(rendered.container.querySelectorAll("button")).filter(button => button.textContent === "Disconnect").at(-1);
+    assert.ok(confirm);
+    await act(async () => confirm.click());
+    expect(mocks.refresh).toHaveBeenCalledOnce();
+
+    await rendered.rerender(createElement(RecordsPageClient, {
+      ...props, initialConnections: [{ ...connection, status: "disconnected", canImport: true }],
+    }));
+    expect(rendered.container.textContent).toContain("Reconnect");
+  });
+
   it("ignores a stale disconnect response after BFCache restore", async () => {
     const connection = makeConnection();
     let resolveDisconnect!: (value: unknown) => void;

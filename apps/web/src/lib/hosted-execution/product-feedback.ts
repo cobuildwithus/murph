@@ -5,6 +5,7 @@ import { readHostedAppSessionHmacKey } from "../hosted-onboarding/app-session-co
 
 import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+  HOSTED_ROLEPLAY_REVIEW_SUMMARY,
   HOSTED_USAGE_OPTIMIZATION_AUDIT_PREFIX,
   isHostedUsageOptimizationAuditFeedback,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -53,6 +54,9 @@ export async function recordHostedProductFeedback(input: {
   const feedbackId = usageAudit
     ? await buildHostedAnonymousUsageFeedbackId(input)
     : buildHostedProductFeedbackId({ feedback: input.feedback });
+  if (feedback.kind === "moderation_review") {
+    return persistHostedModerationReview(feedback, feedbackId, input.memberId);
+  }
   // The reserved prefix is itself the support-path discriminator. Fail closed
   // below when the remainder is missing or the reserved kind/linkage contract
   // is invalid instead of persisting it as ordinary feedback.
@@ -251,6 +255,8 @@ export function normalizeHostedProductFeedback(
 ): HostedRuntimeProductFeedbackRecord {
   const summary = sanitizeHostedProductFeedbackSummary(feedback.summary);
   if (
+    (feedback.kind === "moderation_review" &&
+      (summary !== HOSTED_ROLEPLAY_REVIEW_SUMMARY || feedback.relatedChangelogItemIds.length > 0)) ||
     summary.length === 0 ||
     summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH ||
     (feedback.relatedChangelogItemIds.length > 0 &&
@@ -294,6 +300,18 @@ export function buildHostedProductFeedbackId(input: {
     .digest("hex")
     .slice(0, 32);
   return `product_feedback_${digest}`;
+}
+
+async function persistHostedModerationReview(
+  feedback: HostedRuntimeProductFeedbackRecord,
+  feedbackId: string,
+  callbackMemberId: string | null | undefined,
+): Promise<HostedRuntimeProductFeedbackRecordResponse> {
+  const memberId = callbackMemberId?.trim();
+  if (!memberId || await getPrisma().hostedThreadContainer.findUnique({
+    select: { memberId: true }, where: { memberId },
+  })) rejectHostedProductFeedback();
+  return persistHostedProductFeedback({ feedback, feedbackId, memberId });
 }
 
 async function persistHostedProductFeedback(input: {

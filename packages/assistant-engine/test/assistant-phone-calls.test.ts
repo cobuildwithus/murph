@@ -194,7 +194,7 @@ describe("assistant phone calls", () => {
     })).toBe(expected);
   });
 
-  it("keys calls by accepted input and the exact bounded brief", () => {
+  it("keys calls by accepted input and number, so a reworded replay finds the first call", () => {
     const first = createPhoneCallRequestKey({
       brief: BASE_BRIEF,
       scope: BASE_SCOPE,
@@ -267,9 +267,13 @@ describe("assistant phone calls", () => {
     };
 
     expect(first).toMatch(/^phone_call_[a-f0-9]{64}$/u);
-    expect(reworded).not.toBe(first);
-    expect(differentDisclosure).not.toBe(first);
-    expect(differentCallerName).not.toBe(first);
+    expect(reworded).toBe(first);
+    expect(differentDisclosure).toBe(first);
+    expect(differentCallerName).toBe(first);
+    expect(createPhoneCallRequestKey({
+      brief: { ...BASE_BRIEF, to: { phoneNumber: "+15555550188" } },
+      scope: BASE_SCOPE,
+    })).not.toBe(first);
     expect(differentInput).not.toBe(first);
     expect(liveSteeredInput).toBe(replayedInput);
     expect(createPhoneCallRequestKey({

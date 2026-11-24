@@ -3,7 +3,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { classifyHostedSystemMailboxExecutionClass } from "@murphai/hosted-execution/orchestration-control";
 
-import type { HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, type HostedRuntimeLogEntry } from "@murphai/hosted-execution/runtime-control";
 import { after } from "next/server";
 
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
@@ -33,6 +33,8 @@ export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
 // Work queued while a member had no access drains over several wakes after
 // restore. Its clock starts at restore and allows this long before alerting.
 export const HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS = 60 * 60_000;
+// Recap shows can spend twenty minutes retrying Flex before a standard-tier turn.
+const RECAP_PROGRESS_DEADLINE_MS = 30 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT = 20;
 const HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS = 10_000;
@@ -980,7 +982,7 @@ function classifyHostedRuntimeProgressRow(
   if (row.lane === "conversation" && isCompletionAwaitingCheckpoint(row, now)) {
     return "fresh";
   }
-  if (isSystemWorkAwaitingForegroundCheckpoint(row, now)) {
+  if (isSystemWorkAwaitingForegroundCheckpoint(row, now) || isRecapRetryInProgress(row, now)) {
     return "fresh";
   }
   const thresholdMs = row.accessRestoredAt != null
@@ -989,6 +991,30 @@ function classifyHostedRuntimeProgressRow(
   return now.getTime() - progressOriginAtMs >= thresholdMs
     ? "stalled"
     : "fresh";
+}
+
+function isRecapRetryInProgress(row: HostedRuntimeProgressHealthRow, now: Date): boolean {
+  // Only a lone, fully imported recap can use this grace. A workspace wake
+  // is shared across jobs, so by itself it cannot establish head progress.
+  if (row.lane !== "system" || row.headKind !== "assistant.notification.requested"
+    || row.pendingCount !== 1n || row.headLaneSeq !== row.durableHighWaterSeq
+    || row.workspaceSystemImportedSeq !== row.headLaneSeq
+    || !parseGameRecapEventId(row.headDedupeKey ?? "")
+    || row.systemMailboxProgressGeneration == null
+    || row.nextDefaultProcessingWakeReason !== "assistant"
+    || row.workspaceCheckpointedAt === null || row.nextDefaultProcessingWakeAt === null) {
+    return false;
+  }
+  const checkpoint = row.workspaceCheckpointedAt.getTime();
+  const origin = row.progressOriginAt.getTime();
+  const wake = row.nextDefaultProcessingWakeAt.getTime();
+  // The five-minute capacity delay starts before the checkpoint. Ordinary
+  // execution errors retry in one minute and keep the usual stall clock.
+  const remainingDelay = wake - checkpoint;
+  return origin < checkpoint && checkpoint <= now.getTime()
+    && remainingDelay > 60_000 && remainingDelay <= 5 * 60_000
+    && now.getTime() - checkpoint < HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
+    && now.getTime() - origin < RECAP_PROGRESS_DEADLINE_MS;
 }
 
 function isSystemWorkAwaitingForegroundCheckpoint(

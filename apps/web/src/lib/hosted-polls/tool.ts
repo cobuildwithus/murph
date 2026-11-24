@@ -4,7 +4,7 @@ import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../h
 import "server-only";
 import { createHash } from "node:crypto";
 import type { HostedConversationPoll } from "@prisma/client";
-import type { ConversationPollRequest, ConversationPollResponse } from "@murphai/hosted-execution/conversation-polls";
+import { CONVERSATION_POLL_PAGE_SIZE, type ConversationPollAction, type ConversationPollRequest, type ConversationPollResponse } from "@murphai/hosted-execution/conversation-polls";
 import { getPrisma } from "../prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -29,25 +29,14 @@ export async function handleHostedConversationPollTool(input: {
   const action = input.request.request;
   if (action.action === "create") return createPoll(input, route);
   const conversationKeys = createHostedExternalThreadIdentityLookupKeyReadCandidates({ channel: route.channel, threadId: route.target });
-  const rows = await prisma.hostedConversationPoll.findMany({
-    where: { memberId: input.memberId, channel: route.channel, conversationKey: { in: conversationKeys },
-      ...(action.action === "list" ? {} : { id: action.pollRef }) },
-    orderBy: { createdAt: "desc" }, take: action.action === "list" ? 10 : 1,
-  });
-  if (action.action === "list") {
-    const polls = [];
-    for (const row of rows) {
-      const result = await readPollResult(row);
-      if (result) polls.push(result.snapshot);
-    }
-    return { status: "listed", polls };
-  }
-  const row = rows[0];
+  const scope = { memberId: input.memberId, channel: route.channel, conversationKey: { in: conversationKeys } };
+  if (action.action === "list") return listPolls(scope, action.cursor);
+  const [row] = await prisma.hostedConversationPoll.findMany({ where: { ...scope, id: action.pollRef }, take: 1 });
   if (!row) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll not found in this conversation. Use list to find its pollRef." });
   const definition = await readPollDefinition(row);
   if (definition.target !== route.target) throw new TypeError("Poll conversation changed.");
   const result = await readPollResult(row);
-  if (!result) return { status: "unknown", polls: [] };
+  if (!result) return unknownPoll(row.id, definition.question);
   if (action.action === "close") {
     if (route.channel !== "telegram") throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "iMessage does not support closing polls." });
     if (result.snapshot.closed) return { status: "closed", polls: [result.snapshot] };
@@ -63,6 +52,36 @@ export async function handleHostedConversationPollTool(input: {
   if (route.channel === "telegram") return { status: "results", polls: [await withTelegramPollVoters(row, result.snapshot, action.voterCursor)] };
   const fresh = await callLinqPoll({ action: "read", chatId: route.target, pollRef: row.id, question: definition.question, messageId: result.messageId, voterCursor: action.voterCursor });
   return { status: "results", polls: [fresh.snapshot] };
+}
+
+function unknownPoll(pollRef: string, question: string): ConversationPollResponse {
+  return { status: "unknown", polls: [], unknownPolls: [{ pollRef, question }] };
+}
+
+async function listPolls(
+  scope: { memberId: string; channel: PollRoute["channel"]; conversationKey: { in: string[] } },
+  cursor: Extract<ConversationPollAction, { action: "list" }>["cursor"],
+): Promise<ConversationPollResponse> {
+  const createdAt = cursor && new Date(cursor.createdAt);
+  const rows = await getPrisma().hostedConversationPoll.findMany({
+    where: { ...scope, ...(cursor && { OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: cursor.pollRef } }] }) },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: CONVERSATION_POLL_PAGE_SIZE + 1,
+  });
+  const polls = [];
+  const unknownPolls = [];
+  const page = rows.slice(0, CONVERSATION_POLL_PAGE_SIZE);
+  for (const row of page) {
+    const result = await readPollResult(row);
+    if (result) polls.push(result.snapshot);
+    else unknownPolls.push({ pollRef: row.id, question: (await readPollDefinition(row)).question });
+  }
+  const last = page.at(-1);
+  return {
+    status: "listed", polls,
+    ...(unknownPolls.length && { unknownPolls }),
+    ...(last && rows.length > page.length && { nextCursor: { createdAt: last.createdAt.toISOString(), pollRef: last.id } }),
+  };
 }
 
 async function voteInPoll(input: Parameters<typeof handleHostedConversationPollTool>[0], route: PollRoute, poll: { pollRef: string; question: string; messageId: string }): Promise<ConversationPollResponse> {
@@ -111,7 +130,7 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
     return tx.hostedConversationPoll.updateMany({ where: { id, dispatchedAt: null }, data: { dispatchedAt: new Date() } });
   });
-  if (claim.count !== 1) return { status: "unknown", polls: [] };
+  if (claim.count !== 1) return unknownPoll(id, original.question);
   return dispatchPoll(row, definition, route);
 }
 
@@ -134,6 +153,6 @@ async function dispatchPoll(row: HostedConversationPoll, definition: { question:
     return { status: "sent", polls: [result.snapshot] };
   } catch {
     // The claim is retained even when acknowledgement/persistence fails.
-    return { status: "unknown", polls: [] };
+    return unknownPoll(row.id, definition.question);
   }
 }

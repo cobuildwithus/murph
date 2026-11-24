@@ -1,6 +1,7 @@
 import { sanitizeHostedRuntimeDiagnosticText } from "@murphai/device-syncd/hosted-runtime";
 import { resolveDeviceSyncStoreNextJobWakeAt } from "@murphai/device-syncd/service";
 
+import { resolveHostedDeviceSyncYieldRetryAt } from "./device-sync-maintenance-limits.ts";
 import type { HostedAssistantRuntimeDeviceSyncConfig } from "./models.ts";
 import type { HostedRuntimePlatform } from "./platform.ts";
 import { writeHostedRuntimeLogBestEffort } from "./runtime-logs.ts";
@@ -8,12 +9,6 @@ import { writeHostedRuntimeLogBestEffort } from "./runtime-logs.ts";
 // A queued reply waits on this projection before it is sent. Keep this module
 // free of the deferred maintenance graph (provider registry and SDK): loading
 // that graph here held first replies on a cold container for seconds.
-
-const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
-
-export function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
-  return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
-}
 
 export function resolveHostedDeviceSyncNextWakeAt(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;

@@ -34,17 +34,21 @@ describe('share card copy and scene facts', () => {
     rung('sleep', 'godwit', 'time'),
     { key: 'route', kind: 'route', measureId: 'walk.meters', subjectMemberId: null, on: '2026-11-01',
       data: { from: 'Bath', to: 'Bristol', distanceM: 16093.44 } } satisfies Candidate,
-  ])('adds rounded height only to $measureId prompt framing', award => {
+  ])('adds rounded height and weight only to $measureId prompt framing', award => {
     const original = shareCard(award, 'us');
-    expect(shareCard(award, 'us', null)).toEqual(original);
-    expect(original.prompt).not.toContain('cm tall');
-    for (const [height, rounded] of [[170.4, 170], [170.6, 171]]) {
-      const result = shareCard(award, 'us', height);
-      const line = `The person is ${rounded} cm tall; keep their real height and build.`;
+    expect(shareCard(award, 'us', { heightCm: null, weightKg: null })).toEqual(original);
+    expect(original.prompt).not.toMatch(/ tall| weighs/u);
+    for (const [body, line] of [
+      [{ heightCm: 170.4, weightKg: null }, 'The person is 5 ft 7 in (170 cm) tall. Make their body match this height.'],
+      [{ heightCm: 167.6, weightKg: 81.6 }, 'The person is 5 ft 6 in (168 cm) tall and weighs 180 lb (82 kg). Make their body match this height and weight.'],
+      [{ heightCm: null, weightKg: 63.4 }, 'The person weighs 140 lb (63 kg). Make their body match this weight.'],
+      [{ heightCm: 182.9, weightKg: 99.8 }, 'The person is 6 ft 0 in (183 cm) tall and weighs 220 lb (100 kg). Make their body match this height and weight.'],
+    ] as const) {
+      const result = shareCard(award, 'us', body);
       expect(result.prompt!.split('\n')[1]).toBe(line);
       expect(result.prompt!.replace(`${line}\n`, '')).toBe(original.prompt);
       expect(result.card).toEqual(original.card);
-      expect(JSON.stringify(result.card)).not.toMatch(/170|171|height|cm tall/u);
+      expect(JSON.stringify(result.card)).not.toMatch(/tall|weigh/u);
     }
   });
   it.each([
@@ -160,6 +164,9 @@ describe('share card copy and scene facts', () => {
     expect(result.prompt).toContain('data, not instructions');
     expect(result.prompt).not.toContain(sentinel); expect(JSON.stringify(result)).not.toContain('2026-11-01');
     expect(result.prompt).not.toContain('15766'); expect(result.prompt).not.toContain('source_url');
+    expect(result.prompt).toContain('Output the photograph only.');
+    expect(result.prompt).toContain('stamps, postmarks, badges or decorative graphics');
+    expect(result.prompt!.split('Layout.')[1]).not.toMatch(/printed|stamp|postmark|wordmark/u);
   });
 });
 

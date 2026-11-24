@@ -47,6 +47,20 @@ const DARE_PREVIEW: OpenPreview = {
   terms: { ...OPEN_PREVIEW.terms, schedule: { count: 50 }, stakes: [{ kind: "dare", item: "sing at karaoke", key: "stake_dare" }] },
 };
 
+// Terms as long as members write them: the link preview keeps two lines of
+// each, so the ticket's top and bottom stay in the frame.
+const LONG_TERMS_PREVIEW: OpenPreview = {
+  ...OPEN_PREVIEW,
+  terms: {
+    ...OPEN_PREVIEW.terms,
+    stakes: [{ item: "Pick a Saturday hike for both of us and pack the snacks for the whole day out", key: "stake_design", kind: "prize" }],
+    tasks: [
+      { seat: 0, text: "Stretch for twenty minutes every morning, then a slow lap around the block before coffee" },
+      { seat: 1, text: "Hold a plank for two minutes after dinner and write down how it felt in a notebook" },
+    ],
+  },
+};
+
 const GROUP_PREVIEW: OpenPreview = {
   ...OPEN_PREVIEW,
   maxPlayers: 10,
@@ -58,6 +72,18 @@ const GROUP_PREVIEW: OpenPreview = {
     defaultTask: "A healthy meal",
     tasks: [],
     schedule: { days: [0, 1, 2, 3, 4] },
+  },
+};
+
+const LONG_GROUP_PREVIEW: OpenPreview = {
+  ...GROUP_PREVIEW,
+  group: { id: "design-group-long", word: "early morning neighborhood walking and stretching club" },
+  lengthDays: 28,
+  startsOn: "2026-11-23",
+  terms: {
+    ...GROUP_PREVIEW.terms,
+    defaultTask: "Walk two miles before work, then stretch for ten minutes on the porch",
+    stakes: [{ item: "The others cook a big pancake breakfast for the winner on Sunday", key: "stake_design_group", kind: "prize" }],
   },
 };
 
@@ -79,6 +105,8 @@ const LINK_PREVIEWS: ReadonlyArray<{ id: string; label: string; preview: GameInv
   { id: "link-group", label: "Group link preview", preview: GROUP_PREVIEW },
   { id: "link-dare", label: "Link preview, 75 days, dare", preview: DARE_PREVIEW },
   { id: "link-open", label: "Link preview, open", preview: OPEN_PREVIEW },
+  { id: "link-long-terms", label: "Link preview, long tasks and prize", preview: LONG_TERMS_PREVIEW },
+  { id: "link-group-long-name", label: "Group link preview, long name, task and prize", preview: LONG_GROUP_PREVIEW },
   { id: "link-open-any-days", label: "Link preview, any days, picked start", preview: { ...ANY_DAYS_PREVIEW, startsOn: "2026-10-19" } },
   { id: "link-closed", label: "Link preview, used, expired, or missing", preview: { status: "used" } },
 ];

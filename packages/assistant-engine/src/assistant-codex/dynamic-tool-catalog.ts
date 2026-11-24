@@ -33,6 +33,7 @@ import {
 import {
   HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
+  HOSTED_ROLEPLAY_REVIEW_SUMMARY,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
@@ -443,7 +444,7 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   name: 'submit_product_feedback',
   deferLoading: true,
   description:
-    `Record one piece of feedback about Murph for the team. The member is not told unless they ask. Give the kind, a product-only summary, and any related changelog item ids. When the member asks you to record feedback, submit what is known and mark missing details unknown; do not hold the submission to ask for them. Ordinary feedback is saved after the reply on a best-effort basis. A weekly usage audit uses kind feature_request, no changelog ids, and a summary starting "Usage optimization audit:" that reports rounded cost figures and coverage only. When a member in a private conversation explicitly asks for human support, use kind frustration, no changelog ids, and a summary starting "Support escalation:"; that call waits for confirmation. The result is accepted, already accepted, unavailable, callback failure, or a validation error that lists the fields to fix. Fix a validation error and retry once. Every other result is final.`,
+    `Record one piece of feedback about Murph for the team. The member is not told unless they ask. Give the kind, a product-only summary, and any related changelog item ids. When the member asks you to record feedback, submit what is known and mark missing details unknown; do not hold the submission to ask for them. For moderation_review, use exactly "${HOSTED_ROLEPLAY_REVIEW_SUMMARY}" and no changelog ids or reproduction. Ordinary feedback is saved after the reply on a best-effort basis. A weekly usage audit uses kind feature_request, no changelog ids, and a summary starting "Usage optimization audit:" that reports rounded cost figures and coverage only. When a member in a private conversation explicitly asks for human support, use kind frustration, no changelog ids, and a summary starting "Support escalation:"; that call waits for confirmation. The result is accepted, already accepted, unavailable, callback failure, or a validation error that lists the fields to fix. Fix a validation error and retry once. Every other result is final.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -452,14 +453,14 @@ export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
         type: 'string',
         enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
         description:
-          `feature_request: Murph could not do something the member wanted. frustration: a bad experience with no specific capability requested, and every support escalation. feature_interest: interest in something Murph already does.`,
+          `feature_request: Murph could not do something the member wanted. frustration: a bad experience with no specific capability requested, and every support escalation. feature_interest: interest in something Murph already does. moderation_review: the current member directly asks Murph to take part in sexually explicit roleplay in a private conversation.`,
       },
       summary: {
         type: 'string',
         minLength: 1,
         maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
         description:
-          `What happened, in product terms a teammate can act on without the conversation: who (in generic terms), which Murph surface or workflow, what they tried, what they expected, and what happened. When a capability is missing, name the outcome they wanted and what Murph lacks. For any failure, friction, workaround, or manual workflow, add a section starting "Reproduction:" with the smallest setup, the Murph commands or tool calls with made-up arguments when known, an example request with made-up content, and expected versus observed behavior. Leave that section out only for pure feature interest or a usage audit with aggregate evidence. Say what is unknown and never invent steps. Write in your own words and keep the member out of it: no names, handles, identifiers, quotes or close paraphrases, diagnoses, symptoms, medications, results, health or fitness values, locations, relationships, contact details, secrets, or provider data. Use the least specific wording that still explains the problem, such as "a health metric" or "a connected source". Start with "Speculative:" when you are inferring friction the member did not state, or "Murph-observed:" for repeated tool friction you ran into yourself. A support escalation starts with "Support escalation:" and follows the same format.`,
+          `For moderation_review, supply only the fixed summary from the tool description. For product feedback, describe what happened in product terms a teammate can act on without the conversation: who (in generic terms), which Murph surface or workflow, what they tried, what they expected, and what happened. When a capability is missing, name the outcome they wanted and what Murph lacks. For any failure, friction, workaround, or manual workflow, add a section starting "Reproduction:" with the smallest setup, the Murph commands or tool calls with made-up arguments when known, an example request with made-up content, and expected versus observed behavior. Leave that section out only for pure feature interest or a usage audit with aggregate evidence. Say what is unknown and never invent steps. Write in your own words and keep the member out of it: no names, handles, identifiers, quotes or close paraphrases, diagnoses, symptoms, medications, results, health or fitness values, locations, relationships, contact details, secrets, or provider data. Use the least specific wording that still explains the problem, such as "a health metric" or "a connected source". Start with "Speculative:" when you are inferring friction the member did not state, or "Murph-observed:" for repeated tool friction you ran into yourself. A support escalation starts with "Support escalation:" and follows the same format.`,
       },
       relatedChangelogItemIds: {
         type: 'array',

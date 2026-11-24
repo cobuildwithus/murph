@@ -99,6 +99,34 @@ it.each(["Invented source evidence", "Resting pulse: 73 bpm"])("holds nonliteral
   expect((await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 10 }))).toHaveLength(1);
 });
 
+it("holds a structured pulse measurement when the source value and proposal disagree", async () => {
+  const f = await fixture([source()]);
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{
+    ...output.records[0]!, payload: { kind: "measurement", occurredAt: date, note: undefined,
+      title: "Resting pulse", measurements: [{ metric: "resting-heart-rate", value: 37, unit: "bpm" }] },
+  }] });
+  await runOneHostedClinicalEnrichment(f.runtime);
+  expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({
+    canonical: null, counts: { held: 1, created: 0 }, readback: { verifiedCount: 0 },
+  });
+  expect(await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(0);
+});
+
+it.each([{ value: 2, created: 1 }, { value: 20, created: 0 }])(
+  "compares a proposed weight of $value kg with the structured quantity in grams", async ({ value, created }) => {
+    const f = await fixture([{ ...source(), valueString: undefined, valueQuantity: { value: 2000, unit: "g" } }]);
+    f.executeExtraction.mockResolvedValue({ status: "complete", records: [{
+      dateBasis: "source", excerpt: '"value": 2000',
+      payload: { kind: "measurement", occurredAt: date, note: undefined, title: "Body weight",
+        measurements: [{ metric: "body-weight", value, unit: "kg" }] },
+    }] });
+    await runOneHostedClinicalEnrichment(f.runtime);
+    expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({
+      counts: { created, held: 1 - created }, readback: { verifiedCount: created },
+    });
+  },
+);
+
 it("does not reuse extraction for a different record on the same page", async () => {
   const f = await fixture([source(), { ...source("second"), effectiveDateTime: "2020-03-13T12:00:00.000Z", valueString: "Resting heart rate 74 bpm." }]);
   await runOneHostedClinicalEnrichment(f.runtime);

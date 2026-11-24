@@ -289,6 +289,8 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedAccountGroupBillingRef",
   "HostedAccountGroupInvite",
   "HostedAccountGroupMembership",
+  // A confirmed deletion's retry: the member id and next attempt time only, deleted with the member.
+  "HostedAccountDeletionRequest",
   // Generic hosted groups: relation-only back-references from HostedMember.
   // Group membership rows stay in dedicated group tables; optional sharing
   // remains explicit through HostedVaultShare grants.

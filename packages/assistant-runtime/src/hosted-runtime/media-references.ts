@@ -365,7 +365,7 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
     }
     // Policy and the local cache already ran, so only a real download is charged.
     if (downloadedBytes + entry.byteSize > (input.options?.maxTotalDownloadBytes ?? Infinity)) {
-      missingArtifactPaths.set(key, "size");
+      missingArtifactPaths.set(key, "download_budget");
       continue;
     }
     downloadedBytes += entry.byteSize;

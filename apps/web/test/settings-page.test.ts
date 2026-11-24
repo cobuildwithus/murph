@@ -15,6 +15,9 @@ const VOICE_TEST_MESSAGE =
   "just picked a new voice for you! send me a voice memo so I can hear it";
 
 const mocks = vi.hoisted(() => ({
+  countHostedFamilySponsoredMembers: vi.fn(),
+  readHostedMemberAccountHint: vi.fn(),
+  getHostedAccountDeletionPageSession: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
 
   isHostedBillingPlanSelectionAvailable: vi.fn(),
@@ -175,6 +178,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  getHostedAccountDeletionPageSession: mocks.getHostedAccountDeletionPageSession,
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedDashboardPageAuthSnapshot: () => { throw new Error("Settings must not require paid dashboard access"); },
@@ -182,6 +189,11 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/hosted-member-store")>(),
+  readHostedMemberAccountHint: mocks.readHostedMemberAccountHint,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-activity", () => ({
@@ -283,6 +295,7 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  countHostedFamilySponsoredMembers: mocks.countHostedFamilySponsoredMembers,
   isHostedFamilyBillingPortalManageable: (billingStatus: string) =>
     ["active", "incomplete", "past_due", "paused", "unpaid"].includes(
       billingStatus,
@@ -353,6 +366,8 @@ beforeEach(() => {
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
+  mocks.readHostedMemberAccountHint.mockResolvedValue(null);
+  mocks.countHostedFamilySponsoredMembers.mockResolvedValue(0);
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedConsentStatus.mockResolvedValue(
@@ -583,6 +598,40 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
   );
 });
 
+test("a suspended owner can reopen deletion without enabling export", async () => {
+  const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+  mocks.getHostedPageAuthSnapshot.mockRejectedValueOnce(hostedOnboardingError({
+    code: "HOSTED_MEMBER_SUSPENDED", httpStatus: 403, message: "Suspended.",
+  }));
+  mocks.getHostedAccountDeletionPageSession.mockResolvedValueOnce({ member: { id: "member_123", suspendedAt: new Date() } });
+  mocks.readHostedMemberAccountHint.mockResolvedValueOnce("*** 0731");
+  const { default: Page } = await import("../app/settings/data-privacy/page");
+  renderToStaticMarkup(await Page());
+  expect(mocks.getHostedAccountDeletionPageSession).toHaveBeenCalledOnce();
+  expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+    accountHint: "*** 0731", authenticated: true, authorizationEnabled: false, familyCovered: 0,
+  }, undefined);
+});
+
+test("data privacy passes the signed-in account to the deletion controls", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: { billingStatus: "active", id: "member_123", suspendedAt: null },
+    session: {},
+  });
+  mocks.readHostedMemberAccountHint.mockResolvedValueOnce("*** 0731");
+  mocks.countHostedFamilySponsoredMembers.mockResolvedValueOnce(2);
+  const { default: Page } = await import("../app/settings/data-privacy/page");
+  renderToStaticMarkup(await Page());
+  expect(mocks.readHostedMemberAccountHint).toHaveBeenCalledWith(expect.objectContaining({ memberId: "member_123" }));
+  expect(mocks.countHostedFamilySponsoredMembers).toHaveBeenCalledWith(
+    expect.objectContaining({ ownerMemberId: "member_123" }),
+  );
+  expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+    accountHint: "*** 0731", authenticated: true, authorizationEnabled: true, familyCovered: 2,
+  }, undefined);
+});
+
 test.each(["active", "checkout"])(
   "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
   async (stage) => {
@@ -612,8 +661,10 @@ test.each(["active", "checkout"])(
       expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
       expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
       expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+        accountHint: null,
         authenticated: true,
         authorizationEnabled: true,
+        familyCovered: 0,
       }, undefined);
     } finally {
 

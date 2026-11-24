@@ -26,6 +26,7 @@ import {
 } from "./device-sync-maintenance-import.ts";
 import {
   HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+  resolveHostedDeviceSyncYieldRetryAt,
 } from "./device-sync-maintenance-limits.ts";
 import {
   loadHostedClinicalRecordsMaintenanceModule,
@@ -332,16 +333,28 @@ async function executeHostedSystemWake(input: {
       });
     }
     case "device-sync.wake":
-      const {
-        runHostedDeviceSyncWakeLane,
-      } = await loadHostedDeviceSyncMaintenanceModule().catch((error: unknown) => {
+      const shouldStopDeviceWork = () => input.signal?.aborted === true
+        || input.shouldYieldBackgroundMaintenance?.() === true;
+      const maintenance = await loadHostedDeviceSyncMaintenanceModule({
+        shouldDeferFirstLoad: input.shouldYieldDeviceImportPreparation,
+        shouldStop: shouldStopDeviceWork,
+      }).catch((error: unknown) => {
         emitHostedDeviceSyncMaintenanceModuleLoadFailureLog({
           error,
           wake: input.wake,
         });
         throw error;
       });
-      const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
+      if (!maintenance) {
+        return createNoopMailboxEffect({
+          backgroundMaintenanceYielded: true,
+          conversationMetrics: null,
+          mailboxLane: "device-sync",
+          nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+          nextWakeReason: HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+        });
+      }
+      const deviceSyncMetrics = await maintenance.runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
@@ -356,9 +369,7 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
-        || input.signal?.aborted === true
-        || input.shouldYieldBackgroundMaintenance?.() === true;
+      const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped || shouldStopDeviceWork();
       const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({

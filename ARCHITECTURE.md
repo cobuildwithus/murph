@@ -1493,8 +1493,10 @@ are encrypted in the existing member private lane, and member deletion cascades
 receipts. Provider calls and encryption stay outside short database transactions.
 One creation per accepted input has a durable dispatch claim; replay returns its
 receipt or an explicit unknown outcome without sending again. A lost response may
-leave an unknown receipt. List is capped at ten polls created by Murph in this
-conversation. Arbitrary provider IDs cannot select another poll. Read exposes
+leave an unknown receipt. Create, list and read identify an unconfirmed poll
+by its reference and question. List returns up to ten entries from the current
+conversation per page, newest first, with a cursor ordered by creation time and
+poll ID. Arbitrary provider IDs cannot select another poll. Read exposes
 provider voter identities in pages of 50 with a continuation cursor; list keeps only summaries.
 
 Linq uses its SDK's native poll create/read/vote methods. The question is a separate
@@ -1666,7 +1668,11 @@ The account-deletion endpoint authenticates the same encrypted browser session
 but admits its suspended owner, so a provider failure can be retried with the
 existing session. This exception grants only deletion; ordinary session reads,
 runtime access, and transaction-time session guards still reject suspension.
-Revoked or expired sessions never qualify.
+Revoked or expired sessions never qualify. For member-requested deletions, the
+suspension transaction also records the confirmed owner and next retry time.
+External retention claims one due request at a time and runs the same deletion
+service. Deleting the member removes the request by cascade. Operator canary
+resets use their own retention policy and never enqueue this member operation.
 Game history beyond one page commits in separate transactions under the suspension
 fence; a request stops after 20 partial pages with a retryable error. The endpoint
 reports every server failure as retryable, and the delete dialog stays open for any
@@ -4427,7 +4433,8 @@ existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
 
 The closed `measurement.add` V1 action admits `estimated-vo2-max` values from
-10 through 90 and `body-height` from 50 through 272 cm, including decimals.
+10 through 90, `body-height` from 50 through 272 cm and `body-weight` from 20
+through 350 kg, including decimals.
 One per-metric range table validates both the action and native request.
 Runtime writes a manual measurement with the
 catalog unit, envelope `requestedAt` as `occurredAt`, and an event id derived
@@ -4437,22 +4444,26 @@ exists, including a corrected record or tombstone. Ordinary same-id measurement
 upserts retain their existing behavior. Created actions report `applied`; kept
 actions report `unchanged`. Neither outcome proves replica publication.
 
-About you reads `heightCm` from the existing companion Numbers response.
-`readCompanionBodyHeight` uses `metricsIndex`'s canonical `body-height`
-selection, so latest-valid source precedence and unit normalization stay at
-the metric owner. It returns null without a usable selection or when its date
-is more than the catalog's 365 days before today's vault-local date, even if
-the selection was fresh at publication. No extra bucket, profile field,
+About you reads `heightCm` and `weightKg` from the existing companion Numbers
+response. `readCompanionBody` uses `metricsIndex`'s canonical `body-height` and
+`body-weight` selections, so latest-valid source precedence and unit
+normalization stay at the metric owner. Each is null only without a usable
+selection: a saved height or weight stands until a newer one replaces it,
+however old. Generation 19 replicas therefore select `body-height` and
+`body-weight` from every point, past the 365-day lookback that still bounds
+their metric rows and every other metric's selection; the bump rebuilds older
+replicas on their next freshness check. No extra bucket, profile field,
 projection generation or endpoint is added. The Numbers read retains native
 session and health-authority checks before and after loading private data.
 
-Height introduces no persisted fields. The existing measurement's metric,
+Height and weight introduce no persisted fields. The existing measurement's metric,
 value, unit, source, title and occurrence time are private health content in
 the canonical vault; the hosted checkpoint and browser replica seal them.
 The queued action payload is encrypted member-action content. The opaque
 action/event identity and terminal status remain operational metadata, not
-health values or lookup keys derived from them. `heightCm` is an owner-only,
-no-store response field, never a profile column or friend-sharing field.
+health values or lookup keys derived from them. `heightCm` and `weightKg` are
+owner-only, no-store response fields, never profile columns or friend-sharing
+fields.
 
 Ship this decoder, canonical writer and runtime handler before enabling the
 companion measurement producer. Deploy and verify the Worker and runner first,
@@ -4465,6 +4476,9 @@ contracts decoder in Worker and runner (including warm bundle replacement)
 before Web can enqueue it, then ship the app. Old VO2 requests and manual
 measurement records retain their shapes; older apps ignore the additive
 Numbers field. Retain height-capable consumers while height requests remain.
+`body-weight` follows the same order: Worker and runner first, then Web, then
+the app that sends it. Retain weight-capable consumers while weight requests
+remain.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
@@ -5950,7 +5964,12 @@ Fitbit and Google Health are ordinary, distinct Junction source authorities insi
 
 ## Feedback diagnostic tasks
 
-Web owns feedback and its nullable member linkage. The Ops-authenticated
+Web owns feedback and its nullable member linkage. A private-chat moderation
+review stores a fixed category and the callback-bound person account. Operators
+can use the exact review row to locate that account in Ops usage for a human
+suspension decision. Digest section numbers are local to a single email.
+
+The Ops-authenticated
 `/api/ops/feedback` endpoint lists product-only summaries, accepts a feedback id,
 a bounded question and an idempotency key, and lists associated diagnostic
 results. GET without `feedbackId` lists feedback; GET with it lists tasks;
@@ -6145,13 +6164,14 @@ Only the insertion winner schedules Next after(), with its own secure-box unwrap
 scope and prepared in-memory reference. The Node route declares maxDuration 300.
 One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
 reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
-logging are off. After admission, generation reads height once through the existing
-Companion replica loader and latest-valid body-height helper, outside transactions
-and under Browser Vault health authority. A height no older than 365 days is sent
-to OpenAI as whole centimeters in the prompt framing to preserve real proportions.
-Missing height or a failed read leaves the prompt unchanged; share authority is
-rechecked before provider dispatch. Height is never added to card or Messages
-text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
+logging are off. After admission, generation reads height and weight once through
+the existing Companion replica loader and latest-valid body helper, outside
+transactions and under Browser Vault health authority. The saved height and
+weight, however old, are sent to OpenAI in the prompt framing, as whole feet and inches with centimeters and whole pounds with
+kilograms, so the picture keeps their real body. Either may be missing alone.
+Missing values or a failed read leave the prompt without them; share authority
+is rechecked before provider dispatch. Height and weight are never added to
+card or Messages text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
 independent of client disconnect. Output is decoded and encoded once at quality
 90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
 The existing store enforces the 3 MiB envelope bound.
@@ -6233,8 +6253,8 @@ The inference provider boundary caps positive quantities at 10,000 while
 preserving fractional units. Typed rep counts already have a safe-integer
 bound; the route-summary boundary also caps `distanceM` at
 `Number.MAX_SAFE_INTEGER`, preserving fractional and long-distance posts.
-These bounds keep totals finite across the admitted 10,000 entries. Reducers
-do not validate the same input again.
+These bounds keep each entry's amount finite. Reducers do not validate the
+same input again.
 
 `patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
 open and shallow field merge, then seal outside the transaction. Its short
@@ -6267,15 +6287,14 @@ View owners filter health awards under live authority before choosing one gold m
 award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
 unseen rows and preserves the first acknowledgement time.
 
-The input readers in BE1/BE2 own the plan's limit-plus-one admission (500 games,
-10,000 entries); an incomplete input settles nothing. Persistence adds no
+The input readers in BE1/BE2 read every game and entry. Persistence adds no
 per-item queries or transactions. Award reads deliberately have no pagination
 or materialized totals, per the locked plan. The award sort index serves the
 Medals page, the subject index serves cascading deletion, the picture index
 serves owner/live/capture-order reads, and measure/task reads use composite keys.
 
-`series.ts` loads at most 501 games and 10,001 own entries, admits 500/10,000,
-and opens admitted task words and typed reps/route payloads in one batch. It
+`series.ts` loads every game and own entry, and opens their task words and
+typed reps/route payloads in one batch. It
 loads task classifications and measure state in two owner-scoped batch reads.
 Typed entries emit their own measure immediately; untyped entries use the day's
 terms revision and the seat override or group default. Retakes contribute once;
@@ -6381,8 +6400,7 @@ retry, new route or wire change; the next ordinary read can try unfinished work.
 
 Uncached untyped phrases are deduplicated and classified sequentially in
 `after()`, with one Responses and one Decisions call sharing an eight-second
-deadline per phrase, no retries, then one sealed cache batch insert. The source
-caps bound distinct credited phrases by 10,000. Provider failure leaves the
+deadline per phrase, no retries, then one sealed cache batch insert. Provider failure leaves the
 phrase uncached; interrupted background work can remain pending on a later read.
 The classifier uses the existing ideas model/client configuration. The live
 synthetic eval runs with `pnpm exec tsx --tsconfig apps/web/tsconfig.json
@@ -6555,13 +6573,12 @@ friend wins over duplicate pending invitations. The caller rechecks the cohort o
 returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
-500 games / 10,000 entries as limit-plus-one batches, including each friend's
+every contributing game in pages of 500, including each friend's
 other games, and exposes only exercise aggregates. Individual exercise comparisons admit the
-viewer and the selected friend. If lifetime entries exceed the budget on a week
-or month board, one more bounded entry query keeps the viewer's exercise catalog
-and peers' credited days in the requested period. The catalog then shows the
-viewer's known exercises. All-time overflow reads the viewer's catalog alone
-and returns incomplete rankings. Windowed peer data cannot settle lifetime passes.
+viewer and the selected friend. Week and month boards read the viewer's lifetime
+entries and peers' credited days in the requested period; when that leaves peer
+days out, the catalog shows the viewer's known exercises. Windowed peer data
+cannot settle lifetime passes.
 Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
@@ -6575,10 +6592,10 @@ the same deferred cache writer used by own Progress. It classifies sequentially,
 seals each owner's batch under that owner's key outside the transaction, then
 inserts all resolved rows once. The committing transaction rechecks the requesting
 session and current friendship while holding the affected pair locks; authority
-loss writes nothing. The next complete read settles awards idempotently.
+loss writes nothing. The next read settles awards idempotently.
 Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
-ranks; private rows have no rank, amount, chart line or gap. Caps set
-`Friends.incomplete` and settle nothing. Exercise reads schedule pass settlement after the response using the ranked input.
+ranks; private rows have no rank, amount, chart line or gap. `Progress.incomplete`
+and `Friends.incomplete` are always false; shipped app builds still require them. Exercise reads schedule pass settlement after the response using the ranked input.
 Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
@@ -6622,17 +6639,17 @@ make a first grant. Restoring a revoked scope requires a current revision.
 Deselecting Steps or Sleep on the person board also withdraws that scope from
 older eligible rooms for the same pair in the same transaction.
 
-Progress collection bounds are 500 games, 10,000 entries and at most 5,000
-current player identities. Deferred friend inference admits at most 10,000
-member-bound phrases, each with at most two sequential provider calls. Sealing
-runs one owner batch at a time, then one transaction takes at most 4,999 pair
-locks, two cohort queries, the existing native-session check and one cache insert.
+Progress reads every game, entry and current player identity. Deferred friend
+inference classifies each distinct member-bound phrase once, with at most two
+sequential provider calls each. Sealing runs one owner batch at a time, then one
+transaction takes one pair lock per affected friend, two cohort queries, the
+existing native-session check and one cache insert.
 No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
 blocks), repeated at the post-decryption and award-commit authority boundaries.
-Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
-source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
-transactions. Names are one batch of at most 5,001 fields including pending invite labels
-and a departure label. The same 501-game admission query selects at most ten
+Game inputs read contributing game ids once, then games and entries in pages of 500 games,
+then the task cache and measure state; their fields are opened in batches, outside
+transactions. Names are one batch including pending invite labels
+and a departure label. The same cohort game query selects at most ten
 player seats and nine invitation seats per game; occupied invitation seats are
 excluded. Pending identities never enter game-amount or pair-health reads. Exercise pills skip sharing-room discovery. Steps and Sleep discover
 eligible pair rooms, read the viewer's requested replica metric and open
@@ -6641,8 +6658,8 @@ projection for the selected friend and metric. Its two authority transactions
 retain both membership identities and check the exact grant generation. One
 post-open discovery catches a changed game binding or a bystander in the thread
 or group. Only this last discovery reads outgoing grants for the sharing preview.
-The full pair board retains its four scopes per person. Sharing likewise has at most 500
-sequential provider observations, transactions and post-commit wakes; verified
+The full pair board retains its four scopes per person. Sharing likewise runs one
+sequential provider observation, transaction and post-commit wake per room; verified
 contact checks run twice per room. The existing board/sharing owners retain
 their internal database and key-access bounds. Maximum-room tests assert the board concurrency bound, sequential sharing
 transactions, exact provider/contact call counts, and
@@ -7619,9 +7636,11 @@ binding. Pairs remain visible in exact two-person rooms even when unbound or
 bound elsewhere; an expanded room needs the pair's binding. Pair rematches
 include their invited addressee in the current-player projection. Keys are
 computed only for two to ten people; larger rooms cannot claim an unbound game.
-Deleting the room owner removes the room and clears the binding; ownership is
-not transferred. Resolved verified room members plus all extant player IDs,
-including leavers, retain block, suspension and revoked-consent checks.
+Deleting the room owner removes the room and clears the binding. For a settled
+group, the departure event records that the game was shared. The exact verified
+surviving roster can read its result in another room. Block, suspension and
+revoked-consent checks cover verified room members and all extant player IDs,
+including leavers.
 Unresolved bystanders acquire no account rights.
 
 Runtime funding remains one database-only admission query over at most 32 fresh
@@ -8049,8 +8068,16 @@ policy and allows a skip, with no game host tools or lore. Egress checks the
 Private game reminders reuse the signed group-tool transport for a direct-only
 `my_game_reminders` request. The runtime member and accepted direct input own
 authority; Web returns only that member's live tasks, schedule, status, peer
-first names and reminder settings. Settings and both chat tools write through
-`setReminders`. `canText` additionally requires the private-reminders flag,
+first names and reminder settings. Native clients PATCH `/api/game/v1/me/reminders`
+with one changed preference: `{push}`, `{text}`, or `{minutes}` for the profile,
+`{gameId, on}` or `{gameId, minutes}` for one live seat. Times are local minutes
+since midnight; a null seat time restores the profile default. A profile
+`{minutes}` moves every live seat to that time, as the app's top time and chat do. Build 120 reads
+the full model with GET and saves it with PUT. The server stores a digest of the
+returned preferences per authenticated session. A missing or stale read returns
+409 and requires a fresh GET before editing again. A successful replacement
+advances the session digest. Chat tools apply scoped edits under the same
+profile lock. `canText` additionally requires the private-reminders flag,
 remaining AI access and usage, and an already deliverable direct thread; the
 game never grants a private conversation. A per-seat `reminder_every_day` option
 changes count-game reminder urgency without changing posting eligibility.

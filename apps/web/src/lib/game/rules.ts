@@ -153,17 +153,6 @@ export const GAME_DEFAULT_LENGTH_DAYS = 7;
 export const GAME_MIN_LENGTH_DAYS = 3;
 export const GAME_MAX_LENGTH_DAYS = 365;
 export const GAME_MAX_START_DAYS_OUT = 60;
-export const GAME_TICKET_USE_DAYS = 14;
-
-/** A ticket's redeem-by time: derived, never stored. */
-export function ticketUseBy(createdAt: Date): Date {
-  return new Date(createdAt.getTime() + GAME_TICKET_USE_DAYS * 24 * 60 * 60 * 1000);
-}
-
-/** Open tickets expire just after their use-by time; redeemed ones never do. */
-export function isTicketExpired(ticket: { status: string; createdAt: Date }, now: Date): boolean {
-  return ticket.status === "open" && now.getTime() > ticketUseBy(ticket.createdAt).getTime();
-}
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_MAX_OPEN_PER_PAIR = 10;
 /** After a pair game ends its chat stays open, and its players can still correct their own days, for this long. Then the result is final. */
@@ -177,6 +166,8 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   CHANGE_PENDING: 409,
   CHANGE_EXPIRED: 409,
   CHAT_UNAVAILABLE: 503,
+  GAME_CHAT_REQUIRED: 409,
+  GAME_CHAT_CHANGED: 409,
   CHALLENGE_USED: 409,
   REPLY_USED: 409,
   CONTENT_NOT_ALLOWED: 422,
@@ -198,7 +189,6 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   TERMS_CHANGED: 409,
   TERMS_REQUIRED: 403,
   HEALTH_DATA_REQUIRED: 403,
-  TICKET_EXPIRED: 410,
   TICKET_NOT_HELD: 403,
   UNAUTHENTICATED: 401,
 };
@@ -429,15 +419,12 @@ export function isGameDecided(state: RuleState, now: Date): boolean {
   const entries = indexGameEntries(state.entries);
   const schedule = currentTerms(state.game.terms).schedule;
   if ("count" in schedule) return players.every(player => scorePlayer(state, player, undefined, entries).score >= schedule.count);
-  for (let day = state.game.lengthDays - 1; day >= 0; day--) {
-    if (!isScheduledDay(state, day)) continue;
-    return players.every(player => {
-      if (!completedEntry(entries, player.memberId, day)) return false;
-      const start = dayStartInstant(addDays(player.dayOne!, day), player.timeZone).getTime();
-      return now.getTime() >= start + GAME_GRACE_MS || !graceOpen(state, player, day - 1, entries);
-    });
-  }
-  return false;
+  const day = lastCheckInDay(state);
+  return players.every(player => {
+    if (!completedEntry(entries, player.memberId, day)) return false;
+    const start = dayStartInstant(addDays(player.dayOne!, day), player.timeZone).getTime();
+    return now.getTime() >= start + GAME_GRACE_MS || !graceOpen(state, player, day - 1, entries);
+  });
 }
 
 /** The acceptance deadline shared by invited and negotiating games. */
@@ -446,9 +433,9 @@ export function isGameInviteExpired(game: { status: string; inviteExpiresAt: Dat
     && game.inviteExpiresAt !== null && game.inviteExpiresAt <= now;
 }
 
-/** This player's last day is over: the game is done for them, whatever the other player's clock says. */
+/** This player's last check-in day is over: the game is done for them, whatever the other player's clock says. */
 export function hasFinishedGame(state: RuleState, player: RulePlayer, now: Date): boolean {
-  return (dayIndexAt(player, now) ?? -1) >= state.game.lengthDays;
+  return (dayIndexAt(player, now) ?? -1) > lastCheckInDay(state);
 }
 
 /** A live game is waiting on this player today: a scheduled day they haven't posted yet. */
@@ -460,18 +447,27 @@ export function needsPostToday(state: RuleState, memberId: string, now: Date): b
 }
 
 /**
- * The settle time: when the last player's last day ends. The grace hour is
- * added only for a player whose last day can still take a late post.
+ * The last scheduled day. Off days after it can't take a post, so the game is
+ * over once it closes: a Monday-to-Friday week ends on Friday, not Sunday.
+ */
+export function lastCheckInDay(state: RuleState): number {
+  for (let day = state.game.lengthDays - 1; day >= 0; day -= 1) if (isScheduledDay(state, day)) return day;
+  return state.game.lengthDays - 1;
+}
+
+/**
+ * The settle time: when the last player's last check-in day ends. The grace
+ * hour is added only for a player whose last check-in day can still take a late post.
  */
 export function settleDueAt(state: RuleState): Date {
-  const { lengthDays } = state.game;
+  const lastDay = lastCheckInDay(state);
   let due = 0;
   // One index keeps ten-player settlement checks linear in entries.
   const entries = indexGameEntries(state.entries);
   for (const player of remainingPlayers(state)) {
     if (!player.dayOne) continue;
-    const end = dayStartInstant(addDays(player.dayOne, lengthDays), player.timeZone).getTime();
-    due = Math.max(due, end + (graceOpen(state, player, lengthDays - 1, entries) ? GAME_GRACE_MS : 0));
+    const end = dayStartInstant(addDays(player.dayOne, lastDay + 1), player.timeZone).getTime();
+    due = Math.max(due, end + (graceOpen(state, player, lastDay, entries) ? GAME_GRACE_MS : 0));
   }
   return new Date(due);
 }
@@ -693,10 +689,23 @@ export function decideJoin(
   assertJoinOpen(state, input, claimed);
   const seat = admissionSeat(state, input, claimed);
   const joiner: RulePlayer = { memberId: input.memberId, seat, timeZone: input.timeZone, dayOne: gameDayOne(calendarPlayers(state)), joinedAt: input.now };
-  if (group && game.status === "live") return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  if (group && game.status === "live") {
+    if (!hasPlayableGroupDay(state, input.timeZone, input.now)) reject("INVITE_EXPIRED", "Your last scheduled day has ended.");
+    return { kind: "join", seat, startedAt: input.now, activates: false, players: [{ ...joiner, dayOne: joiner.dayOne! }] };
+  }
   return { kind: "join", seat, startedAt: input.now, ...(group ? { activates: true } : {}),
     ...scheduleFor(state, [...remainingPlayers(state).filter(player => player.memberId !== input.memberId), joiner],
       player => acceptanceStartDate(input.now, player.timeZone), game.startsOn) };
+}
+
+export function hasPlayableGroupDay(state: RuleState, timeZone: string, now: Date): boolean {
+  const dayOne = gameDayOne(calendarPlayers(state));
+  if (!dayOne) return true;
+  const first = Math.max(0, daysBetween(dayOne, gameLocalDate(now, timeZone)));
+  for (let day = first; day < state.game.lengthDays; day++) {
+    if (isScheduledDay(state, day)) return true;
+  }
+  return false;
 }
 
 type JoinInput = Parameters<typeof decideJoin>[1];
@@ -963,10 +972,10 @@ export function scorePlayer(state: RuleState, player: RulePlayer, throughDay = s
 }
 
 /** Consecutive scheduled posts, ignoring an unposted current day and off days. */
-export function playerStreak(state: RuleState, player: RulePlayer, now: Date): number {
+export function playerStreak(state: RuleState, player: RulePlayer, now: Date, completedDays?: ReadonlySet<number>): number {
   const today = dayIndexAt(player, now);
   if (today === null) return 0;
-  const posted = new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
+  const posted = completedDays ?? new Set(state.entries.filter((entry) => entry.memberId === player.memberId && entry.attempt > 0 && entry.withdrawnAt === null && !entry.incomplete).map((entry) => entry.dayIndex));
   let streak = 0;
   for (let day = Math.min(today, state.game.lengthDays - 1); day >= eligibleFromDay(state, player); day -= 1) {
     if (!isScheduledDay(state, day)) continue;

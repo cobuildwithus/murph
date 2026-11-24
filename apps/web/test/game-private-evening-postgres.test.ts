@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const m = vi.hoisted(() => ({ covered: vi.fn() }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), canText: vi.fn() }));
 vi.mock("@/src/lib/game/service", async original => ({
-  ...await original<typeof import("@/src/lib/game/service")>(), canTextGameReminders: async () => true,
+  ...await original<typeof import("@/src/lib/game/service")>(), canTextGameReminders: m.canText,
 }));
-vi.mock("@/src/lib/game/evening-check-in", async original => ({
-  ...await original<typeof import("@/src/lib/game/evening-check-in")>(), roomCoversEveningGame: m.covered,
+vi.mock("@/src/lib/game/chat-membership", async original => ({
+  ...await original<typeof import("@/src/lib/game/chat-membership")>(), readGameChatAudience: m.audience, readGameChatAuthority: async () => true,
 }));
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -53,7 +53,9 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
   beforeEach(() => {
     vi.stubEnv("MURPH_GAME_PRIVATE_REMINDERS_ENABLED", "true");
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    m.covered.mockReset().mockResolvedValue(false);
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    m.canText.mockReset().mockResolvedValue(true);
+    m.audience.mockReset().mockResolvedValue(null);
   });
   afterEach(async () => {
     await db.hostedLinqDelivery.deleteMany({ where: { payloadOwnerMemberId: { in: members }, template: "game_private_evening" } });
@@ -63,8 +65,8 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
   });
 
   it("reserves one member/date receipt, excludes room-covered games, and invalidates a closed day", async () => {
-    const owner = await member(), id = await game(owner);
-    m.covered.mockResolvedValueOnce(true);
+    const owner = await member(), id = await game(owner, await member());
+    m.audience.mockResolvedValueOnce({});
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
@@ -85,6 +87,19 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
       memberId: owner, date: "2026-11-07", expiresAt: "2026-11-07T03:45:00.000Z", conversationLaneSeq: "0",
       batch: [{ gameId: id, termsVersion: 1, dayIndex: 1 }] };
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, at))).toBe(false);
+  });
+
+  it("sends one private follow-up on each night around the clocks going back", async () => {
+    const owner = await member(), id = await game(owner), zone = "America/New_York", from = new Date("2026-10-27T12:00:00Z");
+    await db.gameProfile.update({ where: { memberId: owner }, data: { reminderMinutes: 75, timeZone: zone } });
+    await db.game.update({ where: { id }, data: { startedAt: from } });
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: id, memberId: owner } },
+      data: { timeZone: zone, dayOne: new Date("2026-10-27T00:00:00Z"), joinedAt: from } });
+    // 01:15 happens twice on November 1; its follow-up at 02:15 happens once each night.
+    for (const [at, on] of [["2026-10-31T06:15:00Z", "2026-10-31"], ["2026-11-01T07:15:00Z", "2026-11-01"], ["2026-11-02T07:15:00Z", "2026-11-02"]] as const) {
+      expect(await reserveDuePrivateEveningCheckIns(new Date(at)), on).toBe(1);
+      expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner, on, 75) } })).toMatchObject({ sourceRef: `${owner}:${on}:75` });
+    }
   });
 
   it("finds a private reminder after twenty already posted games", async () => {
@@ -114,12 +129,46 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await reserveDuePrivateEveningCheckIns(one)).toBe(0);
   });
 
+  it("reads a slow room once and reserves both unrelated private reminders", async () => {
+    const [first, second] = [await member(), await member()].sort();
+    const room = await member();
+    for (let i = 0; i < 6; i++) await game(first!, room);
+    await game(first!);
+    await game(second!);
+    let enteredWrite = false;
+    m.canText.mockImplementation(async (id, client) => {
+      if (id === first && client !== db) enteredWrite = true;
+      return true;
+    });
+    const duringWrite: boolean[] = [];
+    m.audience.mockImplementation(async (id: string | null) => {
+      if (id !== room) return false;
+      duringWrite.push(enteredWrite);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      throw new Error("Room unavailable");
+    });
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(2);
+    expect(duringWrite).toEqual([false]);
+  });
+
+  it("continues to the next profile after a member query fails", async () => {
+    const [first, second] = [await member(), await member()].sort();
+    await game(first!);
+    await game(second!);
+    m.canText.mockImplementation(async (id: string) => {
+      if (id === first) throw new Error("Unavailable member");
+      return true;
+    });
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(second!) } })).toBeTruthy();
+  });
+
   it("continues private reminders past an unreadable room", async () => {
     const [first, second] = [await member(), await member()].sort();
     const room = await member();
     await game(first!, room);
     await game(second!);
-    m.covered.mockImplementation(async (roomId: string | null) => {
+    m.audience.mockImplementation(async (roomId: string | null) => {
       if (roomId === room) throw new Error("Roster unavailable");
       return false;
     });

@@ -161,8 +161,14 @@ export function JoinInviteStudy() {
       <Stage label="Checkout paused" state="checkout-paused">
         <JoinInviteCheckoutPausedScreen href={`/join/${INVITE_CODE}`} />
       </Stage>
-      <Stage label="Payment received" state="payment-received">
+      <Stage label="Back from checkout: checking payment" state="checkout-returned">
         <JoinInviteSuccessScreen status={status("checkout")} />
+      </Stage>
+      <Stage label="Back from checkout in another browser" state="checkout-returned-signed-out">
+        <JoinInviteSuccessScreen status={verify} />
+      </Stage>
+      <Stage label="Back from checkout without paying" state="checkout-unpaid">
+        <JoinInviteSuccessScreen hasCheckoutSession={false} status={status("checkout")} />
       </Stage>
       <Stage label="Setup delayed" state="setup-delayed">
         <JoinInviteSuccessScreen showSetupDelaySupport status={status("checkout")} />
@@ -181,7 +187,7 @@ function Stage({
   state: string;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-3">
+    <section className="flex min-w-0 flex-col gap-3" id={`join-invite-${state}`}>
       <h3 className="text-sm font-semibold text-foreground">{label}</h3>
       <div
         className="flex min-h-[46rem] flex-1 flex-col overflow-hidden rounded-[2rem] bg-[#1C1915]"

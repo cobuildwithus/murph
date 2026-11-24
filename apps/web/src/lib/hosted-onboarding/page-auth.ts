@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 
+import { isHostedOnboardingError } from "./errors";
 import { readHostedMemberOwnsSubscription } from "./hosted-member-billing-store";
 
 import type { HostedAppSession } from "./app-session";
@@ -73,6 +74,9 @@ const resolveHostedPublicLayoutAuthSnapshot = cache(
         status: "ready",
       };
     } catch (error) {
+      if (isHostedOnboardingError(error) && error.code === "HOSTED_MEMBER_SUSPENDED") {
+        return { status: "unavailable" };
+      }
       if (!isHostedSessionStoreUnavailableError(error)) {
         throw error;
       }

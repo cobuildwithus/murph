@@ -74,7 +74,11 @@ export async function requireHostedAppSessionFromRequest(request: Request): Prom
   return session;
 }
 
-/** Only the account-deletion endpoint may admit a suspended owner's session. */
+/** The deletion surface may admit a suspended owner to retry cleanup. */
+export async function getHostedAccountDeletionPageSession(): Promise<HostedAppSession | null> {
+  return resolveHostedAppSessionFromHeaders(await requestHeaders(), "account-deletion");
+}
+
 export async function requireHostedAccountDeletionSessionFromRequest(request: Request): Promise<HostedAppSession> {
   const session = await resolveHostedAppSessionFromHeaders(request.headers, "account-deletion");
   if (!session) throw authRequired();

@@ -14,7 +14,7 @@ const request = (params: Record<string, string>, contentType = 'image/jpeg') => 
   { method: 'POST', headers: { 'Content-Type': contentType }, body: new Uint8Array(bytes) });
 beforeEach(() => {
   vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'owner' } });
-  mocks.series.mockResolvedValue({ incomplete: false, successors: new Map([['old.days', 'pushups.reps']]), measures: [{ id: 'pushups.reps', amounts: [
+  mocks.series.mockResolvedValue({ successors: new Map([['old.days', 'pushups.reps']]), measures: [{ id: 'pushups.reps', amounts: [
     { date: '2026-11-01', amount: 40 }, { date: '2026-11-02', amount: 20 }, { date: '2026-11-03', amount: 50 },
   ] }] });
   mocks.put.mockImplementation(async (_member, _input, _bytes, authorize) => authorize({ synthetic: true }));
@@ -32,12 +32,6 @@ describe('Progress JPEG upload HTTP contract', () => {
     const response = await POST(request(input));
     expect(response.status).toBe(200);
     expect(mocks.put).toHaveBeenCalledWith('owner', input, expect.any(Uint8Array), expect.any(Function));
-  });
-  it('does not upload against an incomplete series', async () => {
-    mocks.series.mockResolvedValue({ incomplete: true, measures: [] });
-    const response = await POST(request(query));
-    expect(response.status).toBe(503); expect((await response.json()).error.retryable).toBe(true);
-    expect(mocks.put).not.toHaveBeenCalled();
   });
   it('does not associate bytes with an absent or foreign measure', async () => {
     const response = await POST(request({ ...query, measureId: 'abs.seconds' }));

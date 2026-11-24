@@ -92,12 +92,8 @@ export async function deleteProgressPic(memberId: string, id: string, beforeMuta
 /** The view computes chart positions from its own cumulative points. No totals are persisted here. */
 export async function readProgressPics(memberId: string) {
   const rows = await getPrisma().gameProgressPic.findMany({ where: { memberId, retiredAt: null, stagingSince: null },
-    select: { id: true, takenAt: true, metaEncrypted: true }, orderBy: [{ takenAt: 'asc' }, { id: 'asc' }], take: MAX_PROGRESS_PICS + 1 });
-  if (rows.length > MAX_PROGRESS_PICS) return { incomplete: true, pics: [] };
-  return runWithHostedDomainRootUnwrapCache(async () => {
-    const pins = await readPictureMetadata(memberId, rows);
-    return { incomplete: pins.length !== rows.length, pics: pins };
-  });
+    select: { id: true, takenAt: true, metaEncrypted: true }, orderBy: [{ takenAt: 'asc' }, { id: 'asc' }] });
+  return runWithHostedDomainRootUnwrapCache(() => readPictureMetadata(memberId, rows));
 }
 
 async function readPictureMetadata(memberId: string, rows: PictureRow[]) {

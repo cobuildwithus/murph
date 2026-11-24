@@ -172,6 +172,239 @@ describe("group admission switch and audience keys", () => {
 });
 
 describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
+  it.each([false, true])("matches every pending task to its player in a forwarded-link chat (override=%s)", async override => {
+    const starter = await person(), addressed = await person(), forwarded = await person();
+    const people = [starter, addressed, forwarded];
+    const game = await create(starter, [addressed]);
+    await ok(addressed.id, join(game.token));
+    await ok(forwarded.id, join(game.token));
+    const context = await groupContext(game.id, people);
+    const next = { ...terms, defaultTask: "Stretch", tasks: override ? [{ seat: 10, text: "Swim" }] : [] };
+    expect(await runGameCommand({ ...context, actorMemberId: starter.id, now: createdAt, command: {
+      type: "editTerms", gameId: game.id, expectedTermsVersion: 1, proposalId: randomUUID(), terms: next,
+    } })).toMatchObject({ ok: true });
+    const state = await readGameChatState(context.chatContainerMemberId, people.map(p => p.id));
+    const card = hostedGameChatStateSchema.parse(state).games.find(card => card.id === game.id)!;
+    const change = card.pendingChange?.change;
+    expect(change?.kind).toBe("edit");
+    for (const player of card.players) {
+      const expected = override && player.memberId === forwarded.id ? "Swim" : "Stretch";
+      expect(change?.kind === "edit" && change.tasks).toContainEqual({ seat: player.seat, text: expected });
+      expect(card.terms.tasks.some(task => task.seat === player.seat)).toBe(true);
+    }
+    expect((await readGame(game.id, forwarded.id, true))?.players.find(p => p.memberId === forwarded.id)?.seat).toBe(10);
+  });
+
+  it("shows complete streaks with bounded history previews", async () => {
+    const { game, people } = await majorityGame(4);
+    for (const player of people) for (let day = 0; day < terms.lengthDays!; day++) await entry(game.id, player.id, day);
+    await settle(game.id, people[0].id);
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(Date.parse("2030-04-02") - Date.now()) } });
+    const detail = await readGame(game.id, people[0].id, true);
+    const { readHistory } = await import("@/src/lib/game/service");
+    const history = (await readHistory(people[0].id, true)).groups?.[0].games[0];
+    expect(detail?.players.map(p => p.streak)).toEqual([10, 10, 10, 10]);
+    expect(history?.players.map(p => p.score)).toEqual([10, 10, 10, 10]);
+    expect(history?.players.map(p => p.streak)).toEqual([10, 10, 10, 10]);
+    expect(history?.previews).toHaveLength(6);
+  });
+
+  it("keeps a live invitation on Home without exposing player detail", async () => {
+    const [starter, joined, invited] = await Promise.all([person(), person(), person()]);
+    const game = await create(starter, [joined, invited]);
+    await ok(joined.id, join(game.token));
+    expect(await readGame(game.id, invited.id, true)).toBeNull();
+    expect((await readHome(invited.id, true)).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    await ok(invited.id, join(game.token));
+    expect((await readHome(invited.id, true)).groupInvitations).toEqual([]);
+  });
+
+  it("dismisses only the addressed member's Home invitation", async () => {
+    const [starter, invited, other] = await Promise.all([person(), person(), person()]);
+    const game = await create(starter, [other, invited]);
+    const dismiss = { type: "dismissInvite", gameId: game.id } as const;
+    expect(await run(starter.id, dismiss)).toMatchObject({ ok: false });
+    const { POST } = await import("@/app/api/game/v1/games/[id]/dismiss-invite/route");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await POST(await httpGame(invited.id, `/games/${game.id}/dismiss-invite`, "POST"), { params: Promise.resolve({ id: game.id }) });
+      expect(response.status).toBe(200);
+    }
+    expect((await readHome(invited.id, true)).games.some(view => view.id === game.id)).toBe(false);
+    await ok(other.id, join(game.token));
+    expect((await readHome(invited.id, true)).groupInvitations).toEqual([]);
+    await ok(invited.id, join(game.token));
+    expect((await gameRow(game.id)).players).toHaveLength(3);
+  });
+
+  it("explains the room requirement before a seated player edits", async () => {
+    const people = await Promise.all([person(), person(), person()]);
+    const g = await create(people[0], people.slice(1));
+    await ok(people[1].id, join(g.token)); await ok(people[2].id, join(g.token));
+    expect(await gameRow(g.id)).toMatchObject({ chatContainerMemberId: null });
+    expect(await readGame(g.id, people[1].id, true)).toMatchObject({ changeControls: { canEdit: false, canEditStakes: false, requiresGroupChat: true } });
+    expect(await run(people[1].id, { type: "editTerms", gameId: g.id, expectedTermsVersion: 1, proposalId: randomUUID(),
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose a trail" }] } })).toMatchObject({ ok: false, status: 409, error: { code: "GAME_CHAT_REQUIRED" } });
+  });
+
+  it("allows the deciding prize vote while the last player can still play", async () => {
+    const zones = ["Pacific/Kiritimati", "Pacific/Honolulu", "UTC", "UTC"];
+    const people = await Promise.all(zones.map(zone => person(zone)));
+    await exactRoom(people);
+    const game = await create(people[0], people.slice(1));
+    for (let i = 1; i < people.length; i++) await ok(people[i].id, join(game.token, zones[i]));
+    const proposalId = randomUUID();
+    const send = (actor: number, command: GameCommand, time: string) => runGameCommand({
+      multiplayer: true, actorMemberId: people[actor].id, command, now: new Date(`2030-03-18T${time}:00Z`),
+    });
+    const ask: GameCommand = { type: "editTerms", gameId: game.id, proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose the park" }] } };
+    const opened = await send(1, ask, "12:00");
+    expect(opened.ok ? "open" : opened.error.code).toBe("open");
+    const vote: GameCommand = { type: "respondChange", gameId: game.id, proposalId, decision: "approve" };
+    expect((await send(2, vote, "12:01")).ok).toBe(true);
+    const last = await send(3, vote, "14:00");
+    expect(last.ok ? "accepted" : last.error.code).toBe("accepted");
+    const row = await gameRow(game.id);
+    expect(row.status).toBe("live");
+    expect(row.pendingChange).toBeNull();
+    expect((await run(people[1].id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Balance practice" },
+      new Date("2030-03-18T14:01:00Z"))).ok).toBe(true);
+  });
+
+  it("preserves the winning seat when deletion is the first action after the deadline", async () => {
+    const outcomes = [];
+    for (const readFirst of [true, false]) {
+      const people = await Promise.all([person(), person(), person(), person()]);
+      const game = await create(people[0], people.slice(1));
+      for (const player of people.slice(1)) await ok(player.id, join(game.token));
+      for (const [seat, total] of [3, 2, 1, 0].entries()) {
+        for (let day = 0; day < total; day++) await entry(game.id, people[seat].id, day);
+      }
+      // Reconstruct the same past calendar for both orderings without shifting the deletion clock.
+      await db.gamePlayer.updateMany({ where: { gameId: game.id }, data: {
+        dayOne: new Date("2022-06-01"), joinedAt: new Date("2022-05-31T12:00:00Z"),
+      } });
+      await db.game.update({ where: { id: game.id }, data: { startsOn: new Date("2022-06-01"), startedAt: new Date("2022-05-31T12:00:00Z") } });
+      for (let day = 0; day < 3; day++) await db.gameEntry.updateMany({ where: { gameId: game.id, dayIndex: day },
+        data: { receivedAt: new Date(Date.UTC(2022, 5, day + 1, 12)) } });
+      if (readFirst) await readGame(game.id, people[1].id, true);
+      const memberIds = [people[0].id];
+      const prepared = await prepareGameAccountDeletion({ memberIds, prisma: db });
+      await db.$transaction(tx => applyGameAccountDeletionTx({ memberIds, prepared, tx, now: new Date() }));
+      await db.hostedMember.delete({ where: { id: people[0].id } });
+      const view = await readGame(game.id, people[1].id, true);
+      outcomes.push({ winners: view?.result?.winnerSeats, score: view?.result?.scores.find(s => s.seat === 0)?.score,
+        recipients: (await gameRow(game.id)).tickets[0]?.owedToSeats });
+    }
+    expect(outcomes).toEqual([{ winners: [0], score: 3, recipients: [0] }, { winners: [0], score: 3, recipients: [0] }]);
+  });
+
+  it.each([0, 3])("preserves a vote opened after seat %i left when that account is erased", async departedSeat => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    await exactRoom([people[1], people[2], people[3], people[0]]);
+    const game = await create(people[0], people.slice(1));
+    for (const player of people.slice(1)) await ok(player.id, join(game.token));
+    await ok(people[departedSeat].id, { type: "leave", gameId: game.id });
+    const proposalId = randomUUID();
+    await ok(people[1].id, { type: "editTerms", gameId: game.id, proposalId, expectedTermsVersion: 1,
+      terms: { ...terms, stakes: [{ kind: "prize", item: "Choose the park" }] } });
+    await erase(people[departedSeat].id);
+    expect((await gameRow(game.id)).pendingChange).toMatchObject({ id: proposalId });
+    const decided = await ok(people[2].id, { type: "respondChange", gameId: game.id, proposalId, decision: "approve" });
+    expect(decided?.terms.stakes).toMatchObject([{ item: "Choose the park" }]);
+    expect(decided?.pendingChange).toBeNull();
+  });
+
+  it("preserves the invitation for survivors after the starter deletes", async () => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1, 3)) await ok(p.id, join(game.token));
+    const linkFor = async (p: Person) => (await readGame(game.id, p.id, true))?.inviteToken === game.token;
+    expect(await Promise.all(people.slice(1, 3).map(linkFor))).toEqual([true, true]);
+    await erase(people[0].id);
+    expect(await Promise.all(people.slice(1, 3).map(linkFor))).toEqual([true, true]);
+    expect((await run(people[3].id, join(game.token))).ok).toBe(true);
+  });
+
+  it("shares the settled result with exactly the remaining players after the room owner deletes", async () => {
+    const owner = await person(), survivors = [await person(), await person()];
+    const room = await exactRoom([owner, ...survivors]);
+    const game = await create(owner, survivors);
+    for (const player of survivors) await ok(player.id, join(game.token));
+    await entry(game.id, owner.id, 0);
+    await settle(game.id, survivors[0].id);
+    const memberIds = [room, owner.id];
+    const prepared = await prepareGameAccountDeletion({ memberIds, prisma: db });
+    await db.$transaction(async tx => {
+      await applyGameAccountDeletionTx({ memberIds, prepared, tx, now: createdAt });
+      await tx.hostedThreadContainer.delete({ where: { memberId: room } });
+      await tx.hostedMember.deleteMany({ where: { id: { in: memberIds } } });
+    });
+    const replacement = await exactRoom(survivors);
+    const read = async () => (await readGameChatState(replacement, survivors.map(p => p.id))).games.find(card => card.id === game.id);
+    expect((await read())?.result?.scores).toContainEqual(expect.objectContaining({ memberId: "departed-seat-0", score: 1 }));
+    chatProof.rooms.set(replacement, [...survivors.map(p => p.email), "nora@example.test"]);
+    expect(await read()).toBeUndefined();
+    chatProof.rooms.set(replacement, survivors.map(p => p.email));
+    await db.gameEvent.updateMany({ where: { gameId: game.id, type: "player_left" },
+      data: { payload: { v: 1, seat: 0, calledOff: false } } });
+    expect(await read()).toBeUndefined();
+  });
+
+  it("preserves the anonymous winning score in the surviving chat", async () => {
+    const people = await Promise.all([person(), person(), person(), person()]);
+    const room = await exactRoom([...people.slice(1), people[0]]);
+    const game = await create(people[0], people.slice(1));
+    for (const p of people.slice(1)) await ok(p.id, join(game.token));
+    for (const [seat, total] of [3, 2, 1, 0].entries()) for (let day = 0; day < total; day++) await entry(game.id, people[seat].id, day);
+    await settle(game.id, people[1].id);
+    await erase(people[0].id);
+    chatProof.rooms.set(room, people.slice(1).map(p => p.email));
+    const app = await readGame(game.id, people[1].id, true);
+    expect(app?.result).toMatchObject({ winnerSeats: [0], outcome: "lost" });
+    const chat = (await readGameChatState(room, people.slice(1).map(p => p.id), people[1].id)).games.find(g => g.id === game.id);
+    expect(chat?.result?.scores.map(s => s.score).sort()).toEqual([0, 1, 2, 3]);
+    expect(chat?.result?.scores.find(s => s.seat === 0)?.memberId).not.toBe(people[0].id);
+    expect(chat?.result?.tickets[0].owedToSeats).toEqual([0]);
+  });
+
+  it("refuses a rematch in a changed room and allows it once the roster matches", async () => {
+    const { people, context, game } = await majorityGame(3);
+    const room = context.chatContainerMemberId;
+    const spectator = await person();
+    chatProof.rooms.set(room, [...people.map(p => p.email), spectator.email]);
+    await settle(game.id, people[0].id);
+    expect(await readGame(game.id, people[0].id, true)).toMatchObject({ status: "settled" });
+    const { POST } = await import("@/app/api/game/v1/games/route");
+    const childId = randomUUID();
+    const command = { type: "createGame" as const, gameId: childId, maxPlayers: 10 as const, previousGameId: game.id, terms };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await POST(await httpGame(people[0].id, "/games", "POST", command));
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toMatchObject({ code: "GAME_CHAT_CHANGED", retryable: false });
+    }
+    expect(await db.game.count({ where: { previousGameId: game.id } })).toBe(0);
+    chatProof.rooms.set(room, people.map(p => p.email));
+    expect((await POST(await httpGame(people[0].id, "/games", "POST", command))).status).toBe(200);
+  });
+
+  it("offers the composer when room discovery exceeds its budget", async () => {
+    const ava = await person();
+    const targets = ["Sam", "Maya"].map((firstName, index) => ({ seat: index + 1, firstName,
+      recipient: { kind: "email" as const, value: `${randomUUID()}@example.test` } }));
+    const command = { type: "createGame" as const, gameId: randomUUID(), maxPlayers: 10 as const, groupWord: "Balance",
+      invitees: targets, terms: { ...terms, startsOn: undefined } };
+    for (let i = 0; i < 20; i++) await exactRoom([ava, await person()]);
+    const { POST } = await import("@/app/api/game/v1/games/route");
+    expect((await POST(await httpGame(ava.id, "/games", "POST", command))).status).toBe(200);
+    await exactRoom([ava, await person()]);
+    const fresh = { ...command, gameId: randomUUID() };
+    const response = await POST(await httpGame(ava.id, "/games", "POST", fresh));
+    expect(response.status).toBe(200);
+    expect((await response.json()).game.composer.murphPhoneNumber).toBeTruthy();
+    expect((await gameRow(fresh.gameId)).chatContainerMemberId).toBeNull();
+  });
+
   it.each([false, true])("refuses bearer admission to a group without member identities (retained seats: %s)", async (retained) => {
     const starter = await person(), invited = await person(), stranger = await person();
     const game = await create(starter, [invited]);
@@ -369,8 +602,24 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await db.gameEvent.findFirst({ where: { gameId: game.id, type: "change_expired" } })).toMatchObject({ payload: { proposalId, reason: "The start date locks once someone checks in." } });
   });
 
-  it("accepts a late day after 20:00 without resetting the calendar, including DST and zero-opportunity joins", async () => {
-    const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person();
+  it("keeps an addressed invitation open after westward travel before a profile refresh", async () => {
+    const starter = await person(), partner = await person("Pacific/Honolulu"), traveler = await person("Pacific/Kiritimati");
+    const game = await create(starter, [partner, traveler]);
+    await ok(partner.id, join(game.token, "Pacific/Honolulu"));
+    const now = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(now.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect((await readHome(traveler.id, true)).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Honolulu")).groupInvitations).toContainEqual({ gameId: game.id, token: game.token });
+    expect((await readHome(traveler.id, true, undefined, "Pacific/Kiritimati")).groupInvitations).toEqual([]);
+    expect(await readInvitePreview(game.token, true, traveler.id, "Pacific/Honolulu")).toMatchObject({ status: "open" });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
+    await ok(traveler.id, join(game.token, "Pacific/Honolulu"), now);
+    expect(await db.gamePlayer.findFirst({ where: { gameId: game.id, memberId: traveler.id } })).toMatchObject({ timeZone: "Pacific/Honolulu" });
+  });
+
+  it("accepts a late day after 20:00 without resetting the calendar, across DST and refuses joins without a playable day", async () => {
+    const a = await person("America/New_York"), b = await person("Pacific/Honolulu"), late = await person(), zero = await person("Pacific/Kiritimati");
     const game = await create(a, [b]);
     await ok(b.id, join(game.token, "Pacific/Honolulu"));
     const lateAt = new Date("2030-03-11T01:30:00Z"); // March 10, 21:30 after New York's DST transition.
@@ -378,13 +627,16 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(late.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, lateAt);
     expect(await db.gameEntry.findFirst({ where: { gameId: game.id, memberId: late.id }, select: { dayIndex: true } })).toEqual({ dayIndex: 1 });
     const ownEnd = dayStartInstant("2030-03-19", "Pacific/Kiritimati");
-    await ok(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd);
-    expect(await run(zero.id, { type: "post", gameId: game.id, entryId: randomUUID(), kind: "words", mediaKeys: [], text: "Done" }, ownEnd)).toMatchObject({ ok: false, error: { code: "DAY_CLOSED" } });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: BigInt(ownEnd.getTime() - Date.now()) } });
+    const { readInvitePreview } = await import("@/src/lib/game/service");
+    expect(await readInvitePreview(game.token, true, zero.id, "Pacific/Kiritimati")).toMatchObject({ status: "expired", noPlayableDay: true });
+    await db.game.update({ where: { id: game.id }, data: { devClockOffsetMs: null } });
+    expect(await run(zero.id, join(game.token, "Pacific/Kiritimati"), ownEnd)).toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
     const row = await gameRow(game.id);
     expect(row.players.every(player => player.dayOne?.toISOString().slice(0, 10) === "2030-03-09")).toBe(true);
     expect(row.players.find(player => player.memberId === late.id)?.joinedAt).toEqual(lateAt);
     const result = parseStoredResult((await settle(game.id, a.id)).result);
-    expect(result.scores.find(score => score.memberId === zero.id)).toMatchObject({ score: 0, misses: 0, eligible: true });
+    expect(result.scores.some(score => score.memberId === zero.id)).toBe(false);
   });
 
   it("uses conditional final-day grace and never admits or leaves after settlement becomes due", async () => {
@@ -392,7 +644,10 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     const game = await create(a, [b]);
     await ok(b.id, join(game.token));
     const end = dayStartInstant("2030-03-19", "UTC");
-    await ok(c.id, join(game.token), new Date(end.getTime() + GAME_GRACE_MS - 1));
+    await ok(c.id, join(game.token), new Date(end.getTime() - 1));
+    expect(await run(d.id, join(game.token), new Date(end.getTime() + GAME_GRACE_MS - 1)))
+      .toMatchObject({ ok: false, error: { code: "INVITE_EXPIRED" } });
+    expect((await gameRow(game.id)).status).toBe("live");
     const atDue = new Date(end.getTime() + GAME_GRACE_MS);
     const race = await Promise.all([run(d.id, join(game.token), atDue), run(a.id, { type: "leave", gameId: game.id }, atDue)]);
     expect(race.every(result => !result.ok)).toBe(true);
@@ -579,7 +834,7 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     await ok(b.id, join(game.token));
     expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
     expect(await run(a.id, { type: "proposeChange", gameId: game.id, proposalId: randomUUID(), expectedTermsVersion: 1, change: { kind: "start_now" } }))
-      .toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+      .toMatchObject({ ok: false, error: { code: "GAME_CHAT_REQUIRED" } });
     await ok(a.id, { type: "cancelInvite", gameId: game.id });
     expect((await gameRow(game.id)).status).toBe("void");
     expect((await gameRow(game.id)).invitees[0].recipientLookupKey).toBe(createHostedEmailLookupKey(b.email));
@@ -2118,7 +2373,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(material?.players).toEqual(["Alex", "Sam"]);
     if (exited) {
       const rematchId = randomUUID();
-      await expect(run(g.people[0].id, { type: "createGame", gameId: rematchId, maxPlayers: 10, previousGameId: g.game.id, terms })).rejects.toThrow("participants have changed");
+      expect(await run(g.people[0].id, { type: "createGame", gameId: rematchId, maxPlayers: 10, previousGameId: g.game.id, terms })).toMatchObject({ ok: false, error: { code: "GAME_CHAT_CHANGED" } });
       expect(await db.game.findUnique({ where: { id: rematchId } })).toBeNull();
     }
     expect(material?.entries.map(e => e.entryId)).toEqual([kept.id]);
@@ -2228,7 +2483,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
     await ok(people[1].id, join(game.token));
     await db.game.update({ where: { id: game.id }, data: { chatContainerMemberId: null } });
-    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
+    expect(await run(people[0].id, command)).toMatchObject({ ok: false, error: { code: "GAME_CHAT_REQUIRED" } });
     expect(await db.gameEvent.count({ where: { gameId: game.id, type: "change_proposed" } })).toBe(0);
   });
 
@@ -2332,7 +2587,7 @@ describe.skipIf(!enabled)("group app change parity", () => {
     const [plain] = await openGameTexts([{ table: "game", field: "terms_words", rowId: row.id, memberId: row.wordsOwnerMemberId, value: row.termsWordsEncrypted }]);
     expect(plain).toContain("Private invitation task");
     await ok(g.people[2].id, { type: "leave", gameId: g.game.id });
-    expect(await readGame(g.game.id, g.people[3].id, true)).toMatchObject({ changeControls: { canEdit: false, canStartNow: false } });
+    expect(await readGame(g.game.id, g.people[3].id, true)).toBeNull();
   });
 
   it.each([false, true])("retains historical attempts after account deletion, withdrawn=%s", async withdrawn => {
@@ -2848,7 +3103,7 @@ describe.skipIf(!enabled)("surviving group authority", () => {
     await erase(f.people[0].id);
     const context = { ...f.context, chatPlayerMemberIds: f.people.slice(1).map(p => p.id),
       chatAudience: await readGameChatAudience(f.context.chatContainerMemberId) };
-    expect(await gameRow(f.group.id)).toMatchObject({ status: "live", createdBy: null, inviteTokenEncrypted: null });
+    expect(await gameRow(f.group.id)).toMatchObject({ status: "live", createdBy: null, inviteTokenEncrypted: expect.any(String) });
     return { ...f, context, actor: f.people[3] };
   }
 

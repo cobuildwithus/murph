@@ -18,6 +18,13 @@ describe("hosted poll route", () => {
     expect(m.callback).toHaveBeenCalledWith(expect.any(Request), { maxBodyBytes: 8_192, runtimeAuthority: "caller_transaction" });
     expect(m.tool).toHaveBeenCalledExactlyOnceWith({ memberId: "member_bound", runtimeIdentity: null, request: body });
   });
+  it("only returns recovery details to readers that accept them", async () => {
+    const result = { status: "listed", polls: [], unknownPolls: [{ pollRef: "poll_" + "b".repeat(32), question: "Choose a trail" }] };
+    m.tool.mockResolvedValue(result);
+    const body = { assistantInputId: "ain_" + "a".repeat(32), request: { action: "list" } };
+    expect(await (await POST(request(body))).json()).toEqual({ status: "listed", polls: [] });
+    expect(await (await POST(request({ ...body, includePollDetails: true }))).json()).toEqual(result);
+  });
   it("rejects model-selected members or destinations before effects", async () => {
     const response = await POST(request({ assistantInputId: "ain_" + "a".repeat(32), request: { action: "list", chatId: "other" }, memberId: "other" }));
     expect(response.status).toBe(400); expect(m.tool).not.toHaveBeenCalled();

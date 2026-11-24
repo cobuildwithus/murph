@@ -36,6 +36,11 @@ export async function readHostedDeviceSyncMemberQuiet(input: {
   const member = await input.prisma.hostedMember.findUnique({
     where: { id: input.memberId },
     select: {
+      accountGroupMemberships: {
+        where: { status: "active", group: { suspendedAt: null, billingStatus: "active", billingRef: { currentBillingPhase: "paid" } } },
+        select: { id: true },
+        take: 1,
+      },
       billingRef: {
         select: {
           currentBillingPhase: true,
@@ -54,6 +59,7 @@ export async function readHostedDeviceSyncMemberQuiet(input: {
     || member.createdAt > since
     || (member.companionLastForegroundAt !== null && member.companionLastForegroundAt > since)
     || hasHostedMemberOwnPaidBilling(member)
+    || (member.suspendedAt === null && member.accountGroupMemberships.length > 0)
   ) {
     return false;
   }

@@ -738,7 +738,10 @@ export const HOSTED_PRODUCT_FEEDBACK_KINDS = [
   "feature_interest",
   "feature_request",
   "frustration",
+  "moderation_review",
 ] as const;
+
+export const HOSTED_ROLEPLAY_REVIEW_SUMMARY = "Review requested for explicit sexual roleplay.";
 
 export type HostedProductFeedbackKind =
   (typeof HOSTED_PRODUCT_FEEDBACK_KINDS)[number];

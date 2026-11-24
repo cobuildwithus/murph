@@ -1,3 +1,4 @@
+import type { HostedGameChatState } from "@murphai/hosted-execution/runtime-control";
 import { GAME_STAKE_KINDS, type GameChange, type GameChangeControls, type GamePendingChange, type GameSchedule } from "./contract";
 import { parseGameChange } from "./command";
 import { isRecord } from "../primitives";
@@ -24,9 +25,9 @@ function changeFromDay(state: RuleState, change: GameChange, now: Date, canMoveS
 export function gameChangeControls(state: RuleState, now: Date, pending: Pick<GamePendingChange, "id"> | null, viewerId?: string): GameChangeControls {
   const day = firstUnstartedGameDay(state, now);
   const live = canRequestGameChange(state, viewerId);
-  // Once either player's last day is over, the game is done for changes.
-  const editable = live && !pending && !isGameDue(state, now) && day <= state.game.lengthDays;
-  const enabled = editable && day < GAME_MAX_LENGTH_DAYS;
+  const editable = live && !pending && !isGameDue(state, now)
+    && (state.game.seats === 10 || day <= state.game.lengthDays);
+  const enabled = editable && day <= state.game.lengthDays && day < GAME_MAX_LENGTH_DAYS;
   return {
     canStartNow: enabled && day === 0 && startNowMovesDayOne(state, now),
     canEdit: editable,
@@ -44,7 +45,7 @@ export function gameChangeControls(state: RuleState, now: Date, pending: Pick<Ga
 function canRequestGameChange(state: RuleState, viewerId?: string): boolean {
   if (state.game.seats === 10) {
     const players = remainingPlayers(state);
-    return state.game.status === "live" && players.length >= 2 && (viewerId === undefined || players.some(player => player.memberId === viewerId));
+    return state.game.status === "live" && players.length >= 2 && (viewerId === undefined || Boolean(state.game.chatContainerMemberId) && players.some(player => player.memberId === viewerId));
   }
   return state.game.seats === 2 && ["live", "negotiating"].includes(state.game.status) && isPairRoster(state.players);
 }
@@ -188,6 +189,7 @@ function decideChange(state: RuleState, actor: string, change: GameChange, now: 
   assertEditableWords(state, change, controls, now, sealedWords);
   // A prize change covers the whole game, so it needs no future day.
   if (isStakesOnlyChange(change, sealedWords)) return { change, effectiveFromDay: Math.min(effectiveFromDay, state.game.lengthDays), startsOn: null };
+  if (effectiveFromDay > state.game.lengthDays) reject("GAME_NOT_LIVE", "Only the prize can change while the last day finishes.");
   const lengthDays = change.lengthDays ?? state.game.lengthDays;
   if ((change.lengthDays !== undefined && lengthDays < GAME_MIN_LENGTH_DAYS) || lengthDays <= effectiveFromDay || lengthDays > GAME_MAX_LENGTH_DAYS) reject("INVALID_REQUEST", "Keep the days already started and at least one future day, up to 365 days.");
   const oldSchedule = currentTerms(state.game.terms).schedule;
@@ -269,6 +271,24 @@ export function pendingGameChangeView(state: RuleState, pending: GamePendingChan
   const seatedChange = change.kind === "edit" && change.tasks ? { ...change,
     tasks: [...players].sort((a, b) => a.seat - b.seat).map(player => ({ seat: player.seat, text: change.tasks!.find(task => task.seat === player.seat)?.text ?? change.defaultTask! })) } : change;
   return { ...view, change: seatedChange, votes, yesNeeded: gameChangeMajority(state, Object.fromEntries(votes.map(({ memberId, vote }) => [memberId, vote])), change).yesNeeded };
+}
+
+/** The runner accepts ten display seats in a pending task vote. Group edits return by member ID. */
+export function projectChatTaskSeats(card: HostedGameChatState["games"][number]): typeof card {
+  const pending = card.pendingChange;
+  if (pending?.change.kind !== "edit") return card;
+  const tasks = pending.change.tasks;
+  if (!tasks?.some(task => task.seat >= 10)) return card;
+
+  // pendingGameChangeView lists the remaining players' tasks in canonical seat order.
+  const seats = new Map(tasks.map((task, index) => [task.seat, index]));
+  const displaySeat = <T extends { seat: number }>(item: T) => ({ ...item, seat: seats.get(item.seat)! });
+  return {
+    ...card,
+    players: card.players.map(displaySeat),
+    terms: { ...card.terms, tasks: card.terms.tasks.map(displaySeat) },
+    pendingChange: { ...pending, change: { ...pending.change, tasks: tasks.map(displaySeat) } },
+  };
 }
 
 /** Before play, Day 1 moves to a scheduled day; once play starts, the rest of the game must keep one. */

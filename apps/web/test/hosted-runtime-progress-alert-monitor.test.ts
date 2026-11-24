@@ -341,6 +341,34 @@ describe("hosted runtime progress health", () => {
     }
   });
 
+  it("allows a checkpointed recap capacity retry but bounds the time to finish", () => {
+    const origin = +now - 23 * 60_000;
+    const row = {
+      ...progressRow({ progressOriginAt: new Date(origin).toISOString(), lane: "system",
+        runtimeKey: "fixture", headKind: "assistant.notification.requested",
+        workspaceCheckpointedAt: new Date(+now - 7 * 60_000),
+        nextDefaultProcessingWakeAt: new Date(+now - 2 * 60_000),
+        nextDefaultProcessingWakeReason: "assistant", systemMailboxProgressGeneration: 4n }),
+      headDedupeKey: "game-recap:fixture_room",
+    };
+    const stalled = (override: Partial<HostedRuntimeProgressHealthRow>, at = now) =>
+      summarizeHostedRuntimeProgressRows({ activeRuntimeKeys: ["fixture"], rows: [{ ...row, ...override }], now: at }).anomalous;
+    expect(stalled({})).toBe(false);
+    expect(stalled({ headDedupeKey: "game-recap:fixture_room:remake_001" })).toBe(false);
+    expect(stalled({ workspaceCheckpointedAt: now, nextDefaultProcessingWakeAt: new Date(+now + 4 * 60_000) },
+      new Date(origin + 30 * 60_000))).toBe(true);
+    for (const override of [
+      { headDedupeKey: "game-check-in:fixture_room" }, { headDedupeKey: null },
+      { lane: "conversation" }, { headKind: "device-sync.wake" },
+      { pendingCount: 2n, durableHighWaterSeq: 2n }, { workspaceSystemImportedSeq: 0n },
+      { nextDefaultProcessingWakeReason: null }, { systemMailboxProgressGeneration: null },
+      { nextDefaultProcessingWakeAt: null }, { nextDefaultProcessingWakeAt: now },
+      { nextDefaultProcessingWakeAt: new Date(+now - 6 * 60_000) },
+      { workspaceCheckpointedAt: null }, { workspaceCheckpointedAt: new Date(origin) },
+      { workspaceCheckpointedAt: new Date(+now - 16 * 60_000), nextDefaultProcessingWakeAt: new Date(+now - 11 * 60_000) },
+    ]) expect(stalled(override)).toBe(true);
+  });
+
   it("classifies every system import and wake-owner diagnostic without identifiers", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: [
