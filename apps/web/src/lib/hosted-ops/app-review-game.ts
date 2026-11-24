@@ -19,7 +19,6 @@ import {
   decideSettle,
   GAME_SEATS_1V1,
   settleDueAt,
-  ticketUseBy,
   type RuleEntry,
   type RuleState,
   type StoredTerms,
@@ -124,7 +123,7 @@ export interface HostedOpsAppReviewGameSummary {
   plan: {
     live: { dayOne: string; lastDay: string; partnerPostedToday: true; round: number; today: string; todayDay: number };
     photos: number;
-    settled: { dayOne: string; holderIsReviewer: true; lastDay: string; round: number; scores: { partner: number; reviewer: number }; ticketUseBy: string };
+    settled: { dayOne: string; holderIsReviewer: true; lastDay: string; round: number; scores: { partner: number; reviewer: number } };
     timeZone: string;
   };
   replacedGames: { id: string; round: number; status: string }[];
@@ -382,7 +381,6 @@ function summarize(
         lastDay: addDays(settled.dayOne, SETTLED_GAME.lengthDays - 1),
         round: SETTLED_GAME.round,
         scores: { partner: score(APP_REVIEW_PARTNER_MEMBER_ID), reviewer: inspected.reviewer ? score(inspected.reviewer) : 0 },
-        ticketUseBy: ticketUseBy(settled.settledAt!).toISOString(),
       },
       timeZone: APP_REVIEW_GAME_TIME_ZONE,
     },

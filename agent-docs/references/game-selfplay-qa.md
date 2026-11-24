@@ -45,7 +45,7 @@ stateDiagram-v2
 | Reply | closed, typing, permission, recording, review, durable pending, failed, accepted, refused | Draft survives failed handoff; exact target and account survive retries; deleting cannot race resurrection. |
 | Prove it | available, confirmation, open, conceded, stood, void | One eligible case; withdrawal, departure and terminal games resolve it without native adjudication. |
 | Recap | settling, writing, ready, playing, watched locally, watch receipt pending/acknowledged | Missing story has a truthful fallback; watching does not change the settled score. |
-| Ticket | held, owed, redeemed, expired, void, acknowledgement owed | Only the holder can redeem; retry never sends another Messages handoff or spends another ticket. |
+| Ticket | held, owed, redeemed, void, acknowledgement owed (never expires) | Only the holder can redeem; retry never sends another Messages handoff or spends another ticket. |
 | Rematch | none, requested, changed, accepted, declined, superseded | Separate game identity; unrelated games with the same person are separate chains. |
 | Device conditions | online, offline, interrupted, backgrounded, refreshed, relaunched | Accepted state cannot regress under delayed responses; durable pending work retains exact ownership. |
 

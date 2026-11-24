@@ -153,17 +153,6 @@ export const GAME_DEFAULT_LENGTH_DAYS = 7;
 export const GAME_MIN_LENGTH_DAYS = 3;
 export const GAME_MAX_LENGTH_DAYS = 365;
 export const GAME_MAX_START_DAYS_OUT = 60;
-export const GAME_TICKET_USE_DAYS = 14;
-
-/** A ticket's redeem-by time: derived, never stored. */
-export function ticketUseBy(createdAt: Date): Date {
-  return new Date(createdAt.getTime() + GAME_TICKET_USE_DAYS * 24 * 60 * 60 * 1000);
-}
-
-/** Open tickets expire just after their use-by time; redeemed ones never do. */
-export function isTicketExpired(ticket: { status: string; createdAt: Date }, now: Date): boolean {
-  return ticket.status === "open" && now.getTime() > ticketUseBy(ticket.createdAt).getTime();
-}
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_MAX_OPEN_PER_PAIR = 10;
 /** After a pair game ends its chat stays open, and its players can still correct their own days, for this long. Then the result is final. */
@@ -200,7 +189,6 @@ export const GAME_ERROR_STATUS: Record<GameErrorCode, number> = {
   TERMS_CHANGED: 409,
   TERMS_REQUIRED: 403,
   HEALTH_DATA_REQUIRED: 403,
-  TICKET_EXPIRED: 410,
   TICKET_NOT_HELD: 403,
   UNAUTHENTICATED: 401,
 };

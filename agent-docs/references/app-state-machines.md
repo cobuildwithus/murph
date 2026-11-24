@@ -888,14 +888,13 @@ Invariant: unique `(game, member, dayIndex, attempt)` bounds posts; exact player
 ### B21 — Game tickets, reports, and blocks
 
 Sources: `apps/web/src/lib/game/{service,rules,moderation,report-review,blocks}.ts`; `GameTicket`, `GameReport`, `GameBlock`.
-States: ticket `open`/`redeemed`, `expired` derived from use-by; report unreviewed/reviewed timestamp; pair unblocked/blocked. Tickets now store `owedBySeats`/`owedToSeats`, not member foreign keys. Report subjects include replies, with encrypted text/audio snapshots and frozen alert parameters.
-Invariant: pair redemption retains holder/deadline/block checks. Group redemption requires the actor's frozen eligible seat plus at least one surviving debtor and creditor; account deletion changes availability, never winners. Report snapshots survive source removal, and frozen alert fields keep provider-idempotent alerts stable. Block changes are pair-scoped.
+States: ticket `open`/`redeemed`; tickets never expire; report unreviewed/reviewed timestamp; pair unblocked/blocked. Tickets now store `owedBySeats`/`owedToSeats`, not member foreign keys. Report subjects include replies, with encrypted text/audio snapshots and frozen alert parameters.
+Invariant: pair redemption retains holder/block checks. Group redemption requires the actor's frozen eligible seat plus at least one surviving debtor and creditor; account deletion changes availability, never winners. Report snapshots survive source removal, and frozen alert fields keep provider-idempotent alerts stable. Block changes are pair-scoped.
 
 | From | Event / guard | To / effect |
 | --- | --- | --- |
 | Settlement | Locked frozen outcome requires IOU | Open seat-based ticket(s) atomically issued |
-| Open ticket | Current eligible redemption authority + deadline | Redeemed via conditional update |
-| Open ticket | Use-by deadline | Derived expired; no redemption |
+| Open ticket | Current eligible redemption authority | Redeemed via conditional update |
 | No report | Authorized post/player/terms/reply subject | Unreviewed encrypted snapshot + stable alert identity |
 | Existing report | Same reporter/subject replay | Reuse accepted receipt/alert; no second report |
 | Unreviewed report | Ops review | Reviewed timestamp |
@@ -1205,7 +1204,7 @@ Invariants: draft remains with composer until durable handoff; member/game/entry
 ### IOS-10: recap and ticket acknowledgements
 
 Owner: `Game/Live/LiveGameService.swift::finishRecap/acknowledgeRecapWatches/redeem/acknowledgeRedeems`.
-Ticket states from server: `open`, `redeemed`, `expired`, `void`, `unknown`; local per-member sets track recap watches/ticket acknowledgements owed.
+Ticket states from server: `open`, `redeemed`, `void`, `unknown` (tickets never expire); local per-member sets track recap watches/ticket acknowledgements owed.
 Invariants: local confirmation never repeats Messages handoff; acknowledgement retries exact ticket, never next ticket; ambiguous failure keeps owed marker across restart; server settlement authority remains canonical. Concurrent acknowledgements may repeat the same request; the canonical ticket is redeemed once. The later main integration at `fc555ff` adds the recap-writing projection through `GamePrototype+Server.swift` and `GameHomePageModel.swift`; an omitted pending field keeps the existing fallback.
 
 | From | Event and guard | To / effect |
@@ -1216,7 +1215,7 @@ Invariants: local confirmation never repeats Messages handoff; acknowledgement r
 | Receipt pending | Server acknowledgement / definitive refusal | Clear exact receipt; transient failure keeps it |
 | Open ticket | Confirm handoff for exact ticket | Record owed acknowledgement; remove from local spendable wallet |
 | Owed acknowledgement | Home refresh under same session | Retry exact id; success/refusal clears marker; failure keeps |
-| Any ticket | Server expired/void/unknown/other member left | Presentation denies unsupported redemption |
+| Any ticket | Server void/unknown/other member left | Presentation denies unsupported redemption |
 
 ### IOS-11: Terms fan-out
 

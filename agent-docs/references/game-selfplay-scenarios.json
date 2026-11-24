@@ -819,16 +819,6 @@
       "screenshotSweepPassed": false
     },
     {
-      "scenario": "prizes",
-      "screen": "prizes",
-      "group": "week",
-      "board": "5.3j expired",
-      "arguments": [
-        "--expired-ticket"
-      ],
-      "screenshotSweepPassed": false
-    },
-    {
       "scenario": "bigTicket",
       "screen": "bigTicket",
       "group": "week",
