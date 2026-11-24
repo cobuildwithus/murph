@@ -64,6 +64,8 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
   awards: readonly StoredAward[];
   /** The member's day: a new leg after a finished one starts on it. */
   today: Day;
+  /** Running's counting day the points were read with (MeasureState.runsFrom). */
+  runsFrom?: Day;
   beforeMutationTx: BeforeProgressMutation;
 }) {
   const entry = 'rungId' in goal ? BANK.find(entry => entry.kind === 'route' && entry.id === goal.rungId) : null;
@@ -74,8 +76,12 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
   const next = await resolveRoute(from, to);
   const total = routeMeters(measureId, context.points.at(-1)?.[1] ?? 0);
   const earned = new Set(context.awards.map(award => award.key));
-  return patchMeasureState(memberId, measureId, previous => ({ goal: { route: { from, to } },
-    legs: replaceRouteLeg(measureId, previous.legs ?? [], next, total, earned, context.today) }), context.beforeMutationTx);
+  return patchMeasureState(memberId, measureId, previous => {
+    // The total was read under one counting day; a start saved under another would never match the series.
+    if (previous.runsFrom !== context.runsFrom) throw hostedOnboardingError({ code: "GAME_PROGRESS_STATE_CONFLICT", httpStatus: 409,
+      retryable: true, message: "Your progress changed. Choose the route again." });
+    return { goal: { route: { from, to } }, legs: replaceRouteLeg(measureId, previous.legs ?? [], next, total, earned, context.today) };
+  }, context.beforeMutationTx);
 }
 
 /** The curated table names checked bank routes, with no city or GPS lookup. */

@@ -1,6 +1,6 @@
 # Run route counts runs from the join day
 
-Status: revised after ReviewGPT (architecture, mountain lane, Nov 24), building.
+Status: revised after ReviewGPT (architecture round, then PR #5285 round 1), shipping in two phases.
 Owner approved the product change on Nov 24 (Paper, "Run route · before and
 after"): Run's route counts runs from the day the member joined, the same
 rule as the Steps walking route. Medals already won and routes already
@@ -86,3 +86,27 @@ One saved field and one reader. No saved route start is ever rewritten.
   - It skips imported runs without health access, and legs that changed
     before the write.
   - A state conflict returns false and doesn't throw.
+
+## PR #5285 ReviewGPT round 1 and outcome
+
+**High: a route pick racing the first mark saves an all-time start. Accepted.**
+1. `setMeasure` reads the all-time total, then waits on Mapbox.
+2. A Progress read sets `runsFrom` and creates the first route.
+3. The route write lands an all-time `startTotal` on a since-join series, and
+   that route then sits at 0.
+
+Fix: `setRouteGoal` takes the `runsFrom` its points were read with. Its patch
+refuses, as the retryable `GAME_PROGRESS_STATE_CONFLICT`, when the saved
+`runsFrom` differs. Covered in `game-progress-route-goals.test.ts`.
+
+The same gap exists across versions: a server that predates this change
+neither filters nor checks. So rollout is two phases.
+
+- **Phase 1 (#5285):** readers filter by `runsFrom` and the route writer
+  checks it, but nothing writes it. No member-visible change, and it is safe
+  to roll back.
+- **Phase 2 (follow-up PR):** `readProgress` calls `countRunsFromJoin`.
+  - It deploys only after phase 1 is live everywhere, so every server it
+    overlaps with understands `runsFrom`.
+  - The rollback floor after phase 2 is phase 1. Never roll back below it.
+  - The changelog entry ships with phase 2.

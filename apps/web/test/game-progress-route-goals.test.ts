@@ -51,6 +51,15 @@ describe('Progress route goal mutation', () => {
         on: '2026-11-02', data: {}, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }] });
     expect(result.legs).toEqual([leg, { ...next, startTotal: 80, startedOn: '2026-11-19' }]);
   });
+  it('refuses a route picked under one counting day once Running has another', async () => {
+    // Read before the join-day mark landed: its total counted every run.
+    mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ legs: [{ ...leg, startTotal: 0 }], runsFrom: '2026-10-21' }) });
+    await expect(setRouteGoal('owner', 'run.meters', { from: 'B', to: 'C' }, { ...context(), points: [['2026-11-02', 900_000]] }))
+      .rejects.toMatchObject({ code: 'GAME_PROGRESS_STATE_CONFLICT', retryable: true });
+    expect(mocks.write).not.toHaveBeenCalled();
+    const result = await setRouteGoal('owner', 'run.meters', { from: 'B', to: 'C' }, { ...context(), points: [['2026-11-02', 10_000]], runsFrom: '2026-10-21' });
+    expect(result.runsFrom).toBe('2026-10-21');
+  });
   it('returns a conflict once if another writer changes the observed ciphertext', async () => {
     mocks.find.mockResolvedValue({ stateEncrypted: '{}' }); mocks.write.mockResolvedValue({ count: 0 });
     await expect(setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, context())).rejects.toMatchObject({ code: 'GAME_PROGRESS_STATE_CONFLICT', retryable: true });
