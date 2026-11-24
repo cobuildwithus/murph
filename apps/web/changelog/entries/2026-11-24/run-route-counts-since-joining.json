@@ -9,6 +9,6 @@
     "summary": "Run counts your runs from the day you joined Murph, the same as Steps.",
     "details": "Runs from before you joined no longer count toward the run route you're on. Medals you've won stay. If you've already finished a run route, your runs keep counting the way they did.",
     "relevanceTags": ["progress", "games"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5285]
   }
 }
