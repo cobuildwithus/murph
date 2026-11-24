@@ -760,6 +760,7 @@ it("validates display-name actions with the memory name contract", () => {
 it.each([
   ["estimated-vo2-max", 10, 42.5, 90],
   ["body-height", 50, 170.2, 272],
+  ["body-weight", 20, 81.6, 350],
 ] as const)("accepts only bounded %s readings in the closed measurement action", (metric, min, middle, max) => {
   const action = { kind: "measurement.add", version: 1, metric, value: middle };
   for (const value of [min, middle, max]) {

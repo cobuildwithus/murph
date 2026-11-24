@@ -4,7 +4,7 @@ import { after } from 'next/server';
 import type { GameProgressShare, Prisma } from '@prisma/client';
 import type { ClientUnits } from '../../companion/client-info';
 import { assertBrowserVaultMemberAuthority } from '../../browser-vault/authority';
-import { readSavedCompanionBodyHeight } from '../../device-sync/companion-numbers';
+import { readSavedCompanionBody } from '../../device-sync/companion-numbers';
 import { runWithFreshHostedDomainRootUnwrapCache } from '../../hosted-crypto/domain-root-unwrap-cache';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
@@ -174,9 +174,9 @@ async function generate(input: ShareRequest, award: Candidate, row: GameProgress
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
     const deadline = row.createdAt.getTime() + SHARE_DEADLINE_MS;
     // Optional likeness context: one replica read; failure keeps the original prompt.
-    const heightCm = await readSavedCompanionBodyHeight(input.memberId, AbortSignal.timeout(Math.max(0, deadline - Date.now()))).catch(() => null);
+    const body = await readSavedCompanionBody(input.memberId, AbortSignal.timeout(Math.max(0, deadline - Date.now()))).catch(() => undefined);
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
-    const { prompt } = shareCard(award, input.units, heightCm);
+    const { prompt } = shareCard(award, input.units, body);
     output = await makeShareImage(reference, prompt!, deadline);
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
     const envelope = await sealHostedUserSecureBoxBytes({ ...progressShareBytesTarget(row.memberId, row.storageKey), value: output });

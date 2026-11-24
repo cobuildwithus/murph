@@ -953,6 +953,38 @@ test("browser-vault metric selections can use old requested points while metric 
   assert.equal(Number((progress.currentValue ?? NaN).toFixed(1)), 81.6);
 });
 
+test("browser-vault selections keep height and weight of any age without a goal while rows stay lookback bounded", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-05-02T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_old_body", "measurement", {
+          occurredAt: "2019-03-01T07:30:00.000Z",
+          title: "Old body check",
+          attributes: {
+            measurements: [
+              { metric: "body_weight", value: 180, unit: "lb" },
+              { metric: "height", value: 66, unit: "in" },
+              { metric: "waist", value: 80, unit: "cm" },
+            ],
+            source: "manual",
+          },
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  assert.deepEqual(client.metrics.series({ metricKey: "body-weight" }), []);
+  assert.deepEqual(client.metrics.series({ metricKey: "body-height" }), []);
+  assert.equal(Number((client.metricSelections.get("body-weight")?.value ?? NaN).toFixed(1)), 81.6);
+  assert.equal(Number((client.metricSelections.get("body-height")?.value ?? NaN).toFixed(2)), 167.64);
+  assert.equal(client.metricSelections.get("waist-circumference")?.value ?? null, null, "other body metrics keep the lookback");
+});
+
 test("browser-vault series and selection normalize lean body mass from pounds and kilograms", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",

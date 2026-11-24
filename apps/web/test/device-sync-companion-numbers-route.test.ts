@@ -29,11 +29,11 @@ vi.mock("@/src/lib/browser-vault/loader", async () => {
 import { createBrowserVaultRouteQueryClient, selectBrowserVaultReplicaDemand } from "@/src/lib/browser-vault/loader";
 import type { decodeReadyBrowserVaultSession } from "@/src/lib/browser-vault/loader";
 import { GET } from "../app/api/device-sync/companion/numbers/route";
-import { readCompanionHealthSeries, readSavedCompanionBodyHeight } from "../src/lib/device-sync/companion-numbers";
+import { readCompanionHealthSeries, readSavedCompanionBody } from "../src/lib/device-sync/companion-numbers";
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
-  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 18,
+  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 19,
   keyId: "browser-vault-replica:d", objectKey: "users/browser-vault-replicas/opaque/replica.json",
   replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:test-root",
   schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
@@ -68,7 +68,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
   return {
     displayName: "Ava",
     assistantSummary: { highlights: [], latestDate: through }, entities: [],
-    generatedAt: savedAt, generation: 18, labResultRows: [],
+    generatedAt: savedAt, generation: 19, labResultRows: [],
     meals: { schemaVersion: 1, timeZone: "America/New_York", days: [] },
     metricGoalProgressRows: [], metricSelectionRows: [],
     metricRows: metricRows ?? [
@@ -121,8 +121,9 @@ it("serves only the documented four saved series and comparison fields, includin
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   const body = await response.json();
-  expect(Object.keys(body)).toEqual(["timeZone", "savedAt", "freshness", "window", "demographics", "heightCm", "numbers"]);
+  expect(Object.keys(body)).toEqual(["timeZone", "savedAt", "freshness", "window", "demographics", "heightCm", "weightKg", "numbers"]);
   expect(body.heightCm).toBeNull();
+  expect(body.weightKg).toBeNull();
   expect(body).toMatchObject({ timeZone: "America/New_York", savedAt, freshness: "fresh", window: { from: yearFrom, through } });
   expect(Object.keys(body.numbers)).toEqual(["restingHeartRate", "sleep", "steps", "vo2Max"]);
   for (const [name, unit, baseline, current, delta] of [
@@ -218,7 +219,7 @@ it.each(["missing ref", "missing object", "empty session"])("returns the Journal
   if (cause === "empty session") mocks.control.mockResolvedValue({ state: "empty" });
   const response = await GET(request());
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ numbers: null, demographics: null, heightCm: null, freshness: "stale" });
+  expect(await response.json()).toEqual({ numbers: null, demographics: null, heightCm: null, weightKg: null, freshness: "stale" });
   expect(mocks.decode).not.toHaveBeenCalled();
   if (cause === "missing ref") expect(mocks.control).not.toHaveBeenCalled();
 });
@@ -401,7 +402,7 @@ it("distinguishes legacy absence, known-null and unresolved fields", async () =>
 });
 
 
-it.each(["missing object", "empty session"])("keeps the empty answer for a generation-18 %s, demographics unknown", async cause => {
+it.each(["missing object", "empty session"])("keeps the empty answer for a current %s, demographics unknown", async cause => {
   if (cause === "missing object") mocks.control.mockRejectedValue(new CloudflareHostedControlBrowserVaultReplicaNotFoundError());
   else mocks.control.mockResolvedValue({ state: "empty" });
   const response = await GET(request());
@@ -416,11 +417,11 @@ it("does not expose the core display name in Numbers", async () => {
   expect(await response.text()).not.toMatch(/displayName|Ava/u);
 });
 
-function heightPoint(sourceLabel: string, date: string, value: number, unit = "cm"): MetricPoint {
-  const { canonicalValue, canonicalUnit } = normalizeMetricValue({ metricKey: "body-height", value, unit });
+function heightPoint(sourceLabel: string, date: string, value: number, unit = "cm", metricKey = "body-height"): MetricPoint {
+  const { canonicalValue, canonicalUnit } = normalizeMetricValue({ metricKey, value, unit });
   return {
-    schemaVersion: "murph.metric-point.v1", id: `height:${sourceLabel}:${date}`,
-    metricKey: "body-height", biomarkerKey: null, value, unit,
+    schemaVersion: "murph.metric-point.v1", id: `${metricKey}:${sourceLabel}:${date}`,
+    metricKey, biomarkerKey: null, value, unit,
     canonicalValue, canonicalUnit, comparator: null, confidence: "high", context: {},
     effectiveDate: date, observedAt: `${date}T12:00:00.000Z`, recordedAt: null, reportedAt: null,
     grain: "day", statistic: "value", textValue: null,
@@ -436,24 +437,30 @@ async function withHeightPoints(points: MetricPoint[]) {
   });
 }
 
-it.each([0, 365, 366])("the height-only reader uses the same selection and freshness at %i days", async age => {
-  await withHeightPoints([heightPoint("Manual", addDaysToIsoDate(through, -age), 170.4)]);
-  expect(await readSavedCompanionBodyHeight("member-ava", request().signal)).toBe(age <= 365 ? 170.4 : null);
+function weightPoint(sourceLabel: string, date: string, value: number, unit = "kg"): MetricPoint {
+  return heightPoint(sourceLabel, date, value, unit, "body-weight");
+}
+
+it.each([0, 46, 366, 3000])("the body reader serves the same selections at %i days old", async age => {
+  const date = addDaysToIsoDate(through, -age);
+  await withHeightPoints([heightPoint("Manual", date, 170.4), weightPoint("Manual", date, 81.6)]);
+  expect(await readSavedCompanionBody("member-ava", request().signal))
+    .toEqual({ heightCm: 170.4, weightKg: 81.6 });
   expect(mocks.authority).toHaveBeenCalledTimes(2);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "member-ava", prisma: {} });
   expect(mocks.control).toHaveBeenCalledTimes(1);
 });
 
-it.each(["absent height", "absent replica"])("the height-only reader returns null for %s", async cause => {
+it.each(["absent height and weight", "absent replica"])("the body reader returns nulls for %s", async cause => {
   if (cause === "absent replica") mocks.workspace.mockResolvedValue(null);
-  expect(await readSavedCompanionBodyHeight("member-ava", request().signal)).toBeNull();
+  expect(await readSavedCompanionBody("member-ava", request().signal)).toEqual({ heightCm: null, weightKg: null });
 });
 
-it.each(["before read", "after read"])("the height-only reader enforces health authority %s", async phase => {
+it.each(["before read", "after read"])("the body reader enforces health authority %s", async phase => {
   const denied = hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Permission required." });
   if (phase === "after read") mocks.authority.mockResolvedValueOnce(undefined);
   mocks.authority.mockRejectedValueOnce(denied);
-  await expect(readSavedCompanionBodyHeight("member-ava", request().signal)).rejects.toBe(denied);
+  await expect(readSavedCompanionBody("member-ava", request().signal)).rejects.toBe(denied);
   expect(mocks.control).toHaveBeenCalledTimes(phase === "before read" ? 0 : 1);
 });
 
@@ -478,6 +485,19 @@ it.each(["Manual", "WHOOP", "Junction", "Clinical record"])("serves the newest v
   expect(body).not.toHaveProperty("metricSelectionRows");
 });
 
+it("serves the newest valid weight in kg beside height", async () => {
+  await withHeightPoints([
+    weightPoint("Manual", through, 180, "lb"),
+    weightPoint("WHOOP", addDaysToIsoDate(through, -1), 79),
+    weightPoint("Invalid unit", through, 80, "cm"),
+  ]);
+  const body = await (await GET(request())).json();
+  expect(body.weightKg).toBeCloseTo(81.6466, 4);
+  expect(body.heightCm).toBeNull();
+  await withHeightPoints([weightPoint("Manual", addDaysToIsoDate(through, -46), 80), heightPoint("Manual", through, 170)]);
+  expect(await (await GET(request())).json()).toMatchObject({ heightCm: 170, weightKg: 80 });
+});
+
 it("keeps canonical same-date source precedence and latest observation within a source", async () => {
   const clinical = heightPoint("Clinical record", through, 171);
   clinical.source = { ...clinical.source, kind: "test-result" };
@@ -490,29 +510,21 @@ it("keeps canonical same-date source precedence and latest observation within a 
 it.each([
   ["no height", [], null],
   ["unusable height", [heightPoint("Manual", through, 80, "kg")], null],
-  ["365 days old", [heightPoint("Manual", addDaysToIsoDate(through, -365), 170)], 170],
-  ["366 days old", [heightPoint("Manual", addDaysToIsoDate(through, -366), 170)], null],
-] as const)("handles %s against the current local date", async (_label, points, expected) => {
+  ["366 days old", [heightPoint("Manual", addDaysToIsoDate(through, -366), 170)], 170],
+  ["eight years old", [heightPoint("Manual", addDaysToIsoDate(through, -3000), 170)], 170],
+] as const)("handles %s: a height stands until replaced", async (_label, points, expected) => {
   await withHeightPoints([...points]);
   expect((await (await GET(request())).json()).heightCm).toBe(expected);
 });
 
-it("expires height even when the saved selection was fresh when published", async () => {
-  await withHeightPoints([heightPoint("Manual", addDaysToIsoDate(through, -365), 170)]);
-  vi.setSystemTime(new Date("2026-11-05T02:00:00Z")); // Still Nov 4 in the vault's zone.
-  expect((await (await GET(request())).json()).heightCm).toBe(170);
-  vi.setSystemTime(new Date("2026-11-05T05:00:00Z"));
-  expect((await (await GET(request())).json()).heightCm).toBeNull();
-});
-
-it("never exposes height after health authority is revoked during decryption", async () => {
-  await withHeightPoints([heightPoint("Manual", through, 170)]);
+it("never exposes height or weight after health authority is revoked during decryption", async () => {
+  await withHeightPoints([heightPoint("Manual", through, 170), weightPoint("Manual", through, 81.6)]);
   mocks.authority.mockResolvedValueOnce(undefined).mockRejectedValueOnce(hostedOnboardingError({
     code: "ACCESS_DENIED", httpStatus: 403, message: "Access denied.",
   }));
   const response = await GET(request());
   expect(response.status).toBe(403);
-  expect(await response.text()).not.toMatch(/heightCm|170/u);
+  expect(await response.text()).not.toMatch(/heightCm|weightKg|170|81\.6/u);
 });
 
 

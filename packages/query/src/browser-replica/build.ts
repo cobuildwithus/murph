@@ -60,6 +60,9 @@ import { projectBrowserTrainingSession } from "./training.ts";
 import { stringifyJsonCooperatively } from "./json.ts";
 import { cloneJson, isBrowserSafeJson } from "./json-values.ts";
 
+/** About you's height and weight stand until replaced, however old: their selections see every point. */
+const UNBOUNDED_SELECTION_METRICS: ReadonlySet<string> = new Set(["body-height", "body-weight"]);
+
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
 ): Promise<BrowserVaultReplica> {
@@ -92,6 +95,7 @@ export async function createBrowserVaultReplica(
   const selectionMetricPoints = allMetricPoints.filter((point) =>
     point.effectiveDate <= today && isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff ||
+      UNBOUNDED_SELECTION_METRICS.has(point.metricKey) ||
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
       isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetricKeys))
   );

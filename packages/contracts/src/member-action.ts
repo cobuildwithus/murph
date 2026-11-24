@@ -501,10 +501,11 @@ export const displayNameSetMemberActionV1Schema = z.object({
 const measurementRanges = {
   "estimated-vo2-max": { min: 10, max: 90 },
   "body-height": { min: 50, max: 272 },
+  "body-weight": { min: 20, max: 350 },
 } as const;
 
 const measurementFieldsSchema = z.object({
-  metric: z.enum(["estimated-vo2-max", "body-height"]),
+  metric: z.enum(["estimated-vo2-max", "body-height", "body-weight"]),
   value: z.number().finite(),
 }).strict().refine(({ metric, value }) => {
   const range = measurementRanges[metric];
