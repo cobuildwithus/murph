@@ -33,7 +33,7 @@ import { readCompanionHealthSeries, readSavedCompanionBody } from "../src/lib/de
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
-  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 18,
+  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 19,
   keyId: "browser-vault-replica:d", objectKey: "users/browser-vault-replicas/opaque/replica.json",
   replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:test-root",
   schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
@@ -68,7 +68,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
   return {
     displayName: "Ava",
     assistantSummary: { highlights: [], latestDate: through }, entities: [],
-    generatedAt: savedAt, generation: 18, labResultRows: [],
+    generatedAt: savedAt, generation: 19, labResultRows: [],
     meals: { schemaVersion: 1, timeZone: "America/New_York", days: [] },
     metricGoalProgressRows: [], metricSelectionRows: [],
     metricRows: metricRows ?? [
@@ -402,7 +402,7 @@ it("distinguishes legacy absence, known-null and unresolved fields", async () =>
 });
 
 
-it.each(["missing object", "empty session"])("keeps the empty answer for a generation-18 %s, demographics unknown", async cause => {
+it.each(["missing object", "empty session"])("keeps the empty answer for a current %s, demographics unknown", async cause => {
   if (cause === "missing object") mocks.control.mockRejectedValue(new CloudflareHostedControlBrowserVaultReplicaNotFoundError());
   else mocks.control.mockResolvedValue({ state: "empty" });
   const response = await GET(request());
