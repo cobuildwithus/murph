@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 it.each([
-  ["estimated-vo2-max", 42.5], ["body-height", 170.2],
+  ["estimated-vo2-max", 42.5], ["body-height", 170.2], ["body-weight", 81.6],
 ])("accepts a stable %s reading and retries the identical envelope", async (metric, value) => {
   for (let i = 0; i < 2; i++) {
     const response = await POST(request({ ...body, metric, value }));
@@ -46,6 +46,7 @@ it.each([
 
 it.each([
   ["estimated-vo2-max", 10], ["estimated-vo2-max", 90], ["body-height", 50], ["body-height", 272],
+  ["body-weight", 20], ["body-weight", 350],
 ])("accepts the inclusive %s bound %s", async (metric, value) => {
   expect((await POST(request({ ...body, metric, value }))).status).toBe(202);
 });
@@ -58,6 +59,8 @@ it.each([
   { ...body, metric: "body-height", value: 49.9 }, { ...body, metric: "body-height", value: 272.1 },
   { ...body, metric: "body-height", value: "170" }, { ...body, metric: "body-height", value: null },
   { ...body, metric: "body-height", value: 170, unit: "cm" },
+  { ...body, metric: "body-weight", value: 19.9 }, { ...body, metric: "body-weight", value: 350.1 },
+  { ...body, metric: "body-weight", value: 180, unit: "lb" },
 ])("rejects invalid input before append %j", async value => {
   const response = await POST(request(value));
   expect(response.status).toBe(400);

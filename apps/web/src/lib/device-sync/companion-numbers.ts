@@ -30,7 +30,8 @@ type MetricId = keyof typeof COMPANION_HEALTH_METRICS;
 const allMetrics = Object.keys(COMPANION_HEALTH_METRICS) as MetricId[];
 type ReplicaState = Awaited<ReturnType<typeof readHostedBrowserVaultReplicaState>>;
 const requestedShards = ["core", "metricsIndex"] as const;
-const emptyNumbers = { numbers: null, demographics: null, heightCm: null, freshness: "stale" } as const;
+const noBody = { heightCm: null, weightKg: null } as const;
+const emptyNumbers = { numbers: null, demographics: null, ...noBody, freshness: "stale" } as const;
 
 // The stage reaches route logs as the error cause, never the response body.
 function numbersUnavailable(stage: string) {
@@ -51,10 +52,10 @@ export async function readCompanionNumbers(request: Request) {
   }
   const snapshot = await readCompanionHealthSeries(auth, request.signal);
   if (!snapshot) return emptyNumbers;
-  const { timeZone, savedAt, freshness, window, demographics, heightCm, numbers } = snapshot;
+  const { timeZone, savedAt, freshness, window, demographics, heightCm, weightKg, numbers } = snapshot;
   const baselineFrom = addDaysToIsoDate(window.through, -89);
   return {
-    timeZone, savedAt, freshness, window, demographics, heightCm,
+    timeZone, savedAt, freshness, window, demographics, heightCm, weightKg,
     numbers: {
       restingHeartRate: presentNumber(numbers.restingHeartRate, COMPANION_HEALTH_METRICS.restingHeartRate, window, baselineFrom),
       sleep: presentNumber(numbers.sleep, COMPANION_HEALTH_METRICS.sleep, window, baselineFrom),
@@ -99,33 +100,29 @@ export async function readCompanionHealthSeries(
   }
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window, stepsWindow,
-    demographics, heightCm: requestedMetrics ? null : readCompanionBodyHeight(client, through), numbers,
+    demographics, ...(requestedMetrics ? noBody : readCompanionBody(client)), numbers,
     // Null: a replica built before run days shipped. Unknown, never zero.
     runs: client.replica.runs ?? null,
   };
 }
 
-/** Canonical latest-valid selection, in cm; expires against today's local date. */
-export function readCompanionBodyHeight(
-  client: Pick<BrowserVaultMetricSeriesCapableQueryClient, "metricSelections">,
-  today: string,
-): number | null {
-  const height = client.metricSelections.get("body-height");
-  const staleAfterDays = resolveMetricDefinition("body-height")!.selectionPolicy.staleAfterDays!;
-  if (!height?.effectiveDate || height.effectiveDate < addDaysToIsoDate(today, -staleAfterDays)) return null;
-  return height.value;
+export type CompanionBody = { heightCm: number | null; weightKg: number | null };
+
+/** Canonical latest-valid selections, in cm and kg. They stand until replaced, however old. */
+export function readCompanionBody(client: Pick<BrowserVaultMetricSeriesCapableQueryClient, "metricSelections">): CompanionBody {
+  return {
+    heightCm: client.metricSelections.get("body-height")?.value ?? null,
+    weightKg: client.metricSelections.get("body-weight")?.value ?? null,
+  };
 }
 
-/** A height-only consumer of the same saved replica and health authority. */
-export async function readSavedCompanionBodyHeight(memberId: string, signal: AbortSignal): Promise<number | null> {
+/** A height-and-weight-only consumer of the same saved replica and health authority. */
+export async function readSavedCompanionBody(memberId: string, signal: AbortSignal): Promise<CompanionBody> {
   const prisma = getPrisma();
   await assertBrowserVaultMemberAuthority({ memberId, prisma });
   const snapshot = await loadSavedNumbers(memberId, signal);
   await assertBrowserVaultMemberAuthority({ memberId, prisma });
-  if (!snapshot) return null;
-  const timeZone = snapshot.client.replica.meals?.timeZone;
-  if (!timeZone) throw numbersUnavailable("replica_timezone_missing");
-  return readCompanionBodyHeight(snapshot.client, toLocalDayKey(new Date(), timeZone));
+  return snapshot ? readCompanionBody(snapshot.client) : noBody;
 }
 
 async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: readonly MetricId[] = allMetrics, replicaState?: ReplicaState) {
