@@ -120,7 +120,7 @@ async function main(): Promise<void> {
     console.log(`ripgrepVersion=${result.ripgrepVersion}`);
 
     // The recap video renderer as a recap starts it: the installed package, its native canvas
-    // and its own fonts, in this image. It must lay out the probe's cover and refuse its song title.
+    // and its own fonts, in this image. It must register those fonts and refuse a title they cannot draw.
     const recapVideo = (await runDockerCommand([
       "run", "--rm", "--platform", "linux/amd64", "--network", "none", "--entrypoint", "node", IMAGE_TAG,
       "--input-type=module", "-e",

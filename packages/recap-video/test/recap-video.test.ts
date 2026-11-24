@@ -330,6 +330,31 @@ describe("refusals", () => {
     expect(await drawn(withPages(pages => pages.map(page => page.card ? { ...page, card: { ...page.card, title: long, line: long } } : page)), "superlative")).toEqual(["face", "name", "lead", "title", "rule", "line"]);
   });
 
+  it("keeps a page's words whole beside a picture too wide to stand any taller, and shortens long blocks evenly", async () => {
+    const wide = path.join(directory, "wide.jpg");
+    await writeFile(wide, fixturePicture(1600, 900, 100));
+    const blocks: RecapVideoPage["blocks"] = [
+      { kind: "headline", text: "Thursday, both of them posted their proof at eleven at night from the same couch" },
+      { kind: "photoPair", entryIds: ["entry-leo-4", "entry-ava-4"] },
+      { kind: "headline", text: "Neither of them would go to bed first, so they both stayed up arguing about it" },
+    ];
+    const heights = async (changed: RecapVideoInput, kind: string, names: string[]): Promise<number[]> => {
+      const made = await createRecapVideoRenderer(changed);
+      const entry = made.timeline.entries.find(found => found.kind === kind || found.page.id === kind);
+      const pieces = made.frameState((entry?.fromMs ?? 0) + 4900).pieces;
+      return names.map(name => pieces.find(piece => piece.name === name)?.box.height ?? 0);
+    };
+    // Two wide photos never stand 120 points tall, so the words around them keep every line they have beside two upright ones.
+    const pair = withPages(pages => pages.map(page => page.id === "page-3" ? { ...page, blocks } : page));
+    expect(await heights({ ...pair, photos: { ...pair.photos, "entry-leo-4": wide, "entry-ava-4": wide } }, "page-3", ["setup", "payoff"]))
+      .toEqual(await heights(pair, "page-3", ["setup", "payoff"]));
+    // A card too long for its page gives up lines from its title and its line in turn, not all of one before the other.
+    const long = Array.from({ length: 12 }, () => "photograph the same yoga mat").join(" ");
+    const card = (title: string): RecapVideoInput => withPages(pages => pages.map(page => page.card ? { ...page, card: { ...page.card, title, line: long } } : page));
+    const [cut] = await heights(card(long), "superlative", ["title"]), [one] = await heights(card("ask for a recount"), "superlative", ["title"]);
+    expect(cut).toBeGreaterThan(one ?? 0);
+  });
+
   it("gives a prize two lines on a taller ticket, or three at its smallest size, and cuts a longer one short", async () => {
     const stake = async (title: string): Promise<number> => (await createRecapVideoRenderer({ ...input, stake: { kind: "prize", title } })).frameState(50000).pieces.find(piece => piece.name === "stake")?.box.height ?? 0;
     const long = "A full weekend of pottery classes at the studio downtown with lunch and a new apron";

@@ -94,16 +94,16 @@ export function starringLine(input: RecapVideoInput): string {
 
 /**
  * A block of words, measured. `lines` is how many lines its shortenable part
- * takes, each `lineHeight` tall: a page with too many words for it cuts that
- * part short with an ellipsis, a line at a time, as the app's text is cut.
+ * takes: a page with too many words for it cuts that part short with an
+ * ellipsis, a line at a time, as the app's text is cut.
  */
-interface Words { height: number; lines: number; lineHeight: number; paint(ctx: Ctx, x: number, top: number, width: number): void }
+interface Words { height: number; lines: number; paint(ctx: Ctx, x: number, top: number, width: number): void }
 
 function headline(text: string, color: string, width: number, maxLines: number): Words {
   // The app sets it 37 points to a line with 5 between lines.
   const style: TextStyle = { font: "display", weight: 700, size: 30, lineHeight: 42, spacing: 5, color };
   const lines = wrapText(text, style, width, { pretty: true, keepHyphens: true, maxLines });
-  return { height: blockHeight(lines.length, style), lines: lines.length, lineHeight: style.lineHeight, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
+  return { height: blockHeight(lines.length, style), lines: lines.length, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
 }
 
 function quote(said: NonNullable<RecapVideoBlock["quote"]>, ink: Ink, width: number, maxLines: number): Words {
@@ -115,7 +115,7 @@ function quote(said: NonNullable<RecapVideoBlock["quote"]>, ink: Ink, width: num
   const by = wrapText([said.who, said.date ?? ""].filter(Boolean).join(" · "), who, width, { maxLines: 2 });
   const saidHeight = blockHeight(lines.length, words);
   return {
-    height: saidHeight + 6 + by.length * who.lineHeight, lines: lines.length, lineHeight: words.lineHeight,
+    height: saidHeight + 6 + by.length * who.lineHeight, lines: lines.length,
     paint: (ctx, x, top, across) => {
       drawLines(ctx, lines, words, x, top, across);
       drawLines(ctx, by, who, x, top + saidHeight + 6, across);
@@ -129,7 +129,7 @@ function stat(value: string, label: string, ink: Ink, width: number, maxLines: n
   const small: TextStyle = { font: "sans", size: 17, lineHeight: 22.1, color: ink.soft };
   const under = label.trim() ? wrapText(label, small, width, { maxLines }) : [];
   return {
-    height: big.style.lineHeight + (under.length > 0 ? 2 + under.length * small.lineHeight : 0), lines: under.length, lineHeight: small.lineHeight,
+    height: big.style.lineHeight + (under.length > 0 ? 2 + under.length * small.lineHeight : 0), lines: under.length,
     paint: (ctx, x, top, across) => {
       drawLines(ctx, big.lines, big.style, x, top, across);
       drawLines(ctx, under, small, x, top + big.style.lineHeight + 2, across);
@@ -142,7 +142,7 @@ function words(block: RecapVideoBlock, ink: Ink, width: number, maxLines = Infin
   if (block.kind === "kicker" && block.text?.trim()) {
     const style = mono(13, 0.3, ink.accent);
     const lines = wrapText(block.text.toUpperCase(), style, width, { maxLines });
-    return { height: lines.length * style.lineHeight, lines: lines.length, lineHeight: style.lineHeight, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
+    return { height: lines.length * style.lineHeight, lines: lines.length, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
   }
   if (block.kind === "quote" && block.quote?.text.trim() && block.quote.who.trim()) return quote(block.quote, ink, width, maxLines);
   if (block.kind === "stat" && block.statValue?.trim()) return stat(block.statValue.trim(), block.text ?? "", ink, width, maxLines);
@@ -150,18 +150,17 @@ function words(block: RecapVideoBlock, ink: Ink, width: number, maxLines = Infin
 }
 
 /**
- * Which block to shorten so a page's words fit, and to how many lines: the
- * tallest block that has a line to give up loses as many as `over` points
- * asks, one at least. Null when every block is down to its last line.
+ * Which block to shorten next so a page's words fit: the tallest that has a
+ * line to give up loses one, so long blocks shorten evenly. Null when every
+ * block is down to its last line.
  */
-function shorten(made: readonly (Words | null)[], over: number): { index: number; lines: number } | null {
+function shorten(made: readonly (Words | null)[]): { index: number; lines: number } | null {
   let index = -1;
   made.forEach((block, at) => {
     if (block && block.lines > 1 && (index === -1 || block.height > (made[index]?.height ?? 0))) index = at;
   });
   const block = made[index];
-  if (!block) return null;
-  return { index, lines: Math.max(1, block.lines - Math.max(1, Math.ceil(over / block.lineHeight))) };
+  return block ? { index, lines: block.lines - 1 } : null;
 }
 
 function wordsPiece(name: string, arriveAt: number | null, made: Words, x: number, top: number, width: number): Piece {
@@ -435,9 +434,13 @@ function picture(item: Exclude<StoryItem, { kind: "words" }>, room: number): Pic
   return item.kind === "pair" ? pairPicture(item.shots, room) : sheetPicture(item.shots, room);
 }
 
-/** The least a picture is squeezed to before the page's words give up lines instead: a sheet's squares are small by design. */
-const leastHeight = (item: Exclude<StoryItem, { kind: "words" }>): number => item.kind === "sheet" ? 60 * Math.ceil(item.shots.length / 3) : 120;
-const tooSmall = (item: Exclude<StoryItem, { kind: "words" }>, made: Picture): boolean => made.height < leastHeight(item) || made.width < 80;
+/**
+ * The least a picture is squeezed to before the page's words give up lines
+ * instead: a sheet's squares are small by design. A picture too wide to stand
+ * that tall on the page at all asks only for its full height there.
+ */
+const leastHeight = (item: Exclude<StoryItem, { kind: "words" }>, column: number): number =>
+  Math.min(item.kind === "sheet" ? 60 * Math.ceil(item.shots.length / 3) : 120, picture(item, column).height);
 
 async function buildStory(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const column: Rect = { x: 24, y: BOARD.top + 48, width: BOARD.width - 48, height: BOARD.height - BOARD.top - 48 - BOARD.bottom - 26 };
@@ -445,9 +448,9 @@ async function buildStory(page: RecapVideoPage, input: RecapVideoInput, load: Pi
   const items = await storyItems(page, input, load);
   if (items.length === 0) throw new RecapVideoRefusal("unsupported_page", "A page has nothing to show.");
   const pictureAt = items.findIndex(item => item.kind !== "words");
-  const shown = items[pictureAt], kept = shown && shown.kind !== "words" ? shown : null;
-  // A page with more words than room cuts its longest block short, as the app's text is cut, until
-  // its words fit and leave its picture its least size. Every block has at least one line left.
+  const shown = items[pictureAt], kept = shown && shown.kind !== "words" ? shown : null, least = kept ? leastHeight(kept, column.height) : 0;
+  // A page with more words than room cuts its tallest block short a line at a time, as the app's text
+  // is cut, until its words fit and leave its picture its least size. Every block keeps one line.
   const budgets = items.map(() => Infinity);
   let made: (Words | null)[], laid: Picture | null, heights: number[], total: number;
   for (;;) {
@@ -457,8 +460,8 @@ async function buildStory(page: RecapVideoPage, input: RecapVideoInput, load: Pi
     laid = kept ? picture(kept, room) : null;
     heights = items.map((_, index) => index === pictureAt ? laid?.height ?? 0 : made[index]?.height ?? 0);
     total = heights.reduce((sum, height) => sum + height, 0) + gap * (items.length - 1);
-    const over = Math.max(total - column.height, kept && laid && tooSmall(kept, laid) ? leastHeight(kept) - laid.height : 0);
-    const cut = over > 0.5 ? shorten(made, over) : null;
+    const over = Math.max(total - column.height, laid ? least - laid.height : 0);
+    const cut = over > 0.5 ? shorten(made) : null;
     if (!cut) break;
     budgets[cut.index] = cut.lines;
   }
@@ -520,16 +523,16 @@ async function buildLikely(page: RecapVideoPage, input: RecapVideoInput, load: P
   const lineStyle: TextStyle = { font: "sans", size: 18, lineHeight: 31, spacing: 8, color: COLOR.muted };
   const name = wrapText((input.players[card.memberId]?.name ?? "").toUpperCase(), nameStyle, column.width, { maxLines: 1 });
   const lead = wrapText("Most likely to", leadStyle, column.width);
-  // A card with more words than its page cuts the longer of its title and its line short, as the app's text is cut, until they fit.
+  // A card with more words than its page cuts the taller of its title and its line short, a line at a time, as the app's text is cut, until they fit.
   let title: string[] = [], line: string[] = [], titleLines = Infinity, lineLines = Infinity;
   for (;;) {
     title = wrapText(card.title, titleStyle, column.width, { maxLines: titleLines });
     line = wrapText(card.line, lineStyle, 310, { maxLines: lineLines });
     const over = 168 + name.length * nameStyle.lineHeight + 14 + leadStyle.lineHeight + title.length * titleStyle.lineHeight + 3 + blockHeight(line.length, lineStyle) + gap * 5 - column.height;
     const cut = over > 0 ? shorten([
-      { height: title.length * titleStyle.lineHeight, lines: title.length, lineHeight: titleStyle.lineHeight, paint: () => {} },
-      { height: blockHeight(line.length, lineStyle), lines: line.length, lineHeight: lineStyle.lineHeight, paint: () => {} },
-    ], over) : null;
+      { height: title.length * titleStyle.lineHeight, lines: title.length, paint: () => {} },
+      { height: blockHeight(line.length, lineStyle), lines: line.length, paint: () => {} },
+    ]) : null;
     if (!cut) break;
     if (cut.index === 0) titleLines = cut.lines;
     else lineLines = cut.lines;

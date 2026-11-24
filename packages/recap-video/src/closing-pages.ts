@@ -82,17 +82,20 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, lo
     lineTops.push(y);
     lineStarts.push(starts[index]?.[0] ?? songMs);
     let x = 0, rows = 1, cut = false;
+    const first = placed.length;
     texts.forEach((text, at) => {
       if (cut) return;
       requireDrawable(text, lyricStyle);
       // A word wider than the card is cut short to fit it.
       const shown = ellipsize(text, lyricStyle, pane.width), width = textWidth(shown, lyricStyle);
       if (x > 0 && x + width > pane.width) {
-        // The card shows the line being sung on two rows, as the app does. A longer one is cut short
-        // at the end of its second row, and the rest of its words are not drawn.
+        // The card shows the line being sung on two rows, as the app does. A longer one ends its second
+        // row with an ellipsis, after the last word that leaves room for one; the words after it are not drawn.
         if (rows === 2) {
+          const fits = (word: { text: string; x: number }): boolean => word.x + textWidth(`${word.text}${ELLIPSIS}`, lyricStyle) <= pane.width;
+          while (placed.length > first + 1 && !fits(placed[placed.length - 1]!)) placed.pop();
           const last = placed.at(-1);
-          if (last) last.text = ellipsize(`${last.text}${ELLIPSIS}`, lyricStyle, pane.width - last.x);
+          if (last && !last.text.endsWith(ELLIPSIS)) last.text = fits(last) ? `${last.text}${ELLIPSIS}` : ellipsize(`${last.text}${ELLIPSIS}`, lyricStyle, pane.width - last.x);
           cut = true;
           return;
         }
