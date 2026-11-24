@@ -245,7 +245,7 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
   if (measure.unit === "meters" || measure.unit === "steps") {
     const profile = await getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
     await setRouteGoal(memberId, measureId, body.goal, { points: cumulativePoints(measure.amounts),
-      awards: snapshot.awards, today: formatTimeZoneDateTimeParts(new Date(), profile.timeZone).dayKey, beforeMutationTx });
+      awards: snapshot.awards, runsFrom: snapshot.states.get(measureId)?.runsFrom, today: formatTimeZoneDateTimeParts(new Date(), profile.timeZone).dayKey, beforeMutationTx });
     return measureId;
   }
   if ("from" in body.goal) throw invalidGameRequest("Choose a route for a distance measure.");

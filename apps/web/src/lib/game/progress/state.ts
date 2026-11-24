@@ -30,6 +30,8 @@ export interface MeasureState {
   healthSettlement?: { savedAt: string; checkedAt: string; timeZone: string; profileTimeZone: string };
   /** Running only: the vault's run meters per day, from the replica saved at savedAt. */
   vaultRuns?: { savedAt: string; days: [Day, number][] };
+  /** Running only: vault runs count from this day, the member's join day, as Steps do. Absent: every vault run counts. */
+  runsFrom?: Day;
 }
 
 /** One state writer. Fields replace whole fields; an eligible baseline freezes once. */
