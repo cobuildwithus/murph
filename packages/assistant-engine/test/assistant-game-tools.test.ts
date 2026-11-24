@@ -882,8 +882,10 @@ describe('a recap wake that asks for a video', () => {
       expect(request).toHaveBeenCalledTimes(uploads + 1)
       expect(request.mock.lastCall?.[0]).toEqual(todaysWrite)
       if (input.render !== 'refused') expect(dispose).toHaveBeenCalled()
-      expect(warn).toHaveBeenCalledExactlyOnceWith('Recap video skipped; the recap goes out without one.',
-        input.render === 'refused' ? { gameId: origin.gameId, reason: 'unsupported_text' } : { gameId: origin.gameId, reason: 'failed', errorName: 'Error' })
+      expect(warn).toHaveBeenCalledOnce()
+      expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toMatchObject({ component: 'hosted.runtime.recap-video', level: 'warn',
+        message: expect.stringMatching(/^Recap video skipped; the recap goes out without one\./u),
+        details: { gameId: origin.gameId, reason: input.render === 'refused' ? 'unsupported_text' : 'failed' } })
     } finally {
       warn.mockRestore()
     }

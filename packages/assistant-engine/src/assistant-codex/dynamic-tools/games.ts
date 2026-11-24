@@ -1,4 +1,5 @@
 import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
+import { emitHostedExecutionStructuredLog } from '@murphai/hosted-execution'
 import * as z from '@murphai/contracts/zod-runtime'
 import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse, type HostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
@@ -676,13 +677,14 @@ async function prepareRecapVideoCandidate(input: {
     if (rendered?.kind === 'rendered') await rendered.dispose()
     // A cancelled turn stops here; every other failure, the deadline included, is the recap without a video.
     if (input.signal?.aborted) throw input.signal.reason ?? error
-    return skipRecapVideo(gameId, 'failed', error instanceof Error ? error.name : typeof error)
+    return skipRecapVideo(gameId, 'failed', error)
   }
 }
 
-/** The recap goes out without its video. Says why, so a missing video is never worked out from request timing. */
-function skipRecapVideo(gameId: string, reason: string, errorName?: string): null {
-  console.warn('Recap video skipped; the recap goes out without one.', { gameId, reason, ...(errorName ? { errorName } : {}) })
+/** The recap goes out without its video. Logs why, so a missing video is never worked out from request timing. */
+function skipRecapVideo(gameId: string, reason: string, error?: unknown): null {
+  emitHostedExecutionStructuredLog({ component: 'hosted.runtime.recap-video', details: { gameId, reason }, ...(error === undefined ? {} : { error }),
+    level: 'warn', message: 'Recap video skipped; the recap goes out without one.', phase: 'wake.running' })
   return null
 }
 
