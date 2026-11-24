@@ -126,7 +126,7 @@ describe('recap video render step', () => {
   })
 
   it.each([
-    ['a renderer refusal', `say({ ok: false, code: 'does_not_fit' })`, 'does_not_fit'],
+    ['a renderer refusal', `say({ ok: false, code: 'unsupported_text' })`, 'unsupported_text'],
     ['a crash', `process.exit(3)`, 'crashed'],
     ['output that is not a result', `process.stdout.write('not json')`, 'crashed'],
     ['a file over the budget', `writeFileSync(request.outPath, Buffer.alloc(8_000_001)); say({ ok: true, bytes: 8_000_001, frames: 1, drawMs: 1, encoder: null })`, 'too_large'],

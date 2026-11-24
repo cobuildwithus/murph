@@ -279,8 +279,9 @@ async function renderInDirectory(input: Parameters<typeof renderRecapShowVideo>[
 }
 
 /**
- * For the runner image smoke: start the installed renderer exactly as a recap does, on a show it
- * can only refuse after measuring text with its own fonts on the native canvas. Returns the refusal.
+ * For the runner image smoke: start the installed renderer exactly as a recap does, on a show whose
+ * cover it lays out by measuring text with its own fonts on the native canvas, and whose song title
+ * it then refuses because those fonts cannot draw it. Returns the refusal.
  */
 export async function probeRecapVideoRenderer(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'murph-recap-video-probe-'))
@@ -289,7 +290,7 @@ export async function probeRecapVideoRenderer(): Promise<string> {
     const request: RecapVideoChildRequest = { outPath: path.join(directory, 'recap.mp4'), deadlineMs: 60_000, input: {
       show: { treatment: 'Probe', pages: [
         { id: 'page-0', kind: 'cover', background: 'night', blocks: [{ kind: 'headline', text: 'M'.repeat(64) }], cueMs: 0 },
-        { id: 'song', kind: 'song', background: 'night', blocks: [], cueMs: 5200, song: { title: 'Probe', lyrics: ['La'] } },
+        { id: 'song', kind: 'song', background: 'night', blocks: [], cueMs: 5200, song: { title: 'Probe \u30e8\u30ac', lyrics: ['La'] } },
         { id: 'result', kind: 'result', background: 'paper', blocks: [] },
       ] },
       players: { a: { name: 'A' }, b: { name: 'B' } }, scores: { a: 1, b: 0 },

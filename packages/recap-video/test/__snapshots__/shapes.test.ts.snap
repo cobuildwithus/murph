@@ -169,27 +169,27 @@ exports[`every shape a recap can take > draws quote-long 1`] = `
 
 exports[`every shape a recap can take > draws result-long-names 1`] = `
 [
-  "score 14,312 374x118",
-  "title 14,430 374x128",
-  "stake 57,568 288x202",
+  "score 14,270 374x118",
+  "title 14,388 374x128",
+  "stake 57,526 288x244",
   "footer -8,786 418x32",
 ]
 `;
 
 exports[`every shape a recap can take > draws result-no-cover 1`] = `
 [
-  "score 14,355.4 374x118",
-  "title 14,473.4 374x74",
-  "stake 57,557.4 288x202",
+  "score 14,324 374x118",
+  "title 14,442 374x74",
+  "stake 57,526 288x244",
   "footer -8,786 418x32",
 ]
 `;
 
 exports[`every shape a recap can take > draws result-two-digit-score 1`] = `
 [
-  "score 14,355.4 374x118",
-  "title 14,473.4 374x74",
-  "stake 57,557.4 288x202",
+  "score 14,324 374x118",
+  "title 14,442 374x74",
+  "stake 57,526 288x244",
   "footer -8,786 418x32",
 ]
 `;
@@ -293,9 +293,9 @@ exports[`every shape a recap can take > draws song-untimed 1`] = `
 
 exports[`every shape a recap can take > draws stake-both-win 1`] = `
 [
-  "score 14,335.8 374x118",
-  "title 14,453.8 374x74",
-  "stake 57,537.8 288x202",
+  "score 14,293.8 374x118",
+  "title 14,411.8 374x74",
+  "stake 57,495.8 288x244",
   "caption 14,745.8 374x38.2",
   "footer -8,786 418x32",
 ]
@@ -321,27 +321,36 @@ exports[`every shape a recap can take > draws stake-even-every-day 1`] = `
 
 exports[`every shape a recap can take > draws stake-prize 1`] = `
 [
-  "score 14,355.4 374x118",
-  "title 14,473.4 374x74",
-  "stake 57,557.4 288x202",
+  "score 14,324 374x118",
+  "title 14,442 374x74",
+  "stake 57,526 288x244",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-prize-cut 1`] = `
+[
+  "score 14,332.4 374x118",
+  "title 14,450.4 374x74",
+  "stake 57,534.4 288x235.6",
   "footer -8,786 418x32",
 ]
 `;
 
 exports[`every shape a recap can take > draws stake-prize-long 1`] = `
 [
-  "score 14,355.4 374x118",
-  "title 14,473.4 374x74",
-  "stake 57,557.4 288x202",
+  "score 14,324 374x118",
+  "title 14,442 374x74",
+  "stake 57,526 288x244",
   "footer -8,786 418x32",
 ]
 `;
 
 exports[`every shape a recap can take > draws stake-prize-own-words 1`] = `
 [
-  "score 14,355.4 374x118",
-  "title 14,473.4 374x74",
-  "stake 57,557.4 288x202",
+  "score 14,324 374x118",
+  "title 14,442 374x74",
+  "stake 57,526 288x244",
   "footer -8,786 418x32",
 ]
 `;

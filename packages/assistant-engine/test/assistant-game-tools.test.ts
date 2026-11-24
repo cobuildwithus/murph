@@ -834,7 +834,7 @@ describe('a recap wake that asks for a video', () => {
     const bytes = Buffer.alloc(input.bytes ?? 4_500_000, 1)
     await writeFile(file, bytes)
     const dispose = vi.fn(async () => { await rm(directory, { recursive: true, force: true }) })
-    const renderGameRecapVideo = vi.fn(async () => input.render === 'refused' ? { kind: 'refused' as const, reason: 'does_not_fit' }
+    const renderGameRecapVideo = vi.fn(async () => input.render === 'refused' ? { kind: 'refused' as const, reason: 'unsupported_text' }
       : { kind: 'rendered' as const, file, hash: 'f'.repeat(64), byteLength: bytes.length, referenceIds: ['1'.repeat(64)], dispose })
     const request = vi.fn()
     for (const value of input.parts ?? []) {
@@ -874,12 +874,19 @@ describe('a recap wake that asks for a video', () => {
     ['Web refuses a part (the flag is off there)', { parts: [{ action: 'read_game', result: { status: 'unavailable', error: 'recap_video_unavailable' } }] }, 1],
     ['a part comes back as something else', { parts: [{ action: 'read_game', result: { status: 'ok', recapGame: { storageKey: 'x' } } }] }, 1],
     ['a later part fails (a seventeenth staged part)', { parts: [{ action: 'read_game', result: { status: 'ok', recapGame: part(0, 2_000_000) } }, new Error('Too many staged parts')] }, 2],
-  ])('writes the recap as today when %s', async (_name, input: { render?: 'refused'; parts?: unknown[] }, uploads) => {
-    const { result, request, dispose } = await setup({ video: true, ...input })
-    expect(result).toMatchObject({ success: true })
-    expect(request).toHaveBeenCalledTimes(uploads + 1)
-    expect(request.mock.lastCall?.[0]).toEqual(todaysWrite)
-    if (input.render !== 'refused') expect(dispose).toHaveBeenCalled()
+  ])('writes the recap as today, and logs why it has no video, when %s', async (_name, input: { render?: 'refused'; parts?: unknown[] }, uploads) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { result, request, dispose } = await setup({ video: true, ...input })
+      expect(result).toMatchObject({ success: true })
+      expect(request).toHaveBeenCalledTimes(uploads + 1)
+      expect(request.mock.lastCall?.[0]).toEqual(todaysWrite)
+      if (input.render !== 'refused') expect(dispose).toHaveBeenCalled()
+      expect(warn).toHaveBeenCalledExactlyOnceWith('Recap video skipped; the recap goes out without one.',
+        input.render === 'refused' ? { gameId: origin.gameId, reason: 'unsupported_text' } : { gameId: origin.gameId, reason: 'failed', errorName: 'Error' })
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('writes the recap as today when the render step itself throws', async () => {

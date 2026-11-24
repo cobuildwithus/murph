@@ -120,13 +120,13 @@ async function main(): Promise<void> {
     console.log(`ripgrepVersion=${result.ripgrepVersion}`);
 
     // The recap video renderer as a recap starts it: the installed package, its native canvas
-    // and its own fonts, in this image. It must measure the probe's headline and refuse it.
+    // and its own fonts, in this image. It must lay out the probe's cover and refuse its song title.
     const recapVideo = (await runDockerCommand([
       "run", "--rm", "--platform", "linux/amd64", "--network", "none", "--entrypoint", "node", IMAGE_TAG,
       "--input-type=module", "-e",
       "const { probeRecapVideoRenderer } = await import('@murphai/assistant-engine/recap-video-render'); process.stdout.write(await probeRecapVideoRenderer())",
     ], "")).trim();
-    if (recapVideo !== "does_not_fit") throw new Error(`Recap video renderer probe answered ${JSON.stringify(recapVideo)}.`);
+    if (recapVideo !== "unsupported_text") throw new Error(`Recap video renderer probe answered ${JSON.stringify(recapVideo)}.`);
     console.log(`recapVideoRendererProbe=${recapVideo}`);
   } finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });

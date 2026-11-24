@@ -92,25 +92,30 @@ export function starringLine(input: RecapVideoInput): string {
 
 // MARK: Words
 
-interface Words { height: number; paint(ctx: Ctx, x: number, top: number, width: number): void }
+/**
+ * A block of words, measured. `lines` is how many lines its shortenable part
+ * takes, each `lineHeight` tall: a page with too many words for it cuts that
+ * part short with an ellipsis, a line at a time, as the app's text is cut.
+ */
+interface Words { height: number; lines: number; lineHeight: number; paint(ctx: Ctx, x: number, top: number, width: number): void }
 
-function headline(text: string, color: string, width: number): Words {
+function headline(text: string, color: string, width: number, maxLines: number): Words {
   // The app sets it 37 points to a line with 5 between lines.
   const style: TextStyle = { font: "display", weight: 700, size: 30, lineHeight: 42, spacing: 5, color };
-  const lines = wrapText(text, style, width, { pretty: true, keepHyphens: true });
-  return { height: blockHeight(lines.length, style), paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
+  const lines = wrapText(text, style, width, { pretty: true, keepHyphens: true, maxLines });
+  return { height: blockHeight(lines.length, style), lines: lines.length, lineHeight: style.lineHeight, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
 }
 
-function quote(said: NonNullable<RecapVideoBlock["quote"]>, ink: Ink, width: number): Words {
+function quote(said: NonNullable<RecapVideoBlock["quote"]>, ink: Ink, width: number, maxLines: number): Words {
   // Their own words run long sometimes: a longer line steps down, as in the app.
   const size = [...said.text].length > 70 ? 23 : 28;
   const words: TextStyle = { font: "display", weight: 400, italic: true, size, lineHeight: displayLine(size) + 4, spacing: 4, color: ink.ink };
   const who: TextStyle = { font: "sans", size: 16, lineHeight: 20.8, color: ink.soft };
-  const lines = wrapText(`“${said.text}”`, words, width, { pretty: true });
-  const by = wrapText([said.who, said.date ?? ""].filter(Boolean).join(" · "), who, width);
+  const lines = wrapText(`“${said.text}”`, words, width, { pretty: true, maxLines });
+  const by = wrapText([said.who, said.date ?? ""].filter(Boolean).join(" · "), who, width, { maxLines: 2 });
   const saidHeight = blockHeight(lines.length, words);
   return {
-    height: saidHeight + 6 + by.length * who.lineHeight,
+    height: saidHeight + 6 + by.length * who.lineHeight, lines: lines.length, lineHeight: words.lineHeight,
     paint: (ctx, x, top, across) => {
       drawLines(ctx, lines, words, x, top, across);
       drawLines(ctx, by, who, x, top + saidHeight + 6, across);
@@ -119,12 +124,12 @@ function quote(said: NonNullable<RecapVideoBlock["quote"]>, ink: Ink, width: num
 }
 
 /** A number blown up big over its label. The number keeps to one line, shrinking as the app shrinks it. */
-function stat(value: string, label: string, ink: Ink, width: number): Words {
+function stat(value: string, label: string, ink: Ink, width: number, maxLines: number): Words {
   const big = fitText(value, { font: "display", weight: 700, size: 96, lineHeight: displayLine(96), tracking: -1.92, color: ink.ink }, width, { maxLines: 1, least: 0.4 });
   const small: TextStyle = { font: "sans", size: 17, lineHeight: 22.1, color: ink.soft };
-  const under = label.trim() ? wrapText(label, small, width) : [];
+  const under = label.trim() ? wrapText(label, small, width, { maxLines }) : [];
   return {
-    height: big.style.lineHeight + (under.length > 0 ? 2 + under.length * small.lineHeight : 0),
+    height: big.style.lineHeight + (under.length > 0 ? 2 + under.length * small.lineHeight : 0), lines: under.length, lineHeight: small.lineHeight,
     paint: (ctx, x, top, across) => {
       drawLines(ctx, big.lines, big.style, x, top, across);
       drawLines(ctx, under, small, x, top + big.style.lineHeight + 2, across);
@@ -132,16 +137,31 @@ function stat(value: string, label: string, ink: Ink, width: number): Words {
   };
 }
 
-function words(block: RecapVideoBlock, ink: Ink, width: number): Words {
-  if (block.kind === "headline" && block.text?.trim()) return headline(block.text, ink.ink, width);
+function words(block: RecapVideoBlock, ink: Ink, width: number, maxLines = Infinity): Words {
+  if (block.kind === "headline" && block.text?.trim()) return headline(block.text, ink.ink, width, maxLines);
   if (block.kind === "kicker" && block.text?.trim()) {
     const style = mono(13, 0.3, ink.accent);
-    const lines = wrapText(block.text.toUpperCase(), style, width);
-    return { height: lines.length * style.lineHeight, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
+    const lines = wrapText(block.text.toUpperCase(), style, width, { maxLines });
+    return { height: lines.length * style.lineHeight, lines: lines.length, lineHeight: style.lineHeight, paint: (ctx, x, top, across) => drawLines(ctx, lines, style, x, top, across) };
   }
-  if (block.kind === "quote" && block.quote?.text.trim() && block.quote.who.trim()) return quote(block.quote, ink, width);
-  if (block.kind === "stat" && block.statValue?.trim()) return stat(block.statValue.trim(), block.text ?? "", ink, width);
+  if (block.kind === "quote" && block.quote?.text.trim() && block.quote.who.trim()) return quote(block.quote, ink, width, maxLines);
+  if (block.kind === "stat" && block.statValue?.trim()) return stat(block.statValue.trim(), block.text ?? "", ink, width, maxLines);
   throw new RecapVideoRefusal("unsupported_block", `No drawing for this ${block.kind} block.`);
+}
+
+/**
+ * Which block to shorten so a page's words fit, and to how many lines: the
+ * tallest block that has a line to give up loses as many as `over` points
+ * asks, one at least. Null when every block is down to its last line.
+ */
+function shorten(made: readonly (Words | null)[], over: number): { index: number; lines: number } | null {
+  let index = -1;
+  made.forEach((block, at) => {
+    if (block && block.lines > 1 && (index === -1 || block.height > (made[index]?.height ?? 0))) index = at;
+  });
+  const block = made[index];
+  if (!block) return null;
+  return { index, lines: Math.max(1, block.lines - Math.max(1, Math.ceil(over / block.lineHeight))) };
 }
 
 function wordsPiece(name: string, arriveAt: number | null, made: Words, x: number, top: number, width: number): Piece {
@@ -166,10 +186,11 @@ const unfinishedTagWidth = (): number => textWidth("Didn't finish", UNFINISHED_T
 /** The largest print of a shot, border and all, that keeps the whole photo inside `maxWidth` by `maxHeight`. */
 function printSize(shot: Shot, border: Border, maxWidth: number, maxHeight: number): { width: number; height: number } {
   const shape = shapeOf(shot), width = Math.min(maxWidth - border.side * 2, (maxHeight - border.side - border.foot) * shape);
-  // A day given back wears its tag inside the photo, eight points in: a photo too narrow for it is refused, not drawn with the tag hanging off.
-  if (shot.unfinished && (width < unfinishedTagWidth() + 16 || width / shape < 21 + 16)) throw new RecapVideoRefusal("does_not_fit", "A photo is too small for its tag.");
   return { width: width + border.side * 2, height: width / shape + border.side + border.foot };
 }
+
+/** A day given back wears its tag inside the photo, eight points in. A photo too small for it is drawn without it, not with the tag hanging off. */
+const tagFits = (picture: { width: number; height: number }): boolean => picture.width >= unfinishedTagWidth() + 16 && picture.height >= 21 + 16;
 
 /** A print: the whole photo on white paper, a little tilted. */
 function paintPrint(ctx: Ctx, shot: Shot, box: Rect, border: Border, tilt: number): void {
@@ -193,7 +214,7 @@ function paintPrint(ctx: Ctx, shot: Shot, box: Rect, border: Border, tilt: numbe
     const label = mono(11, 0.2, onNight(0.55));
     drawLines(ctx, ["MISSED"], label, picture.x, picture.y + (picture.height - label.lineHeight) / 2, picture.width);
   }
-  if (shot.unfinished) {
+  if (shot.unfinished && tagFits(picture)) {
     // The app's tag on a day its player gave back, in the photo's bottom corner.
     const style = UNFINISHED_TAG, wide = unfinishedTagWidth(), tag: Rect = { x: picture.x + picture.width - 8 - wide, y: picture.y + picture.height - 8 - 21, width: wide, height: 21 };
     ctx.fillStyle = "rgba(28,25,21,0.58)";
@@ -265,6 +286,23 @@ async function shotOf(id: string | undefined, input: RecapVideoInput, load: Pict
 
 // MARK: Cover
 
+/** The cover's title sizes, largest first, as the app steps them down. */
+const COVER_TITLE_SIZES = [58, 48, 40, 34] as const;
+
+/**
+ * The cover's title as the app sets it: at the largest size that keeps it to
+ * three lines, and at the smallest past that, cut short with an ellipsis.
+ */
+function coverTitle(title: string, width: number): { style: TextStyle; lines: string[] } {
+  const styleAt = (size: number): TextStyle => ({ font: "display", weight: 700, size, lineHeight: size, tracking: -size * 0.02, color: COLOR.onNight });
+  for (const size of COVER_TITLE_SIZES.slice(0, -1)) {
+    const lines = wrapText(title, styleAt(size), width);
+    if (lines.length <= 3) return { style: styleAt(size), lines };
+  }
+  const least = styleAt(COVER_TITLE_SIZES.at(-1) ?? 34);
+  return { style: least, lines: wrapText(title, least, width, { maxLines: 3 }) };
+}
+
 async function buildCover(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const pieces: Piece[] = [];
   const scene = input.scenes[page.id];
@@ -272,21 +310,19 @@ async function buildCover(page: RecapVideoPage, input: RecapVideoInput, load: Pi
   const width = BOARD.width - 48, gap = 14;
   const title = page.blocks.find(block => block.kind === "headline")?.text;
   if (!title?.trim()) throw new RecapVideoRefusal("unsupported_page", "The cover has no title.");
-  const titleStyle: TextStyle = { font: "display", weight: 700, size: 58, lineHeight: 58, tracking: -1.16, color: COLOR.onNight };
-  const titleLines = wrapText(title, titleStyle, width);
+  const { style: titleStyle, lines: titleLines } = coverTitle(title, width);
   const starringStyle: TextStyle = { font: "sans", size: 15, lineHeight: 19.5, color: onNight(0.72) };
-  const starring = wrapText(starringLine(input), starringStyle, width);
+  const starring = wrapText(starringLine(input), starringStyle, width, { maxLines: 3 });
   // The app's cover can open with a small label. The recap's writer never gives one, but a page that has it draws it.
-  const labels = page.blocks.filter(block => block.kind === "kicker" && block.text?.trim()).map(block => words(block, inkFor("night"), width));
+  const labels = page.blocks.filter(block => block.kind === "kicker" && block.text?.trim()).map(block => words(block, inkFor("night"), width, 2));
   const height = labels.reduce((sum, label) => sum + label.height + gap, 0) + titleLines.length * titleStyle.lineHeight + gap + starring.length * starringStyle.lineHeight;
-  const top = BOARD.height - BOARD.bottom - 42 - height;
-  if (top < BOARD.top + 48) throw new RecapVideoRefusal("does_not_fit", "The cover's title is too long for its page.");
+  // Three lines of title at most, so the words always leave the cover's top clear.
+  const top = Math.max(BOARD.height - BOARD.bottom - 42 - height, BOARD.top + 48);
   if (!scene && page.fallback?.kind === "photo") {
-    // Without its scene the cover stands its photo in, as a print in the room above the words.
+    // Without its scene the cover stands its photo in, as a print in the room above the words, when there is room for one.
     const shot = await shotOf(page.fallback.entryIds[0], input, load), room = top - gap - 12 - BOARD.top;
     const size = printSize(shot, LARGE, 310, room);
-    if (size.height < 120 || size.width < 80) throw new RecapVideoRefusal("does_not_fit", "The cover's title leaves no room for its photo.");
-    pieces.push(printPiece("picture", null, shot, { x: (BOARD.width - size.width) / 2, y: BOARD.top + (room - size.height) / 2, ...size }, LARGE, -2));
+    if (size.height >= 120 && size.width >= 80) pieces.push(printPiece("picture", null, shot, { x: (BOARD.width - size.width) / 2, y: BOARD.top + (room - size.height) / 2, ...size }, LARGE, -2));
   }
   pieces.push({
     // Whole from the first frame: it is the video's thumbnail.
@@ -399,23 +435,33 @@ function picture(item: Exclude<StoryItem, { kind: "words" }>, room: number): Pic
   return item.kind === "pair" ? pairPicture(item.shots, room) : sheetPicture(item.shots, room);
 }
 
-/** The least a picture may be squeezed to before its page is refused: a sheet's squares are small by design. */
-const tooSmall = (item: StoryItem, made: Picture): boolean => made.height < (item.kind === "sheet" ? 60 * Math.ceil(item.shots.length / 3) : 120) || made.width < 80;
+/** The least a picture is squeezed to before the page's words give up lines instead: a sheet's squares are small by design. */
+const leastHeight = (item: Exclude<StoryItem, { kind: "words" }>): number => item.kind === "sheet" ? 60 * Math.ceil(item.shots.length / 3) : 120;
+const tooSmall = (item: Exclude<StoryItem, { kind: "words" }>, made: Picture): boolean => made.height < leastHeight(item) || made.width < 80;
 
 async function buildStory(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const column: Rect = { x: 24, y: BOARD.top + 48, width: BOARD.width - 48, height: BOARD.height - BOARD.top - 48 - BOARD.bottom - 26 };
   const gap = 22, ink = inkFor(page.background);
   const items = await storyItems(page, input, load);
   if (items.length === 0) throw new RecapVideoRefusal("unsupported_page", "A page has nothing to show.");
-  const made = items.map(item => item.kind === "words" ? words(item.block, ink, column.width) : null);
-  // A picture takes the room the words leave.
-  const room = Math.max(column.height - made.reduce((sum, block) => sum + (block?.height ?? 0), 0) - gap * (items.length - 1), 0);
   const pictureAt = items.findIndex(item => item.kind !== "words");
-  const shown = items[pictureAt], laid = shown && shown.kind !== "words" ? picture(shown, room) : null;
-  if (shown && laid && tooSmall(shown, laid)) throw new RecapVideoRefusal("does_not_fit", "The page's words leave no room for its picture.");
-  const heights = items.map((_, index) => index === pictureAt ? laid?.height ?? 0 : made[index]?.height ?? 0);
-  const total = heights.reduce((sum, height) => sum + height, 0) + gap * (items.length - 1);
-  if (total > column.height + 0.5) throw new RecapVideoRefusal("does_not_fit", "The page's words are too long for it.");
+  const shown = items[pictureAt], kept = shown && shown.kind !== "words" ? shown : null;
+  // A page with more words than room cuts its longest block short, as the app's text is cut, until
+  // its words fit and leave its picture its least size. Every block has at least one line left.
+  const budgets = items.map(() => Infinity);
+  let made: (Words | null)[], laid: Picture | null, heights: number[], total: number;
+  for (;;) {
+    made = items.map((item, index) => item.kind === "words" ? words(item.block, ink, column.width, budgets[index]) : null);
+    // A picture takes the room the words leave.
+    const room = Math.max(column.height - made.reduce((sum, block) => sum + (block?.height ?? 0), 0) - gap * (items.length - 1), 0);
+    laid = kept ? picture(kept, room) : null;
+    heights = items.map((_, index) => index === pictureAt ? laid?.height ?? 0 : made[index]?.height ?? 0);
+    total = heights.reduce((sum, height) => sum + height, 0) + gap * (items.length - 1);
+    const over = Math.max(total - column.height, kept && laid && tooSmall(kept, laid) ? leastHeight(kept) - laid.height : 0);
+    const cut = over > 0.5 ? shorten(made, over) : null;
+    if (!cut) break;
+    budgets[cut.index] = cut.lines;
+  }
   const pieces: Piece[] = [];
   let y = column.y + (column.height - total) / 2;
   items.forEach((_, index) => {
@@ -472,10 +518,22 @@ async function buildLikely(page: RecapVideoPage, input: RecapVideoInput, load: P
   const leadStyle: TextStyle = { font: "display", weight: 400, italic: true, size: 24, lineHeight: displayLine(24), color: COLOR.muted };
   const titleStyle: TextStyle = { font: "display", weight: 700, size: 42, lineHeight: 46, tracking: -0.42, color: COLOR.ink };
   const lineStyle: TextStyle = { font: "sans", size: 18, lineHeight: 31, spacing: 8, color: COLOR.muted };
-  const name = wrapText((input.players[card.memberId]?.name ?? "").toUpperCase(), nameStyle, column.width);
+  const name = wrapText((input.players[card.memberId]?.name ?? "").toUpperCase(), nameStyle, column.width, { maxLines: 1 });
   const lead = wrapText("Most likely to", leadStyle, column.width);
-  const title = wrapText(card.title, titleStyle, column.width);
-  const line = wrapText(card.line, lineStyle, 310);
+  // A card with more words than its page cuts the longer of its title and its line short, as the app's text is cut, until they fit.
+  let title: string[] = [], line: string[] = [], titleLines = Infinity, lineLines = Infinity;
+  for (;;) {
+    title = wrapText(card.title, titleStyle, column.width, { maxLines: titleLines });
+    line = wrapText(card.line, lineStyle, 310, { maxLines: lineLines });
+    const over = 168 + name.length * nameStyle.lineHeight + 14 + leadStyle.lineHeight + title.length * titleStyle.lineHeight + 3 + blockHeight(line.length, lineStyle) + gap * 5 - column.height;
+    const cut = over > 0 ? shorten([
+      { height: title.length * titleStyle.lineHeight, lines: title.length, lineHeight: titleStyle.lineHeight, paint: () => {} },
+      { height: blockHeight(line.length, lineStyle), lines: line.length, lineHeight: lineStyle.lineHeight, paint: () => {} },
+    ], over) : null;
+    if (!cut) break;
+    if (cut.index === 0) titleLines = cut.lines;
+    else lineLines = cut.lines;
+  }
   const parts: { name: string; at: number; height: number; paint(ctx: Ctx, top: number): void }[] = [
     { name: "face", at: 0.024, height: 168, paint: (ctx, top) => {
       const x = column.x + (column.width - 168) / 2;
@@ -498,7 +556,6 @@ async function buildLikely(page: RecapVideoPage, input: RecapVideoInput, load: P
     { name: "line", at: 0.36, height: blockHeight(line.length, lineStyle), paint: (ctx, top) => drawLines(ctx, line, lineStyle, column.x + (column.width - 310) / 2, top, 310) },
   ];
   const total = parts.reduce((sum, part) => sum + part.height, 0) + gap * (parts.length - 1);
-  if (total > column.height) throw new RecapVideoRefusal("does_not_fit", "The card's words are too long for its page.");
   let y = column.y + (column.height - total) / 2;
   const pieces = parts.map((part): Piece => {
     const top = y;

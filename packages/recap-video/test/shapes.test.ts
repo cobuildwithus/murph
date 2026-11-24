@@ -84,12 +84,12 @@ describe("what the borrowed faces draw", () => {
     await refuses({ ...base, players: { ...base.players, "member-leo": { name: "李" } } }, "unsupported_text");
   });
 
-  it("types a punishment slip on one line, or smaller on ruled lines, and refuses a dare past three of them", async () => {
+  it("types a punishment slip on one line, or smaller on ruled lines, and cuts a dare past three of them short", async () => {
     const dare = (title: string): RecapVideoInput => ({ ...base, stake: { kind: "punishment", title } });
     const stakeBox = async (title: string): Promise<number> => (await createRecapVideoRenderer(dare(title))).frameState(50000).pieces.find(piece => piece.name === "stake")?.box.height ?? 0;
     const short = await stakeBox("Cold plunge at dawn"), two = await stakeBox("Let the winner pick your outfit for a day"), three = await stakeBox("Sing the national anthem at the next family dinner, standing on a chair");
     // One line is 34 points; ruled lines are 30.5 each. These are the lines the app's own text breaks these dares onto.
     expect([two - short, three - short]).toEqual([27, 57.5]);
-    await refuses(dare(Array.from({ length: 12 }, () => "sing the national anthem").join(" ")), "does_not_fit");
+    expect(await stakeBox(Array.from({ length: 12 }, () => "sing the national anthem").join(" "))).toBe(three);
   });
 });

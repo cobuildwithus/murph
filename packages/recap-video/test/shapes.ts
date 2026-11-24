@@ -82,6 +82,7 @@ export const SHAPES: Shape[] = [
   // The last screen: every stake, both faces, long names, prizes and dares, two-digit scores.
   { name: "stake-prize-long", page: "result", build: base => ({ ...base, stake: { kind: "prize", title: "A Night off Dishes" } }) },
   { name: "stake-prize-own-words", page: "result", build: base => ({ ...base, stake: { kind: "prize", title: "Loser Buys Tacos" } }) },
+  { name: "stake-prize-cut", page: "result", build: base => ({ ...base, stake: { kind: "prize", title: "A full weekend of pottery classes at the studio downtown with lunch and a new apron" } }) },
   { name: "stake-both-win", page: "result", build: base => ({ ...base, ...even(true, 7), stake: { kind: "bothWin", title: "Dinner Out Together" } }) },
   { name: "stake-even", page: "result", build: base => ({ ...base, ...even(false, 6), stake: { kind: "none" } }) },
   { name: "stake-even-every-day", page: "result", build: base => ({ ...base, ...even(true, 7), stake: { kind: "none" } }) },

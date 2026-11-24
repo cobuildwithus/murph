@@ -650,6 +650,7 @@ async function prepareRecapVideoCandidate(input: {
   story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal
 }): Promise<RecapVideoCandidate | null> {
   const { RECAP_VIDEO_BUDGET_MS, recapVideoParts } = await import('../../assistant/recap-video-render.js')
+  const gameId = input.origin.gameId
   // One deadline for all of it: photo fetches, the render and the part uploads.
   const deadlineAt = Date.now() + RECAP_VIDEO_BUDGET_MS
   const budget = AbortSignal.timeout(RECAP_VIDEO_BUDGET_MS)
@@ -657,7 +658,7 @@ async function prepareRecapVideoCandidate(input: {
   let rendered: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['renderGameRecapVideo']>>> | null = null
   try {
     rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal, deadlineAt })
-    if (rendered.kind !== 'rendered') return null
+    if (rendered.kind !== 'rendered') return skipRecapVideo(gameId, rendered.reason)
     const { readFile } = await import('node:fs/promises')
     const parts = []
     for (const [index, bytes] of recapVideoParts(await readFile(rendered.file)).entries()) {
@@ -675,8 +676,14 @@ async function prepareRecapVideoCandidate(input: {
     if (rendered?.kind === 'rendered') await rendered.dispose()
     // A cancelled turn stops here; every other failure, the deadline included, is the recap without a video.
     if (input.signal?.aborted) throw input.signal.reason ?? error
-    return null
+    return skipRecapVideo(gameId, 'failed', error instanceof Error ? error.name : typeof error)
   }
+}
+
+/** The recap goes out without its video. Says why, so a missing video is never worked out from request timing. */
+function skipRecapVideo(gameId: string, reason: string, errorName?: string): null {
+  console.warn('Recap video skipped; the recap goes out without one.', { gameId, reason, ...(errorName ? { errorName } : {}) })
+  return null
 }
 
 async function prepareRecapReadResult(context: AssistantHostedToolContext, result: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['groupTool']>['request']>>) {

@@ -198,40 +198,101 @@ export interface WrapOptions {
   keepHyphens?: boolean;
 }
 
-/** Breaks text into lines no wider than `maxWidth`, or null when a single unit is wider than that. */
-function breakText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions): string[] | null {
+/** What the app ends a line it cuts short with. */
+export const ELLIPSIS = "…";
+
+const letterSegments = new Intl.Segmenter("en", { granularity: "grapheme" });
+/** A text's letters as a reader sees them, so a cut never splits an emoji or a letter from its accent. */
+const lettersOf = (text: string): string[] => Array.from(letterSegments.segment(text), part => part.segment);
+
+/** A word wider than the measure, broken between letters into pieces that each fit, as the app breaks one. */
+function breakWord(word: string, style: TextStyle, maxWidth: number): string[] {
+  const pieces: string[] = [];
+  let piece = "";
+  for (const letter of lettersOf(word)) {
+    if (piece && textWidth(piece + letter, style) > maxWidth) {
+      pieces.push(piece);
+      piece = "";
+    }
+    piece += letter;
+  }
+  return piece ? [...pieces, piece] : pieces;
+}
+
+interface Unit { text: string; glue: string }
+/** Units as one line reads: each joined to the one before it by its glue. */
+const joinUnits = (items: readonly Unit[]): string => items.map((unit, index) => (index === 0 ? "" : unit.glue) + unit.text).join("");
+
+/**
+ * Breaks text into lines of units no wider than `maxWidth`. A single unit
+ * wider than that is broken between its letters, or answers null when `whole`
+ * asks for units kept whole (shrinking text tries a smaller size before it
+ * breaks a word).
+ */
+function breakUnits(text: string, style: TextStyle, maxWidth: number, options: WrapOptions, whole = false): Unit[][] | null {
   // A unit is what cannot be broken; `glue` is what joins it to the unit before it on a line.
-  const units: { text: string; glue: string }[] = [];
+  const units: Unit[] = [];
   for (const word of text.split(/\s+/u).filter(Boolean)) {
     const pieces = options.keepHyphens ? [word] : word.split(/(?<=[^-]-)(?=[^-])/u);
-    pieces.forEach((piece, index) => units.push({ text: piece, glue: index === 0 ? " " : "" }));
+    for (const [index, piece] of pieces.entries()) {
+      const glue = index === 0 ? " " : "";
+      if (textWidth(piece, style) <= maxWidth) {
+        units.push({ text: piece, glue });
+        continue;
+      }
+      if (whole) return null;
+      // Each piece but the last fills its line, so the word reads on from one line to the next.
+      breakWord(piece, style, maxWidth).forEach((part, at) => units.push({ text: part, glue: at === 0 ? glue : "" }));
+    }
   }
-  const join = (items: { text: string; glue: string }[]): string => items.map((unit, index) => (index === 0 ? "" : unit.glue) + unit.text).join("");
-  const lines: { text: string; glue: string }[][] = [];
+  const lines: Unit[][] = [];
   for (const unit of units) {
     const line = lines.at(-1);
-    if (line && textWidth(join([...line, unit]), style) <= maxWidth) line.push(unit);
+    if (line && textWidth(joinUnits([...line, unit]), style) <= maxWidth) line.push(unit);
     else lines.push([unit]);
   }
-  if (lines.some(line => textWidth(join(line), style) > maxWidth)) return null;
   if (options.pretty && lines.length > 1) {
     const last = lines.at(-1) ?? [], before = lines.at(-2) ?? [];
     const moved = before.at(-1);
     // A last line under a third of the measure is an orphan: it takes a word from the line above.
-    if (moved && before.length > 1 && textWidth(join(last), style) < maxWidth / 3 && textWidth(join([moved, ...last]), style) <= maxWidth) {
+    if (moved && before.length > 1 && textWidth(joinUnits(last), style) < maxWidth / 3 && textWidth(joinUnits([moved, ...last]), style) <= maxWidth) {
       before.pop();
       last.unshift(moved);
     }
   }
-  return lines.map(join);
+  return lines;
 }
 
-/** Breaks text into lines no wider than `maxWidth`. A single unit wider than that is a refusal. */
-export function wrapText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions = {}): string[] {
+/** A line cut short at its end with an ellipsis so it fits `maxWidth`, letter by letter, as the app cuts one. */
+export function ellipsize(text: string, style: TextStyle, maxWidth: number): string {
+  if (textWidth(text, style) <= maxWidth) return text;
+  const letters = lettersOf(text);
+  const cut = (count: number): string => `${letters.slice(0, count).join("").trimEnd()}${ELLIPSIS}`;
+  // The most letters that still fit beside the ellipsis.
+  let fits = 0, over = letters.length;
+  while (over - fits > 1) {
+    const middle = Math.floor((fits + over) / 2);
+    if (textWidth(cut(middle), style) <= maxWidth) fits = middle;
+    else over = middle;
+  }
+  return cut(fits);
+}
+
+/** At most `maxLines` lines: past them, the last one shown runs on into the rest of the text and is cut short with an ellipsis. */
+function clampLines(lines: Unit[][], style: TextStyle, maxWidth: number, maxLines: number): string[] {
+  const shown = Math.max(1, Math.floor(maxLines));
+  if (lines.length <= shown) return lines.map(joinUnits);
+  return [...lines.slice(0, shown - 1).map(joinUnits), ellipsize(joinUnits(lines.slice(shown - 1).flat()), style, maxWidth)];
+}
+
+/**
+ * Breaks text into lines no wider than `maxWidth`, and at most `maxLines` of
+ * them, the last cut short with an ellipsis. A word wider than the measure
+ * breaks between its letters. Words never cost the video.
+ */
+export function wrapText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions & { maxLines?: number } = {}): string[] {
   requireDrawable(text, style);
-  const lines = breakText(text, style, maxWidth, options);
-  if (!lines) throw new RecapVideoRefusal("does_not_fit", "A word is wider than its page.");
-  return lines;
+  return clampLines(breakUnits(text, style, maxWidth, options) ?? [], style, maxWidth, options.maxLines ?? Infinity);
 }
 
 /** A style at a share of its size, its leading and spacing with it, as the app shrinks text. */
@@ -248,15 +309,20 @@ export interface FitLimits {
 /**
  * Sets text the way the app's shrinking text is set: at its own size when it
  * takes `maxLines` or fewer, else at the largest smaller size that does. Text
- * the app would cut short with an ellipsis is a refusal.
+ * that fits at none of them is set at the smallest size and cut short with an
+ * ellipsis, as the app cuts it.
  */
-export function fitText(text: string, style: TextStyle, maxWidth: number, limits: FitLimits, options: WrapOptions = {}): { style: TextStyle; lines: string[] } {
+export function fitText(text: string, style: TextStyle, maxWidth: number, limits: FitLimits, options: WrapOptions = {}): { style: TextStyle; lines: string[]; cut: boolean } {
   requireDrawable(text, style);
+  const fits = (lines: number, sized: TextStyle): boolean => lines <= limits.maxLines && lines * sized.lineHeight <= (limits.maxHeight ?? Infinity);
   for (let scale = 1; scale >= limits.least - 1e-9; scale -= 0.005) {
-    const sized = scale === 1 ? style : scaleStyle(style, scale), lines = breakText(text, sized, maxWidth, options);
-    if (lines && lines.length <= limits.maxLines && lines.length * sized.lineHeight <= (limits.maxHeight ?? Infinity)) return { style: sized, lines };
+    const sized = scale === 1 ? style : scaleStyle(style, scale), lines = breakUnits(text, sized, maxWidth, options, true);
+    if (lines && fits(lines.length, sized)) return { style: sized, lines: lines.map(joinUnits), cut: false };
   }
-  throw new RecapVideoRefusal("does_not_fit", "Words are too long for their place, even at their smallest size.");
+  const least = scaleStyle(style, limits.least);
+  const room = Math.min(limits.maxLines, Math.floor((limits.maxHeight ?? Infinity) / least.lineHeight));
+  const units = breakUnits(text, least, maxWidth, options) ?? [];
+  return { style: least, lines: clampLines(units, least, maxWidth, room), cut: units.length > Math.max(1, room) };
 }
 
 export interface TextMetrics { ascent: number; descent: number }
