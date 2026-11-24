@@ -1,0 +1,13 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 200,
+  "item": {
+    "id": "replies-during-device-sync",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quicker replies when device sync starts",
+    "summary": "If your message and a device sync arrive together, Murph can start your reply before loading the sync tools.",
+    "relevanceTags": ["chat", "devices"],
+    "sourcePullRequests": [5281]
+  }
+}
