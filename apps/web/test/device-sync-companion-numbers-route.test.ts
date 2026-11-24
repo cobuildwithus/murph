@@ -441,11 +441,11 @@ function weightPoint(sourceLabel: string, date: string, value: number, unit = "k
   return heightPoint(sourceLabel, date, value, unit, "body-weight");
 }
 
-it.each([0, 45, 46, 365, 366])("the body reader uses the same selections and freshness at %i days", async age => {
+it.each([0, 46, 366, 3000])("the body reader serves the same selections at %i days old", async age => {
   const date = addDaysToIsoDate(through, -age);
   await withHeightPoints([heightPoint("Manual", date, 170.4), weightPoint("Manual", date, 81.6)]);
   expect(await readSavedCompanionBody("member-ava", request().signal))
-    .toEqual({ heightCm: age <= 365 ? 170.4 : null, weightKg: age <= 45 ? 81.6 : null });
+    .toEqual({ heightCm: 170.4, weightKg: 81.6 });
   expect(mocks.authority).toHaveBeenCalledTimes(2);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "member-ava", prisma: {} });
   expect(mocks.control).toHaveBeenCalledTimes(1);
@@ -485,7 +485,7 @@ it.each(["Manual", "WHOOP", "Junction", "Clinical record"])("serves the newest v
   expect(body).not.toHaveProperty("metricSelectionRows");
 });
 
-it("serves the newest valid weight in kg beside height, with its own 45-day expiry", async () => {
+it("serves the newest valid weight in kg beside height", async () => {
   await withHeightPoints([
     weightPoint("Manual", through, 180, "lb"),
     weightPoint("WHOOP", addDaysToIsoDate(through, -1), 79),
@@ -495,7 +495,7 @@ it("serves the newest valid weight in kg beside height, with its own 45-day expi
   expect(body.weightKg).toBeCloseTo(81.6466, 4);
   expect(body.heightCm).toBeNull();
   await withHeightPoints([weightPoint("Manual", addDaysToIsoDate(through, -46), 80), heightPoint("Manual", through, 170)]);
-  expect(await (await GET(request())).json()).toMatchObject({ heightCm: 170, weightKg: null });
+  expect(await (await GET(request())).json()).toMatchObject({ heightCm: 170, weightKg: 80 });
 });
 
 it("keeps canonical same-date source precedence and latest observation within a source", async () => {
@@ -510,19 +510,11 @@ it("keeps canonical same-date source precedence and latest observation within a 
 it.each([
   ["no height", [], null],
   ["unusable height", [heightPoint("Manual", through, 80, "kg")], null],
-  ["365 days old", [heightPoint("Manual", addDaysToIsoDate(through, -365), 170)], 170],
-  ["366 days old", [heightPoint("Manual", addDaysToIsoDate(through, -366), 170)], null],
-] as const)("handles %s against the current local date", async (_label, points, expected) => {
+  ["366 days old", [heightPoint("Manual", addDaysToIsoDate(through, -366), 170)], 170],
+  ["eight years old", [heightPoint("Manual", addDaysToIsoDate(through, -3000), 170)], 170],
+] as const)("handles %s: a height stands until replaced", async (_label, points, expected) => {
   await withHeightPoints([...points]);
   expect((await (await GET(request())).json()).heightCm).toBe(expected);
-});
-
-it("expires height even when the saved selection was fresh when published", async () => {
-  await withHeightPoints([heightPoint("Manual", addDaysToIsoDate(through, -365), 170)]);
-  vi.setSystemTime(new Date("2026-11-05T02:00:00Z")); // Still Nov 4 in the vault's zone.
-  expect((await (await GET(request())).json()).heightCm).toBe(170);
-  vi.setSystemTime(new Date("2026-11-05T05:00:00Z"));
-  expect((await (await GET(request())).json()).heightCm).toBeNull();
 });
 
 it("never exposes height or weight after health authority is revoked during decryption", async () => {

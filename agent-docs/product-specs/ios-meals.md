@@ -419,10 +419,10 @@ notes, lab rows or metric-selection metadata appear in this response.
 canonical latest-valid `body-height` selection from the already-loaded
 `metricsIndex`, in cm, or null. All sources participate, including manual,
 WHOOP, Junction and clinical measurements; canonical same-date source
-precedence and observation ordering remain unchanged. The selection expires
-when its effective date is more than 365 days before today's vault-local date.
-This is evaluated at read time even for an old snapshot. `weightKg` is the
-same for `body-weight`, in kg, with the catalog's 45-day expiry. No height or
+precedence and observation ordering remain unchanged. A height stands until a
+newer one replaces it, however old: the replica selects it from every point,
+past the 365-day lookback. `weightKg` is the same for `body-weight`, in kg.
+No height or
 weight history, source metadata or additional bucket is returned.
 `readCompanionBody` is the server helper for an already-authorized replica;
 the shared `readCompanionHealthSeries` result also includes `heightCm` and

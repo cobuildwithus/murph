@@ -4447,10 +4447,12 @@ actions report `unchanged`. Neither outcome proves replica publication.
 About you reads `heightCm` and `weightKg` from the existing companion Numbers
 response. `readCompanionBody` uses `metricsIndex`'s canonical `body-height` and
 `body-weight` selections, so latest-valid source precedence and unit
-normalization stay at the metric owner. Each is null without a usable selection
-or when its date is older than the catalog's staleness window (365 days for
-height, 45 for weight) before today's vault-local date, even if the selection
-was fresh at publication. No extra bucket, profile field,
+normalization stay at the metric owner. Each is null only without a usable
+selection: a saved height or weight stands until a newer one replaces it,
+however old. Generation 19 replicas therefore select `body-height` and
+`body-weight` from every point, past the 365-day lookback that still bounds
+their metric rows and every other metric's selection; the bump rebuilds older
+replicas on their next freshness check. No extra bucket, profile field,
 projection generation or endpoint is added. The Numbers read retains native
 session and health-authority checks before and after loading private data.
 
@@ -6159,9 +6161,8 @@ One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
 reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
 logging are off. After admission, generation reads height and weight once through
 the existing Companion replica loader and latest-valid body helper, outside
-transactions and under Browser Vault health authority. A height no older than
-365 days and a weight no older than 45 days are sent to OpenAI in the prompt
-framing, as whole feet and inches with centimeters and whole pounds with
+transactions and under Browser Vault health authority. The saved height and
+weight, however old, are sent to OpenAI in the prompt framing, as whole feet and inches with centimeters and whole pounds with
 kilograms, so the picture keeps their real body. Either may be missing alone.
 Missing values or a failed read leave the prompt without them; share authority
 is rechecked before provider dispatch. Height and weight are never added to

@@ -100,7 +100,7 @@ export async function readCompanionHealthSeries(
   }
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window, stepsWindow,
-    demographics, ...(requestedMetrics ? noBody : readCompanionBody(client, through)), numbers,
+    demographics, ...(requestedMetrics ? noBody : readCompanionBody(client)), numbers,
     // Null: a replica built before run days shipped. Unknown, never zero.
     runs: client.replica.runs ?? null,
   };
@@ -108,17 +108,12 @@ export async function readCompanionHealthSeries(
 
 export type CompanionBody = { heightCm: number | null; weightKg: number | null };
 
-/** Canonical latest-valid selections, in cm and kg; each expires by its catalog policy against today's local date. */
-export function readCompanionBody(
-  client: Pick<BrowserVaultMetricSeriesCapableQueryClient, "metricSelections">,
-  today: string,
-): CompanionBody {
-  const latest = (metric: "body-height" | "body-weight") => {
-    const selection = client.metricSelections.get(metric);
-    const staleAfterDays = resolveMetricDefinition(metric)!.selectionPolicy.staleAfterDays!;
-    return !selection?.effectiveDate || selection.effectiveDate < addDaysToIsoDate(today, -staleAfterDays) ? null : selection.value;
+/** Canonical latest-valid selections, in cm and kg. They stand until replaced, however old. */
+export function readCompanionBody(client: Pick<BrowserVaultMetricSeriesCapableQueryClient, "metricSelections">): CompanionBody {
+  return {
+    heightCm: client.metricSelections.get("body-height")?.value ?? null,
+    weightKg: client.metricSelections.get("body-weight")?.value ?? null,
   };
-  return { heightCm: latest("body-height"), weightKg: latest("body-weight") };
 }
 
 /** A height-and-weight-only consumer of the same saved replica and health authority. */
@@ -127,10 +122,7 @@ export async function readSavedCompanionBody(memberId: string, signal: AbortSign
   await assertBrowserVaultMemberAuthority({ memberId, prisma });
   const snapshot = await loadSavedNumbers(memberId, signal);
   await assertBrowserVaultMemberAuthority({ memberId, prisma });
-  if (!snapshot) return noBody;
-  const timeZone = snapshot.client.replica.meals?.timeZone;
-  if (!timeZone) throw numbersUnavailable("replica_timezone_missing");
-  return readCompanionBody(snapshot.client, toLocalDayKey(new Date(), timeZone));
+  return snapshot ? readCompanionBody(snapshot.client) : noBody;
 }
 
 async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: readonly MetricId[] = allMetrics, replicaState?: ReplicaState) {
