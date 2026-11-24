@@ -1,4 +1,4 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.169.0-runtime1
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.172.0-runtime1
 
 # Re-layer the exact pinned native runtime beside /app so lazy image loading
 # fetches the app-server hot set before the first provider turn.
@@ -22,7 +22,7 @@ USER root
 
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
-# The bundled CLI predates the 6.2 catalog entries. Keep hosted Sol within the
+# Preserve hosted 6.2 attachment support and keep Sol within the
 # per-request pricing boundary used by cumulative turn accounting.
 # Drop baked collaboration modes so turn/start can supply current Murph instructions.
 COPY codex-model-catalog.6.2.json /tmp/codex-model-catalog.6.2.json

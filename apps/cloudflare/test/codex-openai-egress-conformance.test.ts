@@ -170,6 +170,9 @@ describe("pinned Codex OpenAI egress conformance", () => {
       const errors = JSON.stringify(completed.definitions.CodexErrorInfo);
       expect(errors).toContain('"modelNotFound"');
       expect(errors).toContain('"policyCapacityUnavailable"');
+      for (const scope of ["apiKey", "project", "organization"]) {
+        expect(errors).toContain(`"${scope}SpendLimitExceeded"`);
+      }
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }

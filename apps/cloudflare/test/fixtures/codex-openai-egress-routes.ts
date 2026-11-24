@@ -5,10 +5,10 @@
  * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "d32063f96c2dff1dc96af839b3952abb6acfeda4",
+  upstreamCommit: "3d86e43b075adeba2193ec5c22ac92f55afd82e6",
   upstreamSourceRoot: "codex-rs",
-  upstreamTag: "rust-v0.169.0",
-  version: "0.169.0",
+  upstreamTag: "rust-v0.172.0",
+  version: "0.172.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -24,6 +24,8 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "responses",
   ],
   reviewedSources: [
+    "codex-rs/app-server-client/src/cloud_backend/auth.rs",
+    "codex-rs/cloud-client/src/environments.rs",
     "codex-rs/model-provider/src/gcp/mod.rs",
     "codex-rs/responses-api-proxy/src/auth.rs",
     "codex-rs/login/src/auth/personal_access_token.rs",
@@ -222,6 +224,72 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/environment-configs",
+      disposition: "different_origin",
+      owner: "codex-cloud",
+      reason: "The desktop environment picker requests saved configurations from codex-cloud-backend.chatgpt.com.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-coststurn-errorusage-limitexecution-unavailableempty-responseanalytics/codex/turn-costs",
+      disposition: "binary_false_positive",
+      owner: "codex-analytics",
+      reason: "The Linux binary places turn outcome labels after the turn-costs path used by the analytics client.",
+    },
+    {
+      candidate: "/v1/decisionscodex",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The Linux binary places a Codex label after the Guardian decisions path.",
+    },
+    {
+      candidate: "/v1/decisionscodex.guardian_v2.classification.truncationcodex.guardian_v2.classification.truncation.bytescodex.guardian_v2.fast_decision",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The Linux binary places Guardian metric names after the decisions path.",
+    },
+    {
+      candidate: "/v1/decisionstext/event-stream",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The macOS binary places the event-stream media type after the Guardian decisions path.",
+    },
+    {
+      candidate: "/v1/environment-configsomit",
+      disposition: "binary_false_positive",
+      owner: "codex-cloud",
+      reason: "The Cloud environment picker sets the environment-configs path and appends omitDraft as a query parameter.",
+    },
+    {
+      candidate: "/v1/liveapi.pathdelay_ms",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The macOS binary places tracing field names after the Live path.",
+    },
+    {
+      candidate: "/v1/realtimewsrealtime",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The Linux binary places the WebSocket scheme and realtime label after the realtime path.",
+    },
+    {
+      candidate: "/v1/realtimewswsshttpsquicksilverrealtime",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The macOS binary places URL schemes and session labels after the realtime path.",
+    },
+    {
+      candidate: "/v1/tokenunhandled",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The macOS binary places error text after the authentication token path.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamisk-proj-fedramp-sk-svcacct-fedramp-",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The macOS binary places key format prefixes after the credential identity path.",
+    },
     {
       candidate: "/v1/analytics/codex/turn-costscodex-cliskipping",
       disposition: "binary_false_positive",
