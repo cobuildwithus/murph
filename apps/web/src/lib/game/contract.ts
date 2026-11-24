@@ -451,15 +451,13 @@ export interface GameTicketView {
   id: string;
   kind?: GameStakeKind;
   what: string;
-  /** "expired" once it's past `useBy` unredeemed; expired tickets stay in the wallet. */
-  status: "open" | "redeemed" | "expired";
-  /** Redeem by this time: 14 days after the ticket was issued. */
-  useBy: string;
+  /** Tickets never expire: an open one stays open until its holder marks it done. */
+  status: "open" | "redeemed";
   owedByMemberId: string;
   /**
    * The verified phone number (E.164) of the player who owes this ticket, so
    * the holder's Messages can open addressed to them. Only on an open,
-   * unexpired ticket the viewer holds in a two-player game, while that player
+   * ticket the viewer holds in a two-player game, while that player
    * is still in it (not left, not blocked). Never logged.
    */
   owedByPhone?: string;
@@ -689,7 +687,6 @@ export type GameErrorCode =
   | "CHALLENGE_USED"
   | "MEDIA_MISSING"
   | "TICKET_NOT_HELD"
-  | "TICKET_EXPIRED"
   | "PROFILE_REQUIRED"
   | "CHANGE_PENDING"
   | "CHANGE_EXPIRED"

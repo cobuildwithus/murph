@@ -405,7 +405,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(phoneBatch).not.toHaveBeenCalled();
   });
 
-  it.each(["expired", "left", "blocked", "hidden", "group"] as const)("does not read ticket phones for %s games", async scenario => {
+  it.each(["left", "blocked", "hidden", "group"] as const)("does not read ticket phones for %s games", async scenario => {
     const db = getPrisma();
     const holder = await member("Holder", "UTC");
     const debtor = await member("Debtor", "UTC");
@@ -413,7 +413,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await db.gameTicket.create({ data: {
       id: randomUUID(), gameId, stakeKey: "synthetic-prize", owedBySeats: [1], owedToSeats: [0],
     } });
-    if (scenario === "expired") await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(15 * 86_400_000) } });
     if (scenario === "left") await db.gamePlayer.updateMany({ where: { gameId, memberId: debtor }, data: { leftAt: new Date() } });
     if (scenario === "blocked" || scenario === "hidden") await db.gameBlock.create({ data: {
       blockerMemberId: scenario === "blocked" ? holder : debtor,
@@ -2118,7 +2117,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await errorCode(kat, { termsVersion: 1, timeZone: "America/New_York", token, type: "join" })).toBe("INVITE_USED");
   });
 
-  it.each(["prize", "dare"] as const)("issues a long-game %s ticket for fourteen days on the dev clock", async (kind) => {
+  it.each(["prize", "dare"] as const)("issues a long-game %s ticket on the dev clock that never expires", async (kind) => {
     const holder = await member("Sam", "America/New_York");
     const debtor = await member("Maya", "America/New_York");
     const {gameId} = await startGame(holder, debtor, {terms:{...TERMS,lengthDays:75,stakes:[{kind,item:"Pick a film"}]}});
@@ -2131,7 +2130,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(offset).toBeGreaterThan(44 * 86_400_000);
     expect(ticket).toMatchObject({kind,status:"open",youHold:true});
     expect(Math.abs(Date.parse(ticket.createdAt) - (Date.now() + offset))).toBeLessThan(10_000);
-    expect(Date.parse(ticket.useBy) - Date.parse(ticket.createdAt)).toBe(14 * 86_400_000);
+    expect(ticket).not.toHaveProperty("useBy");
     expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
     expect((await readHome(debtor)).wallet.owed).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
     expect((await readGameChatState("synthetic-room",[holder,debtor])).games.find((game) => game.id === gameId)?.result?.tickets).toContainEqual(expect.objectContaining({status:"open",count:1}));
@@ -2139,15 +2138,14 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await ok(holder,{type:"redeem",ticketId:ticket.id});
       expect((await readHome(holder)).wallet.redeemed).toContainEqual(expect.objectContaining({id:ticket.id,status:"redeemed"}));
     } else {
-      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 13 * 86_400_000)}});
+      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 400 * 86_400_000)}});
       expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"open"}));
-      await getPrisma().game.update({where:{id:gameId},data:{devClockOffsetMs:BigInt(offset + 14 * 86_400_000)}});
-      expect((await readHome(holder)).wallet.held).toContainEqual(expect.objectContaining({id:ticket.id,status:"expired"}));
-      expect(await errorCode(holder,{type:"redeem",ticketId:ticket.id})).toBe("TICKET_EXPIRED");
+      await ok(holder,{type:"redeem",ticketId:ticket.id});
+      expect((await readHome(holder)).wallet.redeemed).toContainEqual(expect.objectContaining({id:ticket.id,status:"redeemed"}));
     }
   });
 
-  it("lets a ticket expire 14 days after it's issued, refusing to redeem it then", async () => {
+  it("keeps a ticket open months after it's issued, and its holder can still mark it done", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");
     const { gameId } = await startGame(leo, ava);
@@ -2155,17 +2153,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await ok(leo, await photo(leo, gameId, "only-leo"));
     const [ticket] = (await devSettleNow(gameId, leo)).tickets;
     expect(ticket).toMatchObject({ status: "open", youHold: true });
-    expect(new Date(ticket.useBy).getTime() - new Date(ticket.createdAt).getTime()).toBe(14 * 24 * 60 * 60 * 1000);
+    expect(ticket).not.toHaveProperty("useBy");
 
     await getPrisma().gameTicket.update({
-      data: { createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000) },
+      data: { createdAt: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000) },
       where: { id: ticket.id },
     });
-    expect((await readHome(leo)).wallet.held).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
-    expect((await readHome(ava)).wallet.owed).toEqual([expect.objectContaining({ id: ticket.id, status: "expired" })]);
-    const refused = await run(leo, { ticketId: ticket.id, type: "redeem" });
-    expect(refused).toMatchObject({ error: { code: "TICKET_EXPIRED" }, ok: false, status: 410 });
-    expect((await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("open");
+    expect((await readHome(leo)).wallet.held).toEqual([expect.objectContaining({ id: ticket.id, status: "open" })]);
+    expect((await readHome(ava)).wallet.owed).toEqual([expect.objectContaining({ id: ticket.id, status: "open" })]);
+    await ok(leo, { ticketId: ticket.id, type: "redeem" });
+    expect((await getPrisma().gameTicket.findUniqueOrThrow({ where: { id: ticket.id } })).status).toBe("redeemed");
   });
 
   it("starts on the challenger's picked date, shown before and after accept", async () => {

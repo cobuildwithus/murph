@@ -132,9 +132,9 @@ describe("both-win readers", () => {
     const words = { v: 1 as const, versions: [{ n: 1, tasks: [], stakes: [{ key: "prize", item: "Lunch" }, { key: "both", item: "Dinner" }] }] };
     expect(termsView(s, words).stakes.map(stake => stake.kind)).toEqual(["prize", "both_get"]);
     const tickets = decideSettle(s).tickets.map((ticket, i) => ({ ...ticket, id: `ticket_${i}`, gameId: s.game.id,
-      useBy: now(20), createdAt: now(7), redeemedAt: null, status: "open" as const, players: s.players }));
+      createdAt: now(7), redeemedAt: null, status: "open" as const, players: s.players }));
     for (const viewer of ["ava", "leo"]) {
-      const views = tickets.map(ticket => ticketView(ticket, words, viewer, now(8), s.game.terms));
+      const views = tickets.map(ticket => ticketView(ticket, words, viewer, s.game.terms));
       expect(views.filter(ticket => ticket.youHold)).toHaveLength(1);
       expect(views.every(ticket => ticket.kind === "both_get" && !ticket.left)).toBe(true);
     }

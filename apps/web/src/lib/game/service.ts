@@ -110,9 +110,7 @@ import {
   isSettledGameCorrectable,
   settledGameEnd,
   isGameInviteExpired,
-  isTicketExpired,
   GAME_MAX_OPEN_PER_PAIR,
-  GAME_TICKET_USE_DAYS,
   needsPostToday,
   parseStoredResult,
   parseStoredTerms,
@@ -1810,7 +1808,7 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const { ticketId } = command;
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true }, where: { id: ticketId } });
   if (!ticket) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
-  await runLocked(ticket.gameId, context, async ({ clock, now, tx, loaded }) => {
+  await runLocked(ticket.gameId, context, async ({ clock, tx, loaded }) => {
     // A day correction on the finished game can remove an open ticket that is no longer owed.
     const current = await tx.gameTicket.findUnique({ where: { id: ticketId } });
     if (!current) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
@@ -1819,7 +1817,6 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
     const authorized = group ? canRedeemGroupTicket(current, loaded.row.players, loaded.row.result ? parseStoredResult(loaded.row.result) : null, actor)
       : holder && current.owedToSeats.includes(holder.seat);
     if (!authorized) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
-    if (isTicketExpired(current, now)) reject("TICKET_EXPIRED", "This prize expired before it was used.");
     const debtor = loaded.row.players.find(player => current.owedBySeats.includes(player.seat))?.memberId;
     if (!group && current.status === "open" && (!debtor || await areGamePlayersBlocked(tx, actor, debtor))) {
       reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
@@ -2790,9 +2787,9 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     const gameNames = row.maxPlayers === 10 ? gameChatNames(nameProfiles.filter(profile => players.some(player => player.memberId === profile.memberId))) : names;
     const words = parseTermWords(plain[index] ?? "");
     const result = row.result === null ? null : parseStoredResult(row.result);
-    const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; owedBySeats?: number[]; owedToSeats?: number[]; what: string; status: "open" | "redeemed" | "expired"; count: number }>();
+    const ticketGroups = new Map<string, { owedByMemberId: string; owedToMemberId: string; owedBySeats?: number[]; owedToSeats?: number[]; what: string; status: "open" | "redeemed"; count: number }>();
     for (const ticket of tickets.filter((ticket) => ticket.gameId === row.id)) {
-      const view = ticketView(toTicketRow(ticket, row.players), words, "", gameNow(clock, row));
+      const view = ticketView(toTicketRow(ticket, row.players), words, "");
       const key = JSON.stringify([view.owedByMemberId, view.owedToMemberId, view.what, view.status]);
       const existing = ticketGroups.get(key);
       if (existing) existing.count += 1;
@@ -3450,14 +3447,13 @@ async function homeGroupInvitationLinks(games: LoadedGame[], ids: Set<string>, k
   return open.flatMap(({ row }, i) => tokens[i] ? [{ gameId: row.id, token: tokens[i] }] : []);
 }
 
-/** Open obligations outlive the history window. Expiry uses each game's own clock. */
-async function readWalletTickets(memberId: string, multiplayer: boolean, clock: Date) {
+/** Open tickets never expire, so they all outlive the history window. */
+async function readWalletTickets(memberId: string, multiplayer: boolean) {
   const prisma = getPrisma();
   const tickets = await prisma.$queryRaw<GameTicket[]>(Prisma.sql`
     WITH visible AS (
       SELECT ticket.id, ticket.created_at,
-        ticket.status = 'open' AND ticket.created_at + ${GAME_TICKET_USE_DAYS} * interval '1 day'
-          >= (${clock}::timestamptz AT TIME ZONE 'UTC') + COALESCE(game.dev_clock_offset_ms, 0) * interval '1 millisecond' AS actionable
+        ticket.status = 'open' AS actionable
       FROM game_player seat JOIN game ON game.id = seat.game_id
       JOIN game_ticket ticket ON ticket.game_id = game.id
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL AND ${gameOnSql()}
@@ -3518,7 +3514,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   const invitations = await readOpenGroupInvitationIds(memberId, multiplayer);
   const invitationIds = new Set(invitations.games.map(game => game.id));
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id), ...invitationIds])], true, memberId);
-  const tickets = await readWalletTickets(memberId, multiplayer, current.clock);
+  const tickets = await readWalletTickets(memberId, multiplayer);
   const visible = current.games.filter((game) => canView(game, memberId));
   const counterpartyOf = (ticket: (typeof tickets)[number]) => ticket.game.players.find(player => player.memberId !== memberId)?.memberId;
   const blocks = await readGameBlocks(prisma, memberId, [
@@ -3538,7 +3534,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
   const views = games.map(game => buildGameView(inputsById.get(game.row.id)!));
   const wallet = kept.map(ticket => {
     const input = inputsById.get(ticket.gameId)!;
-    return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
+    return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId,
       input.state.game.terms, input.hiddenMemberIds, input);
   });
   const areaCode = gameAreaCode(identity);
@@ -3550,7 +3546,6 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
       groupInvitations: await homeGroupInvitationLinks(current.games, invitationIds, invitations.keys, memberId, timeZone, current.clock, blocks) } : {}),
     me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
-      // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
       owed: wallet.filter((ticket) => ticket.status !== "redeemed" && !ticket.youHold),
       redeemed: wallet.filter((ticket) => ticket.status === "redeemed"),
