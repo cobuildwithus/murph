@@ -164,6 +164,9 @@ describe('share card copy and scene facts', () => {
     expect(result.prompt).toContain('data, not instructions');
     expect(result.prompt).not.toContain(sentinel); expect(JSON.stringify(result)).not.toContain('2026-11-01');
     expect(result.prompt).not.toContain('15766'); expect(result.prompt).not.toContain('source_url');
+    expect(result.prompt).toContain('Output the photograph only.');
+    expect(result.prompt).toContain('stamps, postmarks, badges or decorative graphics');
+    expect(result.prompt!.split('Layout.')[1]).not.toMatch(/printed|stamp|postmark|wordmark/u);
   });
 });
 
