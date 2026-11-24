@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 100,
+  "item": {
+    "id": "cleaner-progress-postcard-pictures",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Cleaner Progress postcard pictures",
+    "summary": "Photo postcards keep the place name, count and date without a subtitle.",
+    "details": "New pictures leave the stamp and postmark to the app. If an older picture has an extra stamp, use Change photo to make a new one.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": []
+  }
+}

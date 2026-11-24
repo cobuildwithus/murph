@@ -220,7 +220,8 @@ export const shareViewSchema = z.strictObject({
   awardId: z.string(),
   // name, contextLine, valueText, face and messageText are build 118's card; the postcard reads the rest.
   card: z.strictObject({ name: z.string(), contextLine: z.string(), valueText: z.string(), face: medalFace, messageText: z.string(),
-    place: z.string().min(1), line: z.string().min(1).max(32),
+    // The ready picture side has no subtitle; the medal side keeps its context line.
+    place: z.string().min(1), line: z.string().max(32),
     stamp: z.strictObject({ amount: z.string().min(1).max(8), unit: z.string().min(1).max(16), spoken: z.string(), art: z.enum(['peak', 'pin', 'bird', 'moon']) }),
     postmark: z.strictObject({ day: z.string(), year: z.string(), verb: z.string() }) }),
   /** Fractions of the 2:3 picture the prompt keeps plain; the app checks faces against marks. */

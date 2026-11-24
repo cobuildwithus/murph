@@ -19,6 +19,7 @@ import { decideProgressShareConsent } from '../src/lib/game/progress/share-conse
 import { putSharePhoto, readSharePhoto } from '../src/lib/game/progress/share-photo';
 import { sealProgress, progressLookup } from '../src/lib/game/progress/crypto';
 import { ShareImageError } from '../src/lib/game/progress/share-image';
+import { shareViewSchema } from '../src/lib/game/progress/contract';
 import type { Candidate } from '../src/lib/game/progress/registry';
 import { lockHostedMemberRow } from '../src/lib/hosted-onboarding/shared';
 
@@ -107,9 +108,12 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     expect(prompt.includes('The person is 170 cm tall; keep their real height and build.')).toBe(state === 'height');
     expect(prompt).not.toContain('PRIVATE_REPLICA_SENTINEL');
     expect(await f.share()).toMatchObject({ status: 'ready', failureCode: null });
+    expect(before.card.line).not.toBe('');
     expect(admitted.card).toEqual(before.card);
-    expect((await readProgressShare(f.input)).card).toEqual(before.card);
-    await startProgressShare(f.input);
+    const ready = shareViewSchema.parse(await readProgressShare(f.input));
+    expect(ready.presentation.state).toBe('photo');
+    expect(ready.card).toEqual({ ...before.card, line: '' });
+    expect(await startProgressShare(f.input)).toEqual(ready);
     expect(mocks.height).toHaveBeenCalledTimes(1);
   });
   it.each(['session', 'health consent'])('rechecks %s after the height read before provider dispatch', async authority => {

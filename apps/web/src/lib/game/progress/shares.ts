@@ -114,10 +114,16 @@ async function assertPhotoAuthority(tx: Prisma.TransactionClient, input: ShareRe
   }
 }
 
+/** The photo is titled, but only the illustrated medal side has a subtitle. */
+function shareView(awardId: string, card: ShareView['card'], selection: Selection, eligible: boolean): ShareView {
+  const state = presentation(selection, awardId, eligible, Date.now());
+  return { awardId, card: state.state === 'photo' ? { ...card, line: '' } : card, zones: SHARE_ZONES, presentation: state };
+}
+
 export async function readProgressShare(input: ShareRequest): Promise<ShareView> {
   const award = await readAward(input), { card, prompt } = shareCard(award, input.units);
   const selection = await withAuthority(input, award, tx => readSelection(tx, input));
-  return { awardId: input.awardId, card, zones: SHARE_ZONES, presentation: presentation(selection, input.awardId, prompt !== null, Date.now()) };
+  return shareView(input.awardId, card, selection, prompt !== null);
 }
 
 /** What this POST may start: the first picture, or a new one in place of the shown picture (Change photo). */
@@ -131,8 +137,7 @@ function admits(selection: Selection, replaces: string | undefined): boolean {
 export async function startProgressShare(input: ShareRequest, replaces?: string): Promise<ShareView> {
   const award = await readAward(input), { card, prompt } = shareCard(award, input.units);
   const current = await withAuthority(input, award, tx => readSelection(tx, input));
-  const view = { awardId: input.awardId, card, zones: SHARE_ZONES, presentation: presentation(current, input.awardId, prompt !== null, Date.now()) };
-  if (prompt === null || !admits(current, replaces)) return view;
+  if (prompt === null || !admits(current, replaces)) return shareView(input.awardId, card, current, prompt !== null);
   let reference: Buffer | null = null;
   let transferred = false;
   try {
@@ -154,7 +159,7 @@ export async function startProgressShare(input: ShareRequest, replaces?: string)
       after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect('generate_share', () => generate(input, award, admission.selection.row!, source))));
       transferred = true;
     }
-    return { awardId: input.awardId, card, zones: SHARE_ZONES, presentation: presentation(admission.selection, input.awardId, true, Date.now()) };
+    return shareView(input.awardId, card, admission.selection, true);
   } finally { if (!transferred) reference?.fill(0); }
 }
 
