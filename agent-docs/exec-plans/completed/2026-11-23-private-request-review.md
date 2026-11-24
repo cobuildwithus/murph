@@ -12,3 +12,5 @@ The workspace build, assistant and Web typechecks, 64 focused deterministic test
 Status: completed
 Updated: 2026-11-23
 Completed: 2026-11-23
+
+PR verification also exercised the instruction size budgets. Regenerated the six affected ceilings from measured bytes with the repository headroom formula. All 12 budget checks passed.
