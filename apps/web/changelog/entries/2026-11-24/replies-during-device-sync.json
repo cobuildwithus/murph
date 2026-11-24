@@ -8,6 +8,6 @@
     "title": "Quicker replies when device sync starts",
     "summary": "If your message and a device sync arrive together, Murph can start your reply before loading the sync tools.",
     "relevanceTags": ["chat", "devices"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5281]
   }
 }
