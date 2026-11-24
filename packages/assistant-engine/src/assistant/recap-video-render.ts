@@ -280,7 +280,9 @@ async function renderInDirectory(input: Parameters<typeof renderRecapShowVideo>[
 
 /**
  * For the runner image smoke: start the installed renderer exactly as a recap does, on a show it
- * can only refuse after measuring text with its own fonts on the native canvas. Returns the refusal.
+ * refuses only once its native canvas has registered its own fonts and read what they can draw:
+ * a cover title in an alphabet they do not cover. Returns the refusal. The runner image lane proves
+ * the same fonts measure as the app's.
  */
 export async function probeRecapVideoRenderer(): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'murph-recap-video-probe-'))
@@ -288,7 +290,7 @@ export async function probeRecapVideoRenderer(): Promise<string> {
     const requestPath = path.join(directory, 'request.json')
     const request: RecapVideoChildRequest = { outPath: path.join(directory, 'recap.mp4'), deadlineMs: 60_000, input: {
       show: { treatment: 'Probe', pages: [
-        { id: 'page-0', kind: 'cover', background: 'night', blocks: [{ kind: 'headline', text: 'M'.repeat(64) }], cueMs: 0 },
+        { id: 'page-0', kind: 'cover', background: 'night', blocks: [{ kind: 'headline', text: 'Probe \u30e8\u30ac' }], cueMs: 0 },
         { id: 'song', kind: 'song', background: 'night', blocks: [], cueMs: 5200, song: { title: 'Probe', lyrics: ['La'] } },
         { id: 'result', kind: 'result', background: 'paper', blocks: [] },
       ] },

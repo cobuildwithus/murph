@@ -21,7 +21,9 @@ const turned = (ctx: Ctx, x: number, y: number, degrees: number): void => {
 
 // MARK: The prize, as a gold ticket (the app's `GameBigTicket`, 256 points wide in its 280-point slot).
 
-const TICKET = { width: 256, height: 170, pad: 20, tilt: -3, inset: 16, gap: 4, kicker: 14 } as const;
+/** `height` is the ticket's shape for a one-line prize; a longer prize makes it taller. The drawing gives up to 17 points first, as in the app. */
+const TICKET = { width: 256, height: 170, pad: 20, tilt: -3, inset: 16, gap: 4, kicker: 14, art: 73, artLeast: 56 } as const;
+
 
 /** A four-point star, drawn so no font has to carry one. */
 function star(ctx: Ctx, x: number, y: number, size: number): void {
@@ -34,8 +36,8 @@ function star(ctx: Ctx, x: number, y: number, size: number): void {
   ctx.fill();
 }
 
-function paintTicketPaper(ctx: Ctx, x: number, y: number): void {
-  const { width, height } = TICKET;
+function paintTicketPaper(ctx: Ctx, x: number, y: number, height: number): void {
+  const { width } = TICKET;
   ctx.save();
   // Scalloped corners: the ticket less a 12-point bite at each.
   ctx.beginPath();
@@ -80,24 +82,30 @@ async function prizeArt(prize: string): Promise<Image> {
 
 /**
  * The gold ticket: "GOOD FOR ONE", the prize's drawing, the prize, and
- * `line` under it. The ticket's print shares its 138 points of height as the
- * app's does: the prize is offered half of it, which is one line, and shrinks
- * to fit; the drawing takes what is left, up to its 104 by 73. A prize too
- * long for that is cut short by the app, and refused here.
+ * `line` under it. The ticket's print shares its height as the app's does: a
+ * one-line prize keeps the ticket's shape and the drawing takes what is left,
+ * up to its 104 by 73. A longer prize takes two lines, or three at its
+ * smallest size; the drawing gives up to 17 points, and past that the ticket
+ * grows to hold the prize.
  */
 export async function ticket(title: string, line: string): Promise<Stake> {
-  const { width, height, pad, inset, gap, kicker } = TICKET;
+  const { width, pad, inset, gap, kicker } = TICKET;
   const icon = await prizeArt(title);
   const label = mono(11, 0.24, COLOR.ticketInk, kicker), small = mono(11, 0.2, COLOR.ticketInk, kicker);
   const good = "GOOD FOR ONE", starSize = 5, starGap = textWidth("  ", label);
-  // The app's line names one player; this one names both, so two long names get a little smaller before the ticket is refused.
+  // The app's line names one player; this one names both, so two long names get a little smaller before they are cut short.
   const under = fitText(line.toUpperCase(), small, width - 44, { maxLines: 1, least: 0.75 });
-  const print = height - inset * 2, shared = print - gap * 3 - kicker * 2;
+  const shared = TICKET.height - inset * 2 - gap * 3 - kicker * 2;
   const prizeStyle: TextStyle = { font: "display", weight: 600, size: 34, lineHeight: displayLine(34), color: COLOR.ticketInk };
-  const prize = fitText(title, prizeStyle, width - 48, { maxLines: 1, least: 0.6, maxHeight: shared / 2 });
+  // As the app sets it: two lines, shrinking to three fifths of its size before a third. A prize
+  // longer than that takes a third line at that size, and is cut short with an ellipsis past it.
+  const twoLines = fitText(title, prizeStyle, width - 48, { maxLines: 2, least: 0.6 });
+  const prize = twoLines.cut ? fitText(title, twoLines.style, width - 48, { maxLines: 3, least: 1 }) : twoLines;
   const prizeHeight = prize.lines.length * prize.style.lineHeight;
-  const fit = Math.min(Math.min(73, shared - prizeHeight) / icon.height, 104 / icon.width), art = { width: icon.width * fit, height: icon.height * fit };
+  const room = Math.min(TICKET.art, Math.max(TICKET.artLeast, shared - prizeHeight));
+  const fit = Math.min(room / icon.height, 104 / icon.width), art = { width: icon.width * fit, height: icon.height * fit };
   const inner = kicker + gap + art.height + gap + prizeHeight + gap + kicker;
+  const height = Math.max(TICKET.height, inner + inset * 2);
   return {
     height: height + pad * 2,
     bounds: top => grow({ x: (BOARD.width - width) / 2, y: top + pad, width, height }, 16),
@@ -105,7 +113,7 @@ export async function ticket(title: string, line: string): Promise<Stake> {
       const x = (BOARD.width - width) / 2, y = top + pad;
       ctx.save();
       turned(ctx, BOARD.width / 2, y + height / 2, TICKET.tilt);
-      paintTicketPaper(ctx, x, y);
+      paintTicketPaper(ctx, x, y, height);
       let row = y + (height - inner) / 2;
       // "✦  GOOD FOR ONE  ✦"
       const lineWidth = textWidth(good, label) + (starSize + starGap) * 2, lineLeft = x + (width - lineWidth) / 2;

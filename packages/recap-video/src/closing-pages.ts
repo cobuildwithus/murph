@@ -1,7 +1,7 @@
 import { artPiece, billing, face, FULL, mono, withArticle, type BuiltPage, type Piece } from "./pages.js";
 import { slip, ticket, type Stake } from "./stakes.js";
 import {
-  BOARD, COLOR, applyText, baselineIn, createCanvas, displayLine, drawCover, drawLines, fitText, grow, onNight, requireDrawable, roundedRect, scaleStyle, setShadow, textWidth, wrapText,
+  BOARD, COLOR, ELLIPSIS, applyText, baselineIn, createCanvas, displayLine, drawCover, drawLines, ellipsize, fitText, grow, onNight, requireDrawable, roundedRect, scaleStyle, setShadow, textWidth, wrapText,
   type Image, type PictureLoader, type Rect, type TextStyle,
 } from "./surface.js";
 import { lyricWordStarts, songOriginMs } from "./timeline.js";
@@ -55,11 +55,10 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, lo
   const titleStyle: TextStyle = { font: "display", weight: 700, size: 30, lineHeight: 37, color: COLOR.onNight };
   const genreStyle: TextStyle = { font: "sans", size: 16, lineHeight: 21, color: onNight(0.7) };
   const timeStyle: TextStyle = { font: "mono", size: 12, lineHeight: 16, color: onNight(0.75) };
-  // The title takes two lines at most and shrinks a little before it would take a third; the genre keeps to one. The app cuts either short past that.
+  // The title takes two lines at most and shrinks a little before it would take a third; the genre keeps to one. Either is cut short past that, as the app cuts it.
   const fitted = fitText(song.title, titleStyle, infoWidth, { maxLines: 2, least: 0.8 }, { pretty: true }), title = fitted.lines;
   const treatment = withArticle(input.show.treatment);
-  const genre = treatment ? wrapText(`${treatment} theme`, genreStyle, infoWidth) : [];
-  if (genre.length > 1) throw new RecapVideoRefusal("does_not_fit", "The show's treatment is too long for the song's page.");
+  const genre = treatment ? wrapText(`${treatment} theme`, genreStyle, infoWidth, { maxLines: 1 }) : [];
   const titleHeight = title.length * fitted.style.lineHeight, genreHeight = genre.length * genreStyle.lineHeight;
   const infoHeight = 26 + titleHeight + 4 + genreHeight + 22 + 24 + 8 + 16;
   // The cover takes what its page has left.
@@ -67,8 +66,8 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, lo
   const sleeve: Rect = { x: (BOARD.width - side) / 2, y: top, width: side, height: side };
   const infoTop = top + side, scrubTop = infoTop + 26 + titleHeight + 4 + genreHeight + 22;
   const card: Rect = { x: 16, y: infoTop + infoHeight + 28, width: BOARD.width - 32, height: BOARD.height + 40 - (infoTop + infoHeight + 28) };
+  // With the title at two lines and the genre at one, the lyrics always keep more than two rows.
   const pane: Rect = { x: card.x + 16, y: card.y + 16 + 32 + 12, width: card.width - 32, height: card.height - 32 - 32 - 12 };
-  if (pane.height < 60) throw new RecapVideoRefusal("does_not_fit", "The song's title leaves no room for its lyrics.");
 
   // Lyrics: every word placed once, lit from its own start.
   const lyricStyle: TextStyle = { font: "sansBold", size: 19, lineHeight: 25, tracking: -0.3, color: tint.ink };
@@ -82,18 +81,29 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, lo
     const texts = timed && timed.length === starts[index]?.length ? timed : line.split(/\s+/u).filter(Boolean);
     lineTops.push(y);
     lineStarts.push(starts[index]?.[0] ?? songMs);
-    let x = 0, rows = 1;
+    let x = 0, rows = 1, cut = false;
+    const first = placed.length;
     texts.forEach((text, at) => {
+      if (cut) return;
       requireDrawable(text, lyricStyle);
-      const width = textWidth(text, lyricStyle);
-      if (width > pane.width) throw new RecapVideoRefusal("does_not_fit", "A lyric word is wider than the lyrics card.");
+      // A word wider than the card is cut short to fit it.
+      const shown = ellipsize(text, lyricStyle, pane.width), width = textWidth(shown, lyricStyle);
       if (x > 0 && x + width > pane.width) {
+        // The card shows the line being sung on two rows, as the app does. A longer one ends its second
+        // row with an ellipsis, after the last word that leaves room for one; the words after it are not drawn.
+        if (rows === 2) {
+          const fits = (word: { text: string; x: number }): boolean => word.x + textWidth(`${word.text}${ELLIPSIS}`, lyricStyle) <= pane.width;
+          while (placed.length > first + 1 && !fits(placed[placed.length - 1]!)) placed.pop();
+          const last = placed.at(-1);
+          if (last && !last.text.endsWith(ELLIPSIS)) last.text = fits(last) ? `${last.text}${ELLIPSIS}` : ellipsize(`${last.text}${ELLIPSIS}`, lyricStyle, pane.width - last.x);
+          cut = true;
+          return;
+        }
         x = 0;
         y += lyricStyle.lineHeight;
-        // The card shows the line being sung on two rows, as the app does. A longer one would run out of sight.
-        if (++rows > 2) throw new RecapVideoRefusal("does_not_fit", "A lyric line is too long for the lyrics card.");
+        rows++;
       }
-      placed.push({ text, x, y, startMs: starts[index]?.[at] ?? songMs });
+      placed.push({ text: shown, x, y, startMs: starts[index]?.[at] ?? songMs });
       x += width + space;
     });
     y += lyricStyle.lineHeight + 6;
@@ -191,7 +201,7 @@ export function posterWords(input: RecapVideoInput): { title: string; line?: str
 /** The score's row: its digits' own line, at 80 points. */
 const SCORE_HEIGHT = displayLine(80);
 
-/** The final score between the two faces. Long numbers share the row and shrink, as the app's do, down to half size. */
+/** The final score between the two faces. Long numbers share the row and shrink, as the app's do. */
 function scoreRow(scores: readonly [string, string], width: number): { styles: [TextStyle, TextStyle]; widths: [number, number]; left: number; total: number } {
   const digits: TextStyle = { font: "display", weight: 600, size: 80, lineHeight: SCORE_HEIGHT, tracking: -2.4, color: COLOR.onNight };
   const room = width - (64 + 18) * 2 - 16 - 10 * 2, ideal = scores.map(score => textWidth(score, digits)) as [number, number];
@@ -203,7 +213,6 @@ function scoreRow(scores: readonly [string, string], width: number): { styles: [
     given[wide] = room - (given[narrow] ?? 0);
   }
   const scales = given.map((share, at) => Math.min(share / (ideal[at] ?? 1), 1));
-  if (scales.some(scale => scale < 0.5)) throw new RecapVideoRefusal("does_not_fit", "The score is too wide for the last screen.");
   const styles = scales.map(scale => scale === 1 ? digits : scaleStyle(digits, scale)) as [TextStyle, TextStyle];
   const widths = scores.map((score, at) => textWidth(score, styles[at] ?? digits)) as [number, number];
   const total = 64 + 18 + widths[0] + 10 + 16 + 10 + widths[1] + 18 + 64;
@@ -239,10 +248,10 @@ export async function buildPoster(_page: RecapVideoPage, input: RecapVideoInput,
   const stakeHeight = stake ? 16 + stake.height : 0, captionHeight = caption.length > 0 ? (stake ? 12 : 10) + caption.length * captionStyle.lineHeight : 0;
   const mark = mono(13, 0.3, COLOR.tan, 16), markTop = BOARD.height - 64 - 16;
   const height = SCORE_HEIGHT + 20 + titleHeight + stakeHeight + captionHeight;
-  // The score sits on the cover's foot, and rises when the stake needs the room.
+  // The score sits on the cover's foot, and rises when the stake needs the room. Each part is
+  // bounded (a two-line title, a three-line prize or dare), so the stack always clears the footer.
   const rest = BOARD.top + (BOARD.height - BOARD.top - BOARD.bottom) * 0.39;
   const top = Math.max(Math.min(rest, markTop - 20 - height), BOARD.top + 61);
-  if (top + height > markTop - 8) throw new RecapVideoRefusal("does_not_fit", "The last screen's stake is too tall for it.");
 
   pieces.push({
     name: "score", arriveAt: 0.03, bounds: grow({ x: 24, y: top, width, height: SCORE_HEIGHT }, 10),

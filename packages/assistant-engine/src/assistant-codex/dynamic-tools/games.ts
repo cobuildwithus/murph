@@ -1,4 +1,5 @@
 import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
+import { emitHostedExecutionStructuredLog } from '@murphai/hosted-execution'
 import * as z from '@murphai/contracts/zod-runtime'
 import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse, type HostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
@@ -650,6 +651,7 @@ async function prepareRecapVideoCandidate(input: {
   story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal
 }): Promise<RecapVideoCandidate | null> {
   const { RECAP_VIDEO_BUDGET_MS, recapVideoParts } = await import('../../assistant/recap-video-render.js')
+  const gameId = input.origin.gameId
   // One deadline for all of it: photo fetches, the render and the part uploads.
   const deadlineAt = Date.now() + RECAP_VIDEO_BUDGET_MS
   const budget = AbortSignal.timeout(RECAP_VIDEO_BUDGET_MS)
@@ -657,7 +659,7 @@ async function prepareRecapVideoCandidate(input: {
   let rendered: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['renderGameRecapVideo']>>> | null = null
   try {
     rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal, deadlineAt })
-    if (rendered.kind !== 'rendered') return null
+    if (rendered.kind !== 'rendered') return skipRecapVideo(gameId, rendered.reason)
     const { readFile } = await import('node:fs/promises')
     const parts = []
     for (const [index, bytes] of recapVideoParts(await readFile(rendered.file)).entries()) {
@@ -675,8 +677,15 @@ async function prepareRecapVideoCandidate(input: {
     if (rendered?.kind === 'rendered') await rendered.dispose()
     // A cancelled turn stops here; every other failure, the deadline included, is the recap without a video.
     if (input.signal?.aborted) throw input.signal.reason ?? error
-    return null
+    return skipRecapVideo(gameId, 'failed', error)
   }
+}
+
+/** The recap goes out without its video. Logs why, so a missing video is never worked out from request timing. */
+function skipRecapVideo(gameId: string, reason: string, error?: unknown): null {
+  emitHostedExecutionStructuredLog({ component: 'hosted.runtime.recap-video', details: { gameId, reason }, ...(error === undefined ? {} : { error }),
+    level: 'warn', message: 'Recap video skipped; the recap goes out without one.', phase: 'wake.running' })
+  return null
 }
 
 async function prepareRecapReadResult(context: AssistantHostedToolContext, result: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['groupTool']>['request']>>) {

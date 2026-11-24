@@ -90,7 +90,6 @@ export type RecapVideoRefusalCode =
   | "unsupported_stake"
   | "unsupported_outcome"
   | "unsupported_text"
-  | "does_not_fit"
   | "missing_picture"
   | "unsupported_picture"
   | "missing_song"
@@ -98,7 +97,11 @@ export type RecapVideoRefusalCode =
   | "too_large"
   | "encoder_failed";
 
-/** A recap this renderer will not draw. The recap goes out without a video. */
+/**
+ * A recap this renderer will not draw. The recap goes out without a video.
+ * Words that are too long for their place are never one: they are cut short
+ * with an ellipsis, as the app cuts them.
+ */
 export class RecapVideoRefusal extends Error {
   readonly code: RecapVideoRefusalCode;
 

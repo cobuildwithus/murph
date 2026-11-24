@@ -10,7 +10,7 @@ import {
   RECAP_VIDEO_MAX_BYTES, RecapVideoRefusal, billing, buildRecapVideoTimeline, createRecapVideoRenderer, encodeRecapVideo, posterWords, starringLine, videoKbpsCeiling,
   type RecapVideoInput, type RecapVideoPage, type RecapVideoRenderer, type RecapVideoSongWord,
 } from "../src/index.js";
-import { pictureSize, registerRecapFonts, textWidth, wrapText, type TextStyle } from "../src/surface.js";
+import { ELLIPSIS, fitText, pictureSize, registerRecapFonts, textWidth, wrapText, type TextStyle } from "../src/surface.js";
 import { FIXTURE_PAGES, fixturePicture, writeFixture, type FixtureExtras } from "./fixture.js";
 
 const run = promisify(execFile);
@@ -252,6 +252,15 @@ describe("refusals", () => {
   };
   const withBlock = (pageId: string, block: RecapVideoPage["blocks"][number]): RecapVideoInput =>
     withPages(pages => pages.map(page => page.id === pageId ? { ...page, blocks: [block, ...page.blocks.slice(1)] } : page));
+  /** Lays out a changed show, draws its page of `kind` well into its time, and answers that page's pieces. */
+  const drawn = async (changed: RecapVideoInput, kind: string): Promise<string[]> => {
+    const made = await createRecapVideoRenderer(changed);
+    const entry = made.timeline.entries.find(found => found.kind === kind || found.page.id === kind);
+    if (!entry) throw new Error(`The show has no ${kind} page.`);
+    const ms = entry.fromMs + Math.min(4600, entry.toMs - entry.fromMs - 40);
+    made.drawFrame(ms);
+    return made.frameState(ms).pieces.map(piece => piece.name);
+  };
 
   it("refuses what it has no drawing for, instead of drawing it wrong", async () => {
     const sheet = (entryIds: string[]): RecapVideoInput => withPages(pages => pages.map(page => page.id === "page-3" ? { ...page, blocks: [{ kind: "contactSheet", entryIds }] } : page));
@@ -280,25 +289,77 @@ describe("refusals", () => {
     }
   });
 
-  it("refuses a day given back whose photo is too narrow for its tag", async () => {
+  it("draws a day given back on a photo too narrow for its tag without the tag, instead of refusing the video", async () => {
     const sliver = path.join(directory, "sliver.jpg");
     await writeFile(sliver, fixturePicture(60, 1024, 10));
     const narrow: RecapVideoInput = { ...input, photos: { ...input.photos, "entry-ava-4": sliver } };
-    // The same pair draws without the tag, and with the tag on the photo that has room for it.
-    expect((await createRecapVideoRenderer(narrow)).frameState(18000).pieces.map(piece => piece.name)).toEqual(["setup", "picture", "second picture", "payoff"]);
-    expect((await createRecapVideoRenderer({ ...narrow, unfinished: ["entry-leo-4"] })).frameState(18000).pieces).toHaveLength(4);
-    await refuses({ ...narrow, unfinished: ["entry-ava-4"] }, "does_not_fit");
+    const frame = async (unfinished: string[]): Promise<Buffer> => Buffer.from((await createRecapVideoRenderer({ ...narrow, unfinished })).drawFrame(18000).data());
+    // The wide photo wears its tag; the sliver is drawn as it is, with nothing hanging off it.
+    const plain = await frame([]);
+    expect(plain.equals(await frame(["entry-leo-4"]))).toBe(false);
+    expect(plain.equals(await frame(["entry-ava-4"]))).toBe(true);
   });
 
-  it("refuses words the app would cut short with an ellipsis", async () => {
+  it("cuts text past its lines short with an ellipsis, and breaks a word wider than its line, as the app's text does", () => {
+    const style: TextStyle = { font: "sans", size: 17, lineHeight: 22, color: "#000" };
+    const lines = wrapText(Array.from({ length: 20 }, () => "Leo kept posting the mat").join(" "), style, 200, { maxLines: 3 });
+    expect(lines).toHaveLength(3);
+    expect(lines.at(-1)?.endsWith(ELLIPSIS)).toBe(true);
+    for (const line of lines) expect(textWidth(line, style)).toBeLessThanOrEqual(200);
+    const word = wrapText("m".repeat(80), style, 200);
+    expect(word.length).toBeGreaterThan(1);
+    expect(word.join("")).toBe("m".repeat(80));
+    // Shrinking text shrinks before it is cut, and says when it was cut.
+    const prize: TextStyle = { font: "display", weight: 600, size: 34, lineHeight: 41, color: "#000" };
+    expect(fitText("Weekend pottery class", prize, 208, { maxLines: 2, least: 0.6 })).toMatchObject({ cut: false, lines: ["Weekend", "pottery class"] });
+    const cut = fitText("A full weekend of pottery classes at the studio downtown with lunch", prize, 208, { maxLines: 2, least: 0.6 });
+    expect([cut.cut, cut.lines.length, cut.style.size, cut.lines.at(-1)?.endsWith(ELLIPSIS)]).toEqual([true, 2, 34 * 0.6, true]);
+  });
+
+  it("draws words too long for their place cut short, instead of refusing the video", async () => {
     const song = (change: (song: NonNullable<RecapVideoPage["song"]>) => NonNullable<RecapVideoPage["song"]>): RecapVideoInput => withPages(pages => pages.map(page => page.song ? { ...page, song: change(page.song) } : page));
-    // A song's title past two lines at its smallest size; a treatment past one line under it.
-    await refuses(song(found => ({ ...found, title: "The Ballad of the Mat That Took the Stand Twice and Then Once More for Luck on a Thursday" })), "does_not_fit");
-    await refuses({ ...input, show: { ...input.show, treatment: "70s American high school pep rally the night before prom" } }, "does_not_fit");
-    // Beside its drawing a prize keeps to one line, down to three fifths of its size: the app cuts a longer one short.
-    expect((await createRecapVideoRenderer({ ...input, stake: { kind: "prize", title: "A Night off Dishes" } })).frameState(50000).pieces.map(piece => piece.name)).toContain("stake");
-    await refuses({ ...input, stake: { kind: "prize", title: "Pick of the Restaurant" } }, "does_not_fit");
-    await refuses(withBlock("page-1", { kind: "stat", statValue: "one hundred and four thousand", text: "steps" }), "does_not_fit");
+    const long = Array.from({ length: 12 }, () => "photograph the same yoga mat").join(" ");
+    // A song's title past two lines at its smallest size; a treatment past one line under it; a lyric line past the card's two rows.
+    expect(await drawn(song(found => ({ ...found, title: "The Ballad of the Mat That Took the Stand Twice and Then Once More for Luck on a Thursday" })), "song")).toEqual(["song"]);
+    expect(await drawn({ ...input, show: { ...input.show, treatment: "70s American high school pep rally the night before prom" } }, "song")).toEqual(["song"]);
+    expect(await drawn(song(found => ({ title: found.title, lyrics: [Array.from({ length: 30 }, () => "hello").join(" "), ...found.lyrics.slice(1)] })), "song")).toEqual(["song"]);
+    // A cover title past three lines at its smallest size, a page's words past its room, a stat too wide for its line, a card past its page.
+    expect(await drawn(withBlock("page-0", { kind: "headline", text: long }), "page-0")).toEqual(["words"]);
+    expect(await drawn(withBlock("page-1", { kind: "headline", text: Array.from({ length: 30 }, () => "Leo kept posting the mat").join(" ") }), "page-1")).toEqual(["setup", "picture", "payoff"]);
+    expect(await drawn(withBlock("page-1", { kind: "stat", statValue: "one hundred and four thousand", text: "steps" }), "page-1")).toEqual(["setup", "picture", "payoff"]);
+    expect(await drawn(withPages(pages => pages.map(page => page.card ? { ...page, card: { ...page.card, title: long, line: long } } : page)), "superlative")).toEqual(["face", "name", "lead", "title", "rule", "line"]);
+  });
+
+  it("keeps a page's words whole beside a picture too wide to stand any taller, and shortens long blocks evenly", async () => {
+    const wide = path.join(directory, "wide.jpg");
+    await writeFile(wide, fixturePicture(1600, 900, 100));
+    const blocks: RecapVideoPage["blocks"] = [
+      { kind: "headline", text: "Thursday, both of them posted their proof at eleven at night from the same couch" },
+      { kind: "photoPair", entryIds: ["entry-leo-4", "entry-ava-4"] },
+      { kind: "headline", text: "Neither of them would go to bed first, so they both stayed up arguing about it" },
+    ];
+    const heights = async (changed: RecapVideoInput, kind: string, names: string[]): Promise<number[]> => {
+      const made = await createRecapVideoRenderer(changed);
+      const entry = made.timeline.entries.find(found => found.kind === kind || found.page.id === kind);
+      const pieces = made.frameState((entry?.fromMs ?? 0) + 4900).pieces;
+      return names.map(name => pieces.find(piece => piece.name === name)?.box.height ?? 0);
+    };
+    // Two wide photos never stand 120 points tall, so the words around them keep every line they have beside two upright ones.
+    const pair = withPages(pages => pages.map(page => page.id === "page-3" ? { ...page, blocks } : page));
+    expect(await heights({ ...pair, photos: { ...pair.photos, "entry-leo-4": wide, "entry-ava-4": wide } }, "page-3", ["setup", "payoff"]))
+      .toEqual(await heights(pair, "page-3", ["setup", "payoff"]));
+    // A card too long for its page gives up lines from its title and its line in turn, not all of one before the other.
+    const long = Array.from({ length: 12 }, () => "photograph the same yoga mat").join(" ");
+    const card = (title: string): RecapVideoInput => withPages(pages => pages.map(page => page.card ? { ...page, card: { ...page.card, title, line: long } } : page));
+    const [cut] = await heights(card(long), "superlative", ["title"]), [one] = await heights(card("ask for a recount"), "superlative", ["title"]);
+    expect(cut).toBeGreaterThan(one ?? 0);
+  });
+
+  it("gives a prize two lines on a taller ticket, or three at its smallest size, and cuts a longer one short", async () => {
+    const stake = async (title: string): Promise<number> => (await createRecapVideoRenderer({ ...input, stake: { kind: "prize", title } })).frameState(50000).pieces.find(piece => piece.name === "stake")?.box.height ?? 0;
+    const long = "A full weekend of pottery classes at the studio downtown with lunch and a new apron";
+    expect(await stake("Weekend pottery class")).toBeGreaterThan(await stake("Lunch"));
+    expect(await stake(long)).toBe(await stake(`${long} and a second weekend after it`));
   });
 
   it("shrinks long scores to share their row, as the app does", async () => {
@@ -312,9 +373,8 @@ describe("refusals", () => {
     expect(count(pixels, { x: 230, y: Math.round(score.y * 2) + 30, width: 340, height: 170 }, cream)).toBeGreaterThan(3000);
   });
 
-  it("refuses text its fonts cannot draw, and words that do not fit their page", async () => {
+  it("refuses text its fonts cannot draw", async () => {
     await refuses(withBlock("page-1", { kind: "headline", text: "Leo's first post was a ヨガマット" }), "unsupported_text");
-    await refuses(withBlock("page-1", { kind: "headline", text: Array.from({ length: 30 }, () => "Leo kept posting the mat").join(" ") }), "does_not_fit");
   });
 
   it("refuses a page whose picture is missing", async () => {
@@ -336,10 +396,6 @@ describe("refusals", () => {
     await refuses({ ...input, photos: { ...input.photos, "entry-leo-1": huge } }, "unsupported_picture");
     await refuses({ ...input, photos: { ...input.photos, "entry-leo-1": other } }, "unsupported_picture");
     expect(pictureSize(await readFile(input.photos["entry-ava-4"] ?? ""))).toEqual({ width: 1024, height: 768 });
-  });
-
-  it("refuses a lyric line too long for the two rows the lyrics card shows", async () => {
-    await refuses(withPages(pages => pages.map(page => page.song ? { ...page, song: { title: page.song.title, lyrics: [Array.from({ length: 30 }, () => "hello").join(" "), ...page.song.lyrics.slice(1)] } } : page)), "does_not_fit");
   });
 
   it("falls back from a failed scene to its photo, or to its words alone", async () => {
