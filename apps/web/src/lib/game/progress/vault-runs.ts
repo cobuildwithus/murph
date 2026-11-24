@@ -5,7 +5,8 @@ import { getPrisma } from "../../prisma";
 import type { Day } from "./contract";
 import { describeMeasure, readGameSeries, type MeasureSeries } from "./series";
 import { ProgressReadTiming } from "./read-timing";
-import { patchMeasureState, type BeforeProgressMutation } from "./state";
+import { routeAwardKey } from "./route-progress";
+import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 
 /** Game run check-ins and vault runs share one Running measure. */
 export const RUN_MEASURE_ID = "run.meters";
@@ -39,9 +40,50 @@ export async function readOwnSeries(memberId: string, clock: Date, timing = new 
   const snapshot = await readGameSeries(memberId, clock, timing, [RUN_MEASURE_ID]);
   const running = snapshot.measures.find(measure => measure.id === RUN_MEASURE_ID);
   const gameRunning = running && { ...running };
-  const days = snapshot.states.get(RUN_MEASURE_ID)?.vaultRuns?.days ?? [];
+  const state = snapshot.states.get(RUN_MEASURE_ID);
+  const days = (state?.vaultRuns?.days ?? []).filter(([day]) => state?.runsFrom === undefined || day >= state.runsFrom);
   const vaultRunsMerged = days.length > 0 && await hasHealthAuthority(memberId) && mergeVaultRuns(snapshot.measures, days);
   return { ...snapshot, vaultRunsMerged, gameRunning };
+}
+
+export type OwnSeries = Awaited<ReturnType<typeof readOwnSeries>>;
+
+/**
+ * Runs count from the day the member joined, as Steps do, once Running's state
+ * says so. That is set once, here, only where it can't move a saved route
+ * start: Running with no route yet, or on a first route that hasn't finished.
+ * A later route's start was taken from every run, so it keeps counting every
+ * run. True when the mark was written and the series should be read again.
+ */
+export async function countRunsFromJoin(memberId: string, snapshot: OwnSeries, joinedOn: Day, beforeMutationTx: BeforeProgressMutation): Promise<boolean> {
+  const judged = snapshot.states.get(RUN_MEASURE_ID);
+  const running = snapshot.measures.find(measure => measure.id === RUN_MEASURE_ID);
+  if (judged?.runsFrom !== undefined || (!judged && !running)) return false;
+  // Imported runs without health access can't be judged: the next read tries again.
+  if (judged?.vaultRuns?.days.length && !snapshot.vaultRunsMerged) return false;
+  if (!firstRouteOnly(judged ?? {}, (running?.amounts ?? []).reduce((sum, day) => sum + day.amount, 0), snapshot.awards)) return false;
+  let marked = false;
+  try {
+    await patchMeasureState(memberId, RUN_MEASURE_ID, previous => {
+      // Judged on these legs: a route picked meanwhile is judged on a later read.
+      if (previous.runsFrom !== undefined || JSON.stringify(previous.legs) !== JSON.stringify(judged?.legs)) return previous;
+      marked = true;
+      return { runsFrom: joinedOn };
+    }, beforeMutationTx);
+    return marked;
+  } catch (error) {
+    // Another read changed Running meanwhile: this one goes on unchanged.
+    if (isHostedOnboardingError(error) && error.code === "GAME_PROGRESS_STATE_CONFLICT") return false;
+    throw error;
+  }
+}
+
+function firstRouteOnly(state: Readonly<MeasureState>, totalM: number, awards: OwnSeries["awards"]): boolean {
+  const legs = state.legs ?? [];
+  if (!legs.length) return true;
+  const [leg] = legs;
+  return legs.length === 1 && leg!.startTotal === 0 && leg!.startedOn === undefined && totalM < leg!.distanceM
+    && !awards.some(award => award.key === routeAwardKey(RUN_MEASURE_ID, leg!, 0));
 }
 
 /** Each day's Running is the larger of its game check-ins and its vault runs, so one run never counts twice. */

@@ -10,7 +10,7 @@ import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
 import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, describeMeasure, scheduleInference, type MeasureSeries, type TodayCheckIn } from "./series";
-import { hasHealthAuthority, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
+import { countRunsFromJoin, hasHealthAuthority, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
 import type { BeforeProgressMutation, MeasureState } from "./state";
 import { routeAwardName } from "./route-progress";
 import { BANK, type RungDefinition } from "./bank";
@@ -177,7 +177,11 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
   // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 1.
   const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
-  const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
+  let snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
+  // Runs count from the day they joined, as Steps do, from the read that first can: then read them again.
+  if (await countRunsFromJoin(memberId, snapshot, formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, beforeMutationTx)) {
+    snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
+  }
   const pics = await timing.measure("pictures", () => readProgressPics(memberId));
   let attemptedInsert = false;
   const firstRoutes = snapshot.measures.filter(measure => !measure.pending
