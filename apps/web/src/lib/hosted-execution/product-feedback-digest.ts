@@ -267,6 +267,7 @@ function formatHostedProductFeedbackDigest(
     feature_interest: "Feature interest",
     feature_request: "Feature requests",
     frustration: "Product frustrations",
+    moderation_review: "Moderation review",
   };
   const rowsByMemberId = new Map<string, HostedProductFeedbackDigestRow[]>();
   const anonymousRows: HostedProductFeedbackDigestRow[] = [];
@@ -359,6 +360,7 @@ function createEmptyHostedProductFeedbackDigestCounts(): Record<
     feature_interest: 0,
     feature_request: 0,
     frustration: 0,
+    moderation_review: 0,
   };
 }
 

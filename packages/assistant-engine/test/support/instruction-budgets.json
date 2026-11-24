@@ -100,7 +100,7 @@
     "phone-calls": 7450,
     "physical-therapy": 13400,
     "private-group-access": 7650,
-    "product-feedback": 3250,
+    "product-feedback": 3600,
     "reminders": 7300,
     "self-management-experiments": 7150,
     "signup-link": 1650,
@@ -149,7 +149,7 @@
     "phone-calls": 7450,
     "physical-therapy": 19900,
     "private-group-access": 7650,
-    "product-feedback": 3250,
+    "product-feedback": 3600,
     "reminders": 7300,
     "self-management-experiments": 7150,
     "signup-link": 1650,
@@ -222,7 +222,7 @@
     "murph.send_progress_update": 500,
     "murph.send_vault_file": 1600,
     "murph.stop_phone_call": 650,
-    "murph.submit_product_feedback": 3150,
+    "murph.submit_product_feedback": 3550,
     "murph.subscription": 900,
     "murph.update_game": 5900,
     "murph.usage_diagnostics": 550,
@@ -290,14 +290,14 @@
     "murph.send_progress_update": 250,
     "murph.send_vault_file": 850,
     "murph.stop_phone_call": 450,
-    "murph.submit_product_feedback": 1000,
+    "murph.submit_product_feedback": 1100,
     "murph.subscription": 550,
     "murph.update_game": 1050,
     "murph.usage_diagnostics": 400,
     "murph.write_recap": 1050
   },
   "toolRosters": {
-    "direct all capabilities": 146650,
-    "group all capabilities": 146650
+    "direct all capabilities": 151400,
+    "group all capabilities": 151450
   }
 }

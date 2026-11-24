@@ -5956,7 +5956,12 @@ Fitbit and Google Health are ordinary, distinct Junction source authorities insi
 
 ## Feedback diagnostic tasks
 
-Web owns feedback and its nullable member linkage. The Ops-authenticated
+Web owns feedback and its nullable member linkage. A private-chat moderation
+review stores a fixed category and the callback-bound person account. Operators
+can use the exact review row to locate that account in Ops usage for a human
+suspension decision. Digest section numbers are local to a single email.
+
+The Ops-authenticated
 `/api/ops/feedback` endpoint lists product-only summaries, accepts a feedback id,
 a bounded question and an idempotency key, and lists associated diagnostic
 results. GET without `feedbackId` lists feedback; GET with it lists tasks;
