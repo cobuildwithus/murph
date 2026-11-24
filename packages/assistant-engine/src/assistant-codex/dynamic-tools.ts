@@ -1,5 +1,5 @@
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
-import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
+import { sleepSummaryCardRequestSchema, sleepSummaryCardValueRows } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
 import { readLeaveGroupDynamicToolRequest, executeLeaveGroupTool } from './dynamic-tools/leave-group.js'
 import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
@@ -3398,7 +3398,17 @@ async function executeSleepCardDynamicTool(
   if (card === null) {
     return toolTextResult(false, 'no_sleep_for_date: No eligible completed sleep night is available for that date. Answer truthfully in text.', 'not_found')
   }
-  return await executeResponseCardAttachmentDynamicTool(input, { kind: 'attach-response-card', card })
+  const attachment = await executeResponseCardAttachmentDynamicTool(input, { kind: 'attach-response-card', card })
+  if (!attachment.rpcResult.success) return attachment
+  const values = sleepSummaryCardValueRows(card).map(([label, value]) => `${label}: ${value}`).join('\n')
+  return {
+    ...attachment,
+    ...toolTextResult(true, [
+      'Sleep card attached. Verified values for this night:',
+      values,
+      'Only add a note if requested. The stage bar shows deep, REM and light individually. When requested, include the combined deep + REM duration in the note. Look up a requested missing metric for this same night before leaving it out.',
+    ].join('\n')),
+  }
 }
 
 async function executeGroupChallengeCardDynamicTool(

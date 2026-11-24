@@ -44,6 +44,15 @@ describe('host-built sleep summary attachment', () => {
     const zero = await resolveTrustedSleepSummaryCard({ vaultRoot: await seed('garmin', { totalSleepMinutes: 436, deepMinutes: 0, remMinutes: 0, lightMinutes: 0, awakeMinutes: 0, sleepEfficiency: 0 }), date: '2026-11-03' })
     expect(zero).toMatchObject({ stages: null, awakeMinutes: null, efficiencyPercent: null })
   })
+  it.each([
+    { total: 360.25, deep: 60.75, rem: 80.5, light: 219, expected: { deepMinutes: 61, remMinutes: 80, lightMinutes: 219 } },
+    { total: 390, deep: 60.25, rem: 80.375, light: 219.25, expected: { deepMinutes: 60, remMinutes: 81, lightMinutes: 219 } },
+  ])('keeps fractional stages at their measured subtotal for a $total-minute night', async ({ total, deep, rem, light, expected }) => {
+    const vaultRoot = await seed('whoop', { totalSleepMinutes: total, deepMinutes: deep, remMinutes: rem, lightMinutes: light })
+    expect(await resolveTrustedSleepSummaryCard({ vaultRoot, date: '2026-11-03' }))
+      .toMatchObject({ totalSleepMinutes: Math.round(total), stages: expected })
+  })
+
   it('omits sleep stages that exceed the measured night', async () => {
     const vaultRoot = await seed('garmin', { totalSleepMinutes: 215, deepMinutes: 130, remMinutes: 95, lightMinutes: 75 })
     expect(await resolveTrustedSleepSummaryCard({ vaultRoot, date: '2026-11-03' }))
@@ -51,6 +60,7 @@ describe('host-built sleep summary attachment', () => {
   })
 
   it('has a tiny selector-only schema and shares private card availability', () => {
+    expect(MURPH_ATTACH_SLEEP_CARD_TOOL.description).toContain('{"date":"YYYY-MM-DD"}')
     expect(JSON.stringify(MURPH_ATTACH_SLEEP_CARD_TOOL.inputSchema).length).toBeLessThan(5000)
     expect(resolveMurphDynamicTools({ responseCardsAvailable: true })).toContain(MURPH_ATTACH_SLEEP_CARD_TOOL)
     expect(resolveMurphDynamicTools({ responseCardsAvailable: false })).not.toContain(MURPH_ATTACH_SLEEP_CARD_TOOL)
@@ -61,6 +71,7 @@ describe('host-built sleep summary attachment', () => {
     const root = await seed('oura', values)
     const result = await run(root)
     expect(result.rpcResult.success).toBe(true)
+    expect(result.rpcResult.contentItems).toEqual([{ type: 'inputText', text: expect.stringContaining('Restorative (deep + REM): 4h 19m') }])
     const card = result.responseCardPatch?.card
     expect(card?.kind).toBe('sleep_summary')
     expect((await run(root, { currentResponseCard: card as AssistantResponseCard })).rpcResult.success).toBe(false)
