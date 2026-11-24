@@ -19,9 +19,10 @@ import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
 import { healthAgeTitle } from "./health";
+import { attachRouteArt } from "./route-art";
 
-// Charts moved their day 0 to the app on Nov 19, 2026; anyone on it earlier starts a month before.
-const CHARTS_FROM = "2026-10-19";
+// Charts start the day someone started the app, and Oct 1, 2026 for anyone on it before then.
+const CHARTS_FROM = "2026-10-01";
 
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
   return { measures: measures.map(measure => {
@@ -174,7 +175,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
-  // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 19.
+  // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 1.
   const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
   const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
   const pics = await timing.measure("pictures", () => readProgressPics(memberId));
@@ -201,7 +202,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     const successor = award.measureId && snapshot.successors.get(award.measureId);
     return successor ? { ...award, measureId: successor } : award;
   });
-  return timing.measure("render", () => {
+  const progress = await timing.measure("render", () => {
     const byId = new Map(snapshot.measures.map(measure => [measure.id,
       measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units)]));
     for (const pic of pics) {
@@ -234,6 +235,9 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     return { joinedOn, today, incomplete: false, measures,
       medals, shelf, moments: momentsView(destinations, measures, units), picCount: pics.length, checkIns };
   });
+  // Running's map and any other game route's, painted as Steps' is: start what's missing, after the response.
+  await timing.measure("art", () => attachRouteArt(progress.measures, snapshot.states, { memberId, beforeMutationTx }));
+  return progress;
 }
 
 export async function seeMoments(memberId: string, momentIds: readonly string[], beforeMutationTx: BeforeProgressMutation): Promise<void> {
