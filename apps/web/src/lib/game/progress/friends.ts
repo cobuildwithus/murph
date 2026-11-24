@@ -38,7 +38,8 @@ export function friendsView(input: {
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(day => [day.date, total += day.amount]);
     return { person, total, points, ranked: person.daily !== null && (!health || points.length > 0) };
-  });
+  }) // A friend with none of this exercise in the range isn't on its board; the friend you opened stays.
+    .filter(row => health || row.person.me || row.total > 0 || row.person.memberId === query.with);
   const ranked = series.filter(row => row.ranked)
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));
   // A friend who keeps this number private isn't on the board; your own row always is.

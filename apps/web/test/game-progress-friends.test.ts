@@ -35,6 +35,19 @@ it("a private friend is off the board; your own private row stays", () => {
     { ...person("leo", "Leo", 1), daily: null }] })).toEqual([]);
 });
 
+it("leaves a friend who hasn't done the exercise off its board", () => {
+  const people = [person("ava", "Ava", 40, true), person("sam", "Sam", 30), played("leo", "Leo", {}),
+    played("maya", "Maya", { "2026-10-02": 25 })];
+  const result = view(people);
+  expect(result.rows.map(row => [row.memberId, row.rank])).toEqual([["ava", 1], ["sam", 2]]);
+  expect(result.chart.map(line => line.memberId)).toEqual(["ava", "sam"]);
+  // All time, Maya's October counts; Leo still has none. Your own zero row stays.
+  const allTime = friendsView({ units: "us", people: [{ ...played("ava", "Ava", {}), me: true }, ...people.slice(1)],
+    measure, pills: [measure], query: { measure: measure.id, range: "all" }, today: "2026-11-16",
+    shareAudience: [], departureNotice: null, challenge: null });
+  expect(allTime.rows.map(row => [row.memberId, row.total?.value])).toEqual([["sam", 30], ["maya", 25], ["ava", 0]]);
+});
+
 it.each(["pushups.reps", "steps", "sleep"])("charts every ranked person for %s", id => {
   const people = [person("sam", "Sam", 120), person("maya", "Maya", 110), person("leo", "Leo", 100),
     person("ava", "Ava", 90, true), person("jordan", "Jordan", 80), person("priya", "Priya", 70)];
