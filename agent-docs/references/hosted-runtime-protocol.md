@@ -1074,6 +1074,12 @@ default ownership so imported heads dormant behind enrichment, or left pending
 by an old runner, remain eligible for its existing usage-denial exemption.
 Actual AI-allowed stalls and unimported aged rows remain alertable.
 
+For a lone, fully imported game recap, the progress monitor allows a short
+assistant retry recorded by a system-progress checkpoint after acceptance.
+This covers the recap show's twenty-minute Flex budget and time for its
+standard-tier attempt. Grace ends fifteen minutes after the checkpoint or
+thirty minutes after acceptance, whichever comes first.
+
 No wire field or processing mode changes. New Web with an old runner can admit
 fresh work that the runner leaves pending. Once that runner publishes a current
 empty model-free projection, imported rows stay dormant rather than repeatedly
