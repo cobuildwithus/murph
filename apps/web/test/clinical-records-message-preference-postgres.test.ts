@@ -90,6 +90,24 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 });
   });
 
+  it("rejects extra keys before changing the preference", async () => {
+    const response = await setPreference(request("message-preference", "POST", { mode: "off", extra: true }));
+    expect(response.status).toBe(400);
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+  });
+
+  it("allows opting out when product access blocks notice and detail", async () => {
+    await getPrisma().hostedMember.update({ where: { id: memberId }, data: { billingStatus: "not_started" } });
+    for (const mode of ["notice", "detail"]) {
+      const response = await postMode(mode);
+      expect(response.status).toBe(403);
+      expect((await response.json()).error.code).toBe("HOSTED_ACCESS_REQUIRED");
+    }
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+    expect((await postMode("off")).status).toBe(200);
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
+  });
+
   it("rejects a session revoked between bearer admission and the write", async () => {
     const auth = await requireHostedMemberAuthFromBearerToken(request("message-preference"));
     await getPrisma().hostedAuthRecord.delete({ where: { model_id: { model: "session", id: session.sessionId } } });

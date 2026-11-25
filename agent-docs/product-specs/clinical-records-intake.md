@@ -107,9 +107,10 @@ withdrawn. Regranting consent leaves the setting off. This API only stores the
 choice. Notification delivery ships separately.
 
 Apply the schema expansion and historical withdrawal backfill first, then deploy
-the companion Web routes to all instances, then the app. Keep the expanded columns and withdrawal trigger on
-rollback. Once clients use the setting, retain a Web version that serves the
-preference route and honors existing opt-outs.
+the companion Web routes to all instances, then the app. Web resets the preference
+in the health-consent revocation transaction. Keep the withdrawal bridge while
+older Web versions can serve traffic or be restored. Once clients use the setting,
+retain a Web version that serves the preference route and honors existing opt-outs.
 
 Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 

@@ -447,6 +447,12 @@ export async function revokeHostedConsentScope(input: {
     // serialization fence. Once this lock is acquired, every later admission
     // must observe the committed revocation before it can persist new work.
     await lockHostedMemberRow(tx, input.memberId);
+    if (input.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE) {
+      await tx.hostedMember.updateMany({
+        where: { id: input.memberId, clinicalRecordMessageMode: { not: "off" } },
+        data: { clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: { increment: 1 } },
+      });
+    }
     await recordHostedConsentDecisionTx({ tx, memberId: input.memberId, scope: input.scope,
       decision: "deny", source, now, metadata: null });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
