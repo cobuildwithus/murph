@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import squareLogos from "@/src/lib/clinical-records/provider-logos-square.json";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -71,7 +72,7 @@ describe("Clinical Records connection lifecycle", () => {
       connectedAt: createdAt, lastCheckedAt: null, lastErrorCode: null, status: "active", refreshTokenEncrypted: "sealed",
       retrievalRuns: [{ status: "retrieving", createdAt, completedAt: null, outcomeCountsJson: null, requests: [{ updatedAt }] }],
     };
-    mocks.connectionFindMany.mockResolvedValue([row, { ...row, retrievalRuns: [{ ...row.retrievalRuns[0], requests: [] }] }, ...Array(18).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
+    mocks.connectionFindMany.mockResolvedValue([row, { ...row, providerDirectoryEntryId: "epic-1001", retrievalRuns: [{ ...row.retrievalRuns[0], requests: [] }] }, ...Array(18).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
     const response = await GET(new Request("https://app.example.test/api/clinical-records/companion/sources"));
     const body = await response.json();
     expect(body.messageMode).toBe("detail");
@@ -80,6 +81,7 @@ describe("Clinical Records connection lifecycle", () => {
       state: "getting_records", reason: null, lastImport: null, connectedAt: createdAt.toISOString(), lastCheckedAt: null,
       lastActivityAt: updatedAt.toISOString(), updates: "daily", actions: ["start_over", "remove"] });
     expect(body.sources[1].lastActivityAt).toBe(createdAt.toISOString());
+    expect(body.sources[1].logoPath).toBe(squareLogos["epic-1001"]);
     expect(body.sources.at(-1)).toMatchObject({ state: "disconnected", updates: "one_time", lastActivityAt: null });
     expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { memberId: "member-a" }, orderBy: expect.arrayContaining([{ disconnectedAt: { sort: "desc", nulls: "first" } }]),

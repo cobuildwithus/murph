@@ -3,11 +3,20 @@ import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { getPrisma } from "../prisma";
 import { classifyClinicalSource, hasImportCapacity } from "./source-state";
 import { lastRunActivity, lifecycleRunSelect } from "./run-lifecycle";
-import logos from "./provider-logos.json";
+import wideLogos from "./provider-logos.json";
+import squareLogos from "./provider-logos-square.json";
+
+// The app draws a square tile, so it gets the square mark when one exists.
+// The wide wordmarks were made for the web pages and are the fallback.
+const companionLogoMaps: Record<string, string>[] = [squareLogos, wideLogos];
+const companionLogoPath = /^\/clinical-provider-logos\/[a-f0-9]{24}\.png$/u;
 
 export function clinicalLogoPath(id: string) {
-  const value = (logos as Record<string, string>)[id];
-  return typeof value === "string" && /^\/clinical-provider-logos\/[a-f0-9]{24}\.png$/u.test(value) ? value : undefined;
+  for (const logos of companionLogoMaps) {
+    const value = logos[id];
+    if (typeof value === "string" && companionLogoPath.test(value)) return value;
+  }
+  return undefined;
 }
 
 export async function readCompanionSources(auth: HostedNativeMemberAuth) {
