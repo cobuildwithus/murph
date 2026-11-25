@@ -4,7 +4,7 @@ Last verified: 2026-09-17
 
 ## Launch contract
 
-The default app is patient-facing, read-only, R4, non-confidential with S256
+The existing public app is patient-facing, read-only, R4, non-confidential with S256
 PKCE and no refresh/offline access. Select USCDI v3 automatic distribution in
 Epic and register only the 44 default APIs below. Provision that app's production
 and non-production IDs in `EPIC_SMART_CLIENT_ID` and
@@ -20,9 +20,10 @@ guarantee of every hospital, every historical record or every document body.
 
 ## Optional persistent registration
 
-Daily checks do not change the automatic API allowlist. A member can request
-ongoing access only when a corresponding confidential patient-facing client
-has been provisioned. The server-only `EPIC_SMART_PERSISTENT_CREDENTIALS` secret
+Daily checks use the same automatic API allowlist. Starts request ongoing access
+when the selected confidential registration and portal support it. For the
+replacement asymmetric registration, use the [sandbox proof and rollout procedure](../product-specs/clinical-records-intake.md#epic-client-authentication-and-sandbox-proof).
+For existing per-organization Basic registrations, the server-only `EPIC_SMART_PERSISTENT_CREDENTIALS` secret
 is a JSON object keyed by exact provider directory ID, with `clientId` and
 `clientSecret` string fields. Leave it unset for the existing one-time flow.
 Use distinct explicit entries for sandbox and production; there is no wildcard

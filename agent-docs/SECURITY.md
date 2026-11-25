@@ -964,6 +964,13 @@ Existing product admission, delivery and runtime safety rules still apply.
   event. Only the member setting authorizes detail. Withdrawing health consent
   resets that setting and advances its revision in the grant transaction, even
   from an older Web writer. Reconsent does not enable texts.
+- Web authenticates each Epic token request with the registration bound to the
+  stored client ID and environment. A signed registration requires a matching
+  RSA private key in the Web secret store and public key in its environment’s
+  published set. It sends a fresh RS384 assertion scoped to the pinned token
+  endpoint. Unknown or ambiguous registrations and unavailable signers fail
+  closed. Keep sandbox and production material separate. Only public RSA
+  verification fields may be served at `/.well-known/epic/*.jwks.json`.
 - Hosted Clinical Records keeps Epic SMART client configuration, OAuth state,
   PKCE verifiers, encrypted patient binding/context and access tokens in `apps/web`.
   Patient/token/verifier/cursor ciphertext uses purpose-specific hosted crypto

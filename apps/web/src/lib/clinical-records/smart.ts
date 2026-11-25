@@ -1,4 +1,5 @@
 import type { DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
+import { epicTokenRequest, type EpicClientAuth } from "./epic-client-auth";
 import { isClinicalReturnState } from "./return-query";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -172,8 +173,7 @@ export function buildSmartAuthorizationUrl(input: {
 }
 
 export async function exchangeSmartAuthorizationCode(input: {
-  clientSecret?: string;
-  clientId: string;
+  auth: EpicClientAuth;
   code: string;
   fetchImpl?: typeof fetch;
   redirectUri: string;
@@ -181,22 +181,11 @@ export async function exchangeSmartAuthorizationCode(input: {
   tokenEndpoint: string;
   verifier: string;
 }): Promise<SmartTokenResponse> {
-  const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), {
-    body: new URLSearchParams({
-      ...(!input.clientSecret ? { client_id: input.clientId } : {}),
-      code: input.code,
-      code_verifier: input.verifier,
-      grant_type: "authorization_code",
-      redirect_uri: input.redirectUri,
-    }),
-    headers: {
-      Accept: "application/json",
-      ...(input.clientSecret ? { Authorization: smartClientAuthorization(input.clientId, input.clientSecret) } : {}),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    method: "POST",
-    redirect: "manual",
-  }, SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_TOKEN_EXCHANGE_FAILED");
+  const request = await epicTokenRequest(input.auth, input.tokenEndpoint, {
+    code: input.code, code_verifier: input.verifier, grant_type: "authorization_code", redirect_uri: input.redirectUri,
+  });
+  const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), request,
+    SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_TOKEN_EXCHANGE_FAILED");
   if (!response.ok) {
     throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_EXCHANGE_FAILED", "The provider did not complete authorization.");
   }
@@ -225,19 +214,17 @@ export async function exchangeSmartAuthorizationCode(input: {
 }
 
 export async function refreshSmartAccessToken(input: {
-  clientId: string;
-  clientSecret: string;
+  auth: Exclude<EpicClientAuth, { method: "public" }>;
   refreshToken: string;
   tokenEndpoint: string;
   grantedScopes: readonly string[];
   fetchImpl?: typeof fetch;
-}): Promise<{ accessToken: string; refreshToken: string; expiresInSeconds: number; grantedScopes: readonly string[]; patientId?: string }> {
-  const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), {
-    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: input.refreshToken }),
-    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: smartClientAuthorization(input.clientId, input.clientSecret) },
-    method: "POST", redirect: "manual",
-  }, SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_REFRESH_FAILED");
+}): Promise<{ accessToken: string; successorReturned: boolean; refreshToken: string; expiresInSeconds: number; grantedScopes: readonly string[]; patientId?: string }> {
+  const request = await epicTokenRequest(input.auth, input.tokenEndpoint, {
+    grant_type: "refresh_token", refresh_token: input.refreshToken,
+  });
+  const response = await fetchWithTimeout(input.fetchImpl ?? fetch, new URL(input.tokenEndpoint), request,
+    SMART_TOKEN_TIMEOUT_MS, "CLINICAL_RECORD_SMART_REFRESH_FAILED");
   if (!response.ok) throw clinicalRecordsError({
     code: response.status === 429 || response.status >= 500 ? "CLINICAL_RECORD_SMART_REFRESH_TEMPORARILY_UNAVAILABLE" : "CLINICAL_RECORD_SMART_REFRESH_REJECTED",
     httpStatus: 503, retryable: response.status === 429 || response.status >= 500,
@@ -258,14 +245,10 @@ export async function refreshSmartAccessToken(input: {
   if (!expiresInSeconds) throw providerUnavailable("CLINICAL_RECORD_SMART_TOKEN_INVALID", "The provider did not return an access lifetime.");
   return {
     accessToken: requireBoundedString(body.access_token, "SMART access token", 65_536),
+    successorReturned: body.refresh_token !== undefined,
     refreshToken: body.refresh_token === undefined ? input.refreshToken : requireBoundedString(body.refresh_token, "SMART refresh token", 65_536),
     expiresInSeconds, grantedScopes, ...(patientId ? { patientId } : {}),
   };
-}
-
-function smartClientAuthorization(clientId: string, clientSecret: string): string {
-  const encoded = (value: string) => new URLSearchParams({ value }).toString().slice(6);
-  return `Basic ${Buffer.from(`${encoded(clientId)}:${encoded(clientSecret)}`, "utf8").toString("base64")}`;
 }
 
 async function fetchWithTimeout(

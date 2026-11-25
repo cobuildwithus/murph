@@ -26,6 +26,7 @@
     "hosted-crypto:env-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-hosted-crypto-standby-env.ts",
     "public-routes:waf-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-public-routes-waf.ts",
     "device:reconnect-link": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/create-device-reconnect-link.ts",
+    "epic:sandbox:offline": "node --import tsx scripts/epic-sandbox-offline.ts",
     "clinical-records:providers:import": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/import-epic-clinical-provider-directory.ts",
     "linq:sync-lines": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/sync-hosted-linq-lines.ts",
     "game:ideas-eval": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/game-ideas-eval.ts",
