@@ -12,6 +12,7 @@ import {
   withCanonicalResourceLocks,
 } from "../operations/index.ts";
 import {
+  deleteMarkdownRegistryDocument,
   loadMarkdownRegistryDocuments,
   resolveMarkdownRegistryUpsertTarget,
   writeMarkdownRegistryRecord,
@@ -49,6 +50,8 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
+  DeleteRegimenInput,
+  DeleteRegimenResult,
   RegimenLink,
   RegimenLinkType,
   ReadRegimenInput,
@@ -770,6 +773,29 @@ export async function readRegimen(
   input: ReadRegimenInput,
 ): Promise<RegimenStoredDocument> {
   return resolveRegimenRecord(input);
+}
+
+export async function deleteRegimen({
+  vaultRoot,
+  regimenId,
+}: DeleteRegimenInput): Promise<DeleteRegimenResult> {
+  return withRegimenRegistryLock(vaultRoot, async () => {
+    const { entity, document } = await resolveRegimenRecord({ vaultRoot, regimenId });
+    const { relativePath } = await deleteMarkdownRegistryDocument({
+      vaultRoot,
+      relativePath: document.relativePath,
+      operationType: "regimen_delete",
+      summary: `Delete regimen ${entity.regimenId}`,
+      audit: {
+        action: "regimen_delete",
+        commandName: "core.deleteRegimen",
+        summary: `Deleted regimen ${entity.regimenId}.`,
+        targetIds: [entity.regimenId],
+      },
+    });
+
+    return { regimenId: entity.regimenId, relativePath, deleted: true };
+  });
 }
 
 export async function stopRegimen(
