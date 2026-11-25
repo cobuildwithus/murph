@@ -1,4 +1,9 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import providerDirectory from "@/src/lib/clinical-records/provider-directory.v2.json";
+import squareLogos from "@/src/lib/clinical-records/provider-logos-square.json";
+import wideLogos from "@/src/lib/clinical-records/provider-logos.json";
 
 const mocks = vi.hoisted(() => ({
   bearer: vi.fn(),
@@ -61,6 +66,22 @@ describe("Clinical Records provider search route", () => {
     expect(JSON.stringify([...warning.mock.calls, ...error.mock.calls])).not.toContain(query);
   });
 
+  it("gives the app a square logo when the provider has one and the wide logo otherwise", async () => {
+    const { POST } = await import("../app/api/clinical-records/companion/providers/search/route");
+    const square = "epic-1001", wideOnly = "epic-1002", unknown = "epic-example";
+    expect(wideLogos).toHaveProperty(square);
+    expect(squareLogos).not.toHaveProperty(wideOnly);
+    mocks.searchClinicalProviderDirectory.mockReturnValue({
+      providers: [square, wideOnly, unknown].map(id => ({ id, brandName: "Synthetic Ridge", facilities: [] })),
+    });
+    const response = await POST(new Request("https://app.example.test/api/clinical-records/companion/providers/search", {
+      method: "POST", body: JSON.stringify({ query: "Synthetic" }), headers: { "content-type": "application/json" },
+    }));
+    const { providers } = await response.json() as { providers: { logoPath?: string }[] };
+    expect(providers.map(provider => provider.logoPath)).toEqual([squareLogos[square], wideLogos[wideOnly], undefined]);
+    expect(squareLogos[square]).not.toBe(wideLogos[square]);
+  });
+
   it("accepts only the bounded provider search selectors", async () => {
     const request = jsonRequest({
       city: "Atlanta",
@@ -90,6 +111,24 @@ describe("Clinical Records provider search route", () => {
     });
     expect(mocks.searchClinicalProviderDirectory).not.toHaveBeenCalled();
     expect(JSON.stringify([...warning.mock.calls, ...error.mock.calls])).not.toContain(claim);
+  });
+});
+
+describe("Clinical Records square provider logos", () => {
+  it("maps directory providers to 144-pixel PNG files the app is allowed to load", () => {
+    const directoryIds = new Set(providerDirectory.entries.map(entry => entry.id));
+    const entries = Object.entries(squareLogos);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [id, logoPath] of entries) {
+      expect(directoryIds.has(id), `${id} should be a directory provider`).toBe(true);
+      // The same pattern the app checks before it loads a logo.
+      expect(logoPath).toMatch(/^\/clinical-provider-logos\/[0-9a-f]{24}\.png$/u);
+      const file = path.join(process.cwd(), "apps/web/public", logoPath);
+      expect(existsSync(file), `${logoPath} should exist under apps/web/public`).toBe(true);
+      const bytes = readFileSync(file);
+      expect(bytes.subarray(0, 8).toString("hex"), `${logoPath} should be a PNG`).toBe("89504e470d0a1a0a");
+      expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)], `${logoPath} should be 144 pixels square`).toEqual([144, 144]);
+    }
   });
 });
 
