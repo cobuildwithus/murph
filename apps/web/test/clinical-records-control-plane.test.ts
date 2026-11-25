@@ -1,3 +1,4 @@
+import { clinicalProcessors, clinicalProcessorScope, registeredClinicalRecipients } from "@/src/lib/clinical-records/processor-registry";
 import { signerPem } from "./clinical-records-synthetic-signer";
 
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
@@ -426,7 +427,15 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
-  it("requests offline access with the sandbox signer and authenticates its stored session after rollback", async () => {
+  it("requires a closed recipient set and rejects an unmapped fallback", () => {
+    const origins = clinicalProcessors.map(processor => processor.origin);
+    expect(registeredClinicalRecipients(origins)).toBe(true);
+    for (const route of [null, [], [...origins, "https://alternative.example.test"]]) {
+      expect(registeredClinicalRecipients(route)).toBe(false);
+    }
+  });
+
+  it("checks every approval before discovery and fences signed callbacks across selector rollback", async () => {
     provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
@@ -434,12 +443,23 @@ describe("Clinical Records authorization persistence", () => {
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
     const harness = createHarness(null, { clientId: "signed" });
     mocks.getPrisma.mockReturnValue(harness.prisma);
-    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
-      request: new Request("https://app.example.test/start", { method: "POST" }) });
-    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ requestOfflineAccess: true }));
-    expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data.clientId).toBe("signed");
+    const grants = await harness.prisma.hostedConsentGrant.findMany();
+    harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants.slice(1)).mockResolvedValueOnce([
+      { scope: grants[0]!.scope, documentVersionsJson: { openai: "stale" } }, ...grants.slice(1),
+    ]);
+    for (const reason of ["missing", "stale"]) {
+      await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+        request: new Request("https://app.example.test/start", { method: "POST" }) }), reason)
+        .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED" });
+      expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+    }
+    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) }))
+      .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE" });
+    expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "legacy");
-    await finishAuthorization();
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE" });
+    expect(harness.durableConnections).toHaveLength(0);
     expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
       auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),
     }));
@@ -1293,7 +1313,11 @@ function createHarness(
     return input.data;
   });
   const transactionStart = vi.fn<(call: number) => void>();
+  const grants = vi.fn(async (): Promise<{ scope: string; documentVersionsJson: Record<string, string> }[]> => clinicalProcessors.map(processor => ({
+    scope: clinicalProcessorScope(processor), documentVersionsJson: { [processor.id]: processor.version },
+  })));
   const tx = {
+    hostedConsentGrant: { findMany: grants },
     $queryRaw: oauthSessionLock,
     clinicalRecordConnectIntent: {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -1352,6 +1376,7 @@ function createHarness(
         callOrder.push(`transaction:${call}:end`);
       }
     }),
+    hostedConsentGrant: tx.hostedConsentGrant,
     clinicalRecordConnectIntent: tx.clinicalRecordConnectIntent,
     clinicalRecordConnection: tx.clinicalRecordConnection,
     clinicalRecordOauthSession: tx.clinicalRecordOauthSession,

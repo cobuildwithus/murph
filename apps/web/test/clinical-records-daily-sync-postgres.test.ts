@@ -2,6 +2,7 @@ import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
+import { clinicalProcessorAdmissionError, clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import { recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
@@ -62,6 +63,33 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const mailbox = () => client.hostedMailboxItem.count({ where: { userId: memberId } });
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
+
+  it("gates a replacement daily run and its transport at the current version of every processor", async () => {
+    const f = await fixture();
+    const pointer = { connectionId: f.connectionId, memberId: f.memberId, now };
+    await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { requiresProcessorApprovals: true } });
+    for (const processor of clinicalProcessors) {
+      expect(await clinicalProcessorAdmissionError(f.memberId, client)).toBe("CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED");
+      expect(await admitClinicalDailySync(pointer)).toBe(false);
+      await client.hostedConsentGrant.create({ data: { memberId: f.memberId, scope: clinicalProcessorScope(processor),
+        status: "granted", grantedAt: now, source: "synthetic", documentVersionsJson: { [processor.id]: processor.version } } });
+    }
+    const processor = clinicalProcessors[0];
+    const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(processor) } };
+    await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: "obsolete" } } });
+    expect(await clinicalProcessorAdmissionError(f.memberId, client)).toBe("CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED");
+    expect(await admitClinicalDailySync(pointer)).toBe(false);
+    await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: processor.version } } });
+    expect(await clinicalProcessorAdmissionError(f.memberId, client)).toBe("CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE");
+    expect(await admitClinicalDailySync(pointer)).toBe(false);
+    expect(await f.mailbox()).toBe(0);
+    const run = await client.clinicalRecordRetrievalRun.update({ where: { connectionId_generation: {
+      connectionId: f.connectionId, generation: 1 } }, data: { status: "queued", completedAt: null } });
+    const read = () => readClinicalRetrievalRun({ memberId: f.memberId, runId: run.id, generation: run.generation });
+    expect(await read()).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
+    await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+    expect(await read()).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
+  });
 
   it("commits the current run failure before returning a permanent outcome rejection", async () => {
     const f = await fixture();

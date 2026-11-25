@@ -51,6 +51,17 @@ hospital-specific erasure merely to suppress a warning. Link the questionnaire
 to the current privacy policy and deletion instructions. This code change does
 not edit or verify the operator's Epic questionnaire.
 
+Keep the current sharing answer for the public registration. For the replacement
+registration, the app must show the legal name, purpose and current notice for
+each readable-content processor and accept a separate decision for each. The
+companion ledger supports this screen. Replacement starts currently stop even
+after all approvals because the shared vault can reach unenumerated recipients.
+Before attesting, confirm the signed entities, actual model and delivery routes,
+every downstream or fallback recipient, and the published subprocessor list.
+Verify withdrawal against already-imported data, ordinary and scheduled turns,
+enrichment and detail delivery on the deployed system. The owner changes the
+questionnaire after those checks pass.
+
 Persistent rollout requires the additive clinical daily-sync migration before
 Web, followed by the runtime extraction-cache build. Existing runtimes accept
 the unchanged bounded-window protocol; older runtimes simply repeat extraction.

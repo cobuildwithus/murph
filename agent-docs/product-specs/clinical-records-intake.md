@@ -92,6 +92,40 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
 | POST `message-preference` | `{ mode }` | `{ messageMode }` |
+| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }] }` |
+| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | Same fresh processor list |
+
+On a start response requiring named approval, the app fetches the current list,
+displays one tick per company on a single screen and sends one decision per
+request. It retries start after the final approval. A missing route on an older server leaves the feature unavailable.
+Send the displayed version, including on withdrawal. A stale version returns
+409 `CONSENT_DOCUMENT_VERSIONS_STALE`. Either decision requires a current native
+bearer. Withdrawal remains available after product access lapses. Neither
+decision changes the medical-record message setting. Withdrawing health consent
+still turns that setting off and blocks further grants until reconsent.
+
+The asymmetric registration checks every current notice before SMART discovery
+and again under the member lock before saving the connection. Missing approvals
+return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
+governs daily admission and transport even after the start selector changes.
+Legacy profiles keep their current admission rules.
+
+**Replacement imports are on hold.** Even with all ticks, start returns 503
+`CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE`. The current shared vault allows
+turns, tools and delivery paths whose recipients cannot be enumerated. Web
+denies transfer into that workspace before it can import replacement records.
+Legacy imports and their derived facts retain their existing processing rules.
+Withdrawal records a new ledger decision. It cannot recall prior disclosures or
+erase retained data. Activating replacement imports requires enforcing actual
+recipients on every later use of protected records, including existing sessions,
+outbound retries and restored workspaces.
+
+Apply the nullable profile column first, converge Web with the public selector
+still active, then release the app. Confirm that no older server admitted a
+replacement grant before treating unmarked rows as legacy. Keep the approval
+reader, writer and withdrawal route after the first app decision. Keep profile
+and transport readers after the first replacement grant. A selector rollback
+alone cannot protect records already read into a shared workspace.
 
 The list, completion and removal responses include `messageMode` only while at
 least one connected source reports `updates: "daily"`. With only one-time

@@ -328,6 +328,7 @@ model ClinicalRecordConnection {
   fhirBaseUrlEncrypted     String                           @map("fhir_base_url_encrypted")
   fhirBaseHash             String                           @map("fhir_base_hash")
   status                   String                           @default("active")
+  requiresProcessorApprovals Boolean?                       @map("requires_processor_approvals")
   patientBindingEncrypted  String?                          @map("patient_binding_encrypted")
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
