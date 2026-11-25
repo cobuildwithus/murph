@@ -3,6 +3,7 @@ import { mkdir, opendir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  clinicalDocumentAttachmentKey,
   clinicalExtractionDateIsSupported,
   clinicalDocumentExtractionOutputSchemaForFamily,
   clinicalDocumentExtractionOutputSchema,
@@ -15,7 +16,7 @@ import {
 } from "@murphai/clinical-records";
 import { eventImportDecisionSchema, toLocalDayKey, vaultMetadataSchema, type ExternalRef } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
-import { importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
+import { type ClinicalChangeReceipt, type ClinicalChangeReceiptIdentity, readClinicalChangeReceipt, importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
 import { normalizeMetricValue, unitsEquivalent } from "@murphai/health-metrics";
 import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } from "@murphai/query";
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
@@ -73,7 +74,11 @@ async function saveJob(vaultRoot: string, job: Job) {
   await mkdir(rootPath(vaultRoot), { recursive: true, mode: 0o700 });
   await writeJsonFileAtomic(jobPath(vaultRoot, job.jobId), jobSchema.parse(job), { mode: 0o600 });
 }
-async function readJob(vaultRoot: string, jobId: string) { return jobSchema.parse(await readOptional(jobPath(vaultRoot, jobId))); }
+async function readJob(vaultRoot: string, jobId: string) {
+  const job = jobSchema.parse(await readOptional(jobPath(vaultRoot, jobId)));
+  if (job.jobId !== jobId || job.root.sha256 !== jobId) throw new Error("Clinical enrichment job identity changed.");
+  return job;
+}
 function locked<T>(vaultRoot: string, run: () => Promise<T>): Promise<T> {
   return withCanonicalResourceLocks({ vaultRoot, resources: [{ key: "clinical-enrichment", label: "Clinical document enrichment" }], run });
 }
@@ -91,7 +96,7 @@ async function attestSource(vaultRoot: string, job: Job) {
     if (!current || stable(current) !== stable(job.source.resource)) throw new Error("Clinical resource cursor is stale.");
     const attested = await attestClinicalStructuredSource({ vaultRoot, manifestPath: job.root.manifestPath, manifest, source: current });
     if (stable(attested.source) !== stable(job.source)) throw new Error("Clinical resource source binding changed.");
-    return { ...attested, storedSha256: attested.source.sha256 };
+    return { ...attested, manifest, sourceId: hash(stable(["resource", current])), storedSha256: attested.source.sha256 };
   }
   const attachment = "documentAttachments" in manifest ? manifest.documentAttachments?.[job.attachmentIndex] : undefined;
   if (!job.source || attachment?.status !== "downloaded" || attachment.sha256 !== job.source.sha256 || attachment.byteLength !== job.source.byteLength || attachment.mediaType !== job.source.mediaType || path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath) !== job.source.rawRef) throw new Error("Clinical enrichment source is no longer attested by its manifest.");
@@ -99,7 +104,7 @@ async function attestSource(vaultRoot: string, job: Job) {
   const stored = await readClinicalStoredDocument({ vaultRoot, source: job.source });
   const { readClinicalAttachmentText } = await import("@murphai/importers/clinical-records");
   const extractedText = readClinicalAttachmentText(await readFile(stored.absolutePath), job.source.mediaType);
-  return { documentPath: stored.absolutePath, storedSha256: stored.sha256, parent, extractedText };
+  return { manifest, sourceId: hash(stable(["attachment", clinicalDocumentAttachmentKey(attachment)])), documentPath: stored.absolutePath, storedSha256: stored.sha256, parent, extractedText };
 }
 
 /** Portable clinical operations only; raw evidence and canonical records keep their existing owners. */
@@ -529,7 +534,7 @@ async function planClinicalEnrichmentPage(
   const evidence = clinicalResourceEvidence(source, sourceText);
   const hold = (reason: string) => {
     held++;
-    if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
+    recordHoldReason(job, reason);
   };
   for (const family of families) {
     const output = clinicalDocumentExtractionOutputSchemaForFamily(family).parse(prepared.outputs[family]);
@@ -587,47 +592,86 @@ async function readbackClinicalEnrichmentPage(
   return verifiedIds;
 }
 
+function enrichmentReceiptIdentity(job: Job, attested: Awaited<ReturnType<typeof attestSource>>): ClinicalChangeReceiptIdentity {
+  const { manifest, sourceId } = attested;
+  const batch = "batch" in manifest ? manifest.batch : undefined;
+  return {
+    connectionId: manifest.connectionId, runId: batch?.runId ?? manifest.retrievalJobId,
+    unit: { kind: "enrichment", batch: batch?.index ?? 0, jobId: job.jobId, sourceId, page: job.page },
+    inputDigest: hash(stable([sourceId, job.source, job.prepared])),
+  };
+}
+
 /** Applies only host-attributed, previously frozen proposals; retries replay the same source keys. */
 export async function applyClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string }) {
   return locked(input.vaultRoot, () => withCanonicalWriteLock(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
     if (job.status !== "prepared" || !job.prepared || !job.source) throw new Error("Clinical enrichment has no accepted proposals to apply.");
     const attested = await attestSource(input.vaultRoot, job);
+    const identity = enrichmentReceiptIdentity(job, attested);
+    const saved = await readClinicalChangeReceipt(input.vaultRoot, identity);
+    const completeHeld = async (reason: string) => {
+      const receipt = saved ?? (await importEventBatch({
+        vaultRoot: input.vaultRoot, apply: true, decisions: [], receiptIdentity: identity,
+      })).receipt;
+      return holdPreparedClinicalDocument(input.vaultRoot, job, reason, receipt);
+    };
     if (!attested.parent.eligible) {
-      return holdPreparedClinicalDocument(input.vaultRoot, job, attested.parent.reason ?? "Clinical document parent is not eligible.");
+      return completeHeld(attested.parent.reason ?? "Clinical document parent is not eligible.");
     }
-    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source, attested.parent, "extractedText" in attested ? attested.extractedText : undefined);
+    const { accepted, existing, held, verifiedIds } = await planClinicalEnrichmentPage(input.vaultRoot, job, job.prepared, job.source, attested.parent, attested.extractedText);
     let canonical;
     try {
-      canonical = accepted.length ? await importEventBatch({ vaultRoot: input.vaultRoot, apply: true, decisions: accepted.map((entry) => entry.decision) }) : null;
+      canonical = saved ? null : await importEventBatch({
+        vaultRoot: input.vaultRoot, apply: true, receiptIdentity: identity, decisions: accepted.map((entry) => entry.decision),
+      });
     } catch (error) {
       if (isVaultError(error) && (error.code === "EVENT_SOURCE_PARENT_WITHDRAWN" || error.code === "EVENT_SOURCE_PARENT_STALE")) {
-        return holdPreparedClinicalDocument(input.vaultRoot, job, "Clinical document parent was withdrawn or replaced by a newer revision.");
+        return completeHeld("Clinical document parent was withdrawn or replaced by a newer revision.");
       }
       throw error;
     }
-    verifiedIds.push(...await readbackClinicalEnrichmentPage(input.vaultRoot, accepted));
+    if (saved && accepted.length) {
+      // A completed page cannot publish proposals that became eligible on retry.
+      const reason = "Previously completed clinical page no longer matches current canonical facts.";
+      job.counts.held += accepted.length;
+      recordHoldReason(job, reason);
+    } else {
+      verifiedIds.push(...await readbackClinicalEnrichmentPage(input.vaultRoot, accepted));
+    }
     job.counts.created += canonical?.createdCount ?? 0;
     job.counts.existing += existing + (canonical?.skippedExistingCount ?? 0);
     job.counts.held += held;
-    job.counts.pages++;
-    job.lastReadback = { eventIds: verifiedIds, verifiedCount: verifiedIds.length };
-    if (job.page >= job.prepared.totalPages) { advanceClinicalSource(job); job.page = 1; job.counts.documents++; delete job.source; delete job.totalPages; }
-    else job.page++;
-    delete job.prepared;
-    job.status = "pending";
-    await saveJob(input.vaultRoot, job);
-    return { canonical, counts: job.counts, readback: job.lastReadback };
+    const readback = await finishClinicalEnrichmentPage(input.vaultRoot, job, verifiedIds, job.prepared.totalPages);
+    return { receipt: saved ?? canonical!.receipt, canonical: accepted.length ? canonical : null, counts: job.counts, readback };
   }));
 }
 
-async function holdPreparedClinicalDocument(vaultRoot: string, job: Job, reason: string) {
+async function finishClinicalEnrichmentPage(vaultRoot: string, job: Job, verifiedIds: string[], totalPages: number) {
+  job.counts.pages++;
+  job.lastReadback = { eventIds: verifiedIds, verifiedCount: verifiedIds.length };
+  if (job.page >= totalPages) {
+    advanceClinicalSource(job);
+    job.page = 1;
+    job.counts.documents++;
+    delete job.source;
+    delete job.totalPages;
+  } else {
+    job.page++;
+  }
+  delete job.prepared;
+  job.status = "pending";
+  await saveJob(vaultRoot, job);
+  return job.lastReadback;
+}
+
+async function holdPreparedClinicalDocument(vaultRoot: string, job: Job, reason: string, receipt: ClinicalChangeReceipt) {
   holdCurrentSource(job, reason);
   delete job.prepared;
   job.status = "pending";
   job.lastReadback = { eventIds: [], verifiedCount: 0 };
   await saveJob(vaultRoot, job);
-  return { canonical: null, counts: job.counts, readback: job.lastReadback };
+  return { receipt, canonical: null, counts: job.counts, readback: job.lastReadback };
 }
 
 export async function readClinicalEnrichmentStatus(input: { vaultRoot: string; jobId: string }) {
@@ -648,9 +692,13 @@ export async function deferClinicalEnrichment(input: { vaultRoot: string; jobId:
   });
 }
 
+function recordHoldReason(job: Job, reason: string) {
+  if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
+}
+
 function holdCurrentSource(job: Job, reason: string, structured?: boolean) {
   job.counts.held++;
-  if (!job.holdReasons.includes(reason)) job.holdReasons = [...job.holdReasons, reason].slice(-20);
+  recordHoldReason(job, reason);
   advanceClinicalSource(job, structured);
   job.page = 1;
   job.failures = 0;

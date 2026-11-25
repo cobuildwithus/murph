@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-11-24
+Last verified: 2026-11-25
 
 ## Product outcome
 
@@ -495,6 +495,31 @@ can progress. Invalid manifests and changes to prepared source bytes fail closed
 Recoverable failures retain bounded retry state; exhausted retries hold the
 affected document. Neither retrieval success nor an enrichment receipt proves
 that every document or clinical fact was recovered.
+
+### Private change receipts
+
+Core commits a v1 change receipt with the event appends for each retrieval batch
+and frozen enrichment page. Source-only document markers, metadata-only revisions
+and invalidated facets contribute no changes. Withdrawing a saved fact records
+its deletion revision. A kind replacement records one supersession at the new
+canonical ID and revision. A completed import with no changes has an empty array.
+
+The receipt binds the connection and run. Hosted retrieval also binds the
+generation, batch index and digest of immutable manifest and supplied extraction
+inputs. Enrichment binds the manifest job, attested attachment or structured
+resource, page number and digest of the source and frozen proposals. Matching
+retries return the original receipt even when overlap checks now exclude every
+proposal. A conflicting binding or digest rejects the import. Run and job
+checkpoints can advance or disappear independently.
+
+The vault ledger layout defines the private run shard and retention. Deploy Core
+readers before enabling receipt-writing imports. Earlier runtimes ignore the
+additional shard and preserve it in encrypted workspace snapshots. They can
+continue importing without writing receipts. A receipt-aware reader treats
+missing history as unproved. During rollback, retain the shard and require
+receipt-capable runners wherever complete evidence is needed. App counts retain
+their existing wire contract. Web outcomes, orchestration and diagnostics carry
+no receipt contents.
 
 ### Bounded repeat import
 

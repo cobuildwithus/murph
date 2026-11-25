@@ -73,14 +73,18 @@ it.each(["entered-in-error", "corrected"])("retires extracted facts when the par
   await runOneHostedClinicalEnrichment(f.runtime);
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const frozen = await readFile(statePath, "utf8");
-  await applyClinicalEnrichmentProposals(f);
-  await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: "updated-import", fetchedAt: "2026-07-02T12:00:00.000Z",
+  const original = await applyClinicalEnrichmentProposals(f);
+  const updated = { ...f.input, retrievalJobId: "updated-import", fetchedAt: "2026-07-02T12:00:00.000Z",
     pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource: {
       ...source(), status, meta: { lastUpdated: "2026-07-02T12:00:00.000Z" }, valueString: "Resting heart rate 75 bpm.",
-    } }] }) }] });
+    } }] }) }] };
+  await importClinicalFhirSnapshot(updated);
+  if (status === "entered-in-error") {
+    expect((await importClinicalFhirSnapshot(updated)).canonical.skippedExistingCount).toBe(2);
+  }
   expect((await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["measurement"], limit: 20 })).filter((row) => row.title === "Resting heart rate")).toHaveLength(0);
   await writeFile(statePath, frozen);
-  expect((await applyClinicalEnrichmentProposals(f)).canonical).toBeNull();
+  expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({ canonical: null, receipt: original.receipt });
 });
 
 it("keeps unsafe statuses held while admitting undated source observations", async () => {

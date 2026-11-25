@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
 import {
   archiveClosedEventLedgerShards,
+  importEventBatch,
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
   readIntegrationIngestEntries,
@@ -187,6 +188,13 @@ describe("workspace snapshot local restore", () => {
         }));
       }
 
+      const receiptIdentity = { runId: "synthetic-restore", connectionId: "synthetic-source", inputDigest: "a".repeat(64),
+        unit: { kind: "retrieval" as const, batch: 0, generation: 1 } };
+      const clinical = await importEventBatch({ vaultRoot: sourceVaultRoot, apply: true, receiptIdentity,
+        decisions: [{ action: "upsert", payload: { kind: "note", occurredAt: "2026-01-12T10:00:00Z", title: "Synthetic record",
+          note: "Synthetic evidence.", externalRef: { system: "synthetic", resourceType: "observation", resourceId: "fixture" } } }] });
+      expect(clinical.receipt?.changes).toHaveLength(1);
+
       const baselineSnapshotId = "snapshot_event_archive_before";
       const baselineObjectKey =
         `users/member_test/workspace-snapshots/${baselineSnapshotId}.snapshot.enc`;
@@ -256,6 +264,9 @@ describe("workspace snapshot local restore", () => {
           userId: "member_test",
         }),
       });
+      const replay = await importEventBatch({ vaultRoot: path.join(restoredDurableRoot, "vault"),
+        apply: true, receiptIdentity, decisions: [] });
+      expect(replay.receipt).toEqual(clinical.receipt);
       for (const [index, historicalEvent] of historicalEvents.entries()) {
         await expect(readEvent({
           eventId: historicalEvent.eventId,

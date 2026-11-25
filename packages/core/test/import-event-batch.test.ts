@@ -1669,8 +1669,10 @@ test("importEventBatch keeps the newest source tombstone after a revised kind re
   const replaced = await importEventBatch({
     vaultRoot,
     decisions: [{ action: "upsert", payload: replacement }],
+    receiptIdentity: { connectionId: "synthetic", runId: "kind-change", unit: { kind: "retrieval", batch: 0 }, inputDigest: "a".repeat(64) },
     apply: true,
   });
+  assert.deepEqual(replaced.receipt?.changes, [{ action: "superseded", eventId: replaced.eventIds[0], revision: 1, externalRef: replacement.externalRef }]);
   assert.equal(replaced.createdCount, 1);
   assert.equal(replaced.supersededCount, 1);
 

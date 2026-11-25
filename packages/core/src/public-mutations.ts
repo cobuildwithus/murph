@@ -4,11 +4,14 @@ import {
   dedupeDeviceEventsByExternalRef as dedupeDeviceEventsByExternalRefInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importEventBatch as importEventBatchInternal,
+  type ImportEventDecisionBatchInput,
+  type ImportEventBatchResult,
   importDocument as importDocumentInternal,
   recordInboxDocumentDefaultPromotion as recordInboxDocumentDefaultPromotionInternal,
   importSamples as importSamplesInternal,
   validateSampleImport as validateSampleImportInternal,
 } from "./mutations.ts";
+import type { ClinicalChangeReceipt, ClinicalChangeReceiptIdentity } from "./clinical-change-receipts.ts";
 import { resolveWorkoutSourceImportStatus as resolveWorkoutSourceImportStatusInternal } from "./domains/documents/source-evidence.ts";
 import {
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
@@ -614,6 +617,10 @@ export async function dedupeDeviceEventsByExternalRef(
   return withCanonicalInputWriteLock(input, dedupeDeviceEventsByExternalRefInternal);
 }
 
+export function importEventBatch(
+  input: ImportEventDecisionBatchInput & { apply: true; receiptIdentity: ClinicalChangeReceiptIdentity },
+): Promise<ImportEventBatchResult & { receipt: ClinicalChangeReceipt }>;
+export function importEventBatch(input: Parameters<typeof importEventBatchInternal>[0]): Promise<ImportEventBatchResult>;
 export async function importEventBatch(
   input: Parameters<typeof importEventBatchInternal>[0],
 ): ReturnType<typeof importEventBatchInternal> {

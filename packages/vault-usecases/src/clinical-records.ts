@@ -32,6 +32,9 @@ import {
 import type { EventImportDecision } from "@murphai/contracts";
 import {
   applyCanonicalWriteBatch,
+  readClinicalChangeReceipt,
+  type ClinicalChangeReceipt,
+  type ClinicalChangeReceiptIdentity,
   importEventBatch,
   isVaultError,
   withCanonicalWriteLock,
@@ -57,6 +60,7 @@ const CLINICAL_RETRIEVAL_CHECKPOINT_SCHEMA =
   "murph.clinical-retrieval-checkpoint.v4";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const TERMINAL_CLINICAL_IMPORT_ERROR_CODES = new Set([
+  "CLINICAL_RECEIPT_CONFLICT",
   "EVENT_KIND_MISMATCH",
   "EVENT_SOURCE_REVISION_CONFLICT",
   "EVENT_SOURCE_REVISION_UNORDERED",
@@ -104,6 +108,7 @@ export interface ClinicalFhirPendingDocument {
 }
 
 export interface ClinicalFhirSnapshotImportInput {
+  generation?: number;
   batch?: {
     runId: string; index: number;
     previous?: { manifestPath: string; sha256: string };
@@ -180,6 +185,7 @@ export interface ClinicalFhirRetrievalCheckpointRecord {
 }
 
 export interface ClinicalFhirSnapshotImportResult {
+  receipt: ClinicalChangeReceipt;
   structuredEnrichmentSources?: ClinicalStructuredSource[];
   canonical: {
     applied: boolean;
@@ -531,33 +537,38 @@ export async function importClinicalFhirSnapshot(
   }
 
   await yieldClinicalFhirImportControl(input.signal ?? null);
-  if (executableDecisions.length > 0) {
-    await input.assertCurrent?.();
-    input.signal?.throwIfAborted();
-  }
-
+  await input.assertCurrent?.();
+  input.signal?.throwIfAborted();
+  const manifestSha256 = createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`).digest("hex");
+  // File digests and the predecessor are already bound by the immutable manifest.
+  const suppliedText = (input.attachments ?? []).flatMap((file) => file.extractedText === undefined
+    ? [] : [[file.relativePath, file.extractedText] as const]).sort(([left], [right]) => left.localeCompare(right));
+  const identity: ClinicalChangeReceiptIdentity = {
+    connectionId: input.connectionId,
+    runId: input.batch?.runId ?? input.retrievalJobId,
+    unit: { kind: "retrieval", batch: input.batch?.index ?? 0, ...(input.generation === undefined ? {} : { generation: input.generation }) },
+    inputDigest: createHash("sha256").update(JSON.stringify([manifestSha256, suppliedText])).digest("hex"),
+  };
   let retainedLabCount = 0;
-  const canonical = executableDecisions.length === 0
-    ? {
-        applied: false,
-        createdCount: 0,
-        retractedCount: 0,
-        skippedExistingCount: 0,
-        supersededCount: 0,
-      }
-    : await withCanonicalWriteLock(input.vaultRoot, async () => {
-        const retained = await retainUnchangedClinicalParserHolds({
-          vaultRoot: input.vaultRoot, decisions: executableDecisions, manifest: prepared.manifest,
-          pages: new Map(prepared.pages.map((page) => [page.rawPath, page.content])),
-        });
-        reviewDecisionCount += retained.retainedCount;
-        retainedLabCount = retained.retainedLabCount;
-        return importClinicalEventDecisions({
-          decisions: retained.decisions, signal: input.signal, vaultRoot: input.vaultRoot,
-        });
+  const canonical = await withCanonicalWriteLock(input.vaultRoot, async () => {
+    try {
+      const saved = await readClinicalChangeReceipt(input.vaultRoot, identity);
+      const retained = await retainUnchangedClinicalParserHolds({
+        vaultRoot: input.vaultRoot, decisions: executableDecisions, manifest: prepared.manifest,
+        pages: new Map(prepared.pages.map((page) => [page.rawPath, page.content])),
       });
+      reviewDecisionCount += retained.retainedCount;
+      retainedLabCount = retained.retainedLabCount;
+      if (saved) return replayClinicalSnapshot(input, retained.decisions, saved);
+      return await importEventBatch({ apply: true, receiptIdentity: identity, decisions: retained.decisions,
+        signal: input.signal, vaultRoot: input.vaultRoot });
+    } catch (error) {
+      rethrowClinicalFhirImportError(error);
+    }
+  });
 
   return {
+    receipt: canonical.receipt,
     canonical: {
       applied: canonical.applied,
       createdCount: canonical.createdCount,
@@ -570,10 +581,21 @@ export async function importClinicalFhirSnapshot(
     labResultCount: plan.decisions.filter((decision) => decision.action === "upsert" && decision.payload.kind === "test" && decision.payload.testCategory === "laboratory").length - retainedLabCount,
     incompleteRevisionCount: plan.decisions.filter((decision) => decision.action === "review" && decision.disposition === "incomplete").length,
     manifestPath: prepared.manifestPath,
-    manifestSha256: createHash("sha256").update(`${JSON.stringify(prepared.manifest, null, 2)}\n`, "utf8").digest("hex"),
+    manifestSha256,
     rawFileCount,
     reviewDecisionCount,
   };
+}
+
+async function replayClinicalSnapshot(input: ClinicalFhirSnapshotImportInput, decisions: EventImportDecision[], receipt: ClinicalChangeReceipt) {
+  // Legacy counts include the saved child facets covered by a parent withdrawal.
+  // Ask Core to expand those withdrawals without republishing the completed import.
+  const withdrawals = decisions.filter((decision) => decision.action === "retract" && decision.retractFacetPrefixes);
+  const preview = withdrawals.length ? await importEventBatch({
+    vaultRoot: input.vaultRoot, decisions: withdrawals, apply: false, signal: input.signal,
+  }) : null;
+  return { receipt, applied: false, createdCount: 0, retractedCount: 0, supersededCount: 0,
+    skippedExistingCount: decisions.length - withdrawals.length + (preview?.skippedExistingCount ?? 0) };
 }
 
 function resolveClinicalFhirRetrievalCheckpointPath(input: {
@@ -656,23 +678,6 @@ function isMissingFileError(error: unknown): boolean {
   return error instanceof Error
     && "code" in error
     && error.code === "ENOENT";
-}
-
-async function importClinicalEventDecisions(input: {
-  decisions: EventImportDecision[];
-  signal?: AbortSignal | null;
-  vaultRoot: string;
-}) {
-  try {
-    return await importEventBatch({
-      apply: true,
-      decisions: input.decisions,
-      signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    });
-  } catch (error) {
-    rethrowClinicalFhirImportError(error);
-  }
 }
 
 function rethrowClinicalFhirImportError(error: unknown): never {

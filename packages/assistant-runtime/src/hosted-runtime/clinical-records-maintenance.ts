@@ -49,7 +49,7 @@ type ClinicalRecordsVaultModule = {
   }): Promise<void>;
   importClinicalFhirSnapshot(
     input: ClinicalFhirSnapshotImportInput,
-  ): Promise<ClinicalFhirSnapshotImportResult>;
+  ): Promise<Omit<ClinicalFhirSnapshotImportResult, "receipt">>;
   readClinicalFhirRetrievalCheckpoint(input: {
     identity: ClinicalFhirRetrievalCheckpointIdentity;
     vaultRoot: string;
@@ -218,6 +218,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       },
       completedRetrievalSlices: [],
       connectionId: checkpointIdentity.connectionId,
+      generation: checkpointIdentity.generation,
       fetchedAt: checkpointIdentity.fetchedAt,
       fhirBaseUrlHash: checkpointIdentity.fhirBaseUrlHash,
       grantedScopes: checkpointIdentity.grantedScopes,

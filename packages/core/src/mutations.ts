@@ -77,6 +77,7 @@ import {
   type InboxDocumentDefaultPromotionCorrelation,
 } from "./domains/documents/source-evidence.ts";
 import { VaultError } from "./errors.ts";
+import { readClinicalChangeReceipt, stageClinicalChangeReceipt, type ClinicalChangeReceipt, type ClinicalChangeReceiptIdentity, type ClinicalRecordChange } from "./clinical-change-receipts.ts";
 import {
   listEventLedgerShardPaths,
   listEventLedgerShardPathsInterruptible,
@@ -1343,10 +1344,11 @@ async function readExistingRecordIds(
   return ids;
 }
 
-async function buildJsonlAppendPlan<RecordType extends { id: string }>(
+async function buildJsonlAppendPlan<Entry extends PreparedJsonlEntry<{ id: string }>>(
   vaultRoot: string,
-  entries: readonly PreparedJsonlEntry<RecordType>[],
+  entries: readonly Entry[],
   options: {
+    onAppend?: (entry: Entry) => void;
     dedupeWithinPlan?: boolean;
     forceAppendIds?: ReadonlySet<string>;
     signal?: AbortSignal | null;
@@ -1375,6 +1377,7 @@ async function buildJsonlAppendPlan<RecordType extends { id: string }>(
       existingIds.add(entry.record.id);
     }
 
+    options.onAppend?.(entry);
     appendedRecordIds.push(entry.record.id);
     const existingPayload = payloads.get(entry.relativePath) ?? "";
     payloads.set(entry.relativePath, `${existingPayload}${JSON.stringify(entry.record)}\n`);
@@ -2200,8 +2203,14 @@ type PreparedEventImportDecision =
 
 const EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE = "event_import_retraction_marker";
 
+// Only entries implementing an import decision have a predecessor (null for a creation).
+// Auxiliary tombstones still append through the same plan.
+interface EventImportAppendEntry extends PreparedJsonlEntry<EventRecord> {
+  previous?: EventRecord | null;
+}
+
 interface EventImportReconciliation {
-  appendEntries: PreparedJsonlEntry<EventRecord>[];
+  appendEntries: EventImportAppendEntry[];
   forceAppendIds: ReadonlySet<string>;
   createdCount: number;
   skippedExistingCount: number;
@@ -5432,6 +5441,10 @@ async function reconcileDeviceEventEntriesByExternalRef(
   };
 }
 
+function isClinicalBookkeepingNote(record: EventRecord): boolean {
+  return record.kind === "note" && (record.noteType === "clinical-document-receipt" || record.noteType === EVENT_IMPORT_RETRACTION_MARKER_NOTE_TYPE);
+}
+
 function isClinicalDocumentReceiptTransition(receipt: EventRecord, materialized: EventRecord): boolean {
   return !isDeletedEventSpineRecord(receipt) && !isDeletedEventSpineRecord(materialized)
     && receipt.kind === "note" && receipt.noteType === "clinical-document-receipt"
@@ -5595,7 +5608,7 @@ async function reconcileEventImportDecisionsByExternalRef(
     }
   }
 
-  const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
+  const appendEntries: EventImportAppendEntry[] = [];
   const forceAppendIds = new Set<string>();
   const eventIds: string[] = [];
   const retractedEventIds: string[] = [];
@@ -5675,7 +5688,7 @@ async function reconcileEventImportDecisionsByExternalRef(
       forceAppendIds.add(latest.id);
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(tombstone, decision.externalRef, latestPath));
       index.maxRevisionById.set(latest.id, revision);
-      appendEntries.push({ relativePath: latestPath, record: tombstone });
+      appendEntries.push({ relativePath: latestPath, record: tombstone, previous: latest });
       retractedEventIds.push(latest.id);
       retractedCount += 1;
       continue;
@@ -5686,7 +5699,7 @@ async function reconcileEventImportDecisionsByExternalRef(
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
-      appendEntries.push(entry);
+      appendEntries.push({ ...entry, previous: null });
       eventIds.push(entry.record.id);
       createdCount += 1;
       continue;
@@ -5698,7 +5711,7 @@ async function reconcileEventImportDecisionsByExternalRef(
 
     if (!latest) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
-      appendEntries.push(entry);
+      appendEntries.push({ ...entry, previous: null });
       eventIds.push(entry.record.id);
       createdCount += 1;
       continue;
@@ -5746,7 +5759,7 @@ async function reconcileEventImportDecisionsByExternalRef(
 
     if (isDeletedEventSpineRecord(latest)) {
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
-      appendEntries.push(entry);
+      appendEntries.push({ ...entry, previous: null });
       eventIds.push(entry.record.id);
       createdCount += 1;
       continue;
@@ -5769,7 +5782,7 @@ async function reconcileEventImportDecisionsByExternalRef(
       forceAppendIds.add(latest.id);
       index.maxRevisionById.set(latest.id, revision);
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef, entry.relativePath));
-      appendEntries.push({ relativePath: latestPath, record: tombstone }, entry);
+      appendEntries.push({ relativePath: latestPath, record: tombstone }, { ...entry, previous: latest });
       eventShardPaths.add(latestPath);
       eventIds.push(entry.record.id);
       createdCount += 1;
@@ -5790,7 +5803,7 @@ async function reconcileEventImportDecisionsByExternalRef(
     forceAppendIds.add(latest.id);
     index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef, entry.relativePath));
     index.maxRevisionById.set(latest.id, revision);
-    appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    appendEntries.push({ relativePath: entry.relativePath, record: superseding, previous: latest });
     eventIds.push(superseding.id);
     supersededCount += 1;
   }
@@ -8291,6 +8304,7 @@ export interface ImportEventPayloadBatchInput {
 }
 
 export interface ImportEventDecisionBatchInput {
+  receiptIdentity?: ClinicalChangeReceiptIdentity;
   vaultRoot: string;
   decisions: readonly LooseRecord[];
   payloads?: never;
@@ -8307,6 +8321,7 @@ type ImportEventBatchFailure = {
 };
 
 export interface ImportEventBatchResult {
+  receipt?: ClinicalChangeReceipt;
   applied: boolean;
   receivedCount: number;
   createdCount: number;
@@ -8396,6 +8411,11 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       "EVENT_BATCH_INVALID",
       "Event batch source raw reference must not be empty.",
     );
+  }
+  const receiptIdentity = usesDecisions ? input.receiptIdentity : undefined;
+  if (usesDecisions && receiptIdentity) {
+    const completed = await replayOrCompleteEmptyClinicalImport(input, receiptIdentity);
+    if (completed) return completed;
   }
   const normalizedRows = usesDecisions
     ? normalizeImportEventBatchDecisions(input.decisions, signal)
@@ -8519,13 +8539,52 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     sourceCompletionTargetId = sourceState.completionTargetId;
   }
 
+  return publishEventImportBatch({ vaultRoot, decisions, signal, receiptIdentity, sourceCompletionTargetId, apply });
+}
+
+async function replayOrCompleteEmptyClinicalImport(input: ImportEventDecisionBatchInput, identity: ClinicalChangeReceiptIdentity) {
+  if (!input.apply || !Array.isArray(input.decisions)) {
+    throw new VaultError("EVENT_BATCH_INVALID", "A change receipt requires an applied decision batch.");
+  }
+  const saved = await readClinicalChangeReceipt(input.vaultRoot, identity);
+  const receivedCount = input.decisions.length;
+  if (!saved && receivedCount > 0) return null;
+  if (!saved) await loadVault({ vaultRoot: input.vaultRoot });
+  const receipt = saved ?? await runCanonicalWrite({
+    vaultRoot: input.vaultRoot, operationType: "event_batch_import", summary: "Complete empty clinical import",
+    mutate: ({ batch }) => stageClinicalChangeReceipt(batch, identity, []),
+  });
+  return { receipt, applied: false, receivedCount, createdCount: 0, supersededCount: 0, retractedCount: 0,
+    skippedExistingCount: receivedCount, eventIds: [], retractedEventIds: [], eventShardPaths: [], auditPath: null };
+}
+
+function clinicalChangeForAppend({ record, previous }: EventImportAppendEntry): ClinicalRecordChange | null {
+  if (previous === undefined) return null;
+  const savedBefore = previous && !isDeletedEventSpineRecord(previous) && !isClinicalBookkeepingNote(previous);
+  const savedAfter = !isDeletedEventSpineRecord(record) && !isClinicalBookkeepingNote(record);
+  if (!savedAfter && !savedBefore) return null;
+  if (savedBefore && savedAfter && eventImportSourceSemanticContentKey(previous) === eventImportSourceSemanticContentKey(record)) return null;
+  if (!record.externalRef) throw new VaultError("EVENT_BATCH_INVALID", "Clinical changes require source provenance.");
+  const action = savedAfter ? (savedBefore ? "superseded" : "created") : "retracted";
+  return { action, eventId: record.id, revision: eventSpineRevision(record), externalRef: record.externalRef };
+}
+
+async function publishEventImportBatch({ vaultRoot, decisions, signal, receiptIdentity, sourceCompletionTargetId, apply }: {
+  vaultRoot: string;
+  decisions: PreparedEventImportDecision[];
+  signal?: AbortSignal | null;
+  receiptIdentity?: ClinicalChangeReceiptIdentity;
+  sourceCompletionTargetId: string | null;
+  apply: boolean;
+}): Promise<ImportEventBatchResult> {
   signal?.throwIfAborted();
-  const reconciliation = await reconcileEventImportDecisionsByExternalRef(
-    vaultRoot,
-    decisions,
-    signal,
-  );
+  const changes: ClinicalRecordChange[] = [];
+  const reconciliation = await reconcileEventImportDecisionsByExternalRef(vaultRoot, decisions, signal);
   const appendPlan = await buildJsonlAppendPlan(vaultRoot, reconciliation.appendEntries, {
+    onAppend: receiptIdentity && ((entry) => {
+      const change = clinicalChangeForAppend(entry);
+      if (change) changes.push(change);
+    }),
     dedupeWithinPlan: true,
     forceAppendIds: reconciliation.forceAppendIds,
     signal,
@@ -8536,7 +8595,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
   // evaluated.
   const appendedCount = appendPlan.appendedRecordIds.length;
   const counts = {
-    receivedCount: normalizedRows.length,
+    receivedCount: decisions.length,
     createdCount: reconciliation.createdCount,
     skippedExistingCount: reconciliation.skippedExistingCount,
     supersededCount: reconciliation.supersededCount,
@@ -8545,7 +8604,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     retractedEventIds: reconciliation.retractedEventIds,
   };
 
-  if (!apply || appendedCount === 0) {
+  if (!apply || (appendedCount === 0 && !receiptIdentity)) {
     return {
       applied: false,
       ...counts,
@@ -8562,10 +8621,12 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
   return runCanonicalWrite({
     vaultRoot,
     operationType: "event_batch_import",
-    summary: `Import event batch with ${normalizedRows.length} decision(s)`,
+    summary: `Import event batch with ${decisions.length} decision(s)`,
     occurredAt,
     mutate: async ({ batch }) => {
       await stageJsonlAppendPlan(batch, appendPlan);
+      const receipt = receiptIdentity ? await stageClinicalChangeReceipt(batch, receiptIdentity, changes) : undefined;
+      if (appendedCount === 0) return { receipt, ...counts, applied: false, eventShardPaths: reconciliation.eventShardPaths, auditPath: null };
       const audit = await emitAuditRecord({
         vaultRoot,
         batch,
@@ -8586,6 +8647,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       });
 
       return {
+        ...(receipt ? { receipt } : {}),
         applied: true,
         ...counts,
         eventShardPaths: reconciliation.eventShardPaths,

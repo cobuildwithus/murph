@@ -26,6 +26,7 @@ import {
   type ClinicalFhirSnapshotImportInput,
   writeClinicalFhirRetrievalCheckpoint,
 } from "@murphai/vault-usecases/clinical-records";
+import { applyClinicalEnrichmentProposals, enqueueClinicalEnrichment, persistClinicalEnrichmentProposals, readNextClinicalEnrichment } from "@murphai/vault-usecases/clinical-enrichment";
 import { listMetricPoints, rebuildQueryProjection, summarizeWearableBodyStateRuntime, summarizeWearableRecoveryRuntime } from "@murphai/query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as clinicalStorage from "../src/clinical-document-storage.ts";
@@ -170,6 +171,42 @@ describe("importClinicalFhirSnapshot", () => {
     const note = await findEventByExternalRef({ vaultRoot: input.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "document-reference", resourceId: resource.id });
     expect(JSON.stringify(note)).toContain("Historical discharge summary");
     expect((await importClinicalFhirSnapshot(input)).canonical.skippedExistingCount).toBe(1);
+  });
+
+  it("records an attachment and a structured resource at page one under the same job", async () => {
+    const content = Buffer.from("Synthetic retained attachment.");
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    const relativePath = `attachments/${sha256}.bin`;
+    const parent = { resourceType: "DocumentReference", id: "fixture-doc", status: "current",
+      subject: { reference: `Patient/${PATIENT_ID}` }, content: [{ attachment: { contentType: "text/plain", url: "Binary/fixture" } }] };
+    const page = fhirBundle([parent]);
+    const input = await createSnapshotInput({ resourceTypes: ["DocumentReference", "Observation"], pages: [
+      { resourceType: "DocumentReference", content: page },
+      { resourceType: "Observation", content: fhirBundle([{ ...heartRateObservation("fixture-narrative"),
+        code: { text: "Synthetic narrative" }, valueQuantity: undefined, valueString: "Synthetic finding." }]) },
+    ] });
+    input.attachments = [{ relativePath, contentBase64: content.toString("base64") }];
+    input.documentAttachments = [{ parentPageSha256: createHash("sha256").update(page).digest("hex"),
+      resourceType: "DocumentReference", resourceId: parent.id, attachmentIndex: 0, status: "downloaded",
+      relativePath, sha256, mediaType: "text/plain", byteLength: content.length }];
+    const result = await importClinicalFhirSnapshot(input);
+    const { jobId } = await enqueueClinicalEnrichment({ vaultRoot: input.vaultRoot, manifestPath: result.manifestPath,
+      manifestSha256: result.manifestSha256, structuredSources: result.structuredEnrichmentSources });
+    const job = { vaultRoot: input.vaultRoot, jobId };
+    const units = [];
+    for (const kind of ["attachment", "structured"]) {
+      const work = await readNextClinicalEnrichment(job);
+      if (work?.status !== "extract") throw new Error("Expected a frozen source assignment.");
+      expect(Boolean(work.source.resource)).toBe(kind === "structured");
+      const empty = { status: "complete" as const, records: [] };
+      await persistClinicalEnrichmentProposals({ ...job, sourceSha256: work.source.sha256, page: 1, totalPages: 1,
+        outputs: { labs: empty, measurements: empty, history: empty } });
+      const applied = await applyClinicalEnrichmentProposals(job);
+      expect(applied.receipt.changes).toEqual([]);
+      expect(applied.receipt.identity.runId).toBe(result.receipt.identity.runId);
+      units.push(applied.receipt.identity.unit);
+    }
+    expect(units[0]).not.toEqual(units[1]);
   });
 
   it("replays original provider input without restoring reviewed omitted image bytes", async () => {
@@ -433,6 +470,7 @@ describe("importClinicalFhirSnapshot", () => {
       rawFileCount: 2,
       reviewDecisionCount: 0,
     }));
+    expect(replay.receipt).toEqual(first.receipt);
     expect(replay.canonical).toEqual(expect.objectContaining({
       applied: false,
       createdCount: 0,
@@ -1082,6 +1120,8 @@ describe("importClinicalFhirSnapshot", () => {
       skippedExistingCount: 0,
       supersededCount: 0,
     });
+    expect(result.receipt.changes).toEqual([]);
+    expect((await importClinicalFhirSnapshot(input)).receipt).toEqual(result.receipt);
     expect(result.executableDecisionCount).toBe(0);
     expect(result.reviewDecisionCount).toBe(1);
   });
