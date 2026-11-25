@@ -1,3 +1,8 @@
+import { signerPem } from "./clinical-records-synthetic-signer";
+
+vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
 import { createHash } from "node:crypto";
 
@@ -421,6 +426,51 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
+  it("requests offline access with the sandbox signer and authenticates its stored session after rollback", async () => {
+    provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "signed");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID", "signed");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
+    const harness = createHarness(null, { clientId: "signed" });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) });
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ requestOfflineAccess: true }));
+    expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data.clientId).toBe("signed");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "legacy");
+    await finishAuthorization();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+      auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),
+    }));
+  });
+
+  it("services the stored public session after switching the active client", async () => {
+    vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "old-public");
+    vi.stubEnv("EPIC_SMART_ASYMMETRIC_CLIENT_ID", "new-signed");
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "new-signed");
+    const harness = createHarness(null, { clientId: "old-public" });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await finishAuthorization();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+      auth: { method: "public", clientId: "old-public" },
+    }));
+  });
+
+  it.each(["distinct-basic", "new-signed"])("refuses an unprovisioned production signer or colliding Basic ID", async basicId => {
+    vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "old-public");
+    vi.stubEnv("EPIC_SMART_ASYMMETRIC_CLIENT_ID", "new-signed");
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "new-signed");
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [PROVIDER_ID]: { clientId: basicId, clientSecret: "secret" } }));
+    const harness = createHarness(null, { clientId: "new-signed" });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) })).rejects.toThrow();
+    await expect(finishAuthorization()).rejects.toThrow();
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+  });
+
   it("asks for ongoing access whenever the provider has a confidential client, with no member option", async () => {
     vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [PROVIDER_ID]: { clientId: "persistent-client", clientSecret: "synthetic-secret" } }));
     const harness = createHarness(null);
@@ -463,7 +513,7 @@ describe("Clinical Records authorization persistence", () => {
     mocks.exchangeSmartAuthorizationCode.mockResolvedValue({ accessToken: "access", refreshToken: "refresh", expiresInSeconds: 300,
       grantedScopes: scopes, patientId: "patient-low-entropy" });
     await finishAuthorization();
-    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({ clientId: "persistent-client", clientSecret: "synthetic-secret" }));
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({ auth: { method: "basic", clientId: "persistent-client", clientSecret: "synthetic-secret" } }));
     expect(harness.connectionCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ refreshTokenEncrypted: "sealed-refreshToken", nextSyncAt: expect.any(Date) }) });
     const sealed = mocks.sealClinicalConnectionSecret.mock.calls.find(([input]) => input.field === "refreshToken")![0];
     expect(JSON.parse(sealed.value)).toMatchObject({ clientId: "persistent-client", refreshToken: "refresh", tokenEndpoint: "https://fhir.example.test/oauth2/token" });

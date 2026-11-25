@@ -11,7 +11,7 @@ import { CLINICAL_CODE_LIMIT } from "./return-query";
 import { hasImportCapacity, countedSourceFilter } from "./source-state";
 import { prepareClinicalPersistentAccess } from "./persistent-access";
 
-import { readEpicImportConfiguration, readEpicPersistentCredentials } from "./epic-import-config";
+import { resolveEpicClient } from "./epic-import-config";
 
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 
@@ -108,9 +108,8 @@ async function startAuthorization(input: {
     memberId: auth.member.id,
     providerDirectoryEntryId: provider.id,
   });
-  const configuration = readEpicImportConfiguration(provider);
-  const persistent = configuration.hospitalApprovedImports ? null : readEpicPersistentCredentials(provider.id);
-  const clientId = persistent?.clientId ?? configuration.clientId;
+  const configuration = resolveEpicClient(provider);
+  const { clientId } = configuration.auth;
   const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
     memberId: auth.member.id,
@@ -119,7 +118,7 @@ async function startAuthorization(input: {
 
   try {
     const smart = await discoverSmartConfiguration({
-      requestOfflineAccess: Boolean(persistent),
+      requestOfflineAccess: configuration.auth.method !== "public",
       fetchImpl: input.fetchImpl,
       fhirBaseUrl: provider.fhirBaseUrl,
       requestedBaseScopes: provider.requestedBaseScopes,
@@ -266,10 +265,7 @@ async function finishAuthorization(input: {
   if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) {
     throw providerConfigurationChangedError();
   }
-  const configuration = readEpicImportConfiguration(provider);
-  const persistent = configuration.hospitalApprovedImports ? null : readEpicPersistentCredentials(provider.id);
-  const clientSecret = persistent?.clientId === session.clientId ? persistent.clientSecret : undefined;
-  if (configuration.clientId !== session.clientId && !clientSecret) throw providerConfigurationChangedError();
+  const configuration = resolveEpicClient(provider, { clientId: session.clientId, grant: "callback" });
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
     encrypted: session.codeVerifierEncrypted,
@@ -277,8 +273,7 @@ async function finishAuthorization(input: {
     stateHash: session.stateHash,
   });
   const token = await exchangeSmartAuthorizationCode({
-    clientSecret,
-    clientId: session.clientId,
+    auth: configuration.auth,
     code: normalizeAuthorizationCode(input.code),
     fetchImpl: input.fetchImpl,
     redirectUri: session.redirectUri,
