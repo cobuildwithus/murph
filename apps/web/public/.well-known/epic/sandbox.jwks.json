@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-sandbox-sF88F1MiYZ5b",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "rpEPsaeU1HalWQhXOXvkWuGPd5NHc3LmE6gdCHwG-ebgl44RARMv6yHvwlzuH_XLH5a9hD6MBpKRajGKkY-J8vUUzm0-nWJf_rQN7Y0cBX_3-cafJQjMoXO3VoG--2K6Ggd_h_Koau0Qbpii4oG1SEB6XNV3h31Q73vfIhtBuw9YngGf3vAciSp0rb-xYkNjB9-Q7lORxgQE_9ZlGTL6SMRJ2csNb7IcO13Kgb394D-iIDeC2-huY4LoXWMHuRviiehkfcH0HM8MIgpVRVzKUDzM-oi_0y4GYBdMjJ39-tm9VHWayYp4rlN3BERFl47Dsca1A07_cAlBN-xqyswASw",
+      "e": "AQAB"
+    }
+  ]
+}

@@ -1,9 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { signerPem } from "./clinical-records-synthetic-signer";
+
+vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
 
 const mocks = vi.hoisted(() => ({
   prisma: vi.fn(), access: vi.fn(), consent: vi.fn(), suspension: vi.fn(),
   append: vi.fn(), signal: vi.fn(), open: vi.fn(), seal: vi.fn(),
+}));
+vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
+  resolveClinicalProviderDirectoryEntry: (id: string) => ({ id, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", resourceTypes: ["Patient", "Observation"] }),
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.access }));
@@ -45,6 +53,7 @@ function fixture() {
   return { row, connection, create };
 }
 
+afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.access.mockResolvedValue(true);
@@ -98,6 +107,34 @@ describe("daily clinical admission", () => {
 });
 
 describe("rotating clinical refresh lease", () => {
+  it("renews a stored signed grant after starts switch back to public", async () => {
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "legacy");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID", "client");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", "");
+    const f = fixture();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      access_token: "renewed", token_type: "Bearer", expires_in: 300,
+    }));
+    const input = { connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl };
+    await expect(renewClinicalAccess(input)).resolves.toBe("renewed");
+    expect(f.row.refreshTokenEncrypted).toContain("old-refresh");
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe("https://portal.example.test/token");
+    expect(new URLSearchParams(String(init?.body)).has("client_assertion")).toBe(true);
+  });
+
+  it("releases the lease without egress when the stored client is unknown", async () => {
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", "");
+    const f = fixture();
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl }))
+      .rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(f.row.refreshLeaseId).toBeNull();
+  });
+
   it("renews expired access once and seals the rotated grant", async () => {
     const f = fixture();
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600, token_type: "Bearer" }));

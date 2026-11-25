@@ -9,7 +9,8 @@ import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { clinicalRecordsError, isClinicalRecordsControlPlaneError } from "./errors";
-import { readEpicPersistentCredentials } from "./epic-import-config";
+import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
+import { resolveEpicClient } from "./epic-import-config";
 import { openClinicalConnectionSecret, sealClinicalConnectionSecret } from "./secrets";
 import { refreshSmartAccessToken, type SmartTokenResponse } from "./smart";
 
@@ -86,9 +87,11 @@ export async function renewClinicalAccess(input: {
     try {
       const value = await openClinicalConnectionSecret({ ...identity, field: "refreshToken", encrypted: current.refreshTokenEncrypted });
       const payload = refreshPayloadSchema.parse(JSON.parse(value ?? "null"));
-      const credentials = readEpicPersistentCredentials(current.providerDirectoryEntryId);
-      if (!credentials || credentials.clientId !== payload.clientId) throw new Error("Refresh client unavailable.");
-      const token = await refreshSmartAccessToken({ ...payload, clientSecret: credentials.clientSecret,
+      const provider = resolveClinicalProviderDirectoryEntry(current.providerDirectoryEntryId);
+      if (!provider) throw new Error("Refresh provider unavailable.");
+      const { auth } = resolveEpicClient(provider, { clientId: payload.clientId, grant: "refresh" });
+      if (auth.method === "public") throw new Error("Refresh client unavailable.");
+      const token = await refreshSmartAccessToken({ ...payload, auth,
         fetchImpl: (url, init) => {
           exchangeAttempted = true;
           return (input.fetchImpl ?? fetch)(url, init);
