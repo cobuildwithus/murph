@@ -29,6 +29,7 @@ import {
   type HostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { retireHostedCoveredDeviceHintsAfterImport } from "../src/hosted-runtime/system-mailbox.ts";
+import { admitHostedClinicalEnrichmentWake } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import {
   HOSTED_MAILBOX_IMPORT_STATE_RELATIVE_PATH,
   HOSTED_MAILBOX_IMPORT_STATE_SCHEMA,
@@ -689,6 +690,38 @@ describe("hosted runtime system mailbox state", () => {
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
+  });
+
+  it("does not let runtime-local clinical enrichment hold back the Web system lane", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-clinical-enrichment-lane-"));
+    try {
+      await admitHostedClinicalEnrichmentWake({
+        jobId: "a".repeat(64),
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        userId: "member_123",
+        vaultRoot,
+      });
+      const state = await readHostedSystemMailboxState(vaultRoot);
+      expect(state.pending).toHaveLength(1);
+      expect(resolveHostedSystemMailboxProgress({ importedSeq: "9", state })).toEqual({
+        deviceSyncContinuationSeqs: [],
+        firstPendingClassifierFailures: null,
+        firstPendingSeq: null,
+        handledThroughSeq: "9",
+      });
+      // Real Web work still holds the lane at its own seq.
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "9",
+        state: {
+          pending: [
+            ...state.pending,
+            buildPendingSystemMailboxItem({ itemId: "pending_5", mailboxLaneSeq: "5" }),
+          ],
+        },
+      })).toMatchObject({ firstPendingSeq: "5", handledThroughSeq: "4" });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
