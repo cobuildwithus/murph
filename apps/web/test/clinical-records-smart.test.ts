@@ -1,3 +1,8 @@
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
+import { createLocalJWKSet, jwtVerify } from "jose";
+import sandboxSet from "../public/.well-known/epic/sandbox.jwks.json";
+import productionSet from "../public/.well-known/epic/production.jwks.json";
+import { epicAssertionSigner } from "@/src/lib/clinical-records/epic-client-auth";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -75,7 +80,7 @@ describe("Clinical Records SMART negotiation", () => {
       "patient/DiagnosticReport.s",
     ];
     const token = await exchangeSmartAuthorizationCode({
-      clientId: "client-id",
+      auth: { method: "public" as const, clientId: "client-id" },
       code: "authorization-code",
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
         access_token: "access-token",
@@ -117,7 +122,7 @@ describe("Clinical Records SMART negotiation", () => {
     });
     expect(selection.scopes).toContain("patient/Binary.r");
     const token = await exchangeSmartAuthorizationCode({
-      clientId: "client-id", code: "authorization-code", verifier: "verifier",
+      auth: { method: "public" as const, clientId: "client-id" }, code: "authorization-code", verifier: "verifier",
       redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
       tokenEndpoint: "https://fhir.example.test/oauth2/token",
       requestedScopes: selection.scopes,
@@ -145,7 +150,7 @@ describe("Clinical Records SMART negotiation", () => {
       token_type: "Bearer",
     });
     const input = {
-      clientId: "client-id",
+      auth: { method: "public" as const, clientId: "client-id" },
       code: "authorization-code",
       redirectUri: "https://app.example.test/api/clinical-records/oauth/callback",
       requestedScopes: [...baseScopes, "patient/Patient.r", "patient/Observation.s"],
@@ -166,7 +171,7 @@ describe("Clinical Records SMART negotiation", () => {
 
   it("rejects a token grant without Patient plus one clinical family", async () => {
     await expect(exchangeSmartAuthorizationCode({
-      clientId: "client-id",
+      auth: { method: "public" as const, clientId: "client-id" },
       code: "authorization-code",
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
         access_token: "access-token",
@@ -259,7 +264,7 @@ describe("persistent SMART access", () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
       access_token: "new-access", refresh_token: "rotated-refresh", expires_in: 300, token_type: "Bearer",
     }));
-    const result = await refreshSmartAccessToken({ clientId: "client:one", clientSecret: "secret space", refreshToken: "old-refresh",
+    const result = await refreshSmartAccessToken({ auth: { method: "basic", clientId: "client:one", clientSecret: "secret space" }, refreshToken: "old-refresh",
       tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"], fetchImpl });
     expect(result).toMatchObject({ accessToken: "new-access", refreshToken: "rotated-refresh", grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"] });
     const init = fetchImpl.mock.calls[0]![1]!;
@@ -269,16 +274,103 @@ describe("persistent SMART access", () => {
   });
 
   it.each([400, 401, 429, 503])("classifies a refresh HTTP %s without exposing its body", async (status) => {
-    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+    await expect(refreshSmartAccessToken({ auth: { method: "basic", clientId: "client", clientSecret: "secret" }, refreshToken: "refresh",
       tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s"],
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response("private provider response", { status })) }))
       .rejects.toMatchObject({ retryable: status === 429 || status === 503 });
   });
 
   it("requires reconnecting when renewal narrows the patient grant", async () => {
-    await expect(refreshSmartAccessToken({ clientId: "client", clientSecret: "secret", refreshToken: "refresh",
+    await expect(refreshSmartAccessToken({ auth: { method: "basic", clientId: "client", clientSecret: "secret" }, refreshToken: "refresh",
       tokenEndpoint: "https://portal.example.test/token", grantedScopes: ["patient/Patient.r", "patient/Observation.s", "patient/DocumentReference.s"],
       fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ access_token: "new", expires_in: 300,
         token_type: "Bearer", scope: "patient/Patient.r patient/Observation.s" })) })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_GRANT_CHANGED" });
+  });
+});
+
+describe("Epic signed client authentication", () => {
+  it("signs a one-time PKCE exchange and each rolling refresh for the pinned endpoint", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const { n, e } = publicKey.export({ format: "jwk" });
+    const publicJwk = { kty: "RSA", alg: "RS384", use: "sig", kid: "synthetic-key", n: n!, e: e! };
+    const pem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+    expect(() => epicAssertionSigner("client", pem, [])).toThrow();
+    const otherKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey.export({ format: "jwk" });
+    const previous = { ...publicJwk, kid: "previous-key", n: otherKey.n!, e: otherKey.e! };
+    expect(() => epicAssertionSigner("client", pem, [previous])).toThrow();
+    const auth = epicAssertionSigner("client", pem, [previous, publicJwk]);
+    const tokenEndpoint = "https://portal.example.test/token";
+    const scopes = ["patient/Patient.r", "patient/Observation.s"];
+    const ids = new Set();
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      expect(String(url)).toBe(tokenEndpoint);
+      expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+      const fields = new URLSearchParams(String(init?.body));
+      expect(fields.get("client_assertion_type")).toBe("urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+      const assertion = fields.get("client_assertion")!;
+      const { payload, protectedHeader } = await jwtVerify(assertion, createLocalJWKSet({ keys: [previous, publicJwk] }), { audience: tokenEndpoint,
+        issuer: auth.clientId, subject: auth.clientId, algorithms: ["RS384"] });
+      expect(protectedHeader).toEqual({ alg: "RS384", typ: "JWT", kid: publicJwk.kid });
+      await expect(jwtVerify(assertion, publicKey, { audience: "https://other.example.test/token" })).rejects.toThrow();
+      await expect(jwtVerify(assertion, createLocalJWKSet({ keys: [{ ...publicJwk, kid: "wrong-key" }] })))
+        .rejects.toMatchObject({ code: "ERR_JWKS_NO_MATCHING_KEY" });
+      expect(payload.exp! - payload.iat!).toBe(120);
+      expect(payload.iat).toBe(payload.nbf);
+      expect(payload.jti).toMatch(/^[a-f0-9-]{36}$/u);
+      ids.add(payload.jti);
+      if (fields.get("grant_type") === "authorization_code") {
+        expect(fields.get("code_verifier")).toBe("verifier");
+        expect(fields.get("redirect_uri")).toBe("https://app.example.test/callback");
+      } else {
+        expect(fields.get("refresh_token")).toBe(`refresh-${ids.size - 1}`);
+      }
+      return jsonResponse({ access_token: "access", token_type: "Bearer", patient: "sample", expires_in: 300,
+        refresh_token: `refresh-${ids.size}` });
+    });
+    const common = { auth, tokenEndpoint, fetchImpl };
+    const oneTime = await exchangeSmartAuthorizationCode({ ...common, requestedScopes: scopes, code: "code",
+      verifier: "verifier", redirectUri: "https://app.example.test/callback" });
+    expect(oneTime.refreshToken).toBeUndefined();
+    let refreshToken = "refresh-1";
+    for (const successor of ["refresh-2", "refresh-3"]) {
+      const renewed = await refreshSmartAccessToken({ ...common, grantedScopes: [...scopes, "offline_access"], refreshToken });
+      expect(renewed.successorReturned).toBe(true);
+      expect(renewed.refreshToken).toBe(successor);
+      refreshToken = renewed.refreshToken;
+    }
+    expect(ids.size).toBe(3);
+  });
+
+  it("keeps the prior token but exposes an omitted successor", async () => {
+    const result = await refreshSmartAccessToken({
+      auth: { method: "basic", clientId: "client", clientSecret: "secret" },
+      grantedScopes: ["offline_access", "patient/Patient.r", "patient/Observation.s"],
+      refreshToken: "retained", tokenEndpoint: "https://portal.example.test/token",
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ access_token: "access", token_type: "Bearer", expires_in: 300 })),
+    });
+    expect(result).toMatchObject({ refreshToken: "retained", successorReturned: false });
+  });
+
+  it("publishes only distinct RSA verification keys across both environments", () => {
+    const kids = new Set<string>();
+    const moduli = new Set<string>();
+    expect(sandboxSet.keys.length).toBeGreaterThan(0);
+    for (const set of [sandboxSet, productionSet]) {
+      expect(Object.keys(set)).toEqual(["keys"]);
+      for (const key of set.keys) {
+        expect(Object.keys(key).sort()).toEqual(["alg", "e", "kid", "kty", "n", "use"]);
+        expect(key).toMatchObject({ kty: "RSA", alg: "RS384", use: "sig" });
+        expect(key.kid.trim()).not.toBe("");
+        const imported = createPublicKey({ key, format: "jwk" });
+        const canonical = imported.export({ format: "jwk" });
+        expect(imported.asymmetricKeyDetails!.modulusLength).toBeGreaterThanOrEqual(2048);
+        expect(canonical.n).toBe(key.n);
+        expect(canonical.e).toBe(key.e);
+        expect(kids.has(key.kid)).toBe(false);
+        expect(moduli.has(key.n)).toBe(false);
+        kids.add(key.kid);
+        moduli.add(key.n);
+      }
+    }
   });
 });

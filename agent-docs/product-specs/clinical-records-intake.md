@@ -14,7 +14,7 @@ The default Epic policy uses 25 queries (one Patient read and 24 searches) acros
 labs, reports, medications, allergies and other chart records. Hospital-approved
 imports are behind a default-empty provider flag and use a separate Epic client.
 The broader catalog has 40 queries across 17 families. Supported facts
-become canonical records; other evidence remains raw. Each import is bounded. App connections are one-time imports. The browser can request daily checks with separate consent at a portal configured for persistent access.
+become canonical records; other evidence remains raw. Each import is bounded. App and browser connections request ongoing access wherever the registration and portal support it. The portal records the member’s chosen access period.
 
 This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
@@ -92,7 +92,7 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd }` |
 
-Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
+Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. Each app start gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 
 Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
 
@@ -521,6 +521,36 @@ The query fingerprint versions this correction; already-frozen runs retain their
 original request identity, and a fresh import uses the corrected category.
 See [Epic's CarePlan specification](https://fhir.epic.com/Specifications?api=1065).
 
+## Epic client authentication and sandbox proof
+
+The directory selects the registration environment. The existing automatic client ID selects new starts. For a public automatic registration, a configured per-organization Basic client still takes precedence. Selecting the asymmetric ID starts with that client. Hospital-approved starts keep their separate registration and acquisition policy. Callback authentication uses the OAuth session’s client ID. Renewal uses the encrypted grant’s client ID and token endpoint. Each profile selection requires exactly one matching registration. Signer failure stops the request before token egress.
+
+| Web configuration | Production | Sandbox |
+| --- | --- | --- |
+| Existing start selector | `EPIC_SMART_CLIENT_ID` | `EPIC_SMART_NON_PRODUCTION_CLIENT_ID` |
+| Public ID retained across a switch | `EPIC_SMART_PUBLIC_CLIENT_ID` | `EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID` |
+| Asymmetric registration ID | `EPIC_SMART_ASYMMETRIC_CLIENT_ID` | `EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID` |
+| **Secret**, RSA private key in PEM format | `EPIC_SMART_PRIVATE_KEY_PEM` | `EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM` |
+
+With no new settings, the existing automatic ID identifies the public registration. Pin its ID before adding the asymmetric ID. Web derives the signing kid from the one matching RSA public key in that environment’s committed set. Signing material belongs in hosted secrets. The local proof reads the sandbox PEM by path.
+
+**Register the sandbox-only draft.** Choose Patients, incoming OAuth 2.0, standalone SMART v1, FHIR R4 and S256 PKCE. Select USCDI v3 automatic distribution and the 44 APIs with `automaticDistribution: true` in `epic-registration.v1.json`. Check **Is Confidential Client**, **Requires Persistent Access**, **Uses Rolling Refresh Tokens** and **Can Have Indefinite Access**. Choose asymmetric JWT authentication with the app-level non-production JWK Set URL. Available durations depend on MyChart configuration. Register the non-production JWK Set URL at a stable anonymously accessible HTTPS staging origin under `/.well-known/epic/sandbox.jwks.json`. Register the exact sandbox redirect `https://127.0.0.1:8443/callback`. Save and mark Ready for Sandbox.
+
+On a Mac or Linux desktop with a browser and a locally trusted TLS certificate for IP address `127.0.0.1`, run from the hydrated checkout. Supply the draft non-production ID, the staging origin (without trailing slash), and absolute paths to the loopback certificate and its private key. These shell placeholders are local inputs. Keep both private keys outside Git.
+
+```sh
+pnpm -s --filter @murphai/hosted-web epic:sandbox:offline \
+  "$DRAFT_ID" ~/.config/murph/epic/sandbox-private.pem murph-sandbox-sF88F1MiYZ5b \
+  "$STAGING_ORIGIN/.well-known/epic/sandbox.jwks.json" \
+  https://127.0.0.1:8443/callback "$TLS_CERT" "$TLS_KEY"
+```
+
+Sign in as a sandbox patient and select ongoing access on the portal. The script checks published key material, discovers the pinned sandbox, verifies state and exchanges the S256 code once. Each of two successive refreshes must return a replacement token and authorize a read of the original Patient. Output contains step names and pass/fail. Production renewal retains the prior token if a successor is omitted.
+
+**Deployment and rotation.** Prove the sandbox first. The production set ships empty. For later activation publish distinct production keys, register the production callback and JWK Set URL, check anonymous HTTPS/CDN visibility, and provision the matching signer. Confirm per-organization distribution in Epic before switching the active ID. For rotation publish old and new kids together. Allow for the CDN and Epic’s default 29-hour cache, switch signers, drain old instances and keep both keys through the maximum assertion lifetime (five minutes) plus clock skew. Roll back by reverting new starts while retaining profile readers, matching signers and published keys for outstanding sessions and grants. Check revocation and overlapping-kid rotation separately with the owner.
+
+Epic documents `jku` as optional for registered JWK Set URLs. Web omits it and sends RS384, JWT type, and the published kid. Each request gets a fresh identifier, a two-minute assertion and the exact token endpoint as its audience. See the frontend confidential JWT exchange, JWT refresh, Creating a JWT and Key Rotation sections of the [Epic OAuth 2.0 Specification](https://fhir.epic.com/Documentation?docId=oauth2).
+
 ## Daily checks with persistent access
 
 The existing signed device-sync recovery sweep admits at most twenty due
@@ -609,8 +639,7 @@ current Web/Worker/runner versions, no old active runs, ordinary pagination,
 saved partial counts, and a same-patient repeat import. Keep signed runtime
 fencing throughout; no direct provider-access fallback.
 
-Register an incoming OAuth 2.0 app for Patients, R4, a non-confidential client
-and S256 PKCE. The default app must select **USCDI v3 automatic distribution**
+The existing public registration uses incoming OAuth 2.0 for Patients, R4 and S256 PKCE. The default app must select **USCDI v3 automatic distribution**
 and contain only the reviewed default registration set. The exact registration
 matrix, official-source cross-check, conservative exclusions, client-ID setup
 and feature flag are owned by
@@ -622,7 +651,7 @@ The default-empty `EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS` feature flag names
 only organizations that have provisioned the separate broad app. Listed
 organizations require the corresponding `EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID`
 or `EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID`, without fallback.
-An OAuth callback whose selected client changed since start fails closed.
+A change in the provider’s hospital-approved policy during authorization fences the callback. Switching the automatic start ID preserves callbacks for registered IDs.
 Disabling a provider blocks subsequent gated page and document egress, including
 old frozen plans, without deleting saved records or rewriting their identities.
 
@@ -630,7 +659,7 @@ Resource families without a canonical mapper remain patient-bound raw evidence
 with an explicit review decision. Binary and Media remain supporting reads,
 not primary searches. A partial grant without Binary access preserves primary
 records and reports linked bodies unavailable. Persistent access follows the
-separate opt-in contract below; hospital-approved broad imports remain one-time.
+portal grant described above; hospital-approved broad imports remain one-time.
 
 The following describes full-catalog capabilities; only variants classified as
 default in the registration matrix run without the hospital-approved flag.

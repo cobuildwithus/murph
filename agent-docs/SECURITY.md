@@ -957,6 +957,13 @@ Existing product admission, delivery and runtime safety rules still apply.
   provider egress.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - Native Clinical Records binds the member, native session and SMART state in the app completion proof. The callback reads only the stored return target. The stateless bridge forwards the validated state and bounded code or error. Both approval and denial verify the proof before consuming state. Native persistence rechecks the credential, session, product admission, consent and consumed authorization under the member lock. Search text stays in POST bodies.
+- Web authenticates each Epic token request with the registration bound to the
+  stored client ID and environment. A signed registration requires a matching
+  RSA private key in the Web secret store and public key in its environment’s
+  published set. It sends a fresh RS384 assertion scoped to the pinned token
+  endpoint. Unknown or ambiguous registrations and unavailable signers fail
+  closed. Keep sandbox and production material separate. Only public RSA
+  verification fields may be served at `/.well-known/epic/*.jwks.json`.
 - Hosted Clinical Records keeps Epic SMART client configuration, OAuth state,
   PKCE verifiers, encrypted patient binding/context and access tokens in `apps/web`.
   Patient/token/verifier/cursor ciphertext uses purpose-specific hosted crypto
