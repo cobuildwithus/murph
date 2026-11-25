@@ -420,7 +420,7 @@ test("diagnostic-test list and show read non-blood tests with one matched row pe
   await initializeVault({ vaultRoot, createdAt: "2026-02-01T12:00:00.000Z", timezone: "UTC" });
   const kit = (id: string, occurredAt: string, score: number) => ({
     source: "import", occurredAt, testName: "Synthetic gut kit", testCategory: "microbiome",
-    specimenType: "stool", resultStatus: "unknown",
+    specimenType: "stool",
     externalRef: { system: "synthetic-kit", resourceType: "diagnostic-test", resourceId: id, facet: "scores" },
     results: [
       { analyte: "Synthetic Fiber Pathways", slug: "synthetic-fiber-pathways", value: score, unit: "score", note: "Pathway" },

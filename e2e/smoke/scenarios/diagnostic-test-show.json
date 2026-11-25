@@ -1,0 +1,10 @@
+{
+  "id": "diagnostic-test-show",
+  "command": "vault-cli diagnostic-test show <id> --vault <path>",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/ledger/events/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents follow-up reads of one saved test of any kind by event id, title, test name, or lab panel id."
+}

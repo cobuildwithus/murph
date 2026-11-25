@@ -154,13 +154,6 @@ export function toBloodTestRecord(
   });
 }
 
-export function compareBloodTests(
-  left: BloodTestQueryRecord,
-  right: BloodTestQueryRecord,
-): number {
-  return compareByOccurredAtDescThenId(left, right);
-}
-
 function matchesTestOptions(
   record: TestQueryRecord<"blood_test" | "test">,
   options: BloodTestListOptions,

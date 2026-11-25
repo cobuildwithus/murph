@@ -1,0 +1,10 @@
+{
+  "id": "diagnostic-test-list",
+  "command": "vault-cli diagnostic-test list --vault <path> [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>] [--text <text>] [--limit <n>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/ledger/events/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/list",
+  "purpose": "Documents listing saved tests of every kind with date and text filters and a bounded matched result row."
+}

@@ -14,7 +14,7 @@ value belongs in a lab record, never only in memory or a note.
 | What the member sent | Command |
 | --- | --- |
 | Blood lab results and panels | `vault-cli blood-test` (`scaffold` shows the payload for `import-json`) |
-| Other tests, such as stool, microbiome, urine or saliva | `vault-cli diagnostic-test import-json` (`payload-schema` shows the payload) |
+| Other tests, such as stool, microbiome, urine or saliva | `vault-cli diagnostic-test import-json` with `testCategory` and `specimenType` (`payload-schema` shows the payload) |
 | Vitals and body values | `vault-cli measurement add` |
 | Visits, assessments, plans, diagnoses, procedures, orders, imaging reports, test summaries | `vault-cli encounter scaffold`, then `vault-cli encounter import-json` |
 | A medicine or supplement they take now | `vault-cli regimen save` with its kind, status and dates |
@@ -30,7 +30,7 @@ value belongs in a lab record, never only in memory or a note.
 Save each test score, organism and food as its own result row, named as the
 report names it so later tests line up. Split a report past 500 rows, or one
 with a food list, into tests that share `externalRef.resourceId` and differ by
-`facet`.
+`facet` and title.
 
 Leave out an unreported workout duration, symptom severity, or dose and unit
 (which go together). Ask for them only if the member wants them tracked.

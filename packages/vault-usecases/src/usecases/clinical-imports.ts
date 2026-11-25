@@ -581,7 +581,7 @@ function buildDiagnosticTestEventPayload(
     }),
     kind: 'test',
     testName: payload.testName,
-    resultStatus: payload.resultStatus,
+    resultStatus: payload.resultStatus ?? 'unknown',
     summary: payload.summary,
     testCategory: payload.testCategory,
     specimenType: payload.specimenType,
