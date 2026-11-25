@@ -15,7 +15,11 @@ vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.access }));
-vi.mock("@/src/lib/legal/consent", () => ({ readHostedConsentStatus: mocks.consent, assertHostedLaunchRequiredConsentGranted: vi.fn() }));
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/legal/consent")>(),
+  readHostedConsentStatus: mocks.consent,
+  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+}));
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: vi.fn(), readHostedMemberSuspensionAfterLockTx: mocks.suspension }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => Promise<unknown>) => fn() }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({ unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32) }) }));

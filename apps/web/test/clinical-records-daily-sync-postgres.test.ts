@@ -1,6 +1,6 @@
 import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
-import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { clinicalFhirRetrievalPlanSchema, hashClinicalFhirPatientId } from "@murphai/clinical-records";
+import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
@@ -17,6 +17,32 @@ import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/ho
 import { runWithFreshHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
+
+import { startNativeAuthorization, completeNativeAuthorization } from "@/src/lib/clinical-records/control-plane";
+import * as directory from "@/src/lib/clinical-records/provider-directory-store";
+import * as smart from "@/src/lib/clinical-records/smart";
+import * as notification from "@/src/lib/clinical-records/notification";
+import { setClinicalRecordMessageMode } from "@/src/lib/clinical-records/message-preference";
+import { setClinicalProcessorApproval } from "@/src/lib/clinical-records/processor-approvals";
+import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
+import { issueHostedAppSession } from "./support/hosted-auth-session";
+import { signerPem } from "./clinical-records-synthetic-signer";
+
+vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
+
+async function nativeAuth(memberId: string) {
+  vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 11).toString("base64url"));
+  vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 12).toString("base64url"));
+  vi.stubEnv("HOSTED_APP_SESSION_HMAC_KEY", Buffer.alloc(32, 13).toString("base64url"));
+  vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://app.example.test");
+  const session = await issueHostedAppSession({ memberId });
+  return requireHostedMemberAuthFromBearerToken(new Request("https://app.example.test", {
+    headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(session.token)}` },
+  }));
+}
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -39,6 +65,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   beforeAll(() => { restoreCrypto = configureLocalCryptoForTest(); client = getPrisma(); });
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     await client.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
   afterAll(async () => { await client.$disconnect(); restoreCrypto(); });
@@ -75,9 +102,9 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   }
 
   async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", {
-    replacement = true, readers = currentReaders, reconnect = false, verified = true, group = false,
+    replacement = true, readers = currentReaders, verified = true, group = false,
     baselineStatus = "completed", scheduledSweep = false,
-  }: { replacement?: boolean; readers?: typeof currentReaders; reconnect?: boolean; verified?: boolean; group?: boolean;
+  }: { replacement?: boolean; readers?: typeof currentReaders; verified?: boolean; group?: boolean;
     baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean } = {}) {
     const f = await fixture({ openBaseline: true, replacement });
     const { memberId, connectionId } = f;
@@ -122,7 +149,6 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     expect(await f.mailbox()).toBe(0);
     expect((await f.row()).baselineTokenVersion).toBe(replacement && baselineStatus === "completed" ? 1 : null);
     const due = (await f.row()).nextSyncAt!;
-    if (reconnect) await client.clinicalRecordConnection.update({ where: { id: connectionId }, data: { tokenVersion: { increment: 1 } } });
     if (scheduledSweep) expect(await runClinicalDailySyncSweep({ now: due })).toMatchObject({ queued: 1 });
     else expect(await admitClinicalDailySync({ memberId, connectionId, now: due, noticeReaders: readers })).toBe(true);
     const [run] = await f.runs();
@@ -174,7 +200,6 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     ["old runner", { readers: { ...currentReaders, runner: 0 } }],
     ["old port", { readers: { ...currentReaders, cloudflarePort: 0 } }],
     ["legacy client", { replacement: false }],
-    ["new credential epoch", { reconnect: true }],
     ["failed baseline", { baselineStatus: "failed" }],
     ["partial baseline", { baselineStatus: "partial" }],
     ["unverified phone", { verified: false }],
@@ -189,6 +214,115 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       expect(await f.count()).toBe(0);
       expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
     } finally { await f.cleanup(); }
+  });
+
+  it.each([0, 1])("accepts an empty whole-history baseline only when the terminal page count validates (%i)", async fetchedPageCount => {
+    const f = await fixture({ openBaseline: true, replacement: true });
+    const run = await client.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { connectionId: f.connectionId } });
+    const plan = clinicalFhirRetrievalPlanSchema.parse(run.retrievalPlanJson);
+    expect(run).toMatchObject({ pageCount: 0, completedAt: null });
+    expect((await f.row()).baselineTokenVersion).toBeNull();
+    const outcome = recordClinicalRetrievalOutcome({ memberId: f.memberId, request: {
+      runId: run.id, generation: run.generation, status: "completed", retrievalProtocol: "query-slices-v2",
+      counts: { ...emptyCounts, fetchedPageCount }, retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+    } });
+    if (fetchedPageCount === 0) {
+      await outcome;
+      expect(await f.row()).toMatchObject({ tokenVersion: 1, baselineTokenVersion: 1 });
+    } else {
+      await expect(outcome).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH" });
+      expect((await f.row()).baselineTokenVersion).toBeNull();
+    }
+  });
+
+  it("requires a fresh baseline after a same-patient replacement SMART authorization", async () => {
+    const f = await notificationFixture();
+    try {
+      await f.terminal(true);
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "notice", threadId: f.threadId });
+      const auth = await nativeAuth(f.memberId);
+      const fhirBaseUrl = "https://portal.example.test/fhir";
+      const patientId = "synthetic-patient";
+      const { providerDirectoryEntryId, tokenVersion } = await f.row();
+      vi.spyOn(directory, "resolveClinicalProviderDirectoryEntry").mockReturnValue({
+        id: providerDirectoryEntryId, aliases: [], brandName: "Synthetic hospital", facilities: [], fhirBaseUrl,
+        clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", policyId: "synthetic-policy",
+        requestedBaseScopes: ["openid", "fhirUser", "launch/patient"], resourceTypes: ["Patient", "DocumentReference"], sourceSystem: "epic-fhir",
+      });
+      vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "synthetic-signed");
+      vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "synthetic-public");
+      vi.stubEnv("EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID", "synthetic-signed");
+      vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
+      const requestedScopes = ["patient/Patient.rs", "patient/DocumentReference.rs", "offline_access"];
+      vi.spyOn(smart, "discoverSmartConfiguration").mockResolvedValue({ authorizationEndpoint: fhirBaseUrl + "/authorize",
+        tokenEndpoint: fhirBaseUrl + "/token", requestedScopes, requestedResourceTypes: ["Patient", "DocumentReference"] });
+      vi.spyOn(smart, "exchangeSmartAuthorizationCode").mockResolvedValue({ patientId, grantedScopes: requestedScopes,
+        accessToken: "synthetic-access", refreshToken: "synthetic-refresh", expiresInSeconds: 3600 });
+      await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-test", userId: f.memberId });
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
+        fhirBaseHash: createHash("sha256").update(fhirBaseUrl).digest("hex"),
+        patientBindingEncrypted: await sealClinicalConnectionSecret({ memberId: f.memberId, connectionId: f.connectionId,
+          tokenVersion, field: "patientBinding", value: hashClinicalFhirPatientId(patientId) }),
+      } });
+      const start = await startNativeAuthorization({ auth, appReturn: "ios", origin: "https://app.example.test", providerDirectoryEntryId });
+      const state = new URL(start.authorizationUrl).searchParams.get("state")!;
+      expect(await completeNativeAuthorization(auth, new URLSearchParams({ state, code: "synthetic-code" }), start.completionProof)).toBe("connected");
+      const renewed = await f.row();
+      expect(renewed).toMatchObject({ tokenVersion: tokenVersion + 1, baselineTokenVersion: tokenVersion, requiresProcessorApprovals: true });
+      expect(renewed.refreshTokenEncrypted).toBeTruthy();
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      const baseline = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
+        where: { connectionId_generation: { connectionId: f.connectionId, generation: renewed.retrievalGeneration } },
+      });
+      const plan = clinicalFhirRetrievalPlanSchema.parse(baseline.retrievalPlanJson);
+      await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { runId: baseline.id, generation: baseline.generation,
+        status: "partial", retrievalProtocol: "query-slices-v2", counts: emptyCounts,
+        retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) } });
+      expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId, noticeReaders: currentReaders, now: (await f.row()).nextSyncAt! })).toBe(true);
+      expect(await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
+        where: { connectionId_generation: { connectionId: f.connectionId, generation: baseline.generation + 1 } },
+      })).toMatchObject({ notificationTokenVersion: null, retrievalProtocol: "query-slices-v2" });
+    } finally { await f.cleanup(); }
+  });
+
+  it.each(["setting", "approval"] as const)("serializes a %s change requested after the eligibility check and before insert", async kind => {
+    const f = await notificationFixture("detail");
+    let change: Promise<unknown> | undefined;
+    try {
+      await f.terminal();
+      const auth = await nativeAuth(f.memberId);
+      const freeze = notification.freezeClinicalDailyNotification;
+      vi.spyOn(notification, "freezeClinicalDailyNotification").mockImplementationOnce(async (...args) => {
+        const pin = await freeze(...args);
+        expect(pin?.notificationTokenVersion).toBe(1);
+        const processor = clinicalProcessors[0]!;
+        change = kind === "setting" ? setClinicalRecordMessageMode(auth, "off")
+          : setClinicalProcessorApproval(auth, processor, processor.version, false);
+        // The member lock must keep the concurrent policy writer behind the still-uninserted pin.
+        await vi.waitFor(async () => {
+          const [row] = await args[0].$queryRaw<{ waiting: boolean }[]>`
+            SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+              AND pg_backend_pid() = ANY(pg_blocking_pids(pid))) AS waiting`;
+          expect(row?.waiting).toBe(true);
+        }, { timeout: 1500, interval: 10 });
+        return pin;
+      });
+      expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId,
+        now: (await f.row()).nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+      await change;
+      const run = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
+        where: { connectionId_generation: { connectionId: f.connectionId, generation: f.pointer.generation + 1 } },
+      });
+      expect(run).toMatchObject({ notificationTokenVersion: 1, notificationSettingRevision: 0, retrievalProtocol: "query-slices-receipts-v3" });
+      const pointer = { memberId: f.memberId, runId: run.id, generation: run.generation };
+      expect(await client.$transaction(tx => readClinicalNotificationAuthority(tx, pointer))).toBeNull();
+      const plan = clinicalFhirRetrievalPlanSchema.parse(run.retrievalPlanJson);
+      await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { runId: run.id, generation: run.generation,
+        counts: emptyCounts, retrievalProtocol: "query-slices-receipts-v3", status: "completed", hasChangeReceipt: true,
+        retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) } });
+      expect(await readClinicalNotificationDecision(pointer)).toEqual({ mode: "off" });
+      expect(await f.count()).toBe(0);
+    } finally { await change; await f.cleanup(); }
   });
 
   it("recovers an incomplete baseline only after a full catch-up and never upgrades the catch-up run", async () => {

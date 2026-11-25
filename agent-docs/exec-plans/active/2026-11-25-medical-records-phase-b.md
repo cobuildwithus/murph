@@ -201,6 +201,15 @@ and the callback and sweep routes passed 24. The deterministic private
 staging suite passed its three cases. The live assistant selector has no
 registered daily notice, detail or off journey at this head.
 
+Follow-up verification accepts a zero-page whole-history baseline only after
+Web validates the terminal outcome against the frozen slices and its page count.
+A real replacement SMART callback increments the credential epoch. The next
+daily run stays silent until the new epoch has a baseline. If a member changes
+the setting or withdraws approval after eligibility is checked, PostgreSQL
+serializes the change behind the run insert. The decision reader then refuses
+the frozen pin. The mocked admission suite now preserves real consent exports
+and runs all 13 tests.
+
 **Second draft, delivery and production activation.** Complete the following
 in the same head before supplying reader evidence to the production writer.
 

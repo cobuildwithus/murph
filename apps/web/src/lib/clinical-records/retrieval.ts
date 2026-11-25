@@ -647,7 +647,8 @@ function connectionAfterClinicalOutcome(request: HostedClinicalRecordsRecordOutc
   connection: Pick<RunnableClinicalRun["connection"], "refreshTokenEncrypted" | "requiresProcessorApprovals" | "tokenVersion">,
   plan: ClinicalFhirRetrievalPlan, now: Date) {
   if (request.status === "failed") return { lastErrorCode: request.errorCode ?? "retrieval-failed", status: "error" };
-  // A daily window can complete without covering the historical baseline.
+  // The validated terminal outcome matches the frozen slices and Web's page count.
+  // An empty whole-history import qualifies, including when both page counts are zero.
   const acceptedBaseline = request.status === "completed" && connection.requiresProcessorApprovals && connection.refreshTokenEncrypted
     && plan.slices.every(slice => slice.coverage === "whole-family");
   return { lastErrorCode: request.errorCode ?? null, lastSyncCompletedAt: now, status: "active",
