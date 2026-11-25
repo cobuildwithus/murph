@@ -242,9 +242,9 @@ describe("Clinical Records authorization persistence", () => {
     "reuses a finalized %s source with a fresh credential epoch and run",
     async (status) => {
       const existing = existingConnection(status);
-      existing.retrievalRuns[0] = {
+      existing.retrievalRuns[0] = { ...existing.retrievalRuns[0]!,
         completedAt: new Date("2026-07-09T12:00:00Z"),
-        status: status === "needs_reauth" ? "needs_reauth" : "completed",
+        status: status === "needs_reauth" ? "needs_reauth" : "complete",
         outcomeCountsJson: {},
       };
       const harness = createHarness(existing);
@@ -792,39 +792,54 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
   });
 
-  it("rejects a second retrieval for the same member and provider", async () => {
-    const harness = createHarness(existingConnection());
-    mocks.getPrisma.mockReturnValue(harness.prisma);
-
-    await expect(finishAuthorization()).rejects.toMatchObject({
-      code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
-    });
-    expect(mocks.sealClinicalConnectionFhirBaseUrl).not.toHaveBeenCalled();
-    expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
-    expect(harness.connectionCreate).not.toHaveBeenCalled();
-    expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
-  });
-
-  it.each(["active", "disconnected", "needs_reauth"] as const)(
-    "keeps a %s legacy member-provider row ineligible before provider discovery",
-    async (status) => {
-      const harness = createHarness(existingConnection(status));
-      mocks.getPrisma.mockReturnValue(harness.prisma);
-
-      await expect(startClinicalRecordConnection({
-        claim: CONNECT_CLAIM,
-        providerDirectoryEntryId: PROVIDER_ID,
-        request: new Request(
-          "https://join.example.test/api/clinical-records/connect-intents/start",
-          { headers: { origin: "https://join.example.test" }, method: "POST" },
-        ),
-      })).rejects.toMatchObject({
-        code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS",
+  it.each(["busy", "quiet", "settling", "grace-elapsed"] as const)(
+    "applies start and callback eligibility for a %s prior run", async kind => {
+      const existing = existingConnection();
+      const previous = existing.retrievalRuns[0]!;
+      if (kind === "busy") previous.createdAt = new Date();
+      if (kind === "settling" || kind === "grace-elapsed") {
+        existing.status = "needs_reauth";
+        previous.status = "needs_reauth";
+        previous.completedAt = kind === "settling" ? new Date() : new Date(0);
+      }
+      const h = createHarness(existing);
+      mocks.getPrisma.mockReturnValue(h.prisma);
+      const start = () => startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+        request: new Request("https://join.example.test/api/clinical-records/connect-intents/start", { method: "POST" }) });
+      if (kind === "settling") {
+        await expect(start()).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS" });
+        await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS" });
+        expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+        expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
+        expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+        return;
+      }
+      await start();
+      expect(h.tx.clinicalRecordRetrievalRun.updateMany).not.toHaveBeenCalled();
+      expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+      h.tx.clinicalRecordRetrievalRun.updateMany.mockResolvedValue({ count: 1 });
+      await finishAuthorization();
+      if (!previous.completedAt) expect(h.tx.clinicalRecordRetrievalRun.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: previous.id, completedAt: null, generation: 1 }),
+        data: { status: "canceled", completedAt: expect.any(Date), lastErrorCode: "superseded" },
       });
-      expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
-      expect(mocks.sealClinicalConnectionSecret).not.toHaveBeenCalled();
-    },
-  );
+      expect(h.retrievalRunCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ generation: 2, connectionId: existing.id }) });
+    });
+
+  it("refuses replacement when the open run starts settling between callback preflight and persistence", async () => {
+    const open = existingConnection();
+    const settling = existingConnection("needs_reauth");
+    Object.assign(settling.retrievalRuns[0]!, { status: "needs_reauth", completedAt: new Date() });
+    const h = createHarness(open);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    h.connectionFindUnique.mockResolvedValueOnce(open).mockResolvedValueOnce(settling);
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS" });
+    expect(mocks.sealClinicalConnectionSecret).toHaveBeenCalled();
+    expect(h.tx.clinicalRecordRetrievalRun.updateMany).not.toHaveBeenCalled();
+    expect(h.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+  });
 
   it("maps the member-provider uniqueness race to the same bounded conflict", async () => {
     const harness = createHarness(null);
@@ -1311,7 +1326,7 @@ function existingConnection(status: "active" | "disconnected" | "needs_reauth" =
     patientBindingEncrypted: "sealed-patientBinding",
     fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
     disconnectedAt: null as Date | null,
-    retrievalRuns: [{ completedAt: null as Date | null, status: "retrieving", outcomeCountsJson: null as Record<string, unknown> | null }],
+    retrievalRuns: [{ id: "prior-run", generation: 1, createdAt: new Date(0), requests: [], completedAt: null as Date | null, status: "retrieving", outcomeCountsJson: null as Record<string, unknown> | null }],
   };
 }
 

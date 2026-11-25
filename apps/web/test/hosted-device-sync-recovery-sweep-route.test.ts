@@ -1,3 +1,4 @@
+import { abortAtHostedRecoveryDeadline } from "@/src/lib/hosted-orchestration/recovery-batch";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -136,11 +137,35 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("keeps clinical admission failures retryable with a 503", async () => {
-    mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 1, queued: 0, failed: 1 });
-    const response = await route.POST(new Request("https://example.test/recovery", { method: "POST", body: "{}" }));
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED" } });
+  it.each(["partial", "rejected", "deadline"])("returns the device sweep payload when the clinical sweep reports %s", async failure => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const request = () => new Request("https://example.test/recovery", { method: "POST", body: "{}" });
+      const devices = {
+        dueReconcileSweeper: { dueConnections: 7, wakeAccepted: 5 },
+        preferenceHandoffSweeper: { candidateUsers: 4, handoffAccepted: 3 },
+      };
+      mocks.runHostedDeviceSyncRecoverySweep.mockResolvedValueOnce(devices);
+      if (failure === "partial") {
+        mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 4, queued: 2, failed: 1 });
+      } else if (failure === "deadline") {
+        mocks.runClinicalDailySyncSweep.mockImplementation(({ deadlineMs }) => new Promise((_, reject) => {
+          abortAtHostedRecoveryDeadline(deadlineMs).addEventListener("abort", () => reject(new Error("synthetic timeout")));
+        }));
+      } else mocks.runClinicalDailySyncSweep.mockRejectedValue(new Error("synthetic failure"));
+      const pending = route.POST(request());
+      await vi.advanceTimersByTimeAsync(22_000);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(devices);
+      if (failure === "partial") {
+        expect(warn).toHaveBeenCalledExactlyOnceWith("CLINICAL_DAILY_ADMISSION_FAILED", { checked: 4, queued: 2, failed: 1 });
+      } else expect(warn).toHaveBeenCalledExactlyOnceWith("CLINICAL_DAILY_SWEEP_FAILED");
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("rejects signed callbacks with the wrong callback identity", async () => {

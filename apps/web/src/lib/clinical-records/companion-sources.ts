@@ -2,6 +2,7 @@ import "server-only";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { getPrisma } from "../prisma";
 import { classifyClinicalSource, hasImportCapacity } from "./source-state";
+import { lastRunActivity, lifecycleRunSelect } from "./run-lifecycle";
 import logos from "./provider-logos.json";
 
 export function clinicalLogoPath(id: string) {
@@ -18,10 +19,7 @@ export async function readCompanionSources(auth: HostedNativeMemberAuth) {
     select: {
       id: true, providerDirectoryEntryId: true, displayName: true, status: true,
       refreshTokenEncrypted: true, connectedAt: true, lastCheckedAt: true, lastErrorCode: true,
-      retrievalRuns: { orderBy: { generation: "desc" }, take: 1, select: {
-        status: true, createdAt: true, completedAt: true, outcomeCountsJson: true,
-        requests: { orderBy: { updatedAt: "desc" }, take: 1, select: { updatedAt: true } },
-      } },
+      retrievalRuns: { orderBy: { generation: "desc" }, take: 1, select: lifecycleRunSelect },
     },
   });
   const canAdd = hasImportCapacity(rows.filter(row => row.status !== "disconnected").length);
@@ -33,8 +31,8 @@ export async function readCompanionSources(auth: HostedNativeMemberAuth) {
       ...projection, id: row.id, providerId: row.providerDirectoryEntryId, name: row.displayName,
       logoPath: clinicalLogoPath(row.providerDirectoryEntryId),
       connectedAt: row.connectedAt.toISOString(), lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
-      lastActivityAt: projection.state === "getting_records" && run
-        ? (run.requests[0]?.updatedAt ?? run.createdAt).toISOString() : null,
+      lastActivityAt: projection.actions.includes("start_over") && run
+        ? lastRunActivity(run).toISOString() : null,
       updates: row.refreshTokenEncrypted ? "daily" as const : "one_time" as const,
     };
   });

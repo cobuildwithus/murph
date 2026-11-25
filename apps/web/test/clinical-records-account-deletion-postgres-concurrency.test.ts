@@ -233,10 +233,12 @@ import {
 import {
   readClinicalProviderDirectory,
 } from "@/src/lib/clinical-records/provider-directory-store";
+import * as clinicalSecrets from "@/src/lib/clinical-records/secrets";
 import {
   sealClinicalOauthVerifier,
 } from "@/src/lib/clinical-records/secrets";
 import { disconnectClinicalRecordConnection, listClinicalRecordConnectionsForMember } from "@/src/lib/clinical-records/connections";
+import { admitClinicalDailySync } from "@/src/lib/clinical-records/daily-sync";
 import { completeNativeAuthorization, startNativeAuthorization, startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
 import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
 import { prepareClinicalPersistentAccess } from "@/src/lib/clinical-records/persistent-access";
@@ -280,6 +282,8 @@ type CallbackProbe = {
     reached: Deferred<void>;
     release: Deferred<void>;
   } | null;
+  updatePause: CallbackProbe["createPause"];
+  persistenceTransaction: number;
   ingressRootReads: number;
   ingressRootReadsDuringPersistence: number;
   persistenceBackendPid: Deferred<number>;
@@ -354,6 +358,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   boundary.ingressDecryptBarrier?.release.resolve();
   boundary.ingressDecryptBarrier = null;
   boundary.callbackPrisma = null;
@@ -371,6 +376,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
   "Clinical Records callback/account-deletion PostgreSQL concurrency",
   () => {
     it.each([
+      { path: "page", failure: "unwrap" },
       { path: "page", failure: "revoked" },
       { path: "page", failure: "transport" },
       { path: "page", failure: "abandoned" },
@@ -423,14 +429,21 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const ticket = page.documents?.[0]?.ticket;
         if (path === "document" && !ticket) throw new Error("Expected an attested document ticket");
+        if (failure === "unwrap") {
+          const open = clinicalSecrets.openClinicalConnectionSecret;
+          vi.spyOn(clinicalSecrets, "openClinicalConnectionSecret").mockImplementation(async input => {
+            if (input.field === "refreshToken") throw new Error("synthetic unwrap unavailable");
+            return open(input);
+          });
+        }
         const result = path === "page"
           ? await fetchClinicalRetrievalPage({ memberId: fixture.memberId, request: { ...pageRequest, requestId: "refresh-proof-expired" }, fetchImpl })
           : await fetchClinicalRetrievalDocument({ memberId: fixture.memberId,
             request: { runId: initial.id, generation: initial.generation, ticket: ticket! }, fetchImpl });
-        expect(fetchImpl).toHaveBeenCalledTimes(failure === "abandoned" ? 0 : 1);
+        expect(fetchImpl).toHaveBeenCalledTimes(failure === "abandoned" || failure === "unwrap" ? 0 : 1);
         const ended = await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } });
         const endedConnection = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } });
-        if (failure === "throttled") {
+        if (failure === "throttled" || failure === "unwrap") {
           expect(result).toMatchObject({ status: "unavailable", errorCode: "provider-temporarily-unavailable", retryable: true });
           expect(ended.completedAt).toBeNull();
           expect(endedConnection).toMatchObject({ status: "active", refreshLeaseId: null, refreshTokenEncrypted: persistent.refreshTokenEncrypted });
@@ -451,7 +464,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
         await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
         expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "needs_reauth" });
-        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, request });
         const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
           fetchImpl: vi.fn().mockResolvedValue(Response.json({
             authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
@@ -462,7 +475,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const reconnected = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } });
         expect(reconnected).toMatchObject({ status: "active", retrievalGeneration: 2 });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
-          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
         expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } })).toEqual(reconnected);
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } }))
           .toMatchObject({ status: "needs_reauth", outcomeCountsJson: outcome.counts });
@@ -531,7 +544,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "disconnected" });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
           .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
-        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, request });
         const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
           fetchImpl: vi.fn().mockResolvedValue(Response.json({
             authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
@@ -545,11 +558,136 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(connection).toMatchObject({ retrievalGeneration: 2, status: "active" });
         expect(await readClinicalRetrievalRun(identity)).toMatchObject({ status: "unavailable", errorCode: "run-generation-stale" });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
-          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
         expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: initial.connectionId } })).toEqual(connection);
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } })).toEqual(canceled);
       } finally {
         vi.unstubAllEnvs();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it.each([
+      ["daily", "start-over"], ["start-over", "daily"], ["start-over", "start-over"],
+    ] as const)("serializes %s first against %s and fences each obsolete wake", async (firstKind, secondKind) => {
+      const fixture = await createClinicalFixture();
+      const { observer, memberId } = fixture;
+      const first = createCallbackProbe({ pauseAfterConnectionUpdate: true, persistenceTransaction: firstKind === "daily" ? 1 : 2 });
+      const second = createCallbackProbe({ persistenceTransaction: secondKind === "daily" ? 1 : 2 });
+      const pause = first.updatePause!;
+      const operations: Promise<unknown>[] = [];
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      try {
+        await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const initial = await observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId } });
+        const { connectionId } = initial;
+        const provider = readClinicalProviderDirectory().entries.find(entry => entry.id === fixture.providerDirectoryEntryId)!;
+        const now = new Date();
+        await observer.clinicalRecordConnection.update({ where: { id: connectionId }, data: {
+          refreshTokenEncrypted: "synthetic-renewable-grant", nextSyncAt: now,
+        } });
+        await observer.clinicalRecordRetrievalRun.update({ where: { id: initial.id }, data: { createdAt: new Date(+now - 86_400_000) } });
+        const start = await nativeAuthorizationStarter(observer);
+        const admit = () => admitClinicalDailySync({ memberId, connectionId, now });
+        const runFirst = firstKind === "daily" ? admit : await start(provider);
+        const runSecond = secondKind === "daily" ? admit : await start(provider);
+
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, first);
+        const winner = runFirst();
+        operations.push(winner);
+        await bounded(pause.reached.promise, BLOCKING_TIMEOUT_MS, "first generation update");
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.deletionBaseClient, second);
+        const contender = runSecond();
+        operations.push(contender);
+        await waitForBlockedBackend({ observer, blockerPid: await first.persistenceBackendPid.promise,
+          waiterPid: await bounded(second.persistenceBackendPid.promise, BLOCKING_TIMEOUT_MS, "competing admission") });
+        pause.release.resolve();
+        expect(await winner).toBe(firstKind === "daily" ? true : "connected");
+        expect(await contender).toBe(secondKind === "daily" ? false : firstKind === "daily" ? "connected" : "already_connected");
+        const runs = await observer.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, orderBy: { generation: "asc" } });
+        const generation = firstKind === "daily" ? 3 : 2;
+        expect(runs.map(run => [run.generation, run.status, run.completedAt])).toEqual([
+          [1, "canceled", expect.any(Date)],
+          ...(firstKind === "daily" ? [[2, "canceled", expect.any(Date)]] : []),
+          [generation, "queued", null],
+        ]);
+        expect(await observer.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.sync-requested" } })).toBe(generation);
+        const connected = await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connectionId } });
+        expect(connected).toMatchObject({ retrievalGeneration: generation, tokenVersion: 2, status: "active" });
+        for (const old of runs.slice(0, -1)) {
+          expect(await readClinicalRetrievalRun({ memberId, runId: old.id, generation: old.generation })).toEqual({
+            status: "unavailable", errorCode: "run-generation-stale", retryable: false,
+          });
+          await expect(recordClinicalRetrievalOutcome({ memberId, request: {
+            runId: old.id, generation: old.generation, retrievalProtocol: "query-slices-v2",
+            retrievalSlices: [{ queryScopeId: "obsolete", sliceId: "whole" }], status: "failed", errorCode: "snapshot_rejected",
+            counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
+              rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+          } })).rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
+        }
+        expect(await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connectionId } })).toEqual(connected);
+        expect(await observer.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, orderBy: { generation: "asc" } })).toEqual(runs);
+      } finally {
+        pause.release.resolve();
+        await settleOperations(operations);
+        vi.unstubAllGlobals();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it("preserves the open import and saved page when the provider denies a start-over", async () => {
+      const fixture = await createClinicalFixture();
+      const { observer, memberId } = fixture;
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      try {
+        await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const run = await observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId } });
+        const pointer = { memberId, runId: run.id, generation: run.generation };
+        const loaded = await readClinicalRetrievalRun(pointer);
+        if (loaded.status !== "ready") throw new Error("Expected an open import");
+        const slice = loaded.run.retrievalSlices.find(item => item.resourceType === "Patient")!;
+        expect(await fetchClinicalRetrievalPage({ memberId, request: {
+          ...pointer, queryScopeId: slice.queryScopeId, sliceId: slice.sliceId, queryFingerprint: slice.queryFingerprint,
+          resourceType: slice.resourceType, retrievalProtocol: "query-slices-v2", requestId: "saved-page", cursor: null,
+        }, fetchImpl: vi.fn().mockResolvedValue(Response.json({ resourceType: "Patient", id: boundary.token!.patientId })) })).toMatchObject({ status: "page" });
+        const snapshot = () => observer.clinicalRecordConnection.findUniqueOrThrow({
+          where: { id: run.connectionId }, include: { retrievalRuns: { include: { requests: true } } },
+        });
+        const before = await snapshot();
+        expect(before.retrievalRuns).toMatchObject([{ completedAt: null, pageCount: 1, requests: [{ completedAt: expect.any(Date) }] }]);
+        const start = await nativeAuthorizationStarter(observer);
+        const complete = await start(readClinicalProviderDirectory().entries.find(entry => entry.id === fixture.providerDirectoryEntryId)!);
+        expect(await complete({ error: "access_denied" })).toBe("canceled");
+        expect(await snapshot()).toEqual(before);
+        expect(externalEdges.exchangeSmartAuthorizationCode).toHaveBeenCalledTimes(1);
+        expect(await observer.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.sync-requested" } })).toBe(1);
+      } finally {
+        vi.unstubAllGlobals();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it("rolls back descriptor terminalization when the connection write misses after the run write", async () => {
+      const fixture = await createClinicalFixture();
+      const { observer, memberId } = fixture;
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      try {
+        await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const run = await observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId } });
+        // Isolate the second update's status predicate. The run is open and both epochs still match.
+        vi.spyOn(clinicalSecrets, "openClinicalConnectionSecret").mockImplementationOnce(async () => {
+          await observer.clinicalRecordConnection.update({ where: { id: run.connectionId }, data: { status: "disconnected" } });
+          return null;
+        });
+        await expect(readClinicalRetrievalRun({ memberId, runId: run.id, generation: run.generation }))
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
+        expect(await observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } })).toEqual(run);
+        expect(await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: run.connectionId } }))
+          .toMatchObject({ status: "disconnected", lastErrorCode: null });
+      } finally {
         await cleanupClinicalFixture(fixture);
       }
     }, TEST_TIMEOUT_MS);
@@ -568,27 +706,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         fhirBaseHash: "sample-hash", connectedAt: new Date(), requestedScopesJson: [],
       });
       try {
-        const session = boundary.authSession!;
-        const credential = "synthetic-capacity-credential";
-        const row = await observer.hostedAuthRecord.create({ data: session.authProof.row });
-        const auth = { kind: "better-auth" as const, credential, member: session.member, sessionId: session.sessionId,
-          proof: { ...session.authProof, row, credentialDigest: createHash("sha256").update(credential).digest() } };
+        const start = await nativeAuthorizationStarter(observer);
         await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
         await observer.clinicalRecordConnection.createMany({ data: Array.from({ length: 19 }, (_, i) => seedSource(i)) });
 
         const providers = readClinicalProviderDirectory().entries;
-        const start = async (provider: typeof providers[number]) => {
-          vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
-          vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
-            authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
-            code_challenge_methods_supported: ["S256"], capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
-          })));
-          const { authorizationUrl, completionProof } = await startNativeAuthorization({
-            auth, appReturn: "ios", origin: CALLBACK_ORIGIN, providerDirectoryEntryId: provider.id,
-          });
-          const state = new URL(authorizationUrl).searchParams.get("state")!;
-          return () => completeNativeAuthorization(auth, new URLSearchParams({ state, code: "sample-code" }), completionProof);
-        };
         const finishFirst = await start(providers[0]!);
         const finishSecond = await start(providers[1]!);
         boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, winner);
@@ -981,6 +1103,27 @@ describe.skipIf(!runPostgresConcurrencyProof)(
   },
 );
 
+async function nativeAuthorizationStarter(observer: PrismaClient) {
+  const session = boundary.authSession!;
+  const credential = "synthetic-clinical-credential";
+  const row = await observer.hostedAuthRecord.create({ data: session.authProof.row });
+  const auth = { kind: "better-auth" as const, credential, member: session.member, sessionId: session.sessionId,
+    proof: { ...session.authProof, row, credentialDigest: createHash("sha256").update(credential).digest() } };
+  return async (provider: ReturnType<typeof readClinicalProviderDirectory>["entries"][number]) => {
+    vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+      authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
+      code_challenge_methods_supported: ["S256"], capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
+    })));
+    const { authorizationUrl, completionProof } = await startNativeAuthorization({
+      auth, appReturn: "ios", origin: CALLBACK_ORIGIN, providerDirectoryEntryId: provider.id,
+    });
+    const state = new URL(authorizationUrl).searchParams.get("state")!;
+    return (query: Record<string, string> = { code: "sample-code" }) =>
+      completeNativeAuthorization(auth, new URLSearchParams({ state, ...query }), completionProof);
+  };
+}
+
 function createDeferred<T = void>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
@@ -997,7 +1140,7 @@ function createIngressDecryptBarrier(): IngressDecryptBarrier {
 }
 
 function createCallbackProbe(
-  options: { pauseAfterConnectionCreate?: boolean } = {},
+  options: { pauseAfterConnectionCreate?: boolean; pauseAfterConnectionUpdate?: boolean; persistenceTransaction?: number } = {},
 ): CallbackProbe {
   return {
     createPause: options.pauseAfterConnectionCreate
@@ -1006,6 +1149,8 @@ function createCallbackProbe(
           release: createDeferred(),
         }
       : null,
+    updatePause: options.pauseAfterConnectionUpdate ? { reached: createDeferred(), release: createDeferred() } : null,
+    persistenceTransaction: options.persistenceTransaction ?? 2,
     ingressRootReads: 0,
     ingressRootReadsDuringPersistence: 0,
     persistenceBackendPid: createDeferred<number>(),
@@ -1254,7 +1399,7 @@ function wrapCallbackPrismaClient(
           return Reflect.apply(target.$transaction, target, [
             async (tx: Prisma.TransactionClient) => {
               const backendPid = await readBackendPid(tx);
-              const persistenceTransaction = transactionNumber === 2;
+              const persistenceTransaction = transactionNumber === probe.persistenceTransaction;
               if (persistenceTransaction) {
                 probe.persistenceTransactionStarted = true;
                 probe.persistenceBackendPid.resolve(backendPid);
@@ -1286,6 +1431,15 @@ function wrapCallbackTransactionClient(
 ): Prisma.TransactionClient {
   const clinicalRecordConnection = new Proxy(tx.clinicalRecordConnection, {
     get(target, property) {
+      if (property === "update" && probe.updatePause) {
+        const pause = probe.updatePause;
+        return async (args: Prisma.ClinicalRecordConnectionUpdateArgs) => {
+          const updated = await target.update(args);
+          pause.reached.resolve();
+          await pause.release.promise;
+          return updated;
+        };
+      }
       if (property === "create") {
         return async (args: Prisma.ClinicalRecordConnectionCreateArgs) => {
           const created = await target.create(args);

@@ -70,7 +70,6 @@ export interface ClinicalRecordLatestRunContract {
 
 export interface ClinicalRecordConnectionContract {
   canImport?: boolean;
-  importsRemaining?: number;
   lastCheckedAt?: string | null;
   nextSyncAt?: string | null;
   connectedAt: string;
@@ -225,11 +224,10 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     "providerDirectoryEntryId",
     "sourceSystem",
     "status",
-  ], ["canImport", "importsRemaining", "lastCheckedAt", "nextSyncAt"]);
+  ], ["canImport", "lastCheckedAt", "nextSyncAt"]);
   if (record.sourceSystem !== "epic-fhir") throw invalidContract();
   return {
     ...(record.canImport !== undefined ? { canImport: parseBoolean(record.canImport) } : {}),
-    ...(record.importsRemaining === undefined ? {} : { importsRemaining: requireCount(record.importsRemaining) }),
     connectedAt: requireIsoTimestamp(record.connectedAt),
     connectionId: requireIdentifier(record.connectionId),
     displayName: requireString(record.displayName, 160),

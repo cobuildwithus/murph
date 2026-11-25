@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import type { PrismaClient } from "@prisma/client";
 import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
+import { recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
@@ -61,6 +62,58 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const mailbox = () => client.hostedMailboxItem.count({ where: { userId: memberId } });
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
+
+  it("commits the current run failure before returning a permanent outcome rejection", async () => {
+    const f = await fixture();
+    expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId, now })).toBe(true);
+    const [run] = await f.runs();
+    const pointer = { runId: run!.id, generation: 2, memberId: f.memberId };
+    await expect(recordClinicalRetrievalOutcome({ memberId: f.memberId, request: {
+      runId: pointer.runId, generation: pointer.generation, status: "completed", retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{ queryScopeId: "other-slice", sliceId: "whole" }],
+      counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
+        rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+    } })).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+    expect(await f.runs()).toMatchObject([{ status: "failed", completedAt: expect.any(Date), lastErrorCode: "outcome-conflict", outcomeCountsJson: null }]);
+    expect(await f.row()).toMatchObject({ retrievalGeneration: 2, status: "error" });
+    expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", retryable: false, errorCode: "run-already-terminal" });
+  });
+
+  it.each([true, false])("admits a due open run only after a day without request activity (released recently=%s)", async recent => {
+    const f = await fixture();
+    const previous = await client.clinicalRecordRetrievalRun.update({
+      where: { connectionId_generation: { connectionId: f.connectionId, generation: 1 } },
+      data: { status: "retrieving", completedAt: null, createdAt: new Date(+now - daily) },
+    });
+    if (recent) await client.clinicalRecordRetrievalRequest.create({ data: {
+      id: `crq-${randomUUID()}`, memberId: f.memberId, connectionId: f.connectionId, generation: 1, runId: previous.id,
+      claimedAt: new Date(0), requestFingerprint: "released", updatedAt: new Date(+now - 1),
+    } });
+    expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: recent ? 0 : 1, failed: 0 });
+    expect(await f.mailbox()).toBe(recent ? 0 : 1);
+    const old = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: previous.id } });
+    if (recent) expect(old).toEqual(previous);
+    else expect(old).toMatchObject({ completedAt: now, status: "canceled", lastErrorCode: "superseded" });
+    expect(await f.runs()).toHaveLength(recent ? 0 : 1);
+  });
+
+  it.each([true, false])("retires obsolete daily queries once (surviving query=%s)", async survives => {
+    const f = await fixture();
+    const original = buildEpicBetaRetrievalPlan({ frozenAt: now, pageCount: "100", resourceTypes: ["Patient", "DocumentReference"] });
+    const slices = original.slices.map((slice, i) => survives && i === 0 ? slice : { ...slice, queryScopeId: `retired-${i}` });
+    await client.clinicalRecordRetrievalRun.updateMany({ where: { connectionId: f.connectionId }, data: {
+      retrievalPlanJson: { ...original, slices },
+    } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: survives ? 1 : 0, failed: 0 });
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.any(String), { skipped: slices.length - Number(survives) });
+    if (survives) expect((await f.runs())[0]?.retrievalPlanJson).toMatchObject({ slices: [original.slices[0]] });
+    else {
+      expect(await f.row()).toMatchObject({ status: "needs_reauth", nextSyncAt: null, refreshTokenEncrypted: null });
+      expect(await f.mailbox()).toBe(0);
+      expect(await runClinicalDailySyncSweep({ now: new Date(+now + daily) })).toEqual({ checked: 0, queued: 0, failed: 0 });
+    }
+  });
 
   it.each(["canceled", "paused", "unpaid", "past_due"] as const)("admits %s clinical acquisition with consent", async (billingStatus) => {
     const f = await fixture();
@@ -149,7 +202,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
 
   it("leaves an unstarted row due at an expired deadline for a later sweep", async () => {
     const f = await fixture();
-    expect(await runClinicalDailySyncSweep({ now, deadlineMs: Date.now() - 1 })).toEqual({ checked: 1, queued: 0, failed: 0 });
+    expect(await runClinicalDailySyncSweep({ now, deadlineMs: Date.now() - 1 })).toEqual({ checked: 0, queued: 0, failed: 0 });
     expect((await f.row()).nextSyncAt).toEqual(now);
     expect(await f.runs()).toHaveLength(0);
     expect(await f.mailbox()).toBe(0);

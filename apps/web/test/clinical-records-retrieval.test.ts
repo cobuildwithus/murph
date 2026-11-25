@@ -294,7 +294,6 @@ describe("Clinical Records retrieval control plane", () => {
     }
     expect(harness.state.run.egressBytes).toBe(2 * Buffer.byteLength(body, "utf8"));
     expect(harness.state.run.pageCount).toBe(1);
-    expect(harness.state.run.fetchedBytes).toBeLessThan(harness.state.run.egressBytes);
   });
 
   it("fences egress when consent is withdrawn after initial admission", async () => {
@@ -305,6 +304,7 @@ describe("Clinical Records retrieval control plane", () => {
       .resolves.toMatchObject({ status: "unavailable", errorCode: "member-processing-inactive", retryable: false });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(harness.state.run.providerRequestCount).toBe(0);
+    expect(harness.state.run).toMatchObject({ status: "failed", lastErrorCode: "member-processing-inactive" });
   });
 
   it("finalizes saved counts after authorization ends without reactivating access", async () => {
@@ -323,14 +323,17 @@ describe("Clinical Records retrieval control plane", () => {
       .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
   });
 
-  it("accepts partial received counts below served counts but rejects overcounts", async () => {
+  it("commits a failure for an overcount and accepts lower partial counts on a separate run", async () => {
     const harness = createHarness(["Patient", "Observation"]);
     harness.state.run.pageCount = 2;
     const request = { ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "partial" as const,
       counts: { ...outcomeCounts(), fetchedPageCount: 3 } };
     await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request })).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH" });
+    expect(harness.state.run).toMatchObject({ status: "failed", lastErrorCode: "outcome-count-mismatch", completedAt: expect.any(Date), outcomeCountsJson: null });
+    const valid = createHarness(["Patient", "Observation"]);
+    valid.state.run.pageCount = 2;
     await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: { ...request, counts: { ...request.counts, fetchedPageCount: 1 } } });
-    expect(harness.state.run.status).toBe("partial");
+    expect(valid.state.run.status).toBe("partial");
     expect(harness.state.run.connection.accessTokenEncrypted).toBeNull();
   });
 
@@ -350,19 +353,69 @@ describe("Clinical Records retrieval control plane", () => {
 
 
 
-  it("fails closed when a query-aware run has no frozen plan", async () => {
-    const harness = createHarness(["Observation"], "query-slices-v2");
-    harness.state.run.retrievalPlanJson = null;
+  it.each([
+    ["credentials-unavailable", "needs_reauth"], ["patient-context-unavailable", "needs_reauth"],
+    ["run-configuration-invalid", "failed"], ["run-status-invalid", "failed"],
+    ["member-processing-inactive", "failed"], ["authorization-required", "needs_reauth"],
+    ["run-not-found", null], ["run-generation-stale", null], ["run-already-terminal", null], ["connection-inactive", null],
+  ] as const)("classifies descriptor read %s and applies its lifecycle decision", async (code, terminal) => {
+    const h = createHarness(["Observation"]);
+    const { run } = h.state;
+    const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
+    switch (code) {
+      case "credentials-unavailable": run.connection.accessTokenEncrypted = null; break;
+      case "patient-context-unavailable": mocks.openClinicalConnectionSecret.mockResolvedValue("invalid context"); break;
+      case "run-configuration-invalid": run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [] }; break;
+      case "run-status-invalid": run.status = "invalid"; break;
+      case "member-processing-inactive": mocks.readClinicalTransportAccess.mockResolvedValue(false); break;
+      case "authorization-required": run.connection.status = "needs_reauth"; break;
+      case "run-not-found": pointer.runId = "missing-run"; break;
+      case "run-generation-stale": run.connection.retrievalGeneration++; break;
+      case "run-already-terminal": run.status = "complete"; run.completedAt = new Date(); break;
+      case "connection-inactive": run.connection.status = "disconnected"; break;
+    }
+    const before = structuredClone(run);
+    await expect(readClinicalRetrievalRun(pointer)).resolves.toEqual({ status: "unavailable", errorCode: code, retryable: false });
+    if (terminal) {
+      expect(run).toMatchObject({ status: terminal, completedAt: expect.any(Date), outcomeCountsJson: null, lastErrorCode: code });
+      expect(run.connection.status).toBe(terminal === "needs_reauth" ? "needs_reauth" : "error");
+      const ended = structuredClone(run);
+      await readClinicalRetrievalRun(pointer);
+      expect(run).toEqual(ended);
+    } else expect(run).toEqual(before);
+  });
 
-    await expect(readClinicalRetrievalRun({
-      generation: 1,
-      memberId: MEMBER_ID,
-      runId: RUN_ID,
-    })).resolves.toEqual({
-      errorCode: "run-configuration-invalid",
-      retryable: false,
-      status: "unavailable",
+  it.each(["protocol", "schema"])("retries descriptor and receipt on an unknown %s without changing the run", async kind => {
+    const { state } = createHarness(["Observation"]);
+    if (kind === "protocol") state.run.retrievalProtocol = "future-protocol";
+    else state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v2" };
+    const before = structuredClone(state.run);
+    const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
+    expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", errorCode: "run-format-unsupported", retryable: true });
+    await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "completed", counts: outcomeCounts(),
+    } })).rejects.toMatchObject({ retryable: true, httpStatus: 503 });
+    expect(state.run).toEqual(before);
+  });
+
+  it.each(["tokenVersion", "retrievalGeneration"] as const)("retries a patient-context failure when only %s advances", async fence => {
+    const h = createHarness(["Observation"]);
+    const expected = structuredClone(h.state.run);
+    expected.connection[fence]++;
+    mocks.openClinicalConnectionSecret.mockImplementationOnce(async () => {
+      h.state.run.connection[fence]++;
+      return null;
     });
+    const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
+    expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", errorCode: "credentials-updated-retry", retryable: true });
+    expect(h.state.run).toEqual(expected);
+  });
+
+  it("does not close a run when member access returns before the locked reread", async () => {
+    const h = createHarness(["Observation"]);
+    mocks.readClinicalTransportAccess.mockResolvedValueOnce(false).mockResolvedValue(true);
+    expect(await readClinicalRetrievalRun({ memberId: MEMBER_ID, generation: 1, runId: RUN_ID })).toMatchObject({ status: "ready" });
+    expect(h.state.run).toMatchObject({ completedAt: null, status: "queued" });
   });
 
   it("emits and executes the query-aware beta wire for newly pinned runs", async () => {
@@ -700,6 +753,8 @@ describe("Clinical Records retrieval control plane", () => {
       resourceType: "Bundle",
     });
 
+    const firstStart = harness.state.run.startedAt;
+    expect(firstStart).toBeInstanceOf(Date);
     const second = await fetchClinicalRetrievalPage({
       fetchImpl,
       memberId: MEMBER_ID,
@@ -712,10 +767,10 @@ describe("Clinical Records retrieval control plane", () => {
 
     expect(second.status).toBe("page");
     if (second.status !== "page") throw new Error("Expected continuation retrieval page.");
+    expect(harness.state.run.startedAt).toBe(firstStart);
     expect(second.pageUrlHash).toBe(sha256Hex(nextUrl));
     expect(second.nextCursor).toBeNull();
     expect(harness.state.run.pageCount).toBe(2);
-    expect(harness.state.run.fetchedBytes).toBeGreaterThan(0);
   });
 
   it("uses the exact validated provider next-link text as pagination provenance", async () => {
@@ -1314,8 +1369,7 @@ describe("Clinical Records retrieval control plane", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(harness.state.run.providerRequestCount).toBe(2);
     expect(harness.state.run.pageCount).toBe(1);
-    expect(harness.state.run.fetchedBytes).toBeGreaterThan(0);
-    expect(harness.state.run.egressBytes).toBe(harness.state.run.fetchedBytes);
+    expect(harness.state.run.egressBytes).toBe(2 * Buffer.byteLength(JSON.stringify({ entry: [], resourceType: "Bundle", type: "searchset" })));
   });
 
   it("uses claim-version CAS so a stale claimant cannot double-count a page", async () => {
@@ -1485,7 +1539,7 @@ describe("Clinical Records retrieval control plane", () => {
         status: "completed",
       },
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
-    expect(mismatched.state.run.status).toBe("queued");
+    expect(mismatched.state.run).toMatchObject({ status: "failed", completedAt: expect.any(Date), lastErrorCode: "outcome-conflict", outcomeCountsJson: null });
 
 
   });
@@ -1602,12 +1656,15 @@ function createHarness(
       hook?.();
       const where = args.where ?? {};
       const connectionWhere = where.connection as {
+        tokenVersion?: number;
         retrievalGeneration?: number;
         status?: { in: string[] };
       } | undefined;
       if (
         (where.completedAt === null && state.run.completedAt !== null)
+        || (where.startedAt === null && state.run.startedAt !== null)
         || (typeof where.generation === "number" && where.generation !== state.run.generation)
+        || (connectionWhere?.tokenVersion !== undefined && connectionWhere.tokenVersion !== state.run.connection.tokenVersion)
         || !matchesNumberBound(state.run.egressBytes, where.egressBytes)
         || !matchesNumberBound(state.run.providerRequestCount, where.providerRequestCount)
         || (where.status && !(where.status as { in: string[] }).in.includes(state.run.status))
@@ -1777,12 +1834,12 @@ function updateRetrievalRequest(
 
 function buildRun(
   resourceTypes: string[],
-  retrievalProtocol: "query-slices-v2" | null,
+  retrievalProtocol: string | null,
 ) {
   return {
     completedAt: null as Date | null,
     connection: {
-      accessTokenEncrypted: "encrypted-access-token",
+      accessTokenEncrypted: "encrypted-access-token" as string | null,
       accessTokenExpiresAt: null as Date | null,
       fhirBaseHash: sha256Hex("https://fhir.example.test/FHIR/R4"),
       fhirBaseUrlEncrypted: "encrypted-fhir-base-url",
@@ -1797,8 +1854,8 @@ function buildRun(
       tokenVersion: 1,
     },
     createdAt: new Date("2026-07-10T15:00:00.000Z"),
+    startedAt: null as Date | null,
     egressBytes: 0,
-    fetchedBytes: 0,
     generation: 1,
     grantedScopesJson: ["patient/Patient.rs", "patient/Observation.rs"],
     id: RUN_ID,
@@ -1824,7 +1881,7 @@ function snapshotRun(run: ReturnType<typeof buildRun>) {
 }
 
 function applyRunUpdate(run: ReturnType<typeof buildRun>, data: Record<string, unknown>): void {
-  for (const key of ["egressBytes", "fetchedBytes", "pageCount", "providerRequestCount"] as const) {
+  for (const key of ["egressBytes", "pageCount", "providerRequestCount"] as const) {
     const operation = data[key];
     if (!operation || typeof operation !== "object") continue;
     if ("increment" in operation) run[key] += (operation as { increment: number }).increment;
@@ -1833,7 +1890,6 @@ function applyRunUpdate(run: ReturnType<typeof buildRun>, data: Record<string, u
   for (const [key, value] of Object.entries(data)) {
     if (
       key === "egressBytes"
-      || key === "fetchedBytes"
       || key === "pageCount"
       || key === "providerRequestCount"
       || value === undefined

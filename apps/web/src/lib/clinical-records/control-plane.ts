@@ -1,3 +1,4 @@
+import { classifyClinicalRun, closeClinicalRunTx, lifecycleRunSelect } from "./run-lifecycle";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
@@ -7,7 +8,7 @@ import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/memb
 import { buildHostedDeviceSyncAppCompletionProof, readHostedDeviceSyncAppCompletionProofError } from "../device-sync/browser-callback-proof";
 import { isClinicalRecordsControlPlaneError } from "./errors";
 import { CLINICAL_CODE_LIMIT } from "./return-query";
-import { hasImportCapacity, countedSourceFilter, canRepeatImport } from "./source-state";
+import { hasImportCapacity, countedSourceFilter } from "./source-state";
 import { prepareClinicalPersistentAccess } from "./persistent-access";
 
 import { readEpicImportConfiguration, readEpicPersistentCredentials } from "./epic-import-config";
@@ -407,7 +408,6 @@ async function persistClinicalConnection(input: {
   const connectionId = existing?.id ?? generateOpaqueId(CLINICAL_CONNECTION_ID_PREFIX);
   const retrievalRunId = generateOpaqueId(CLINICAL_RETRIEVAL_RUN_ID_PREFIX);
   const tokenVersion = (existing?.tokenVersion ?? 0) + 1;
-  const retrievalGeneration = (existing?.retrievalGeneration ?? 0) + 1;
   const patientIdHash = hashClinicalFhirPatientId(input.token.patientId);
   const priorPatientBinding = existing
     ? await openClinicalConnectionSecret({
@@ -476,7 +476,6 @@ async function persistClinicalConnection(input: {
     patientBindingEncrypted,
     providerDirectoryEntryId: input.provider.id,
     requestedScopesJson: toClinicalJsonArray(input.requestedScopes),
-    retrievalGeneration,
     sourceSystem: input.provider.sourceSystem,
     status: "active",
     tokenVersion,
@@ -484,7 +483,6 @@ async function persistClinicalConnection(input: {
   const retrievalRunData = {
     connectionId,
     createdAt: input.now,
-    generation: retrievalGeneration,
     id: retrievalRunId,
     memberId: input.memberId,
     grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
@@ -496,7 +494,7 @@ async function persistClinicalConnection(input: {
     }),
     retrievalProtocol: "query-slices-v2",
     status: "queued",
-  } satisfies Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput;
+  } satisfies Omit<Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput, "generation">;
 
   // The wake payload is sealed with commit-time laneSeq AAD, so it must stay
   // inside the transaction. Warm the exact mailbox-payload root beforehand;
@@ -524,7 +522,6 @@ async function persistClinicalConnection(input: {
       if (
         current?.id !== existing?.id ||
         current?.tokenVersion !== existing?.tokenVersion ||
-        current?.retrievalGeneration !== existing?.retrievalGeneration ||
         (current?.disconnectedAt && current.disconnectedAt >= input.authorizationStartedAt)
       )
         throw connectionAlreadyExistsError();
@@ -541,16 +538,22 @@ async function persistClinicalConnection(input: {
             message: "The medical record source limit has been reached.",
           });
       }
+      const retrievalGeneration = (current?.retrievalGeneration ?? 0) + 1;
+      const data = { ...connectionData, retrievalGeneration };
       if (current) {
+        const previous = current.retrievalRuns[0];
+        if (previous && !previous.completedAt && !await closeClinicalRunTx(tx, {
+          memberId: input.memberId, runId: previous.id, generation: previous.generation,
+        }, "canceled", "superseded", input.now)) throw connectionAlreadyExistsError();
         await tx.clinicalRecordConnection.update({
           where: { id: current.id },
-          data: connectionData,
+          data,
         });
       } else {
-        await tx.clinicalRecordConnection.create({ data: connectionData });
+        await tx.clinicalRecordConnection.create({ data });
       }
       await tx.clinicalRecordRetrievalRun.create({
-        data: retrievalRunData,
+        data: { ...retrievalRunData, generation: retrievalGeneration },
       });
       if (input.connectIntentClaimHash) await completeClinicalRecordConnectIntent(
         {
@@ -628,14 +631,15 @@ async function assertClinicalRecordConnectionAvailable(
       retrievalRuns: {
         orderBy: { generation: "desc" },
         take: 1,
-        select: { completedAt: true, status: true, outcomeCountsJson: true },
+        select: lifecycleRunSelect,
       },
     },
     where: { memberId_providerDirectoryEntryId: input },
   });
   if (existing) {
     const run = existing.retrievalRuns[0];
-    if (!canRepeatImport(run))
+    const lifecycle = classifyClinicalRun(run, new Date());
+    if (lifecycle === "unknown" || lifecycle === "awaiting_counts")
       throw connectionAlreadyExistsError();
 
   }

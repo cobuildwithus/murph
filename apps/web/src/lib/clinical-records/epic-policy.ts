@@ -524,13 +524,18 @@ export function buildEpicBetaRetrievalPlan(input: {
 /** Recent clinical dates reduce daily work; every seventh check includes older corrections. */
 export function buildEpicDailyRetrievalPlan(input: {
   previous: ClinicalFhirRetrievalPlan; now: Date; generation: number;
-}): ClinicalFhirRetrievalPlan {
+}): ClinicalFhirRetrievalPlan | null {
   const from = new Date(input.now.getTime() - 7 * 86_400_000).toISOString();
   const to = new Date(input.now.getTime() + 86_400_000).toISOString();
+  const queries = input.previous.slices
+    .map(slice => QUERIES.find(query => query.queryScopeId === slice.queryScopeId))
+    .filter(query => query !== undefined);
+  const skipped = input.previous.slices.length - queries.length;
+  if (skipped > 0) console.warn("Skipped retired medical-record queries in a daily plan.", { skipped });
+  if (queries.length === 0) return null;
   return clinicalFhirRetrievalPlanSchema.parse({
     schemaVersion: input.previous.schemaVersion,
-    slices: input.previous.slices.map((slice) => {
-      const query = requireActiveQueryForScope(slice.queryScopeId);
+    slices: queries.map(query => {
       const identity = buildActiveRetrievalSlice({
         pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
         query,

@@ -3,6 +3,8 @@ import "server-only";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
 
+import { closeClinicalRunTx } from "./run-lifecycle";
+import { CLINICAL_RECORD_OPEN_RUN_STATUSES, CLINICAL_RECORD_TERMINAL_RUN_STATUSES } from "./client-contracts";
 import { epicImportQueryEnabled } from "./epic-import-config";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -87,15 +89,6 @@ const MAX_LOGICAL_REQUEST_CLAIM_VERSION = 20;
 const TOKEN_EXPIRY_LEEWAY_MS = 60_000;
 const RETRIEVAL_REQUEST_ID_PREFIX = "crq_";
 const FHIR_PATIENT_ID_PATTERN = /^[A-Za-z0-9.-]{1,64}$/u;
-const TERMINAL_RUN_STATUSES = new Set([
-  "complete",
-  "partial",
-  "needs_reauth",
-  "failed",
-  "canceled",
-]);
-const ACTIVE_RUN_STATUSES = new Set(["queued", "retrieving"]);
-
 type ClinicalRetrievalTx = Prisma.TransactionClient;
 
 interface ClinicalMailboxCheckpoint {
@@ -122,10 +115,11 @@ interface RunnableClinicalRun {
     tokenVersion: number;
   };
   createdAt: Date;
+  startedAt: Date | null;
   egressBytes: number;
-  fetchedBytes: number;
   generation: number;
-  grantedScopesJson: Prisma.JsonValue;
+  grantedScopes: string[];
+  requestedScopes: string[];
   id: string;
   memberId: string;
   pageCount: number;
@@ -152,8 +146,7 @@ export async function readClinicalRetrievalRun(input: {
   const loaded = await loadRunnableClinicalRun(input);
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
-  const requestedScopes = parseStoredStringArray(run.connection.requestedScopesJson, "requested scopes");
-  const grantedScopes = parseStoredStringArray(run.grantedScopesJson, "granted scopes");
+  const { requestedScopes, grantedScopes } = run;
   let patientIdHash: string;
   const openedPatientId = await openClinicalConnectionSecret({
     connectionId: run.connection.id,
@@ -166,7 +159,11 @@ export async function readClinicalRetrievalRun(input: {
     const patientId = requireFhirPatientId(openedPatientId);
     patientIdHash = hashClinicalFhirPatientId(patientId);
   } catch {
-    return unavailable("patient-context-unavailable", false);
+    const closed = await getPrisma().$transaction(async tx => {
+      await lockHostedMemberRow(tx, input.memberId);
+      return endUnusableRunTx(tx, input, run.connection, "patient-context-unavailable");
+    });
+    return closed ? unavailable("patient-context-unavailable", false) : unavailable("credentials-updated-retry", true);
   }
   const runDescriptorBase = {
     connectionId: run.connection.id,
@@ -276,6 +273,7 @@ export async function fetchClinicalRetrievalPage(input: {
         pageUrlHash,
       ].join("\n"));
   const claimed = await claimRetrievalPageRequest({
+    firstStart: run.startedAt === null,
     connectionId: run.connection.id,
     generation: run.generation,
     memberId: input.memberId,
@@ -350,7 +348,7 @@ export async function fetchClinicalRetrievalDocument(input: {
     memberId: input.memberId, runId: input.request.runId });
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
-  const grantedScopes = parseStoredStringArray(run.grantedScopesJson, "granted scopes");
+  const { grantedScopes } = run;
   if (!epicBinaryReadIsGranted(grantedScopes)) return unavailable("document-scope-unavailable", false);
   const prepared = await loadClinicalDocumentRequest({ input, run, grantedScopes });
   if ("unavailable" in prepared) return unavailable(prepared.unavailable, prepared.retryable);
@@ -359,7 +357,8 @@ export async function fetchClinicalRetrievalDocument(input: {
   const requestFingerprint = sha256Hex(["document", run.connection.id, String(run.generation), run.id,
     ticket.queryScopeId, ticket.sliceId, ticket.parentPageSha256, ticket.resourceType,
     ticket.resourceId, ticket.resourceVersion ?? "", String(ticket.attachmentIndex), url.href].join("\n"));
-  const claimed = await claimRetrievalPageRequest({ connectionId: run.connection.id,
+  const claimed = await claimRetrievalPageRequest({
+    firstStart: run.startedAt === null, connectionId: run.connection.id,
     generation: run.generation, memberId: input.memberId, queryScopeId: ticket.queryScopeId,
     sliceId: ticket.sliceId, requestFingerprint, runId: run.id,
     reservationBytes: DOCUMENT_EGRESS_RESERVATION_BYTES });
@@ -529,7 +528,7 @@ export async function recordClinicalRetrievalOutcome(input: {
   request: HostedClinicalRecordsRecordOutcomeRequest;
 }): Promise<void> {
   const now = new Date();
-  await getPrisma().$transaction(async (tx) => {
+  const rejection = await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     const run = await tx.clinicalRecordRetrievalRun.findFirst({
       include: { connection: true },
@@ -539,19 +538,20 @@ export async function recordClinicalRetrievalOutcome(input: {
         memberId: input.memberId,
       },
     });
-    if (!run) throw staleRunError();
-    assertOutcomeMatchesRun({
-      request: input.request,
-      pageCount: run.pageCount,
-      retrievalPlanJson: run.retrievalPlanJson,
-      retrievalProtocol: run.retrievalProtocol,
+    if (!run || run.connection.retrievalGeneration !== run.generation) throw staleRunError();
+    if (hasUnsupportedRetrievalFormat(run)) throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_RETRIEVAL_FORMAT_UNSUPPORTED", httpStatus: 503, retryable: true,
+      message: "This server cannot read the stored retrieval format.",
     });
-    if (input.request.status === "preempted") {
-      if (run.completedAt) throw staleRunError();
-      const connectionIsActive = run.connection.status === "active" || run.connection.status === "error";
-      if (run.connection.retrievalGeneration !== run.generation || !connectionIsActive) {
-        throw staleRunError();
+    const rejection = validateOutcomeForRun(input.request, run);
+    if (rejection) {
+      if (!run.completedAt && ["active", "error"].includes(run.connection.status)) {
+        await endUnusableRunTx(tx, { ...input.request, memberId: input.memberId }, run.connection,
+          rejection.code === "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH" ? "outcome-count-mismatch" : "outcome-conflict");
       }
+      return rejection; // Commit the failure before reporting the rejection to the runtime.
+    }
+    if (input.request.status === "preempted") {
       const preempted = await tx.clinicalRecordRetrievalRun.updateMany({
         data: { lastErrorCode: input.request.errorCode ?? null, status: "queued" },
         where: {
@@ -563,7 +563,7 @@ export async function recordClinicalRetrievalOutcome(input: {
           generation: run.generation,
           id: run.id,
           memberId: input.memberId,
-          status: { in: [...ACTIVE_RUN_STATUSES] },
+          status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] },
         },
       });
       if (preempted.count !== 1) throw staleRunError();
@@ -572,7 +572,6 @@ export async function recordClinicalRetrievalOutcome(input: {
     if (
       run.status === "needs_reauth"
       && run.connection.status === "needs_reauth"
-      && run.connection.retrievalGeneration === run.generation
       && ((input.request.status === "partial" && input.request.errorCode === HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE)
         || (input.request.status === "failed" && input.request.errorCode === "snapshot_rejected"))
     ) {
@@ -600,11 +599,6 @@ export async function recordClinicalRetrievalOutcome(input: {
         httpStatus: 409,
         message: "The Clinical Records retrieval outcome conflicts with the completed run.",
       });
-    }
-    const generationIsCurrent = run.connection.retrievalGeneration === run.generation;
-    const connectionIsActive = run.connection.status === "active" || run.connection.status === "error";
-    if (!generationIsCurrent || !connectionIsActive) {
-      throw staleRunError();
     }
     const connectionData = input.request.status === "failed"
       ? {
@@ -643,11 +637,12 @@ export async function recordClinicalRetrievalOutcome(input: {
         generation: run.generation,
         id: run.id,
         memberId: input.memberId,
-        status: { in: [...ACTIVE_RUN_STATUSES] },
+        status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] },
       },
     });
     if (updatedRun.count !== 1) throw staleRunError();
   });
+  if (rejection) throw rejection;
 }
 
 export async function appendClinicalRetrievalWakeTx(input: {
@@ -716,18 +711,32 @@ export async function signalClinicalRetrievalWake(
   }
 }
 
-async function loadRunnableClinicalRun(input: {
-  generation: number;
-  memberId: string;
-  runId: string;
-}): Promise<
+type RunPointer = { generation: number; memberId: string; runId: string };
+type RunConnection = Pick<RunnableClinicalRun["connection"], "id" | "refreshTokenEncrypted" | "tokenVersion">;
+type UnusableReason = "patient-context-unavailable" | "member-processing-inactive" | "run-configuration-invalid"
+  | "credentials-unavailable" | "run-status-invalid" | "authorization-required";
+
+async function loadRunnableClinicalRun(input: RunPointer) {
+  const loaded = await inspectRunnableClinicalRun(input, getPrisma());
+  if (!("terminalize" in loaded) || !loaded.terminalize) return loaded;
+  // Repeat the decision under the member lock. A reconnect, consent renewal or outcome can win the race.
+  return getPrisma().$transaction(async tx => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const current = await inspectRunnableClinicalRun(input, tx);
+    if ("terminalize" in current && current.terminalize) {
+      await endUnusableRunTx(tx, input, current.terminalize, current.unavailable);
+    }
+    return current;
+  });
+}
+
+async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRetrievalTx): Promise<
   | { run: RunnableClinicalRun }
-  | { retryable: boolean; unavailable: string }
+  | { retryable: false; unavailable: UnusableReason; terminalize: RunConnection }
+  | { retryable: boolean; unavailable: string; terminalize?: never }
 > {
-  if (!await readClinicalTransportAccess({ memberId: input.memberId })) {
-    return { unavailable: "member-processing-inactive", retryable: false };
-  }
-  const record = await getPrisma().clinicalRecordRetrievalRun.findFirst({
+  const active = await readClinicalTransportAccess({ memberId: input.memberId, prisma });
+  const record = await prisma.clinicalRecordRetrievalRun.findFirst({
     select: {
       connection: {
         select: {
@@ -746,9 +755,10 @@ async function loadRunnableClinicalRun(input: {
           tokenVersion: true,
         },
       },
+      completedAt: true,
+      startedAt: true,
       createdAt: true,
       egressBytes: true,
-      fetchedBytes: true,
       generation: true,
       grantedScopesJson: true,
       id: true,
@@ -765,52 +775,41 @@ async function loadRunnableClinicalRun(input: {
       memberId: input.memberId,
     },
   });
-  if (!record) return { retryable: false, unavailable: "run-not-found" };
-  if (record.connection.retrievalGeneration !== record.generation) {
-    return { retryable: false, unavailable: "run-generation-stale" };
+  // Inactive callers get the same response for absent, obsolete and current pointers.
+  const obsolete = (code: string) => ({ retryable: false as const, unavailable: active ? code : "member-processing-inactive" });
+  if (!record) return obsolete("run-not-found");
+  if (record.connection.retrievalGeneration !== record.generation) return obsolete("run-generation-stale");
+  if (record.completedAt || CLINICAL_RECORD_TERMINAL_RUN_STATUSES.some(status => status === record.status)) {
+    return obsolete(record.connection.status === "needs_reauth" && record.status === "needs_reauth"
+      ? HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE : "run-already-terminal");
   }
-  if (record.connection.status === "needs_reauth") {
-    return {
-      retryable: false,
-      unavailable: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-    };
-  }
-  if (TERMINAL_RUN_STATUSES.has(record.status)) {
-    return { retryable: false, unavailable: "run-already-terminal" };
-  }
-  if (!ACTIVE_RUN_STATUSES.has(record.status)) {
-    return { retryable: false, unavailable: "run-status-invalid" };
-  }
-  if (record.connection.status !== "active" && record.connection.status !== "error") {
-    return { retryable: false, unavailable: "connection-inactive" };
-  }
-  if (
-    !record.connection.patientIdEncrypted
-    || !record.connection.accessTokenEncrypted
-  ) {
-    return { retryable: false, unavailable: "credentials-unavailable" };
-  }
+  if (!["active", "error", "needs_reauth"].includes(record.connection.status)) return obsolete("connection-inactive");
+  const unusable = (unavailable: UnusableReason) => ({ retryable: false as const, unavailable, terminalize: record.connection });
+  if (!active) return unusable("member-processing-inactive");
+  if (record.connection.status === "needs_reauth") return unusable("authorization-required");
+  if (hasUnsupportedRetrievalFormat(record)) return { unavailable: "run-format-unsupported", retryable: true };
+  if (!CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === record.status)) return unusable("run-status-invalid");
+  if (!record.connection.accessTokenEncrypted || !record.connection.patientIdEncrypted) return unusable("credentials-unavailable");
+  let requestedScopes: string[];
+  let grantedScopes: string[];
   let retrievalPlan: ClinicalFhirRetrievalPlan;
   let sourceSystem: ClinicalSourceSystem;
   try {
-    if (
-      record.retrievalProtocol !== "query-slices-v2"
-    ) {
-      throw new ContractValidationError("Stored Clinical Records retrieval protocol is unsupported.");
-    }
+    requestedScopes = parseStoredStringArray(record.connection.requestedScopesJson, "requested scopes");
+    grantedScopes = parseStoredStringArray(record.grantedScopesJson, "granted scopes");
     retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
   } catch {
-    return { retryable: false, unavailable: "run-configuration-invalid" };
+    return unusable("run-configuration-invalid");
   }
   return {
     run: {
       connection: { ...record.connection, sourceSystem },
       createdAt: record.createdAt,
+      startedAt: record.startedAt,
       egressBytes: record.egressBytes,
-      fetchedBytes: record.fetchedBytes,
       generation: record.generation,
-      grantedScopesJson: record.grantedScopesJson,
+      requestedScopes, grantedScopes,
       id: record.id,
       memberId: record.memberId,
       pageCount: record.pageCount,
@@ -1086,6 +1085,7 @@ function hasSurroundingAsciiWhitespace(value: string): boolean {
 }
 
 async function claimRetrievalPageRequest(input: {
+  firstStart: boolean;
   reservationBytes?: number;
   connectionId: string;
   generation: number;
@@ -1144,6 +1144,13 @@ async function claimRetrievalPageRequest(input: {
     return await prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.memberId);
       if (!await readClinicalTransportAccess({ memberId: input.memberId, prisma: tx })) {
+        const current = await tx.clinicalRecordRetrievalRun.findFirst({
+          where: { id: input.runId, generation: input.generation, memberId: input.memberId }, include: { connection: true },
+        });
+        if (current && !current.completedAt && current.connection.retrievalGeneration === input.generation
+          && ["active", "error"].includes(current.connection.status)) {
+          await endUnusableRunTx(tx, input, current.connection, "member-processing-inactive");
+        }
         return { claimed: false, errorCode: "member-processing-inactive", retryable: false } as const;
       }
       const reclaimed = await tx.clinicalRecordRetrievalRequest.updateMany({
@@ -1169,7 +1176,6 @@ async function claimRetrievalPageRequest(input: {
         data: {
           egressBytes: { increment: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES) },
           providerRequestCount: { increment: 1 },
-          startedAt: now,
           status: "retrieving",
         },
         where: {
@@ -1182,10 +1188,13 @@ async function claimRetrievalPageRequest(input: {
           memberId: input.memberId,
           connection: { retrievalGeneration: input.generation, status: { in: ["active", "error"] } },
           providerRequestCount: { lt: RETRIEVAL_COUNTER_MAX },
-          status: { in: [...ACTIVE_RUN_STATUSES] },
+          status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] },
         },
       });
       if (reserved.count !== 1) throw new ClinicalRetrievalClaimRejection();
+      if (input.firstStart) {
+        await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: input.runId, startedAt: null }, data: { startedAt: now } });
+      }
       return {
         claimed: true,
         claimVersion: record.claimVersion + 1,
@@ -1233,7 +1242,6 @@ async function completeRetrievalPageRequest(input: {
     const updated = await tx.clinicalRecordRetrievalRun.updateMany({
       data: {
         egressBytes: { decrement: (input.reservationBytes ?? PAGE_EGRESS_RESERVATION_BYTES) - input.receivedBytes },
-        fetchedBytes: { increment: input.bodyBytes },
         pageCount: input.isFirstCompletion && input.countAsPage !== false ? { increment: 1 } : undefined,
       },
       where: {
@@ -1241,7 +1249,7 @@ async function completeRetrievalPageRequest(input: {
         generation: input.run.generation,
         id: input.run.id,
         memberId: input.run.memberId,
-        status: { in: [...ACTIVE_RUN_STATUSES] },
+        status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] },
       },
     });
     if (updated.count !== 1) {
@@ -1285,7 +1293,7 @@ async function releaseRetrievalPageRequest(input: {
         generation: input.run.generation,
         id: input.run.id,
         memberId: input.run.memberId,
-        status: { in: [...ACTIVE_RUN_STATUSES] },
+        status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] },
       },
     });
   });
@@ -1300,41 +1308,29 @@ async function markClinicalConnectionNeedsReauth(input: {
   observedTokenVersion: number;
   runId: string;
 }): Promise<boolean> {
-  const now = new Date();
-  return getPrisma().$transaction(async (tx) => {
-    const connection = await tx.clinicalRecordConnection.updateMany({
-      data: {
-        accessTokenEncrypted: null,
-        accessTokenExpiresAt: null,
-        lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-        ...CLEAR_CLINICAL_PERSISTENT_ACCESS,
-        patientIdEncrypted: null,
-        status: "needs_reauth",
-      },
-      where: {
-        id: input.connectionId,
-        memberId: input.memberId,
-        retrievalGeneration: input.generation,
-        status: { in: ["active", "error"] },
-        tokenVersion: input.observedTokenVersion,
-      },
-    });
-    if (connection.count !== 1) return false;
-    await tx.clinicalRecordRetrievalRun.updateMany({
-      data: {
-        completedAt: now,
-        lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-        status: "needs_reauth",
-      },
-      where: {
-        completedAt: null,
-        generation: input.generation,
-        id: input.runId,
-        memberId: input.memberId,
-      },
-    });
-    return true;
+  return getPrisma().$transaction(async tx => {
+    await lockHostedMemberRow(tx, input.memberId);
+    return endUnusableRunTx(tx, input, { id: input.connectionId, tokenVersion: input.observedTokenVersion,
+      refreshTokenEncrypted: null }, "authorization-required");
   });
+}
+
+async function endUnusableRunTx(tx: ClinicalRetrievalTx, pointer: RunPointer, connection: RunConnection,
+  reason: UnusableReason | "outcome-count-mismatch" | "outcome-conflict") {
+  const now = new Date();
+  const reauth = reason === "authorization-required" || reason === "credentials-unavailable" || reason === "patient-context-unavailable";
+  const closed = await closeClinicalRunTx(tx, pointer, reauth ? "needs_reauth" : "failed", reason, now, connection.tokenVersion);
+  if (!closed) return false;
+  const updated = await tx.clinicalRecordConnection.updateMany({
+    where: { id: connection.id, memberId: pointer.memberId, retrievalGeneration: pointer.generation,
+      tokenVersion: connection.tokenVersion, status: { in: ["active", "error", "needs_reauth"] } },
+    data: { lastErrorCode: reason, lastCheckedAt: now, ...(reauth ? {
+      ...CLEAR_CLINICAL_PERSISTENT_ACCESS, accessTokenEncrypted: null, accessTokenExpiresAt: null,
+      patientIdEncrypted: null, status: "needs_reauth",
+    } : { ...clinicalCredentialsAfterCheck(Boolean(connection.refreshTokenEncrypted), now), status: "error" }) },
+  });
+  if (updated.count !== 1) throw staleRunError(); // Roll back the run write as well.
+  return true;
 }
 
 function unavailable(
@@ -1349,34 +1345,39 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
   return status;
 }
 
-function assertOutcomeMatchesRun(input: {
+function hasUnsupportedRetrievalFormat(run: { retrievalProtocol: string | null; retrievalPlanJson: Prisma.JsonValue }) {
+  const plan = run.retrievalPlanJson;
+  return run.retrievalProtocol !== "query-slices-v2" || (plan !== null && typeof plan === "object"
+    && "schemaVersion" in plan && plan.schemaVersion !== clinicalFhirRetrievalPlanSchema.shape.schemaVersion.value);
+}
+
+function validateOutcomeForRun(request: HostedClinicalRecordsRecordOutcomeRequest, run: {
   pageCount: number;
-  request: HostedClinicalRecordsRecordOutcomeRequest;
   retrievalPlanJson: Prisma.JsonValue | null;
-  retrievalProtocol: string | null;
-}): void {
+}) {
   if (
-    input.request.status !== "preempted" &&
-    (input.request.counts.fetchedPageCount > input.pageCount ||
-      (input.request.status === "completed" &&
-        input.request.counts.fetchedPageCount !== input.pageCount))
+    request.status !== "preempted" &&
+    (request.counts.fetchedPageCount > run.pageCount ||
+      (request.status === "completed" &&
+        request.counts.fetchedPageCount !== run.pageCount))
   ) {
-    throw clinicalRecordsError({
+    return clinicalRecordsError({
       code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH",
       httpStatus: 409,
       message: "The Clinical Records retrieval page count does not match the control plane.",
     });
   }
 
-  if (input.retrievalProtocol !== "query-slices-v2") throw outcomeConflictError();
-  const plan = clinicalFhirRetrievalPlanSchema.parse(input.retrievalPlanJson);
-  const expected = plan.slices.map((slice) => ({
+  const plan = clinicalFhirRetrievalPlanSchema.safeParse(run.retrievalPlanJson);
+  if (!plan.success) return outcomeConflictError();
+  const expected = plan.data.slices.map((slice) => ({
     queryScopeId: slice.queryScopeId,
     sliceId: slice.sliceId,
   }));
-  if (JSON.stringify(input.request.retrievalSlices) !== JSON.stringify(expected)) {
-    throw outcomeConflictError();
+  if (JSON.stringify(request.retrievalSlices) !== JSON.stringify(expected)) {
+    return outcomeConflictError();
   }
+  return null;
 }
 
 function outcomeConflictError() {

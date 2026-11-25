@@ -51,10 +51,12 @@ export const POST = withJsonError(async (request: Request) => {
       runHostedDeviceSyncRecoverySweep({ deadlineMs }), runClinicalDailySyncSweep({ deadlineMs }),
     ]),
   );
-  if (devices.status === "rejected") throw devices.reason;
-  if (clinical.status === "rejected" || clinical.value.failed > 0) {
-    throw hostedOnboardingError({ code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED", httpStatus: 503,
-      message: "Some daily medical-record checks could not be scheduled." });
+  if (clinical.status === "rejected") {
+    console.warn("CLINICAL_DAILY_SWEEP_FAILED");
+  } else if (clinical.value.failed > 0) {
+    const { checked, queued, failed } = clinical.value;
+    console.warn("CLINICAL_DAILY_ADMISSION_FAILED", { checked, queued, failed });
   }
+  if (devices.status === "rejected") throw devices.reason;
   return jsonOk(devices.value);
 });

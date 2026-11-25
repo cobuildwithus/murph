@@ -2,7 +2,7 @@ import "server-only";
 
 import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
 import type { HostedAppSession } from "../hosted-onboarding/app-session";
-import { canRepeatImport } from "./source-state";
+import { classifyClinicalRun, lifecycleRunSelect } from "./run-lifecycle";
 import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
 
 import { Prisma } from "@prisma/client";
@@ -44,12 +44,7 @@ export async function listClinicalRecordConnectionsForMember(
       retrievalGeneration: true,
       retrievalRuns: {
         orderBy: [{ generation: "desc" }],
-        select: {
-          completedAt: true,
-          id: true,
-          outcomeCountsJson: true,
-          status: true,
-        },
+        select: lifecycleRunSelect,
         take: 1,
       },
       sourceSystem: true,
@@ -60,8 +55,9 @@ export async function listClinicalRecordConnectionsForMember(
   });
   return connections.map((connection) => {
     const latestRun = connection.retrievalRuns[0] ?? null;
+    const lifecycle = classifyClinicalRun(latestRun ?? undefined, new Date());
     return {
-      canImport: canRepeatImport(latestRun ?? undefined),
+      canImport: lifecycle !== "awaiting_counts" && lifecycle !== "unknown",
       connectedAt: connection.connectedAt.toISOString(),
       connectionId: connection.id,
       displayName: connection.displayName,

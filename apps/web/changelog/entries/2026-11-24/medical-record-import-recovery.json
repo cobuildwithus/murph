@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 200,
+  "item": {
+    "id": "medical-record-import-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Start over on a stalled medical records import",
+    "summary": "If a hospital import stops making progress, you can sign in to the same portal again to start a new import.",
+    "details": "The replacement starts after you finish signing in. Records already saved stay in your vault.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": [5293, 5295]
+  }
+}
