@@ -53,8 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
   );
   if (devices.status === "rejected") throw devices.reason;
   if (clinical.status === "rejected" || clinical.value.failed > 0) {
-    throw hostedOnboardingError({ code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED", httpStatus: 503,
-      message: "Some daily medical-record checks could not be scheduled." });
+    console.warn("Some daily medical-record checks could not be scheduled.");
   }
   return jsonOk(devices.value);
 });

@@ -27,18 +27,9 @@ export interface ClinicalRecordConnectIntent {
 export async function createClinicalRecordConnectIntent(input: {
   memberId: string;
   now?: Date;
-  providerDirectoryEntryId?: string | null;
   request: Request;
 }): Promise<{ claim: string; connectUrl: string; expiresAt: string }> {
   const now = input.now ?? new Date();
-  const providerDirectoryEntryId = normalizeProviderEntryId(input.providerDirectoryEntryId);
-  if (input.providerDirectoryEntryId && !providerDirectoryEntryId) {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_NOT_FOUND",
-      httpStatus: 404,
-      message: "The selected Clinical Records provider is unavailable.",
-    });
-  }
   const claim = `${CLAIM_PREFIX}${randomBytes(CLAIM_BYTES).toString("base64url")}`;
   const claimHash = hashClaim(claim);
   const expiresAt = new Date(now.getTime() + CLAIM_TTL_MS);
@@ -66,7 +57,6 @@ export async function createClinicalRecordConnectIntent(input: {
         data: {
           claimHash,
           memberId: input.memberId,
-          providerDirectoryEntryId,
           createdAt: now,
           expiresAt,
         },

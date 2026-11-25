@@ -237,6 +237,7 @@ import {
   sealClinicalOauthVerifier,
 } from "@/src/lib/clinical-records/secrets";
 import { disconnectClinicalRecordConnection, listClinicalRecordConnectionsForMember } from "@/src/lib/clinical-records/connections";
+import { admitClinicalDailySync } from "@/src/lib/clinical-records/daily-sync";
 import { completeNativeAuthorization, startNativeAuthorization, startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
 import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
 import { prepareClinicalPersistentAccess } from "@/src/lib/clinical-records/persistent-access";
@@ -280,6 +281,8 @@ type CallbackProbe = {
     reached: Deferred<void>;
     release: Deferred<void>;
   } | null;
+  updatePause: CallbackProbe["createPause"];
+  persistenceTransaction: number;
   ingressRootReads: number;
   ingressRootReadsDuringPersistence: number;
   persistenceBackendPid: Deferred<number>;
@@ -451,7 +454,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
         await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
         expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "needs_reauth" });
-        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, request });
         const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
           fetchImpl: vi.fn().mockResolvedValue(Response.json({
             authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
@@ -462,7 +465,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const reconnected = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } });
         expect(reconnected).toMatchObject({ status: "active", retrievalGeneration: 2 });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
-          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
         expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connection.id } })).toEqual(reconnected);
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } }))
           .toMatchObject({ status: "needs_reauth", outcomeCountsJson: outcome.counts });
@@ -531,7 +534,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "disconnected" });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
           .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
-        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, request });
         const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
           fetchImpl: vi.fn().mockResolvedValue(Response.json({
             authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
@@ -545,11 +548,78 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(connection).toMatchObject({ retrievalGeneration: 2, status: "active" });
         expect(await readClinicalRetrievalRun(identity)).toMatchObject({ status: "unavailable", errorCode: "run-generation-stale" });
         await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
-          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
         expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: initial.connectionId } })).toEqual(connection);
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } })).toEqual(canceled);
       } finally {
         vi.unstubAllEnvs();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it("serializes daily admission with a same-patient start-over and fences both replaced generations", async () => {
+      const fixture = await createClinicalFixture();
+      const { observer, memberId } = fixture;
+      const daily = createCallbackProbe({ pauseAfterConnectionUpdate: true, persistenceTransaction: 1 });
+      const callback = createCallbackProbe();
+      const pause = daily.updatePause!;
+      const operations: Promise<unknown>[] = [];
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      try {
+        await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const first = await observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId } });
+        const { connectionId } = first;
+        const provider = readClinicalProviderDirectory().entries.find(entry => entry.id === fixture.providerDirectoryEntryId)!;
+        const now = new Date();
+        await observer.clinicalRecordConnection.update({ where: { id: connectionId }, data: {
+          refreshTokenEncrypted: "synthetic-renewable-grant", nextSyncAt: now,
+        } });
+        await observer.clinicalRecordRetrievalRun.update({ where: { id: first.id }, data: { createdAt: new Date(+now - 86_400_000) } });
+        const request = new Request(CALLBACK_ORIGIN, { method: "POST", headers: { origin: CALLBACK_ORIGIN } });
+        const intent = await createClinicalRecordConnectIntent({ memberId, request });
+        const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
+          fetchImpl: vi.fn().mockResolvedValue(Response.json({
+            authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
+            code_challenge_methods_supported: ["S256"], capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
+          })),
+        });
+        const state = new URL(started.authorizationUrl).searchParams.get("state")!;
+        expect(await observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: first.id } })).toMatchObject({ completedAt: null });
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.deletionBaseClient, daily);
+        const admission = admitClinicalDailySync({ memberId, connectionId, now });
+        operations.push(admission);
+        await bounded(pause.reached.promise, BLOCKING_TIMEOUT_MS, "daily generation update");
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, callback);
+        const completion = invokeClinicalRecordsCallback({ ...fixture, state });
+        operations.push(completion);
+        await waitForBlockedBackend({ observer, blockerPid: await daily.persistenceBackendPid.promise,
+          waiterPid: await bounded(callback.persistenceBackendPid.promise, BLOCKING_TIMEOUT_MS, "start-over persistence") });
+        pause.release.resolve();
+        expect(await admission).toBe(true);
+        expectConnectedRedirect(await completion);
+        const runs = await observer.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, orderBy: { generation: "asc" } });
+        expect(runs).toMatchObject([
+          { generation: 1, status: "canceled", completedAt: expect.any(Date) },
+          { generation: 2, status: "canceled", completedAt: expect.any(Date) },
+          { generation: 3, status: "queued", completedAt: null },
+        ]);
+        expect(await observer.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.sync-requested" } })).toBe(3);
+        const connected = await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connectionId } });
+        expect(connected).toMatchObject({ retrievalGeneration: 3, tokenVersion: 2, status: "active" });
+        for (const old of runs.slice(0, 2)) {
+          await expect(recordClinicalRetrievalOutcome({ memberId, request: {
+            runId: old.id, generation: old.generation, retrievalProtocol: "query-slices-v2",
+            retrievalSlices: [{ queryScopeId: "obsolete", sliceId: "whole" }], status: "failed", errorCode: "snapshot_rejected",
+            counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
+              rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+          } })).rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
+        }
+        expect(await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: connectionId } })).toEqual(connected);
+        expect(await observer.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, orderBy: { generation: "asc" } })).toEqual(runs);
+      } finally {
+        pause.release.resolve();
+        await settleOperations(operations);
         await cleanupClinicalFixture(fixture);
       }
     }, TEST_TIMEOUT_MS);
@@ -997,7 +1067,7 @@ function createIngressDecryptBarrier(): IngressDecryptBarrier {
 }
 
 function createCallbackProbe(
-  options: { pauseAfterConnectionCreate?: boolean } = {},
+  options: { pauseAfterConnectionCreate?: boolean; pauseAfterConnectionUpdate?: boolean; persistenceTransaction?: number } = {},
 ): CallbackProbe {
   return {
     createPause: options.pauseAfterConnectionCreate
@@ -1006,6 +1076,8 @@ function createCallbackProbe(
           release: createDeferred(),
         }
       : null,
+    updatePause: options.pauseAfterConnectionUpdate ? { reached: createDeferred(), release: createDeferred() } : null,
+    persistenceTransaction: options.persistenceTransaction ?? 2,
     ingressRootReads: 0,
     ingressRootReadsDuringPersistence: 0,
     persistenceBackendPid: createDeferred<number>(),
@@ -1254,7 +1326,7 @@ function wrapCallbackPrismaClient(
           return Reflect.apply(target.$transaction, target, [
             async (tx: Prisma.TransactionClient) => {
               const backendPid = await readBackendPid(tx);
-              const persistenceTransaction = transactionNumber === 2;
+              const persistenceTransaction = transactionNumber === probe.persistenceTransaction;
               if (persistenceTransaction) {
                 probe.persistenceTransactionStarted = true;
                 probe.persistenceBackendPid.resolve(backendPid);
@@ -1286,6 +1358,15 @@ function wrapCallbackTransactionClient(
 ): Prisma.TransactionClient {
   const clinicalRecordConnection = new Proxy(tx.clinicalRecordConnection, {
     get(target, property) {
+      if (property === "update" && probe.updatePause) {
+        const pause = probe.updatePause;
+        return async (args: Prisma.ClinicalRecordConnectionUpdateArgs) => {
+          const updated = await target.update(args);
+          pause.reached.resolve();
+          await pause.release.promise;
+          return updated;
+        };
+      }
       if (property === "create") {
         return async (args: Prisma.ClinicalRecordConnectionCreateArgs) => {
           const created = await target.create(args);

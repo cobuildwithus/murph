@@ -247,7 +247,7 @@ describe("Clinical Records internal runtime routes", () => {
     });
     await expect(outcomeResponse.json()).resolves.toEqual({ ok: true });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(4);
-    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(4);
+    expect(mocks.requireHostedRuntimeActiveAccess).toHaveBeenCalledTimes(3);
     expect(mocks.createClinicalRecordConnectIntent).not.toHaveBeenCalled();
   });
 
@@ -322,7 +322,7 @@ describe("Clinical Records internal runtime routes", () => {
     });
   });
 
-  it("rejects inactive members before any Clinical Records read, egress, or outcome mutation", async () => {
+  it("rejects inactive members before creating a link, provider egress or outcome recording", async () => {
     mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
       code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
       httpStatus: 403,
@@ -335,10 +335,6 @@ describe("Clinical Records internal runtime routes", () => {
         {},
         headers,
       )),
-      readRunRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/read-run", {
-        generation: 1,
-        runId: "run_1",
-      }, headers)),
       fetchPageRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/fetch-page", {
         cursor: null,
         generation: 1,

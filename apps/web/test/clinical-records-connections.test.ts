@@ -70,13 +70,14 @@ describe("Clinical Records connection lifecycle", () => {
       connectedAt: createdAt, lastCheckedAt: null, lastErrorCode: null, status: "active", refreshTokenEncrypted: "sealed",
       retrievalRuns: [{ status: "retrieving", createdAt, completedAt: null, outcomeCountsJson: null, requests: [{ updatedAt }] }],
     };
-    mocks.connectionFindMany.mockResolvedValue([row, ...Array(19).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
+    mocks.connectionFindMany.mockResolvedValue([row, { ...row, retrievalRuns: [{ ...row.retrievalRuns[0], requests: [] }] }, ...Array(18).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
     const response = await GET(new Request("https://app.example.test/api/clinical-records/companion/sources"));
     const body = await response.json();
     expect(body.canAdd).toBe(false);
     expect(body.sources[0]).toEqual({ id: "source-a", providerId: "epic-example", name: "Sample Portal",
       state: "getting_records", reason: null, lastImport: null, connectedAt: createdAt.toISOString(), lastCheckedAt: null,
-      lastActivityAt: updatedAt.toISOString(), updates: "daily", actions: ["remove"] });
+      lastActivityAt: updatedAt.toISOString(), updates: "daily", actions: ["start_over", "remove"] });
+    expect(body.sources[1].lastActivityAt).toBe(createdAt.toISOString());
     expect(body.sources.at(-1)).toMatchObject({ state: "disconnected", updates: "one_time", lastActivityAt: null });
     expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { memberId: "member-a" }, orderBy: expect.arrayContaining([{ disconnectedAt: { sort: "desc", nulls: "first" } }]),
@@ -158,6 +159,8 @@ describe("Clinical Records connection lifecycle", () => {
         retrievalRuns: expect.objectContaining({
           select: {
             completedAt: true,
+            createdAt: true, generation: true,
+            requests: { orderBy: { updatedAt: "desc" }, take: 1, select: { updatedAt: true } },
             id: true,
             outcomeCountsJson: true,
             status: true,

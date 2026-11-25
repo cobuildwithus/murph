@@ -98,6 +98,8 @@ describe("Epic Clinical Records acquisition policy", () => {
     const plan = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-09-15T12:00:00Z"),
       pageCount: "100", resourceTypes: EPIC_BETA_RESOURCE_TYPES });
     const ids = plan.slices.map((slice) => slice.queryScopeId);
+    expect(ids).toHaveLength(25);
+    expect(EPIC_AUTOMATIC_QUERIES.filter(query => query.operation === "search")).toHaveLength(24);
     expect(ids).toContain("laboratory-observations");
     expect(ids).toContain("diagnostic-reports");
     expect(ids).toContain("document-references-notes");
@@ -452,11 +454,11 @@ function requireSlice(
 it("uses overlapping daily windows and restores lifetime acquisition every seventh generation", () => {
   const now = new Date("2026-09-17T12:00:00.000Z");
   const previous = buildEpicBetaRetrievalPlan({ frozenAt: now, pageCount: "100", resourceTypes: ["Patient", "Observation", "DocumentReference"] });
-  const daily = buildEpicDailyRetrievalPlan({ previous, now, generation: 2 });
+  const daily = buildEpicDailyRetrievalPlan({ previous, now, generation: 2 })!;
   expect(daily.slices.find((slice) => slice.queryScopeId === "patient-demographics")?.coverage).toBe("whole-family");
   const notes = daily.slices.find((slice) => slice.queryScopeId === "document-references-notes")!;
   expect(notes).toMatchObject({ coverage: "bounded-window", from: "2026-09-10T12:00:00.000Z", to: "2026-09-18T12:00:00.000Z" });
-  expect(buildEpicDailyRetrievalPlan({ previous: daily, now, generation: 7 }).slices.every((slice) => slice.coverage === "whole-family")).toBe(true);
+  expect(buildEpicDailyRetrievalPlan({ previous: daily, now, generation: 7 })!.slices.every((slice) => slice.coverage === "whole-family")).toBe(true);
 });
 
 
@@ -485,7 +487,7 @@ it("upgrades legacy care-plan queries for new daily runs without rewriting the f
       previous,
       now: new Date("2026-11-11T12:00:00.000Z"),
       generation,
-    });
+    })!;
     expect(previous.slices).toHaveLength(1);
     expect(previous.slices[0]?.queryScopeId).toBe(legacy.queryScopeId);
     const request = buildEpicBetaInitialFhirPageUrl({

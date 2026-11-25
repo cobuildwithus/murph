@@ -300,10 +300,9 @@ function ConnectionDetails({ connection, disabled, onDisconnect }: {
         ) : null}
         <p>Connected <time dateTime={connection.connectedAt}>{formatDate(connection.connectedAt)}</time>.</p>
         {connection.status !== "disconnected" ? <p>
-          {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Daily updates stopped. Reconnect to continue." : "One-time import."}
+          {connection.nextSyncAt ? <>Daily updates on. Next check around <time dateTime={connection.nextSyncAt}>{formatDate(connection.nextSyncAt)}</time>.</> : connection.status === "needs_reauth" ? "Sign in again to import more records." : "One-time import."}
           {connection.lastCheckedAt ? <> Last checked <time dateTime={connection.lastCheckedAt}>{formatDate(connection.lastCheckedAt)}</time>.</> : null}
         </p> : null}
-        {connection.importsRemaining === 0 ? <p>This source has reached its import limit. Saved records remain available.</p> : null}
         <p>Disconnect stops future imports. Records already saved in Murph stay there.</p>
         <Link href="/legal/privacy" className="w-fit underline underline-offset-4">How Murph uses your data</Link>
         {connection.status !== "disconnected" ? (
@@ -474,7 +473,7 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
     case "canceled":
       return { badgeVariant: "outline", detail: "Murph stopped copying records.", label: "Stopped" };
     default:
-      return { badgeVariant: "secondary", detail: "Your patient portal is connected and Murph is getting ready to copy records.", label: "Getting ready" };
+      return { badgeVariant: "outline", detail: "Sign in again to import records from this portal.", label: "No import available" };
   }
 }
 

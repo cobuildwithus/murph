@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-09-15
+Last verified: 2026-11-24
 
 ## Product outcome
 
@@ -10,11 +10,11 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The default Epic policy collects 25 queries across 16 resource families, including
+The default Epic policy uses 25 queries (one Patient read and 24 searches) across 16 resource families, including
 labs, reports, medications, allergies and other chart records. Hospital-approved
 imports are behind a default-empty provider flag and use a separate Epic client.
 The broader catalog has 40 queries across 17 families. Supported facts
-become canonical records; other evidence remains raw. Each import is bounded. Members can separately authorize daily checks where the provider grants persistent access.
+become canonical records; other evidence remains raw. Each import is bounded. App connections are one-time imports. The browser can request daily checks with separate consent at a portal configured for persistent access.
 
 This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
@@ -96,6 +96,13 @@ Search text travels in the JSON body. Place is the first matching facility’s c
 
 Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
 
+An open import offers `start_over`. The app uses last activity to decide when to show the action.
+Starting sign-in leaves the current import running. Successful same-patient authorization
+closes the previous open generation and creates its replacement in one transaction.
+If access ends, the runtime can still publish counts for pages it already fetched.
+With no receipt, reconnect becomes available 30 minutes after authorization ended.
+Counts can arrive later if the generation is still current.
+
 Completion distinguishes connected, canceled, expired, sign_in_required, already_connected, different_person, not_enough_access, too_many_sources and failed. An expired proof returns `expired` before accessing the OAuth session. A valid-proof replay returns a null outcome with a fresh list. Auth and consent failures use the existing HTTP error codes.
 
 ## Browser member flow
@@ -124,8 +131,7 @@ Completion distinguishes connected, canceled, expired, sign_in_required, already
    granted Epic beta search family.
 5. The callback locks the member, rechecks consent and suspension, then
    atomically persists the connection, next retrieval generation and existing
-   system-mailbox wake. Reauthorization reuses that connection only after its
-   prior run is finalized, with the same patient and FHIR base. The existing
+   system-mailbox wake. Reauthorization reuses the connection for the same patient and FHIR base. The existing
    Temporal handoff sweep re-signals pending work without creating another run.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through
@@ -511,12 +517,15 @@ See [Epic's CarePlan specification](https://fhir.epic.com/Specifications?api=106
 ## Daily checks with persistent access
 
 The existing signed device-sync recovery sweep admits at most twenty due
-clinical sources sequentially. It performs no FHIR egress. Admission checks AI
+clinical sources sequentially. It performs no FHIR egress. Admission checks product
 access, warms mailbox crypto outside the transaction, then locks the member and
-rechecks suspension, health-data consent, the latest completed run and the due
-time. It creates the next generation and the existing durable mailbox wake in
+rechecks suspension, health-data consent, the latest run and the due time.
+A due check can replace an open run after a full day without request activity.
+Supersession commits with the new run and wake. A retired query is skipped.
+If all queries have retired, polling ends and the source offers sign-in again. It creates the next generation and the existing durable mailbox wake in
 one transaction; mailbox recovery owns failed signals. Due rows that cannot be
-admitted back off one day to avoid monopolizing the bounded selection.
+admitted back off one day for ineligibility or 14 minutes for a transient failure.
+Clinical failures are logged independently of the device sweep response.
 
 Checks start no sooner than 24 hours after the previous check. Native date
 filters already supported by the policy use a seven-day overlapping window,
@@ -557,7 +566,7 @@ newer consent grant before mutation. Callback persistence also checks member
 suspension after locking. Network and crypto preparation remain outside the
 persistence transaction; mailbox sealing reuses the prewarmed ingress root. A timestamped
 `needs_reauth` run without outcome counts still has unfinished finalization:
-disconnect and withdrawal cancel it so it cannot strand reconnect. Runs with
+disconnect and withdrawal cancel it immediately. An ordinary reconnect can proceed after the receipt grace. Runs with
 finalized counts retain those results; late outcomes cannot alter a new generation.
 
 Account deletion removes requests, runs, OAuth sessions, intents and encrypted
@@ -566,6 +575,12 @@ connections. Normal vault export never exposes control-plane credentials.
 ## Deployment
 
 Apply the expand migration, then deploy the callback reader and scoped browser invalidation to every serving Web instance. Release the iOS caller after those readers converge. Once app starts are enabled, the Web rollback floor includes the callback and bridge readers for tagged native states and earlier stored returns. Keep the expanded schema during rollback.
+
+Deploy the lifecycle Web reader and generation-fenced transitions first. Existing Cloudflare and
+runtime versions already understand the unavailable replies and permanent outcome errors.
+The recovery behavior requires this Web version. Rolling back to PR 1 preserves stored rows,
+but restores the old reconnect blockers. Keep at least the PR 1 native callback reader while
+app sessions exist. No migration, runtime writer release or backfill is required.
 
 Recheck the bounded production aggregate for retained connections, runs,
 requests and unconsumed OAuth sessions before removing old hosted readers.

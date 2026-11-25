@@ -13,7 +13,7 @@ import { readEpicPersistentCredentials } from "./epic-import-config";
 import { openClinicalConnectionSecret, sealClinicalConnectionSecret } from "./secrets";
 import { refreshSmartAccessToken, type SmartTokenResponse } from "./smart";
 
-export const CLINICAL_DAILY_SYNC_MS = 24 * 60 * 60 * 1000;
+import { CLINICAL_DAILY_SYNC_MS } from "./run-lifecycle";
 export const CLEAR_CLINICAL_PERSISTENT_ACCESS = {
   refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null,
 } as const;

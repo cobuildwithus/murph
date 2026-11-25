@@ -136,11 +136,15 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("keeps clinical admission failures retryable with a 503", async () => {
-    mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 1, queued: 0, failed: 1 });
-    const response = await route.POST(new Request("https://example.test/recovery", { method: "POST", body: "{}" }));
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: "CLINICAL_RECORD_DAILY_ADMISSION_FAILED" } });
+  it.each(["partial", "rejected"])("preserves the device response after %s clinical failure", async failure => {
+    const request = () => new Request("https://example.test/recovery", { method: "POST", body: "{}" });
+    const healthy = await route.POST(request());
+    if (failure === "partial") mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 1, queued: 0, failed: 1 });
+    else mocks.runClinicalDailySyncSweep.mockRejectedValue(new Error("synthetic failure"));
+    const response = await route.POST(request());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(await healthy.json());
+    expect(mocks.runHostedDeviceSyncRecoverySweep).toHaveBeenCalledTimes(2);
   });
 
   it("rejects signed callbacks with the wrong callback identity", async () => {

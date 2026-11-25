@@ -6,14 +6,14 @@ import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
-import { canRepeatImport } from "./source-state";
+import { classifyClinicalRun, closeClinicalRunTx, lifecycleRunSelect, CLINICAL_DAILY_SYNC_MS } from "./run-lifecycle";
 import { readClinicalTransportAccess } from "./transport-access";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
 import { readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
+import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
 import { buildEpicDailyRetrievalPlan } from "./epic-policy";
-import { CLINICAL_DAILY_SYNC_MS } from "./persistent-access";
 import { appendClinicalRetrievalWakeTx, signalClinicalRetrievalWake } from "./retrieval";
 
 // Just under the 15-minute sweep, so the next sweep sees the row.
@@ -25,7 +25,7 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
   const stop = abortAtHostedRecoveryDeadline(input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS);
   const candidates = await getPrisma().clinicalRecordConnection.findMany({
     where: { member: { suspendedAt: null }, status: { in: ["active", "error"] }, nextSyncAt: { lte: now },
-      refreshTokenEncrypted: { not: null }, retrievalRuns: { none: { completedAt: null } } },
+      refreshTokenEncrypted: { not: null } },
     orderBy: [{ nextSyncAt: "asc" }, { id: "asc" }], take: 20,
     select: { id: true, memberId: true },
   });
@@ -68,18 +68,32 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
       if (!(await readHostedConsentStatus({ memberId: input.memberId, prisma: tx })).launchGranted) return null;
       const connection = await tx.clinicalRecordConnection.findFirst({
         where: { id: input.connectionId, memberId: input.memberId },
-        include: { retrievalRuns: { orderBy: { generation: "desc" }, take: 1 } },
+        include: { retrievalRuns: { orderBy: { generation: "desc" }, take: 1, select: { ...lifecycleRunSelect, grantedScopesJson: true, retrievalPlanJson: true } } },
       });
       const previous = connection?.retrievalRuns[0];
-      if (!connection || !["active", "error"].includes(connection.status) || !connection.refreshTokenEncrypted
-        || !connection.patientIdEncrypted || !connection.nextSyncAt || connection.nextSyncAt > input.now
-        || !previous || !canRepeatImport(previous) || previous.status === "needs_reauth") return null;
+      if (!connection || !previous || previous.status === "needs_reauth" || !hasDueClinicalGrant(connection, input.now)) return null;
+      const lifecycle = classifyClinicalRun(previous, input.now);
+      if (lifecycle !== "available" && lifecycle !== "recoverable") return null;
       const grantedScopesJson = previous.grantedScopesJson;
       if (!Array.isArray(grantedScopesJson) || !grantedScopesJson.every((value) => typeof value === "string")) return null;
       const generation = connection.retrievalGeneration + 1;
       const retrievalPlanJson = buildEpicDailyRetrievalPlan({
         previous: clinicalFhirRetrievalPlanSchema.parse(previous.retrievalPlanJson), now: input.now, generation,
       });
+      if (lifecycle === "recoverable") {
+        const closed = await closeClinicalRunTx(tx, {
+          memberId: input.memberId, runId: previous.id, generation: previous.generation,
+        }, retrievalPlanJson ? "canceled" : "failed", retrievalPlanJson ? "superseded" : "daily-queries-retired", input.now);
+        if (!closed) return null;
+      }
+      if (!retrievalPlanJson) {
+        // No grant can be polled. A new authorization can supply a current plan.
+        await tx.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
+          ...CLEAR_CLINICAL_PERSISTENT_ACCESS, accessTokenEncrypted: null, accessTokenExpiresAt: null,
+          patientIdEncrypted: null, status: "needs_reauth", lastErrorCode: "daily-queries-retired",
+        } });
+        return null;
+      }
       const runId = `crr_${randomBytes(24).toString("base64url")}`;
       await tx.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
         retrievalGeneration: generation, status: "active", nextSyncAt: new Date(input.now.getTime() + CLINICAL_DAILY_SYNC_MS),
@@ -95,4 +109,11 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
     await signalClinicalRetrievalWake(wake, input.abortSignal);
     return true;
   });
+}
+
+function hasDueClinicalGrant(connection: {
+  status: string; refreshTokenEncrypted: string | null; patientIdEncrypted: string | null; nextSyncAt: Date | null;
+}, now: Date) {
+  return ["active", "error"].includes(connection.status) && Boolean(connection.refreshTokenEncrypted)
+    && Boolean(connection.patientIdEncrypted) && connection.nextSyncAt !== null && connection.nextSyncAt <= now;
 }

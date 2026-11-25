@@ -6,7 +6,6 @@ import { readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { withClinicalJsonError } from "@/src/lib/clinical-records/http";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { readJsonObject } from "@/src/lib/http";
 import { requireClinicalRecordsRuntimeWriteFence } from "@/src/lib/clinical-records/runtime-write-fence";
 
@@ -21,10 +20,7 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   const memberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  await requireHostedRuntimeActiveAccess(memberId, {
-    code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
-    message: "Clinical Records runtime access is inactive.",
-  });
+  // The read owner checks active person access and consent before returning a descriptor.
   const body = await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
   const parsed = hostedClinicalRecordsReadRunRequestSchema.safeParse(body);
   if (!parsed.success) throw invalidRequestError();

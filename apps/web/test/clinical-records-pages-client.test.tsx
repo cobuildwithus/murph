@@ -1270,6 +1270,8 @@ describe("Clinical Records status page", () => {
     expect(rendered.container.textContent).toContain("2 items saved for reference");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
     expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
+    expect(rendered.container.textContent).toContain("Sign in again to import more records.");
+    expect(rendered.container.textContent).not.toContain("Daily updates");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Portal access ended");
     assert.ok(reauthorizationBadge);
