@@ -427,7 +427,7 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])("checks every approval before discovery and at callback after selector rollback (current=%s)", async current => {
+  it.each(["current", "before exchange", "before persistence"])("checks signed callbacks across selector rollback (%s)", async decision => {
     provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
@@ -449,13 +449,18 @@ describe("Clinical Records authorization persistence", () => {
       request: new Request("https://app.example.test/start", { method: "POST" }) });
     expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data.clientId).toBe("signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "legacy");
-    if (current) {
+    if (decision === "current") {
       await finishAuthorization();
       expect(harness.durableConnections).toMatchObject([{ requiresProcessorApprovals: true }]);
     } else {
+      if (decision === "before persistence") harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants);
       harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants.slice(1));
       await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED" });
       expect(harness.durableConnections).toHaveLength(0);
+      if (decision === "before exchange") {
+        expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+        return;
+      }
     }
     expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
       auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),

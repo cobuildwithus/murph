@@ -51,10 +51,11 @@ The runner tests the fixed destinations and hosted inference selection against
 the same table that supplies the app notices. Imported copies remain available
 in the vault after withdrawal.
 
-Before the replacement rollout, confirm the deployed endpoints, signed entities
-and published disclosures. Keep the four optional helpers named unless their
-inputs are restricted. The existing public registration can continue throughout
-schema, Web and app rollout.
+Before the owner attests in Epic:
+
+1. Confirm from registration and deployment history that no replacement-profile connection was saved before the profile marker deployed. The client ID is inside the encrypted grant, so existing unmarked rows cannot be backfilled from control metadata.
+2. Reconcile the published subprocessor list with the processor inventory.
+3. Confirm which optional helpers are enabled in production and their deployed routes. Keep helpers that may receive hospital content individually named until their inputs are restricted.
 
 The synthetic PostgreSQL test admitted a daily run with five current grants,
 fetched a hospital page, withdrew one grant and observed no further hospital

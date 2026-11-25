@@ -55,12 +55,12 @@ Keep the public registration’s existing sharing answer. For the replacement
 registration, verify these three classes before attesting that members approve
 each entity individually.
 
-1. **Murph chooses the company.** The app shows the company’s legal name and purpose and records one current decision per company. OpenAI reads imported records for extraction, chat and scheduled turns. The hosted model connects directly to OpenAI and has no other-company fallback.
+1. **Murph chooses the company.** The app shows the company’s brand name and purpose and records one current decision per company. OpenAI reads imported records for extraction, chat and scheduled turns. The hosted model connects directly to OpenAI and has no other-company fallback.
 2. **The member chooses the destination.** Connecting an app or custom connector, selecting a website or person, or asking for a call, email or export authorizes that individual destination. A detailed message to the member’s own phone is delivery to the member.
-3. **Murph can invoke an optional helper.** xAI search, Google Gemini video questions, ElevenLabs voice and Mapbox place lookups can carry details from a record. Each has its own required approval. Workers AI transcribes audio attachments, while hospital documents use local preparation. Exa has no hosted integration.
+3. **Murph can invoke an optional helper.** xAI search, Google Gemini video questions, ElevenLabs voice and Mapbox place lookups can carry details from a record. Each has its own required approval. Workers AI transcribes audio attachments, while hospital documents use local preparation.
 
-Check the released app’s one-tick-per-company screen, deployed routes, signed
-legal names and published subprocessor list. Pure hosting and storage belong
+Check the released app’s one-tick-per-company screen, deployed routes and
+published subprocessor list. Pure hosting and storage belong
 on that list. Missing or withdrawn approval stops new replacement starts and
 hospital reads. A transfer already in flight can finish and ordinary or
 scheduled turns can still read a previously imported copy. The owner submits

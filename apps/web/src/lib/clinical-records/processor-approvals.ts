@@ -19,7 +19,7 @@ export function setClinicalProcessorApproval(auth: HostedNativeMemberAuth, proce
     }
     await recordHostedConsentDecisionTx({ tx, memberId, scope: clinicalProcessorScope(processor),
       decision: approved ? "allow" : "deny", source: "clinical-records.companion", now: new Date(), metadata: null,
-      acceptedDocumentVersions: { [processor.id]: version } });
+      expectedDocumentVersions: { [processor.id]: processor.version }, acceptedDocumentVersions: { [processor.id]: version } });
     return { processors: await readClinicalProcessorApprovals(memberId, tx) };
   });
 }

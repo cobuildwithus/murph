@@ -268,6 +268,7 @@ async function finishAuthorization(input: {
     throw providerConfigurationChangedError();
   }
   const configuration = resolveEpicClient(provider, { clientId: session.clientId, grant: "callback" });
+  if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
     encrypted: session.codeVerifierEncrypted,

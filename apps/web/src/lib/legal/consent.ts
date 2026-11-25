@@ -8,7 +8,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 
-import { clinicalProcessors, clinicalProcessorScope } from "../clinical-records/processor-registry";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -465,11 +464,11 @@ export async function revokeHostedConsentScope(input: {
   });
 }
 
-type DecisionScope = HostedConsentScope | ReturnType<typeof clinicalProcessorScope>;
+type ProcessorScope = `clinical.processor.${string}`;
 
 /** Caller holds the member lock so consent and the feature's effects commit together. */
-export async function recordHostedConsentDecisionTx(input: ({ scope: HostedConsentScope; acceptedDocumentVersions?: never }
-  | { scope: ReturnType<typeof clinicalProcessorScope>; acceptedDocumentVersions: Record<string, string> }) & {
+export async function recordHostedConsentDecisionTx(input: ({ scope: HostedConsentScope; acceptedDocumentVersions?: never; expectedDocumentVersions?: never }
+  | { scope: ProcessorScope; acceptedDocumentVersions: Record<string, string>; expectedDocumentVersions: Record<string, string> }) & {
   tx: Prisma.TransactionClient;
   memberId: string;
   decision: "allow" | "deny";
@@ -483,7 +482,7 @@ export async function recordHostedConsentDecisionTx(input: ({ scope: HostedConse
   const prior = grant ? null : await tx.hostedConsentEvent.findFirst({
     where: { memberId, scope }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { action: true },
   });
-  const expected = currentDecisionVersions(scope);
+  const expected = input.expectedDocumentVersions ?? buildCurrentHostedConsentDocumentVersions(input.scope);
   if (input.acceptedDocumentVersions) validateExactVersions(input.acceptedDocumentVersions, expected, scope);
   const allowed = matchesConsentDecision(grant, input.acceptedDocumentVersions);
   if (decision === "allow" ? allowed : (grant?.status === "revoked" || prior?.action === "declined" || prior?.action === "revoked")) return;
@@ -789,14 +788,7 @@ function matchesConsentDecision(grant: HostedConsentGrant | null, exactVersions?
   return Object.entries(exactVersions).every(([id, version]) => recorded[id] === version);
 }
 
-function currentDecisionVersions(scope: DecisionScope): Record<string, string> {
-  for (const processor of clinicalProcessors) {
-    if (scope === clinicalProcessorScope(processor)) return { [processor.id]: processor.version };
-  }
-  return buildCurrentHostedConsentDocumentVersions(parseHostedConsentScope(scope));
-}
-
-function validateExactVersions(submitted: Record<string, string>, expected: Record<string, string>, scope: DecisionScope) {
+function validateExactVersions(submitted: Record<string, string>, expected: Record<string, string>, scope: HostedConsentScope | ProcessorScope) {
   const unknownDocumentIds = Object.keys(submitted)
     .filter((documentId) => !Object.prototype.hasOwnProperty.call(expected, documentId));
 

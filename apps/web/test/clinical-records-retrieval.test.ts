@@ -25,6 +25,7 @@ import {
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readClinicalTransportAccess: vi.fn(),
+  hasClinicalProcessorApprovals: vi.fn(),
   openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   openClinicalPageCursor: vi.fn(),
@@ -33,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   openClinicalDocumentTicket: vi.fn(),
 }));
 
+vi.mock("@/src/lib/clinical-records/processor-registry", () => ({ hasClinicalProcessorApprovals: mocks.hasClinicalProcessorApprovals }));
 vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.readClinicalTransportAccess }));
 
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
@@ -296,15 +298,20 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.pageCount).toBe(1);
   });
 
-  it("fences egress when consent is withdrawn after initial admission", async () => {
+  it.each(["processor-admission-blocked", "member-processing-inactive"])("closes the run before egress if consent changes at claim (%s)", async errorCode => {
     const harness = createHarness(["Observation"]);
-    harness.hooks.afterRequestUpsert = async () => { mocks.readClinicalTransportAccess.mockResolvedValue(false); };
+    harness.state.run.connection.requiresProcessorApprovals = true;
+    mocks.hasClinicalProcessorApprovals.mockResolvedValue(true);
+    harness.hooks.afterRequestUpsert = async () => {
+      if (errorCode === "processor-admission-blocked") mocks.hasClinicalProcessorApprovals.mockResolvedValue(false);
+      else mocks.readClinicalTransportAccess.mockResolvedValue(false);
+    };
     const fetchImpl = vi.fn();
     await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: queryObservationPageRequest("revoked") }))
-      .resolves.toMatchObject({ status: "unavailable", errorCode: "member-processing-inactive", retryable: false });
+      .resolves.toMatchObject({ status: "unavailable", errorCode, retryable: false });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(harness.state.run.providerRequestCount).toBe(0);
-    expect(harness.state.run).toMatchObject({ status: "failed", lastErrorCode: "member-processing-inactive" });
+    expect(harness.state.run).toMatchObject({ status: "failed", lastErrorCode: errorCode, completedAt: expect.any(Date) });
   });
 
   it("finalizes saved counts after authorization ends without reactivating access", async () => {
@@ -1839,6 +1846,7 @@ function buildRun(
   return {
     completedAt: null as Date | null,
     connection: {
+      requiresProcessorApprovals: false,
       accessTokenEncrypted: "encrypted-access-token" as string | null,
       accessTokenExpiresAt: null as Date | null,
       fhirBaseHash: sha256Hex("https://fhir.example.test/FHIR/R4"),

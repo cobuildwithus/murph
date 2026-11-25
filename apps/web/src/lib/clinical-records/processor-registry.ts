@@ -3,7 +3,7 @@ import { clinicalRecordRecipients } from "@murphai/hosted-execution/clinical-rec
 import type { Prisma } from "@prisma/client";
 import { clinicalRecordsError } from "./errors";
 
-/** One notice and one ledger scope per legal entity, independent of launch consent. */
+/** One notice and one ledger scope per named company, independent of launch consent. */
 export const clinicalProcessors = clinicalRecordRecipients.filter(row => row.kind === "named");
 
 export type ClinicalProcessor = (typeof clinicalProcessors)[number];

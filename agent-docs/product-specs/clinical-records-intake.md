@@ -104,8 +104,8 @@ bearer. Withdrawal remains available after product access lapses. Neither
 decision changes the medical-record message setting. Withdrawing health consent
 still turns that setting off and blocks further grants until reconsent.
 
-The asymmetric registration checks every current notice before SMART discovery
-and again under the member lock before saving the connection. Missing approvals
+The asymmetric registration checks every current notice before SMART discovery,
+before callback token exchange and again under the member lock before saving the connection. Missing approvals
 return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
 governs daily admission and transport even after the start selector changes.
 Legacy profiles keep their current admission rules.
@@ -114,18 +114,20 @@ For the replacement Epic registration, the sharing answer rests on three rules.
 
 1. **Named companies.** When Murph chooses a company that can read hospital information, the member approves that company before import. OpenAI reads records for enrichment, chat and scheduled turns. Hosted inference goes directly to OpenAI, including on a transport retry.
 2. **Member-directed destinations.** Connecting an app or connector, choosing a website or recipient, or requesting a call, email or export authorizes that destination. Delivery to the member’s own phone includes the detail text they enabled.
-3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally. Hosted runs have no Exa search integration.
+3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally.
 
 The app shows all five named companies. Current grants let the connection and
 its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
-admission or hospital page/document request. An in-flight transfer may finish.
+admission or hospital page/document request. Web closes a blocked open run as
+failed and preserves its daily grant. Re-approval permits the next due check.
+The companion source reports `reason: "processor_approval_required"` while
+approval pauses an import or daily checks. `updates` still reports the hospital
+grant. A transfer already in flight may finish.
 Records already imported stay in the vault and remain available to ordinary and
 scheduled turns. Member-directed actions continue to use their own authority.
 Hosting, encrypted storage and pointer-only workflows stay on the subprocessor list.
 
-The runner test compares its fixed destinations and allowed model providers
-with the recipient table in `packages/hosted-execution/src/clinical-record-recipients.ts`.
-A new fixed recipient requires a classification before the test passes.
+The classification test covers the runner’s by-host intercept table and allowed model providers, but cannot see deployment secret allowlists or a tool that calls a new fixed origin through the open-internet path.
 Deploy the nullable profile column first. Keep the public selector active until
 all Web replicas enforce the same registry, then release the native approval
 screen and verify the company names and routes before selecting the replacement.

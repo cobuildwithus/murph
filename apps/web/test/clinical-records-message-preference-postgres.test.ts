@@ -159,14 +159,26 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     expect(await read()).toEqual({ sources: [], canAdd: true });
     const source = { memberId, sourceSystem: "epic-fhir", displayName: "Synthetic portal", connectedAt: new Date(),
       fhirBaseUrlEncrypted: "synthetic-sealed", fhirBaseHash: "synthetic-hash", requestedScopesJson: [] };
-    const add = (id: string, persistent: boolean) => getPrisma().clinicalRecordConnection.create({
-      data: { ...source, id, providerDirectoryEntryId: id, refreshTokenEncrypted: persistent ? "synthetic-sealed" : null },
+    const add = (id: string, persistent: boolean, requiresProcessorApprovals = false) => getPrisma().clinicalRecordConnection.create({
+      data: { ...source, id, requiresProcessorApprovals, providerDirectoryEntryId: id, refreshTokenEncrypted: persistent ? "synthetic-sealed" : null },
     });
     const disconnect = async (id: string) => (await remove(request(`sources/${id}/remove`, "POST"),
       { params: Promise.resolve({ id }) })).json();
     const once = await add(randomUUID(), false);
     expect(await read()).not.toHaveProperty("messageMode");
-    const daily = await add(randomUUID(), true);
+    const daily = await add(randomUUID(), true, true);
+    const reasons = async () => (await read()).sources.map((row: { reason: string | null }) => row.reason);
+    expect(await reasons()).toEqual(expect.arrayContaining(["processor_approval_required", null]));
+    for (const { id, version } of clinicalProcessors) {
+      await decide(request(`processor-approvals/${id}`, "POST", { approved: true, version }), { params: Promise.resolve({ id }) });
+    }
+    expect(await reasons()).toEqual([null, null]);
+    await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } },
+      data: { documentVersionsJson: { openai: "obsolete" } } });
+    expect((await read()).sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: daily.id, updates: "daily", reason: "processor_approval_required" }),
+      expect.objectContaining({ id: once.id, reason: null }),
+    ]));
     expect((await postMode("detail")).status).toBe(200);
     const projection = await read();
     expect(projection).toMatchObject({ messageMode: "detail", canAdd: true });
@@ -179,6 +191,6 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     const disconnected = await disconnect(daily.id);
     expect(disconnected).not.toHaveProperty("messageMode");
     expect(disconnected.sources).toHaveLength(2);
-    expect(disconnected.sources).toEqual(Array(2).fill(expect.objectContaining({ updates: "one_time", state: "disconnected" })));
+    expect(disconnected.sources).toEqual(Array(2).fill(expect.objectContaining({ updates: "one_time", state: "disconnected", reason: null })));
   });
 });

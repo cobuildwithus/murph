@@ -106,7 +106,17 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     expect((await fetchPage()).status).toBe("page");
     await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
     expect(await read()).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
-    expect(await fetchPage()).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
+    expect(await fetchPage()).toMatchObject({ status: "unavailable", errorCode: "run-already-terminal" });
+    expect(await f.runs()).toMatchObject([{ status: "failed", completedAt: expect.any(Date), lastErrorCode: "processor-admission-blocked" }]);
+    const paused = await f.row();
+    expect(paused.refreshTokenEncrypted).toBe("synthetic-refresh");
+    await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+    expect(await admitClinicalDailySync({ ...pointer, now: paused.nextSyncAt! })).toBe(true);
+    // A dropped wake can leave a queued run for the daily sweep to settle.
+    await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+    expect(await admitClinicalDailySync({ ...pointer, now: (await f.row()).nextSyncAt! })).toBe(false);
+    expect(await f.runs()).toHaveLength(2);
+    expect((await f.runs()).every(run => run.status === "failed" && run.lastErrorCode === "processor-admission-blocked")).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
