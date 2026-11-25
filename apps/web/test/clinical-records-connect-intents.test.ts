@@ -72,7 +72,7 @@ describe("Clinical Records connect intents", () => {
     });
     expect(mocks.oauthUpdateMany).toHaveBeenCalledWith({
       data: { consumedAt: now },
-      where: { consumedAt: null, memberId: "member_clinical_1" },
+      where: { appReturn: null, consumedAt: null, memberId: "member_clinical_1" },
     });
     expect(mocks.create).toHaveBeenCalledTimes(1);
     expect(new URL(result.connectUrl).pathname).toBe("/records/connect");

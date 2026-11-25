@@ -1,5 +1,7 @@
+import { clinicalReturnQuery, clinicalStateAppReturn } from "@/src/lib/clinical-records/return-query";
 import {
   finishClinicalRecordAuthorization,
+  readClinicalCallbackAppReturn,
 } from "@/src/lib/clinical-records/control-plane";
 import {
   isClinicalRecordsControlPlaneError,
@@ -14,6 +16,13 @@ export async function GET(request: Request): Promise<Response> {
   const providerDenied = url.searchParams.get("error") === "access_denied";
   const providerError = url.searchParams.has("error");
   try {
+    const app = clinicalStateAppReturn(state) ?? await readClinicalCallbackAppReturn(state);
+    if (app) {
+      const query = clinicalReturnQuery(url.searchParams) ?? new URLSearchParams({ state, error: "invalid_response" });
+      const destination = new URL(`/api/device-sync/companion/connect-return/${app}`, resolveHostedPublicBaseUrl() ?? url.origin);
+      destination.search = query.toString();
+      return redirect(destination);
+    }
     await finishClinicalRecordAuthorization({
       code: url.searchParams.get("code"),
       providerDenied,
@@ -63,6 +72,10 @@ function callbackRedirect(request: Request, result: ClinicalRecordCallbackMarker
   const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(request.url).origin;
   const destination = new URL("/records", `${baseUrl}/`);
   destination.searchParams.set("clinicalRecords", result);
+  return redirect(destination);
+}
+
+function redirect(destination: URL) {
   return new Response(null, {
     headers: {
       "Cache-Control": "no-store",

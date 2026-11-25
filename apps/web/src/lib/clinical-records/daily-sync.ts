@@ -6,6 +6,7 @@ import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { unwrapHostedDomainRootForWeb } from "../hosted-crypto/domain-root-store";
+import { canRepeatImport } from "./source-state";
 import { readClinicalTransportAccess } from "./transport-access";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, HOSTED_RECOVERY_LOCK_TIMEOUT_MS, HOSTED_RECOVERY_TRANSACTION_OPTIONS } from "../hosted-orchestration/recovery-batch";
@@ -72,7 +73,7 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
       const previous = connection?.retrievalRuns[0];
       if (!connection || !["active", "error"].includes(connection.status) || !connection.refreshTokenEncrypted
         || !connection.patientIdEncrypted || !connection.nextSyncAt || connection.nextSyncAt > input.now
-        || !previous?.completedAt || previous.status === "needs_reauth") return null;
+        || !previous || !canRepeatImport(previous) || previous.status === "needs_reauth") return null;
       const grantedScopesJson = previous.grantedScopesJson;
       if (!Array.isArray(grantedScopesJson) || !grantedScopesJson.every((value) => typeof value === "string")) return null;
       const generation = connection.retrievalGeneration + 1;

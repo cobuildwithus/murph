@@ -10,12 +10,11 @@ the provider's own SMART-on-FHIR sign-in, and import the authorized record
 families into the member's encrypted vault. The common path asks for no portal
 password inside Murph and no manual file download.
 
-The default Epic policy collects 24 queries across 16 resource families, including
+The default Epic policy collects 25 queries across 16 resource families, including
 labs, reports, medications, allergies and other chart records. Hospital-approved
 imports are behind a default-empty provider flag and use a separate Epic client.
 The broader catalog has 40 queries across 17 families. Supported facts
-become canonical records; other evidence remains raw. This is a bounded
-one-time import, not a complete medical record or continuous sync.
+become canonical records; other evidence remains raw. Each import is bounded. Members can separately authorize daily checks where the provider grants persistent access.
 
 This first release is an Epic SMART foundation, not a TEFCA/QHIN replacement.
 It does not claim nationwide identity matching, discover every organization a
@@ -81,7 +80,25 @@ recover some facts while leaving others unresolved; it does not establish
 complete chart coverage. Existing imports are not silently rewritten: new
 retrieval batches admit their eligible records through the ordinary import path.
 
-## Member flow
+## Companion API
+
+The iOS app uses bearer authentication under `/api/clinical-records/companion`.
+
+| Method and path | Body | Response |
+| --- | --- | --- |
+| GET `sources` | — | `{ sources, canAdd }` |
+| POST `providers/search` | `{ query }` | `{ providers: [{ id, name, place, logoPath? }] }`, up to 20 |
+| POST `start` | `{ providerId, appReturn }` | `{ authorizationUrl, completionProof }` |
+| POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd }` |
+| POST `sources/[id]/remove` | — | `{ sources, canAdd }` |
+
+Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
+
+Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
+
+Completion distinguishes connected, canceled, expired, sign_in_required, already_connected, different_person, not_enough_access, too_many_sources and failed. An expired proof returns `expired` before accessing the OAuth session. A valid-proof replay returns a null outcome with a fresh list. Auth and consent failures use the existing HTTP error codes.
+
+## Browser member flow
 
 1. The assistant or signed-in dashboard creates a 15-minute, single-use,
    member-bound connect intent. Generic intents carry no provider choice. The
@@ -89,7 +106,7 @@ retrieval batches admit their eligible records through the ordinary import path.
    routine server request logs, then moves into the current history entry so a
    sign-in or pre-authorization reload can resume after the visible fragment is
    scrubbed. It is removed before navigation to Epic. At most one incomplete intent may exist per
-   member; creating a new intent supersedes any prior uncompleted flow.
+   member; creating a new intent supersedes any prior uncompleted browser flow.
 2. The connect page verifies the current Murph app session and health-data
    consent, then searches Murph's server-owned Epic directory. A provider may
    be suggested from member-entered city/state text, but the member chooses the
@@ -547,6 +564,8 @@ Account deletion removes requests, runs, OAuth sessions, intents and encrypted
 connections. Normal vault export never exposes control-plane credentials.
 
 ## Deployment
+
+Apply the expand migration, then deploy the callback reader and scoped browser invalidation to every serving Web instance. Release the iOS caller after those readers converge. Once app starts are enabled, the Web rollback floor includes the callback and bridge readers for tagged native states and earlier stored returns. Keep the expanded schema during rollback.
 
 Recheck the bounded production aggregate for retained connections, runs,
 requests and unconsumed OAuth sessions before removing old hosted readers.

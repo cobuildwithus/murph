@@ -14,7 +14,7 @@ const HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_DOMAIN =
 const HOSTED_DEVICE_SYNC_APP_COMPLETION_PROOF_TOKEN_PREFIX =
   "murph_device_sync_app_completion_v1";
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_VERSION = 1;
-const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS = 15 * 60;
+export const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS = 15 * 60;
 const HOSTED_DEVICE_SYNC_CALLBACK_PROOF_TOKEN_PREFIX = "murph_device_sync_callback_v1";
 const HOSTED_DEVICE_SYNC_PROVIDER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
 const HOSTED_DEVICE_SYNC_STATE_PATTERN = /^[A-Za-z0-9_-]{16,128}$/u;
@@ -171,10 +171,6 @@ function readHostedDeviceSyncCallbackProofTokenError(
     return "CALLBACK_PROOF_MALFORMED";
   }
 
-  if (expiresAtMs <= nowMs) {
-    return "CALLBACK_PROOF_EXPIRED";
-  }
-
   const expectedAuthenticator = createHostedDeviceSyncCallbackProofAuthenticator(scope, {
     expiresAtMs,
     memberId: input.memberId,
@@ -183,7 +179,8 @@ function readHostedDeviceSyncCallbackProofTokenError(
     state,
   });
 
-  return safeEqual(authenticator, expectedAuthenticator) ? null : "CALLBACK_PROOF_MISMATCH";
+  if (!safeEqual(authenticator, expectedAuthenticator)) return "CALLBACK_PROOF_MISMATCH";
+  return expiresAtMs <= nowMs ? "CALLBACK_PROOF_EXPIRED" : null;
 }
 
 export function readHostedDeviceSyncCallbackState(url: URL): string | null {

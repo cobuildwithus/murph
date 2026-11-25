@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  verifyNative: vi.fn(),
+  bearer: vi.fn(),
   appendClinicalRetrievalWakeTx: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
@@ -25,6 +27,9 @@ const mocks = vi.hoisted(() => ({
   unwrapHostedDomainRootForWeb: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.bearer }));
+vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.verifyNative }));
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ assertActiveHostedMemberAccessAllowed: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
@@ -63,6 +68,10 @@ vi.mock("@/src/lib/clinical-records/retrieval", () => ({
   signalClinicalRetrievalWake: mocks.signalClinicalRetrievalWake,
 }));
 
+import { POST as nativeComplete } from "../app/api/clinical-records/companion/complete/route";
+import { POST as nativeStart } from "../app/api/clinical-records/companion/start/route";
+import { buildHostedDeviceSyncAppCompletionProof } from "@/src/lib/device-sync/browser-callback-proof";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-policy";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
@@ -266,15 +275,33 @@ describe("Clinical Records authorization persistence", () => {
     },
   );
 
-  it("bounds new source retention under the member lock", async () => {
-    const harness = createHarness(null);
-    harness.tx.clinicalRecordConnection.findMany.mockResolvedValue(
-      Array.from({ length: 20 }, (_, index) => ({ id: `source_${index}` })),
-    );
+  it.each([false, true])("bounds new and reactivated sources under the member lock (reactivating=%s)", async reactivating => {
+    const existing = existingConnection("disconnected");
+    existing.retrievalRuns[0]!.completedAt = new Date();
+    const harness = createHarness(reactivating ? existing : null);
+    const sources = Array.from({ length: 20 }, (_, i) => ({
+      id: `source_${i}`, memberId: MEMBER_ID, status: i === 0 ? "needs_reauth" : "active",
+    }));
+    sources.push({ id: existing.id, memberId: MEMBER_ID, status: "disconnected" },
+      { id: "other-source", memberId: "other-member", status: "active" });
+    harness.tx.clinicalRecordConnection.findMany.mockImplementation(({ where, take }) => {
+      expect(harness.transactionDepth).toBe(1);
+      return sources.filter(row => row.memberId === where.memberId && row.status !== where.status.not).slice(0, take);
+    });
     mocks.getPrisma.mockReturnValue(harness.prisma);
     await expect(finishAuthorization()).rejects.toMatchObject({
       code: "CLINICAL_RECORD_SOURCE_LIMIT_REACHED",
     });
+    const countQuery = harness.tx.clinicalRecordConnection.findMany;
+    expect(countQuery).toHaveBeenCalledExactlyOnceWith({
+      where: { memberId: MEMBER_ID, status: { not: "disconnected" } },
+      select: { id: true }, take: 20,
+    });
+    const lockIndex = harness.oauthSessionLock.mock.calls.findIndex(([sql, memberId]) =>
+      sql.join("?").includes('from "hosted_member" where "id" = ? for update') && memberId === MEMBER_ID);
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(harness.oauthSessionLock.mock.invocationCallOrder[lockIndex]).toBeLessThan(countQuery.mock.invocationCallOrder[0]!);
+    expect(harness.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
     expect(harness.connectionCreate).not.toHaveBeenCalled();
     expect(harness.retrievalRunCreate).not.toHaveBeenCalled();
   });
@@ -955,7 +982,167 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
     expect(harness.connectionCreate).not.toHaveBeenCalled();
   });
+  it.each(["code=code", "error=access_denied"])("rejects wrong proof before any state access for %s", async query => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    const response = await nativeComplete(nativeReturn(query, "different-session"));
+    expect((await response.json()).error.code).toBe("CALLBACK_PROOF_INVALID");
+    expect(h.transactionCalls).toBe(0);
+    expect(h.oauthSessionFindUnique).not.toHaveBeenCalled();
+    expect(h.oauthSessionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns expired for an authenticated old proof before accessing the OAuth row", async () => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    const now = new Date(Date.now() - 16 * 60_000);
+    const expired = await nativeComplete(nativeReturn("code=code", nativeAuth.sessionId, now));
+    expect(expired.status).toBe(200);
+    expect(await expired.json()).toEqual({ outcome: "expired", sources: [], canAdd: true });
+    const mismatch = await nativeComplete(nativeReturn("code=code", "other-session", now));
+    expect(mismatch.status).toBe(400);
+    expect((await mismatch.json()).error.code).toBe("CALLBACK_PROOF_INVALID");
+    expect(h.transactionCalls).toBe(0);
+    expect(h.oauthSessionFindUnique).not.toHaveBeenCalled();
+    expect(h.oauthSessionUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it("expires a native session after ten minutes while the proof is still valid", async () => {
+    const h = createHarness(null, { ...nativeRow, expiresAt: new Date(Date.now() - 1) });
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    expect((await (await nativeComplete(nativeReturn("code=code"))).json()).outcome).toBe("expired");
+    expect(h.oauthSessionUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it("keeps app and browser return authority separate even with identical member and session ids", async () => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_OAUTH_STATE_INVALID" });
+    expect(h.oauthSessionUpdateMany).not.toHaveBeenCalled();
+    const browser = createHarness(null);
+    mocks.getPrisma.mockReturnValue(browser.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    expect((await (await nativeComplete(nativeReturn("code=code"))).json()).outcome).toBe("failed");
+    expect(browser.oauthSessionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([{ memberId: "other-member" }, { webSessionId: "other-session" }])(
+    "checks the native row owner independently of a valid proof", async mismatch => {
+      const h = createHarness(null, { ...nativeRow, ...mismatch });
+      mocks.getPrisma.mockReturnValue(h.prisma);
+      mocks.bearer.mockResolvedValue(nativeAuth);
+      expect((await (await nativeComplete(nativeReturn("error=access_denied"))).json()).outcome).toBe("failed");
+      expect(h.oauthSessionUpdateMany).not.toHaveBeenCalled();
+      expect(h.oauthSessionDeleteMany).not.toHaveBeenCalled();
+    });
+
+  it("rejects a consumed grant removed by consent withdrawal during exchange", async () => {
+    const h = createHarness(null, nativeRow);
+    const exchange = mocks.exchangeSmartAuthorizationCode.getMockImplementation()!;
+    mocks.exchangeSmartAuthorizationCode.mockImplementationOnce(async (...args) => {
+      h.oauthSessionFindUnique.mockResolvedValue(null);
+      return exchange(...args);
+    });
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    expect((await (await nativeComplete(nativeReturn("code=code"))).json()).outcome).toBe("failed");
+    expect(h.connectionCreate).not.toHaveBeenCalled();
+    expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
+  });
+
+  it("returns a fresh source listing on a valid-proof replay", async () => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    const first = nativeReturn("code=code");
+    const replay = first.clone();
+    expect((await (await nativeComplete(first)).json()).outcome).toBe("connected");
+
+    const row = { ...existingConnection(), displayName: "Sample source", providerDirectoryEntryId: PROVIDER_ID,
+      connectedAt: new Date(), lastCheckedAt: null, lastErrorCode: null, retrievalRuns: [] };
+    h.tx.clinicalRecordConnection.findMany.mockResolvedValueOnce([row]);
+    const listing = await (await nativeComplete(replay)).json();
+    expect(listing).toMatchObject({ outcome: null, canAdd: true, sources: [{ id: row.id }] });
+    expect(h.tx.clinicalRecordConnection.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ where: { memberId: MEMBER_ID } }));
+    expect(h.oauthSessionUpdateMany).toHaveBeenCalledOnce();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledOnce();
+    expect(h.connectionCreate).toHaveBeenCalledOnce();
+    expect(h.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    expect(h.retrievalRunCreate).toHaveBeenCalledOnce();
+    expect(mocks.appendClinicalRetrievalWakeTx).toHaveBeenCalledOnce();
+    expect(mocks.signalClinicalRetrievalWake).toHaveBeenCalledOnce();
+  });
+
+  it.each([["access_denied", "canceled"], ["login_required", "sign_in_required"], ["server_error", "failed"]])(
+    "consumes a proven native denial %s without exchange or browser intent", async (error, outcome) => {
+      const h = createHarness(null, nativeRow);
+      mocks.getPrisma.mockReturnValue(h.prisma);
+      mocks.bearer.mockResolvedValue(nativeAuth);
+      expect(await (await nativeComplete(nativeReturn(`error=${error}`))).json()).toEqual({ outcome, sources: [], canAdd: true });
+      expect(h.oauthSessionUpdateMany).toHaveBeenCalledOnce();
+      expect(h.connectIntentUpdateMany).not.toHaveBeenCalled();
+      expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    });
+
+  it("starts without an intent and completes with the pinned redirect and current native authority", async () => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    mocks.createSmartState.mockReturnValue({ state: nativeState, stateHash: "state-hash" });
+    const started = await (await nativeStart(post({ providerId: PROVIDER_ID, appReturn: "ios-dev" }))).json();
+    expect(started).toEqual({ authorizationUrl: expect.any(String), completionProof: expect.any(String) });
+    expect(mocks.createSmartState).toHaveBeenCalledWith("ios-dev");
+    const stored = h.oauthSessionCreate.mock.calls[0]?.[0].data;
+    expect(stored).toMatchObject({ ...nativeRow, webSessionId: nativeAuth.sessionId });
+    expect(stored.expiresAt.getTime() - stored.createdAt.getTime()).toBe(10 * 60_000);
+    expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ redirectUri: stored.redirectUri }));
+    h.oauthSessionFindUnique.mockResolvedValueOnce({ ...oauthSession(), ...nativeRow, redirectUri: stored.redirectUri });
+    const result = await nativeComplete(post({ query: `state=${nativeState}&code=code`, completionProof: started.completionProof }));
+    expect(await result.json()).toEqual({ outcome: "connected", sources: [], canAdd: true });
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({ redirectUri: stored.redirectUri }));
+    expect(mocks.verifyNative).toHaveBeenCalledWith(nativeAuth, h.tx);
+    expect(mocks.verifyNative).toHaveBeenCalledTimes(2);
+    expect(h.connectIntentUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves consent errors and prevents a revoked session from persisting a grant", async () => {
+    const h = createHarness(null, nativeRow);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Consent required.",
+    }));
+    expect((await (await nativeStart(post({ providerId: PROVIDER_ID, appReturn: "ios" }))).json()).error.code)
+      .toBe("HOSTED_CONSENT_REQUIRED");
+    expect(h.oauthSessionCreate).not.toHaveBeenCalled();
+    mocks.verifyNative.mockRejectedValueOnce(hostedOnboardingError({ code: "AUTH_REQUIRED", httpStatus: 401, message: "Sign in." }));
+    expect((await (await nativeComplete(nativeReturn("code=code"))).json()).error.code).toBe("AUTH_REQUIRED");
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledOnce();
+    expect(h.connectionCreate).not.toHaveBeenCalled();
+    expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+    expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
+  });
+
 });
+
+const nativeState = `crs_${"b".repeat(43)}`;
+const nativeRow = { appReturn: "ios-dev", connectIntentClaimHash: null };
+const nativeAuth = { credential: "synthetic-credential", proof: {}, member: { id: MEMBER_ID }, sessionId: "hws_clinical_1" };
+const post = (body: unknown) => new Request("https://join.example.test/api/clinical-records/companion", {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+function nativeReturn(query: string, sessionId = nativeAuth.sessionId, now?: Date) {
+  const completionProof = buildHostedDeviceSyncAppCompletionProof({ memberId: MEMBER_ID, sessionId, now, state: nativeState, provider: "clinical-records" });
+  return post({ query: `state=${nativeState}&${query}`, completionProof });
+}
 
 function createHarness(
   existing: ReturnType<typeof existingConnection> | null,
@@ -984,10 +1171,8 @@ function createHarness(
   });
   const oauthSessionCreate = vi.fn();
   const oauthSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
-  const oauthSessionFindUnique = vi.fn(async () => ({
-    ...oauthSession(),
-    ...oauthOverrides,
-  }));
+  const session = { ...oauthSession(), ...oauthOverrides };
+  const oauthSessionFindUnique = vi.fn(async (): Promise<ReturnType<typeof oauthSession> | null> => ({ ...session }));
   const oauthSessionLock = vi.fn(
     async (strings: TemplateStringsArray, ...values: unknown[]) => {
       void strings;
@@ -995,7 +1180,11 @@ function createHarness(
       return [{ stateHash: "state-hash" }];
     },
   );
-  const oauthSessionUpdateMany = vi.fn(async () => ({ count: 1 }));
+  const oauthSessionUpdateMany = vi.fn(async ({ data }: { data: { consumedAt: Date } }) => {
+    if (session.consumedAt) return { count: 0 };
+    session.consumedAt = data.consumedAt;
+    return { count: 1 };
+  });
   const retrievalRunCreate = vi.fn(async (input: { data: Record<string, unknown> }) => {
     callOrder.push("retrieval-run:create");
     if (!activeTransactionState) {
@@ -1097,7 +1286,8 @@ function oauthSession() {
   return {
     clientId: "epic-client-id",
     codeVerifierEncrypted: "sealed-verifier",
-    connectIntentClaimHash: "claim-hash",
+    appReturn: null as string | null,
+    connectIntentClaimHash: "claim-hash" as string | null,
     consumedAt: null as Date | null,
     createdAt: new Date("2026-07-10T12:00:00.000Z"),
     expiresAt: new Date("2099-07-10T12:10:00.000Z"),

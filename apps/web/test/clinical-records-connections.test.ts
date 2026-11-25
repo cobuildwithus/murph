@@ -8,8 +8,13 @@ const mocks = vi.hoisted(() => ({
   oauthUpdateMany: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   runUpdateMany: vi.fn(),
+  activeBearer: vi.fn(), bearer: vi.fn(), verifyNative: vi.fn(),
 }));
 
+vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.verifyNative }));
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireActiveHostedMemberAuthFromBearerToken: mocks.activeBearer, requireHostedMemberAuthFromBearerToken: mocks.bearer,
+}));
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
@@ -54,6 +59,39 @@ describe("Clinical Records connection lifecycle", () => {
     mocks.connectionUpdateMany.mockResolvedValue({ count: 1 });
     mocks.oauthUpdateMany.mockResolvedValue({ count: 1 });
     mocks.runUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("projects grant, activity, capacity and actions without exposing credential material", async () => {
+    const { GET } = await import("../app/api/clinical-records/companion/sources/route");
+    const createdAt = new Date("2030-03-10T00:00:00Z");
+    const updatedAt = new Date("2030-03-10T01:00:00Z");
+    mocks.activeBearer.mockResolvedValue({ member: { id: "member-a" } });
+    const row = { id: "source-a", providerDirectoryEntryId: "epic-example", displayName: "Sample Portal",
+      connectedAt: createdAt, lastCheckedAt: null, lastErrorCode: null, status: "active", refreshTokenEncrypted: "sealed",
+      retrievalRuns: [{ status: "retrieving", createdAt, completedAt: null, outcomeCountsJson: null, requests: [{ updatedAt }] }],
+    };
+    mocks.connectionFindMany.mockResolvedValue([row, ...Array(19).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
+    const response = await GET(new Request("https://app.example.test/api/clinical-records/companion/sources"));
+    const body = await response.json();
+    expect(body.canAdd).toBe(false);
+    expect(body.sources[0]).toEqual({ id: "source-a", providerId: "epic-example", name: "Sample Portal",
+      state: "getting_records", reason: null, lastImport: null, connectedAt: createdAt.toISOString(), lastCheckedAt: null,
+      lastActivityAt: updatedAt.toISOString(), updates: "daily", actions: ["remove"] });
+    expect(body.sources.at(-1)).toMatchObject({ state: "disconnected", updates: "one_time", lastActivityAt: null });
+    expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { memberId: "member-a" }, orderBy: expect.arrayContaining([{ disconnectedAt: { sort: "desc", nulls: "first" } }]),
+    }));
+  });
+
+  it("removes using the authority-reducing bearer route and returns the refreshed list", async () => {
+    const { POST } = await import("../app/api/clinical-records/companion/sources/[id]/remove/route");
+    const auth = { member: { id: "member-a" }, credential: "synthetic", sessionId: "session-a" };
+    mocks.bearer.mockResolvedValue(auth);
+    const response = await POST(new Request("https://app.example.test/"), { params: Promise.resolve({ id: "source-a" }) });
+    expect(await response.json()).toEqual({ sources: [], canAdd: true });
+    expect(mocks.activeBearer).not.toHaveBeenCalled();
+    expect(mocks.verifyNative).toHaveBeenCalledWith(auth, expect.anything());
+    expect(mocks.connectionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "source-a", memberId: "member-a" } }));
   });
 
   it("clears patient credentials and invalidates older pending OAuth sessions on disconnect", async () => {

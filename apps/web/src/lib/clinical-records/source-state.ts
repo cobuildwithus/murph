@@ -1,0 +1,56 @@
+import { CLINICAL_RECORD_CONNECTION_STATUSES, CLINICAL_RECORD_MAX_SOURCES, CLINICAL_RECORD_RUN_STATUSES } from "./client-contracts";
+
+type RecordsSourceState = "getting_records" | "ready" | "ready_partial" | "nothing_new"
+  | "sign_in_again" | "could_not_add" | "disconnected";
+
+type Run = { status: string; completedAt: Date | null; outcomeCountsJson: unknown };
+export function canRepeatImport(run: Run | undefined) {
+  return Boolean(run?.completedAt && (run.status !== "needs_reauth" || run.outcomeCountsJson !== null));
+}
+
+export function countedSourceFilter(memberId: string) {
+  return { memberId, status: { not: "disconnected" } };
+}
+
+export function hasImportCapacity(count: number) {
+  return count < CLINICAL_RECORD_MAX_SOURCES;
+}
+
+function count(receipt: unknown, key: string): number | null {
+  if (!receipt || typeof receipt !== "object") return null;
+  const value: unknown = Reflect.get(receipt, key);
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+export function classifyClinicalSource(status: string, run: Run | undefined, lastErrorCode: string | null, canAdd = true) {
+  const unknownStatus = !CLINICAL_RECORD_CONNECTION_STATUSES.some(value => value === status)
+    || Boolean(run && !CLINICAL_RECORD_RUN_STATUSES.some(value => value === run.status));
+  const receipt = run?.outcomeCountsJson;
+  const addedCount = count(receipt, "createdCount");
+  const lastImport = addedCount === null ? null : { addedCount, labResultCount: count(receipt, "labResultCount") };
+  const effects = [addedCount, count(receipt, "supersededCount"), count(receipt, "retractedCount")];
+  function resolveState(): RecordsSourceState {
+    if (unknownStatus) return "could_not_add";
+    if (status === "disconnected") return "disconnected";
+    if (status === "needs_reauth" || run?.status === "needs_reauth") return "sign_in_again";
+    if (status === "error" || !run) return "could_not_add";
+    switch (run.status) {
+      case "queued":
+      case "retrieving": return "getting_records";
+      case "partial": return effects.some(n => n !== null && n > 0) ? "ready_partial" : "could_not_add";
+      case "complete":
+        if (effects.some(n => n !== null && n > 0)) return "ready";
+        return effects.every(n => n === 0) ? "nothing_new" : "could_not_add";
+      default: return "could_not_add";
+    }
+  }
+  const state = resolveState();
+  const actions: ("import_again" | "sign_in_again" | "remove")[] = [];
+  if (canRepeatImport(run) && !unknownStatus && (status !== "disconnected" || canAdd)) {
+    actions.push(state === "sign_in_again" || state === "disconnected" ? "sign_in_again" : "import_again");
+  }
+  if (status !== "disconnected") actions.push("remove");
+  const reason = run?.status === "partial" && lastErrorCode === "provider-search-incomplete" && status === "active"
+    ? "limited_by_hospital" as const : null;
+  return { state, reason, lastImport, actions, unknownStatus };
+}

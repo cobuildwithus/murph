@@ -1,3 +1,5 @@
+import type { DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
+import { isClinicalReturnState } from "./return-query";
 import { createHash, randomBytes } from "node:crypto";
 
 import { normalizeClinicalFhirPatientId } from "@murphai/clinical-records";
@@ -45,13 +47,14 @@ export function createSmartPkce(): {
   };
 }
 
-export function createSmartState(): { state: string; stateHash: string } {
-  const state = `crs_${randomBytes(32).toString("base64url")}`;
+export function createSmartState(appReturn: DeviceSyncAppConnectReturn | null = null): { state: string; stateHash: string } {
+  const nonce = randomBytes(32).toString("base64url");
+  const state = appReturn ? `crs_${appReturn}_${nonce}` : `crs_${nonce}`;
   return { state, stateHash: hashSmartState(state) };
 }
 
 export function normalizeSmartStateHash(state: string): string | null {
-  return /^crs_[A-Za-z0-9_-]{43}$/u.test(state) ? hashSmartState(state) : null;
+  return isClinicalReturnState(state) ? hashSmartState(state) : null;
 }
 
 export async function discoverSmartConfiguration(input: {

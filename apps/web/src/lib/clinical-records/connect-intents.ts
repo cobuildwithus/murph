@@ -54,7 +54,7 @@ export async function createClinicalRecordConnectIntent(input: {
       `;
       await tx.clinicalRecordOauthSession.updateMany({
         data: { consumedAt: now },
-        where: { consumedAt: null, memberId: input.memberId },
+        where: { appReturn: null, consumedAt: null, memberId: input.memberId },
       });
       await tx.clinicalRecordConnectIntent.deleteMany({
         where: {

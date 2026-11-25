@@ -328,6 +328,18 @@ const gameProgressShareAttemptsCompatibleStatements = new Set([
   'ALTER TABLE "game_progress_share" DROP CONSTRAINT "game_progress_share_pkey"',
 ]);
 
+// The former required claim satisfies the browser branch for all legacy writes.
+// Only this widening and the matching native binding can deploy before readers.
+const clinicalNativeReturnExpansion = [
+  'ALTER TABLE "clinical_record_oauth_session"',
+  'ALTER COLUMN "connect_intent_claim_hash" DROP NOT NULL,',
+  'ADD COLUMN "app_return" TEXT,',
+  'ADD CONSTRAINT "clinical_record_oauth_session_return_binding" CHECK (',
+  '("app_return" IS NULL AND "connect_intent_claim_hash" IS NOT NULL) OR',
+  `("app_return" IS NOT NULL AND "app_return" IN ('ios', 'ios-dev') AND "connect_intent_claim_hash" IS NULL)`,
+  ') NOT VALID',
+].join(" ");
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -534,6 +546,8 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     if (entry.name === "20261102230000_game_seat_storage"
       && createHash("sha256").update(sql).digest("hex") === "4e0e426e22ebeda0969b90e91f0543dc1efcc33eaeb6eb24bf78e1397be18dff") continue;
     const sqlStatements = splitSqlStatements(sql)
+      .filter((statement) => entry.name !== "20261124120000_clinical_native_return"
+        || statement.replace(/\s+/gu, " ").trim() !== clinicalNativeReturnExpansion)
       .filter((statement) => entry.name !== "20261022071000_game_negotiation"
         || !gameNegotiationCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
       .filter((statement) => entry.name !== "20261022220000_game_v1"

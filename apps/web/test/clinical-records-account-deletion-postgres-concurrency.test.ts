@@ -237,7 +237,7 @@ import {
   sealClinicalOauthVerifier,
 } from "@/src/lib/clinical-records/secrets";
 import { disconnectClinicalRecordConnection, listClinicalRecordConnectionsForMember } from "@/src/lib/clinical-records/connections";
-import { startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
+import { completeNativeAuthorization, startNativeAuthorization, startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
 import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
 import { prepareClinicalPersistentAccess } from "@/src/lib/clinical-records/persistent-access";
 import { createSmartState } from "@/src/lib/clinical-records/smart";
@@ -550,6 +550,78 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } })).toEqual(canceled);
       } finally {
         vi.unstubAllEnvs();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it("serializes two native persists at nineteen sources and refuses reactivation at twenty", async () => {
+      const fixture = await createClinicalFixture();
+      const { observer, memberId } = fixture;
+      const winner = createCallbackProbe({ pauseAfterConnectionCreate: true });
+      const contender = createCallbackProbe();
+      const pause = winner.createPause!;
+      const operations: Promise<unknown>[] = [];
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      const seedSource = (index: number) => ({
+        id: `${memberId}_${index}`, memberId, providerDirectoryEntryId: `seed-${index}`, status: "active",
+        sourceSystem: "epic-fhir", displayName: "Sample source", fhirBaseUrlEncrypted: "sealed",
+        fhirBaseHash: "sample-hash", connectedAt: new Date(), requestedScopesJson: [],
+      });
+      try {
+        const session = boundary.authSession!;
+        const credential = "synthetic-capacity-credential";
+        const row = await observer.hostedAuthRecord.create({ data: session.authProof.row });
+        const auth = { kind: "better-auth" as const, credential, member: session.member, sessionId: session.sessionId,
+          proof: { ...session.authProof, row, credentialDigest: createHash("sha256").update(credential).digest() } };
+        await observer.hostedMember.update({ where: { id: memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        await observer.clinicalRecordConnection.createMany({ data: Array.from({ length: 19 }, (_, i) => seedSource(i)) });
+
+        const providers = readClinicalProviderDirectory().entries;
+        const start = async (provider: typeof providers[number]) => {
+          vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
+          vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+            authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
+            code_challenge_methods_supported: ["S256"], capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
+          })));
+          const { authorizationUrl, completionProof } = await startNativeAuthorization({
+            auth, appReturn: "ios", origin: CALLBACK_ORIGIN, providerDirectoryEntryId: provider.id,
+          });
+          const state = new URL(authorizationUrl).searchParams.get("state")!;
+          return () => completeNativeAuthorization(auth, new URLSearchParams({ state, code: "sample-code" }), completionProof);
+        };
+        const finishFirst = await start(providers[0]!);
+        const finishSecond = await start(providers[1]!);
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, winner);
+        const first = finishFirst();
+        operations.push(first);
+        await bounded(pause.reached.promise, BLOCKING_TIMEOUT_MS, "first connection insert");
+        boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.deletionBaseClient, contender);
+        const second = finishSecond();
+        operations.push(second);
+        await waitForBlockedBackend({ observer, blockerPid: await winner.persistenceBackendPid.promise,
+          waiterPid: await bounded(contender.persistenceBackendPid.promise, BLOCKING_TIMEOUT_MS, "competing persist") });
+        pause.release.resolve();
+        expect(await Promise.all([first, second])).toEqual(["connected", "too_many_sources"]);
+
+        const counted = { memberId, status: { not: "disconnected" } };
+        expect(await observer.clinicalRecordConnection.count({ where: counted })).toBe(20);
+        const run = await observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId } });
+        boundary.callbackPrisma = fixture.callbackBaseClient;
+        await disconnectClinicalRecordConnection({ connectionId: run.connectionId,
+          request: new Request(CALLBACK_ORIGIN, { method: "POST", headers: { origin: CALLBACK_ORIGIN } }) });
+        await observer.clinicalRecordConnection.create({ data: seedSource(19) });
+        const reconnect = await start(providers[0]!);
+        expect(await reconnect()).toBe("too_many_sources");
+        expect(await observer.clinicalRecordConnection.count({ where: counted })).toBe(20);
+        expect(await observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: run.connectionId } }))
+          .toMatchObject({ status: "disconnected", retrievalGeneration: 1, tokenVersion: 1 });
+        expect(await observer.clinicalRecordRetrievalRun.count({ where: { memberId } })).toBe(1);
+        expect(await observer.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.sync-requested" } })).toBe(1);
+        expect(externalEdges.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
+      } finally {
+        pause.release.resolve();
+        await settleOperations(operations);
+        vi.unstubAllGlobals();
         await cleanupClinicalFixture(fixture);
       }
     }, TEST_TIMEOUT_MS);

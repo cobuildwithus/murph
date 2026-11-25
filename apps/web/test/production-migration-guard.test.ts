@@ -630,6 +630,25 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("permits only the mixed-writer clinical return expansion", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261124120000_clinical_native_return";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const changed of [
+        sql.replace("('ios', 'ios-dev')", "('ios')"),
+        sql + '\nALTER TABLE "clinical_record_oauth_session" ADD CONSTRAINT "extra" CHECK ("app_return" IS NULL);',
+      ]) {
+        await writeMigrationSql(migrationsDir, migrationId, changed);
+        assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))[0]?.reason, "ADD CONSTRAINT CHECK");
+      }
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits Linq recovery compatibility to its additive defaulted fields", async () => {
     const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
     const migrationId = "20261008210000_linq_bounded_terminal_recovery";
