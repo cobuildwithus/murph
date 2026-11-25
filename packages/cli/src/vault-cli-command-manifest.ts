@@ -1879,6 +1879,10 @@ export const vaultCliCommandDescriptors = [
         description: 'Stop one regimen while preserving its canonical id.',
       },
       {
+        path: ['regimen', 'delete'],
+        description: 'Delete one regimen record saved by mistake.',
+      },
+      {
         path: ['protocol', 'import-json'],
         description: 'Import one private Health Commons-backed protocol adaptation from JSON.',
       },
@@ -1897,6 +1901,7 @@ export const vaultCliCommandDescriptors = [
         'upsertRegimen',
         'saveRegimen',
         'stopRegimen',
+        'deleteRegimen',
         'upsertPrivateProtocol',
       ],
       query: [

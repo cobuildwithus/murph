@@ -83,6 +83,7 @@ const coreServiceMethodNames = [
   "saveRegimen",
   "saveSupplement",
   "stopRegimen",
+  "deleteRegimen",
   ...healthCoreServiceMethodNames,
 ] satisfies ReadonlyArray<keyof CoreWriteServices & string>
 
