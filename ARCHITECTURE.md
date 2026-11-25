@@ -1350,10 +1350,13 @@ confined read-only model leaves for labs, measurements and history and a shared
 source evidence. Foreground replies can proceed during extraction. The controller
 aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
-Active extraction may defer an idle checkpoint for one finite 125-second window,
-but cannot defer pending canonical receipts or durable effects.
-Each page's own proposal apply and deferred usage therefore checkpoint per page,
-and the next page starts only after that checkpoint, never just to be aborted.
+Active extraction may defer an idle checkpoint for one five-minute window,
+opened by the first extraction after a checkpoint; no single page defers it for
+more than 125 seconds. Finished pages' own deferred usage and canonical
+receipts, which restore already replays from the receipt log, share that
+window's checkpoint. Any other durable effect, a follow-up checkpoint or a
+nearly full receipt log still voids the window. A finished page starts the next
+one only if it can finish inside the window, so no page starts just to be aborted.
 After that checkpoint and its effect drain, an invocation whose only due work is
 requeued or due enrichment resumes the extractor and system work itself instead
 of returning to a restored successor, for at most ten minutes after the

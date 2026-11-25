@@ -2,17 +2,38 @@ export type HostedClinicalEnrichmentRunResult = "idle" | "settled";
 
 /** One invocation may act as its own clinical successor for this long. */
 export const HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS = 10 * 60_000;
+/** Finished pages share one checkpoint opened by the first extraction after it. */
+export const HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS = 5 * 60_000;
+/** One page's provider deadline plus settling; no page defers a checkpoint longer. */
+export const HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS = 125_000;
+
+/**
+ * What the runtime's next checkpoint must publish. `batchable` is only
+ * finished pages' deferred usage plus canonical receipts, which restore already
+ * replays from the receipt log; anything else is `due`.
+ */
+export type HostedClinicalPendingCheckpointWork = "none" | "batchable" | "due";
+
+export function classifyHostedClinicalPendingCheckpointWork<Effect>(input: {
+  canonicalReceiptCount: number;
+  canonicalReceiptLogNearlyFull: boolean;
+  durableEffects: readonly Effect[];
+  durableFollowUpPending: boolean;
+  isClinicalUsageEffect(effect: Effect): boolean;
+}): HostedClinicalPendingCheckpointWork {
+  if (input.durableFollowUpPending || input.canonicalReceiptLogNearlyFull
+    || !input.durableEffects.every((effect) => input.isClinicalUsageEffect(effect))) {
+    return "due";
+  }
+  return input.durableEffects.length > 0 || input.canonicalReceiptCount > 0 ? "batchable" : "none";
+}
 
 export function resolveHostedBackgroundReadCheckpointDeadline(input: {
   assistantAskDeadline: number | null;
   clinicalDeadline: number | null;
-  canonicalReceiptCount: number;
-  durableEffectCount: number;
-  durableFollowUpPending: boolean;
+  pendingCheckpointWork: HostedClinicalPendingCheckpointWork;
 }): number | null {
-  const clinicalDeadline = input.canonicalReceiptCount === 0
-    && input.durableEffectCount === 0 && !input.durableFollowUpPending
-    ? input.clinicalDeadline : null;
+  const clinicalDeadline = input.pendingCheckpointWork === "due" ? null : input.clinicalDeadline;
   return Math.max(input.assistantAskDeadline ?? 0, clinicalDeadline ?? 0) || null;
 }
 
@@ -44,11 +65,16 @@ export interface HostedClinicalEnrichmentControllerInput {
   runOne(signal: AbortSignal, onExtractionStarted: () => void): Promise<HostedClinicalEnrichmentRunResult>;
   onError(error: unknown): void;
   /**
-   * True while the runtime holds work, such as a finished page's deferred
-   * usage or apply receipt, that its next checkpoint must publish. That
-   * checkpoint would abort any extraction started now.
+   * Work the runtime's next checkpoint must publish. After a finished page,
+   * `due` work, or `batchable` work once another page would overrun the
+   * checkpoint window, holds the next page: that checkpoint would abort it.
    */
-  deferNextJobUntilCheckpoint?(): boolean;
+  pendingCheckpointWork?(): HostedClinicalPendingCheckpointWork;
+  /**
+   * The controller went idle inside an open extraction window. The runtime's
+   * checkpoint wait may still hold the last page's deadline.
+   */
+  onExtractionWindowReleased?(): void;
 }
 
 /** Keeps provider work separate from the runtime's tracked canonical mutations. */
@@ -71,13 +97,19 @@ export function createHostedClinicalEnrichmentController(
   // pacing takes over instead of a checkpoint loop.
   let continuationsWithoutExtraction = 0;
   // Startup kicks run even when restored work awaits a checkpoint; once a job
-  // has finished, its own checkpoint work holds the next one until then.
+  // has finished, its own checkpoint work may hold the next one until then.
   let jobFinishedSinceCheckpoint = false;
+
+  const holdsNextJobForCheckpoint = (): boolean => {
+    if (!jobFinishedSinceCheckpoint) return false;
+    const pending = input.pendingCheckpointWork?.() ?? "none";
+    return pending === "due" || (pending === "batchable"
+      && (windowDeadline === null || Date.now() + HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS > windowDeadline));
+  };
 
   const kick = (): void => {
     if (closed) return;
-    if (paused || active
-      || (jobFinishedSinceCheckpoint && input.deferNextJobUntilCheckpoint?.() === true)) {
+    if (paused || active || holdsNextJobForCheckpoint()) {
       kickRequested = true;
       return;
     }
@@ -87,8 +119,8 @@ export function createHostedClinicalEnrichmentController(
     const started = new Promise<void>((resolve) => { markStarted = resolve; });
     const completion = Promise.resolve().then(() => input.runOne(abortController.signal, () => {
       if (active !== owned || paused || closed) return;
-      windowDeadline ??= Date.now() + 125_000;
-      owned.deadline = windowDeadline;
+      windowDeadline ??= Date.now() + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS;
+      owned.deadline = Math.min(windowDeadline, Date.now() + HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS);
       continuationsWithoutExtraction = 0;
       markStarted();
     }));
@@ -103,7 +135,9 @@ export function createHostedClinicalEnrichmentController(
         jobFinishedSinceCheckpoint = true;
         // Cancellation leaves durable work pending even if runOne returns idle.
         kickRequested ||= result === "settled" || abortController.signal.aborted;
-        if (!paused && !closed && kickRequested) kick();
+        if (paused || closed) return;
+        if (kickRequested) kick();
+        if (!active && windowDeadline !== null) input.onExtractionWindowReleased?.();
       },
       (error: unknown) => {
         // Keep the rejected promise: release must fail if child exit, proposal

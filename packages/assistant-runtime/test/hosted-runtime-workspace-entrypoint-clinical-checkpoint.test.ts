@@ -209,14 +209,11 @@ test("resumes clinical work when fresh input continues the invocation after a ch
   }
 });
 
-// Each synthetic page leaves deferred usage like production. Provider pages
-// outlast a checkpoint, so a page finishes only after its predecessor's
-// usage, which runs after the snapshot that made the predecessor durable.
-function mockClinicalPages(events: string[], totalPages: number, onUsage?: (page: number) => void) {
+// Each synthetic page leaves deferred usage like production; a checkpoint
+// boundary aborts a page still extracting.
+function mockClinicalPages(events: string[], totalPages: number, onPageDone?: (page: number) => void) {
   let completedPages = 0;
   let extracting = false;
-  const usageRecorded = Array.from({ length: totalPages + 1 }, () => createDeferred<void>());
-  usageRecorded[0]?.resolve();
   const runOne = vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment")
     .mockImplementation(async (input) => {
       if (input.abortSignal.aborted || completedPages === totalPages) return "idle";
@@ -227,7 +224,7 @@ function mockClinicalPages(events: string[], totalPages: number, onUsage?: (page
       events.push(`page-${page}:start`);
       const aborted = await new Promise<boolean>((resolve) => {
         input.abortSignal.addEventListener("abort", () => resolve(true), { once: true });
-        void usageRecorded[page - 1]?.promise.then(() => resolve(input.abortSignal.aborted));
+        void setImmediate().then(() => resolve(input.abortSignal.aborted));
       });
       extracting = false;
       if (aborted) {
@@ -238,10 +235,9 @@ function mockClinicalPages(events: string[], totalPages: number, onUsage?: (page
       events.push(`page-${page}:done`);
       input.deferUsageUntilAfterDurableCheckpoint?.(async () => {
         events.push(`page-${page}:usage`);
-        usageRecorded[page]?.resolve();
-        onUsage?.(page);
       });
       input.onStateMutation();
+      onPageDone?.(page);
       return "settled";
     });
   return { runOne, completedPages: () => completedPages, extracting: () => extracting };
@@ -288,7 +284,7 @@ async function runClinicalPagesInvocation(input: {
 const pageProgress = (events: readonly string[]) =>
   events.filter((event) => event === "snapshot" || /^page-\d+:(done|usage)$/u.test(event));
 
-test("keeps extracting later clinical pages after each page checkpoint in one invocation", async () => {
+test("batches later clinical pages into one checkpoint in one invocation", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-pages-"));
   const events: string[] = [];
   const pages = mockClinicalPages(events, 3);
@@ -298,18 +294,13 @@ test("keeps extracting later clinical pages after each page checkpoint in one in
       attemptId: "attempt_synthetic_clinical_pages", events, extracting: pages.extracting, vaultRoot,
     });
     expect(pages.completedPages(), events.join(",")).toBe(3);
-    // Usage stays behind the snapshot that made its page durable.
+    // Finished pages share one snapshot; usage stays behind it.
     expect(pageProgress(events)).toEqual([
-      "page-1:done", "snapshot", "page-1:usage",
-      "page-2:done", "snapshot", "page-2:usage",
-      "page-3:done", "snapshot", "page-3:usage",
+      "page-1:done", "page-2:done", "page-3:done",
+      "snapshot", "page-1:usage", "page-2:usage", "page-3:usage",
     ]);
-    // No page pays for a provider call that its predecessor's snapshot aborts.
+    // No page pays for a provider call that a checkpoint aborts.
     expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
-    const snapshots = events.flatMap((event, index) => event === "snapshot" ? [index] : []);
-    for (const page of [2, 3]) {
-      expect(events.indexOf(`page-${page}:start`), events.join(",")).toBeGreaterThan(snapshots[page - 2] ?? Infinity);
-    }
   } finally {
     pages.runOne.mockRestore();
     await removeTempRoot(vaultRoot);
@@ -320,8 +311,8 @@ test("leaves later clinical pages to the durable successor once shutdown starts"
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-pages-shutdown-"));
   const events: string[] = [];
   const shutdown = new AbortController();
-  const pages = mockClinicalPages(events, 3, () => {
-    shutdown.abort(new DOMException("Synthetic container SIGTERM.", "AbortError"));
+  const pages = mockClinicalPages(events, 4, (page) => {
+    if (page === 2) shutdown.abort(new DOMException("Synthetic container SIGTERM.", "AbortError"));
   });
   try {
     await initializeVault({ vaultRoot, createdAt: TEST_NOW });
@@ -329,8 +320,10 @@ test("leaves later clinical pages to the durable successor once shutdown starts"
       attemptId: "attempt_synthetic_clinical_pages_shutdown", events, extracting: pages.extracting,
       shutdownSignal: shutdown.signal, vaultRoot,
     });
-    expect(pages.completedPages(), events.join(",")).toBe(1);
-    expect(pageProgress(events)).toEqual(["page-1:done", "snapshot", "page-1:usage"]);
+    expect(pages.completedPages(), events.join(",")).toBe(2);
+    expect(pageProgress(events)).toEqual([
+      "page-1:done", "page-2:done", "snapshot", "page-1:usage", "page-2:usage",
+    ]);
   } finally {
     pages.runOne.mockRestore();
     await removeTempRoot(vaultRoot);

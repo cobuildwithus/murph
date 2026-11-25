@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  classifyHostedClinicalPendingCheckpointWork,
   createHostedClinicalEnrichmentController,
   HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS,
   resolveHostedBackgroundReadCheckpointDeadline,
@@ -22,14 +23,26 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("clinical enrichment controller", () => {
-  it("does not delay foreground durability for document extraction", () => {
-    const input = { assistantAskDeadline: null, clinicalDeadline: 125_000,
-      canonicalReceiptCount: 0, durableEffectCount: 0, durableFollowUpPending: false };
+  it("lets finished pages share a checkpoint window but never delays other durable work", () => {
+    const pageUsage = { kind: "page-usage" };
+    const replyDelivery = { kind: "reply-delivery" };
+    const classify = (overrides: Partial<Parameters<typeof classifyHostedClinicalPendingCheckpointWork<object>>[0]>) =>
+      classifyHostedClinicalPendingCheckpointWork<object>({
+        canonicalReceiptCount: 0, canonicalReceiptLogNearlyFull: false, durableEffects: [],
+        durableFollowUpPending: false, isClinicalUsageEffect: (effect) => effect === pageUsage, ...overrides,
+      });
+    expect(classify({})).toBe("none");
+    expect(classify({ canonicalReceiptCount: 2, durableEffects: [pageUsage, pageUsage] })).toBe("batchable");
+    expect(classify({ durableEffects: [pageUsage, replyDelivery] })).toBe("due");
+    expect(classify({ canonicalReceiptCount: 62, canonicalReceiptLogNearlyFull: true })).toBe("due");
+    expect(classify({ durableFollowUpPending: true })).toBe("due");
+    const input = { assistantAskDeadline: null, clinicalDeadline: 125_000, pendingCheckpointWork: "none" as const };
     expect(resolveHostedBackgroundReadCheckpointDeadline(input)).toBe(125_000);
-    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, canonicalReceiptCount: 1 })).toBeNull();
-    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, durableEffectCount: 1 })).toBeNull();
-    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, durableFollowUpPending: true })).toBeNull();
-    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, clinicalDeadline: null, assistantAskDeadline: 50_000 })).toBe(50_000);
+    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, pendingCheckpointWork: "batchable" })).toBe(125_000);
+    expect(resolveHostedBackgroundReadCheckpointDeadline({ ...input, pendingCheckpointWork: "due" })).toBeNull();
+    expect(resolveHostedBackgroundReadCheckpointDeadline({
+      ...input, clinicalDeadline: null, assistantAskDeadline: 50_000, pendingCheckpointWork: "due",
+    })).toBe(50_000);
   });
   it("does not defer checkpoints while discovering an empty queue", async () => {
     const discovery = deferred<HostedClinicalEnrichmentRunResult>();
@@ -46,31 +59,77 @@ describe("clinical enrichment controller", () => {
     expect(controller.activeDeadline()).toBeNull();
     await controller.closeAndRequeue();
   });
-  it("does not extend the checkpoint window as successive pages finish", async () => {
+  it("bounds each page and every page since the checkpoint by one window", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
-    const first = deferred<HostedClinicalEnrichmentRunResult>();
-    const second = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn().mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
-      started();
-      return first.promise;
-    }).mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
-      started();
-      return second.promise;
-    }).mockResolvedValue("idle");
+    const pages = [0, 1, 2].map(() => deferred<HostedClinicalEnrichmentRunResult>());
+    const runOne = vi.fn();
+    for (const page of pages) {
+      runOne.mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
+        started();
+        return page.promise;
+      });
+    }
+    runOne.mockResolvedValue("idle");
     const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
     try {
       controller.kick();
       await flushMicrotasks();
       expect(controller.activeDeadline()).toBe(135_000);
       clock.mockReturnValue(100_000);
-      first.resolve("settled");
+      pages[0]?.resolve("settled");
       await flushMicrotasks();
-      expect(controller.activeDeadline()).toBe(135_000);
-      second.resolve("idle");
+      expect(controller.activeDeadline()).toBe(225_000);
+      // The window opened by the first extraction still ends this page.
+      clock.mockReturnValue(290_000);
+      pages[1]?.resolve("settled");
+      await flushMicrotasks();
+      expect(controller.activeDeadline()).toBe(310_000);
+      pages[2]?.resolve("idle");
       await controller.pauseAndRequeue();
     } finally {
-      first.resolve("idle");
-      second.resolve("idle");
+      for (const page of pages) page.resolve("idle");
+      await controller.closeAndRequeue();
+      clock.mockRestore();
+    }
+  });
+
+  it("batches finished pages until the next page could overrun the window", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
+    const pages = [0, 1, 2].map(() => deferred<HostedClinicalEnrichmentRunResult>());
+    const runOne = vi.fn();
+    for (const page of pages) {
+      runOne.mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
+        started();
+        return page.promise;
+      });
+    }
+    runOne.mockResolvedValue("idle");
+    const onExtractionWindowReleased = vi.fn();
+    const controller = createHostedClinicalEnrichmentController({
+      runOne, onError: vi.fn(), onExtractionWindowReleased, pendingCheckpointWork: () => "batchable",
+    });
+    try {
+      controller.kick();
+      await flushMicrotasks();
+      clock.mockReturnValue(100_000);
+      pages[0]?.resolve("settled");
+      await flushMicrotasks();
+      expect(runOne).toHaveBeenCalledTimes(2);
+      expect(onExtractionWindowReleased).not.toHaveBeenCalled();
+      // A page started now could run past the window, so the checkpoint goes first.
+      clock.mockReturnValue(200_000);
+      pages[1]?.resolve("settled");
+      await flushMicrotasks();
+      expect(runOne).toHaveBeenCalledTimes(2);
+      expect(controller.activeDeadline()).toBeNull();
+      expect(onExtractionWindowReleased).toHaveBeenCalledOnce();
+      await controller.pauseAndRequeue();
+      expect(controller.continueAfterCheckpoint(false)).toBe(true);
+      await controller.waitForExtraction();
+      expect(runOne).toHaveBeenCalledTimes(3);
+      expect(controller.activeDeadline()).toBe(325_000);
+    } finally {
+      for (const page of pages) page.resolve("idle");
       await controller.closeAndRequeue();
       clock.mockRestore();
     }
@@ -211,11 +270,11 @@ describe("clinical enrichment controller", () => {
       .mockImplementationOnce(() => page.promise)
       .mockResolvedValue("idle");
     const controller = createHostedClinicalEnrichmentController({
-      runOne, onError: vi.fn(), deferNextJobUntilCheckpoint: () => checkpointWorkPending,
+      runOne, onError: vi.fn(), pendingCheckpointWork: () => checkpointWorkPending ? "due" : "none",
     });
     controller.kick();
     await flushMicrotasks();
-    // The finished page deferred its usage; its apply then kicks again.
+    // The finished page left work its checkpoint must publish now; its apply then kicks again.
     checkpointWorkPending = true;
     page.resolve("settled");
     await flushMicrotasks();
@@ -237,7 +296,7 @@ describe("clinical enrichment controller", () => {
       .mockResolvedValueOnce("settled")
       .mockResolvedValue("idle");
     const controller = createHostedClinicalEnrichmentController({
-      runOne, onError: vi.fn(), deferNextJobUntilCheckpoint: () => checkpointWorkPending,
+      runOne, onError: vi.fn(), pendingCheckpointWork: () => checkpointWorkPending ? "due" : "none",
     });
     // Work restored with the workspace does not hold the first job.
     controller.kick();
