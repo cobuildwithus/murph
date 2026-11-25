@@ -16,22 +16,22 @@ export const clinicalRecordRecipients = [
   {
     id: "xai", kind: "member-directed", hosts: ["api.x.ai"],
     name: "xAI",
-    reason: "searches X when you ask",
+    reason: "to search X",
   },
   {
     id: "gemini", kind: "member-directed", hosts: ["generativelanguage.googleapis.com"],
     name: "Google",
-    reason: "answers your questions about a video you share",
+    reason: "for questions about a video you share",
   },
   {
     id: "elevenlabs", kind: "member-directed", hosts: ["api.elevenlabs.io"],
     name: "ElevenLabs",
-    reason: "makes voice messages you request",
+    reason: "for voice messages",
   },
   {
     id: "mapbox", kind: "member-directed", hosts: ["api.mapbox.com"],
     name: "Mapbox",
-    reason: "finds places and directions when you ask",
+    reason: "for places and directions",
   },
   {
     id: "delivery", kind: "member-directed", hosts: ["api.linqapp.com", "api.telegram.org"],

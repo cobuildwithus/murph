@@ -74,7 +74,7 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     expect(await approvals()).toEqual({
       processors: [{ id: "openai", name: "OpenAI", purpose: processor.purpose, version: processor.version, approved: false }],
       alsoUsed: [
-        { id: "xai", name: "xAI", purpose: expect.stringMatching(/searches X/) },
+        { id: "xai", name: "xAI", purpose: "to search X" },
         { id: "gemini", name: "Google", purpose: expect.stringMatching(/video/) },
         { id: "elevenlabs", name: "ElevenLabs", purpose: expect.stringMatching(/voice messages/) },
         { id: "mapbox", name: "Mapbox", purpose: expect.stringMatching(/places and directions/) },
