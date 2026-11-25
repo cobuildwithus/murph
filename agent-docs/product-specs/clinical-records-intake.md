@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-11-24
+Last verified: 2026-11-25
 
 ## Product outcome
 
@@ -86,11 +86,30 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 
 | Method and path | Body | Response |
 | --- | --- | --- |
-| GET `sources` | — | `{ sources, canAdd }` |
+| GET `sources` | — | `{ sources, canAdd, messageMode? }` |
 | POST `providers/search` | `{ query }` | `{ providers: [{ id, name, place, logoPath? }] }`, up to 20 |
 | POST `start` | `{ providerId, appReturn }` | `{ authorizationUrl, completionProof }` |
-| POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd }` |
-| POST `sources/[id]/remove` | — | `{ sources, canAdd }` |
+| POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
+| POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
+| POST `message-preference` | `{ mode }` | `{ messageMode }` |
+
+The list, completion and removal responses include `messageMode` only while at
+least one connected source reports `updates: "daily"`. With only one-time
+imports or disconnected sources, Web omits the field. The existing source
+fields, counts and completion outcomes keep their meanings for shipped apps.
+
+One member setting covers all sources. Its default is `notice`. A member can
+choose `off` at any time, including after billing lapses. Turning texts back on
+starts at `notice`. The app asks for confirmation before explicitly requesting
+`detail`. Web returns HTTP 409 for `off` to `detail`. Every change advances
+the setting revision once, including a reset to `off` when health consent is
+withdrawn. Regranting consent leaves the setting off. This API only stores the
+choice. Notification delivery ships separately.
+
+Apply the schema expansion and historical withdrawal backfill first, then deploy
+the companion Web routes to all instances, then the app. Keep the expanded columns and withdrawal trigger on
+rollback. Once clients use the setting, retain a Web version that serves the
+preference route and honors existing opt-outs.
 
 Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 

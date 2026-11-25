@@ -12,7 +12,8 @@ export function clinicalLogoPath(id: string) {
 
 export async function readCompanionSources(auth: HostedNativeMemberAuth) {
   // Removal stamps disconnectedAt. NULLS FIRST keeps all counted rows ahead of history.
-  const rows = await getPrisma().clinicalRecordConnection.findMany({
+  const prisma = getPrisma();
+  const rows = await prisma.clinicalRecordConnection.findMany({
     where: { memberId: auth.member.id },
     orderBy: [{ disconnectedAt: { sort: "desc", nulls: "first" } }, { updatedAt: "desc" }, { id: "asc" }],
     take: 100,
@@ -33,8 +34,13 @@ export async function readCompanionSources(auth: HostedNativeMemberAuth) {
       connectedAt: row.connectedAt.toISOString(), lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
       lastActivityAt: projection.actions.includes("start_over") && run
         ? lastRunActivity(run).toISOString() : null,
-      updates: row.refreshTokenEncrypted ? "daily" as const : "one_time" as const,
+      updates: row.status !== "disconnected" && row.refreshTokenEncrypted ? "daily" as const : "one_time" as const,
     };
   });
-  return { sources, canAdd };
+  if (!sources.some(source => source.updates === "daily")) return { sources, canAdd };
+  const member = await prisma.hostedMember.findUniqueOrThrow({
+    where: { id: auth.member.id },
+    select: { clinicalRecordMessageMode: true },
+  });
+  return { sources, canAdd, messageMode: member.clinicalRecordMessageMode };
 }

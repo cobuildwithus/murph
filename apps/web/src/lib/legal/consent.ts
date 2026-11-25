@@ -888,7 +888,7 @@ function normalizeBoundedString(input: {
   return normalized.slice(0, input.maxLength);
 }
 
-function generateHostedConsentEventId(): string {
+export function generateHostedConsentEventId(): string {
   return `hbce_${randomBytes(12).toString("base64url")}`;
 }
 

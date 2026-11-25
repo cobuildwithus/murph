@@ -425,6 +425,12 @@ model HostedWebInternalRequestNonce {
   @@map("hosted_web_internal_request_nonce")
 }
 
+enum ClinicalRecordMessageMode {
+  off
+  notice
+  detail
+}
+
 enum HostedBillingStatus {
   not_started
   active
@@ -609,6 +615,8 @@ model AppleHealthReopenPush {
 }
 
 model HostedMember {
+  clinicalRecordMessageMode      ClinicalRecordMessageMode       @default(notice) @map("clinical_record_message_mode")
+  clinicalRecordMessageRevision  Int                             @default(0) @map("clinical_record_message_revision")
   accountDeletionRequest HostedAccountDeletionRequest?
   customConnections HostedMcpConnection[]
   customConnectionActions HostedMcpActionRequest[]
