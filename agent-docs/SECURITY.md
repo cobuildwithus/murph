@@ -949,7 +949,9 @@ Existing product admission, delivery and runtime safety rules still apply.
   Web memory. Web verifies and reduces each receipt to operational metadata
   before persistence, logging, tracing or handoff. Ordinary diagnostics retain
   sanitized provider wording. The clinical template suppresses both receipt
-  reasons before the event, line, delivery or alert is written. Web terminal retry excludes
+  reasons before the event, line, delivery or alert is written. Web accepts receipts
+  with an unknown owner and clears both reasons when a pending clinical dispatch
+  could own the receipt (same chat, or any chat if the chat ID is absent). Web terminal retry excludes
   the clinical delivery template before fetching provider content. A definite
   terminal failure consumes an attempted occurrence. Private staging alone
   leaves coverage open.

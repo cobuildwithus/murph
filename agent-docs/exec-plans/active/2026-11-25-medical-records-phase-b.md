@@ -126,7 +126,9 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
 text passing through Web memory on the ordinary webhook. Web verifies it,
 drops echoed message parts for every receipt and suppresses clinical provider
 prose before storage, logging, tracing or orchestration. Ordinary receipts
-retain sanitized provider diagnostics. The Web retry owner excludes
+retain sanitized provider diagnostics. Web accepts uncorrelated receipts and
+clears both reasons if a pending clinical dispatch matches the chat, or if
+the receipt omits the chat ID and any clinical dispatch is pending. The Web retry owner excludes
 clinical deliveries using the existing delivery template. A definite terminal
 failure consumes the attempted occurrence. This avoids fetching private text
 or generating a second message after a provider attempt.

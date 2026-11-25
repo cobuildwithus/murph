@@ -299,20 +299,60 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
-  it("retries an uncorrelated receipt before any writes while a clinical dispatch could own it", async () => {
+  it.each([
+    { chat: "synthetic-chat", pendingChat: "synthetic-chat", redact: true },
+    { chat: "synthetic-chat", pendingChat: "synthetic-other", redact: false },
+    { chat: null, pendingChat: "synthetic-other", redact: true },
+    { chat: "synthetic-chat", pendingChat: null, redact: false },
+  ])("accepts an unowned receipt in $chat with a pending clinical dispatch in $pendingChat", async ({ chat, pendingChat, redact }) => {
     const fixture = createObservabilityPrismaFixture();
-    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "synthetic-pending" });
-    const event = requireParsedProviderEvent(buildProviderEvent({ eventId: "synthetic-early", eventType: "message.failed", data: {
-      message_id: "synthetic-message", chat_id: "synthetic-chat", reason: "synthetic carrier reason",
-    } }));
-    await expect(ingestHostedLinqProviderEventTx({ event, prisma: fixture.prisma as never }))
-      .rejects.toMatchObject({ httpStatus: 503, retryable: true });
-    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ template: "clinical_change", status: "provider_dispatch_started",
-        linqChatLookupKey: { in: expect.arrayContaining([event.linqChatLookupKey]) } }),
+    const pendingKey = pendingChat && createHostedLinqChatLookupKey(pendingChat);
+    fixture.hostedLinqDeliveryFindFirst.mockImplementation(async ({ where }) => {
+      if (where.template !== "clinical_change" || where.status !== "provider_dispatch_started") return null;
+      if (!pendingKey || (where.linqChatLookupKey && !where.linqChatLookupKey.in.includes(pendingKey))) return null;
+      return { id: "synthetic-pending" };
+    });
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      eventId: "synthetic-early",
+      eventType: "message.failed",
+      data: {
+        ...(chat ? { chat_id: chat } : {}),
+        message_id: "synthetic-message",
+        error: { message: "synthetic failure" }, reason: "synthetic provider reason",
+      },
     }));
-    expect(fixture.hostedLinqProviderEventCreateMany).not.toHaveBeenCalled();
-    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+
+    const result = await ingestHostedLinqProviderEventTx({ event, prisma: fixture.prisma as never });
+    const reasons = {
+      failureReason: redact ? null : "synthetic failure",
+      providerReason: redact ? null : "synthetic provider reason",
+    };
+    expect(result.duplicate).toBe(false);
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining(reasons) }),
+    );
+    expect(fixture.hostedLinqAlertCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ detailsJson: expect.objectContaining(reasons) }) }),
+    );
+  });
+
+  it("checks the pending dispatch before resolving an unlocked sent receipt", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({ id: "synthetic-pending" }).mockResolvedValueOnce(null);
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      eventId: "synthetic-early-sent", eventType: "message.sent",
+      data: { chat_id: "synthetic-chat", message_id: "synthetic-message", reason: "synthetic provider reason" },
+    }));
+
+    const result = await ingestHostedLinqProviderEventTx({ event, prisma: fixture.prisma as never });
+    expect(result.duplicate).toBe(false);
+    expect(fixture.queryRaw).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: expect.objectContaining({ template: "clinical_change", status: "provider_dispatch_started" }),
+    }));
+    expect(fixture.hostedLinqProviderEventCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ failureReason: null, providerReason: null }) }),
+    );
   });
 
   it.each([null, "clinical_change"])("projects permitted failure diagnostics for delivery template %s", async template => {

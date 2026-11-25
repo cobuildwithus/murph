@@ -435,7 +435,10 @@ A group, replacement thread or different channel cannot receive the text.
 Linq can echo the sent text in a signed outbound receipt. Web verifies the body
 in memory and discards echoed text before persistence, logging, tracing or
 orchestration. Ordinary deliveries retain sanitized provider failure reasons
-for operations. Clinical deliveries discard both failure and provider reasons. Web's terminal
+for operations. Clinical deliveries discard both failure and provider reasons.
+Web accepts receipts with an unknown owner. It clears both reasons if a clinical
+dispatch is pending in the receipt’s chat, or in any chat when the receipt
+omits the chat ID. Otherwise it retains the sanitized reasons. Web's terminal
 retry excludes clinical deliveries by their opaque delivery template before
 fetching any message parts. A definite terminal failure consumes an attempted
 clinical occurrence. Admission remains closed through the reader rollout.

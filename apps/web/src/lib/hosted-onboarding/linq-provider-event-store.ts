@@ -22,7 +22,6 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
 import { createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
-import { hostedOnboardingError } from "./errors";
 import { lockHostedLinqProviderReceiptTx } from "./linq-message-receipt-lock";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
@@ -30,25 +29,26 @@ type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
 async function projectReceiptReasons(event: ParsedHostedLinqProviderEvent, prisma: HostedLinqProviderEventClient) {
   if ((!event.failureReason && !event.providerReason) ||
       !["message.sent", "message.delivered", "message.failed"].includes(event.eventType)) return { event };
+  // Sent receipts do not lock the message. Read pending dispatches first so
+  // acceptance cannot move a clinical delivery out of view between the reads.
+  const pendingBeforeOwner = event.eventType === "message.sent"
+    ? await hasPendingClinicalDispatch(event.linqChatId, prisma) : undefined;
   const owner = await readHostedLinqReceiptOwnerTx(event, prisma);
-  if (owner) return {
-    owner, event: owner.delivery.template === CLINICAL_LINQ_DELIVERY_TEMPLATE
-      ? { ...event, failureReason: null, providerReason: null } : event,
-  };
-  // The provider can issue a receipt before the acceptance callback binds its
-  // message ID. Retry before writing anything if a clinical fence could own it.
+  const redact = owner
+    ? owner.delivery.template === CLINICAL_LINQ_DELIVERY_TEMPLATE
+    : pendingBeforeOwner ?? await hasPendingClinicalDispatch(event.linqChatId, prisma);
+  return { owner, event: redact ? { ...event, failureReason: null, providerReason: null } : event };
+}
+
+async function hasPendingClinicalDispatch(chatId: string | null, prisma: HostedLinqProviderEventClient) {
   const pending = await prisma.hostedLinqDelivery.findFirst({
     where: {
       template: CLINICAL_LINQ_DELIVERY_TEMPLATE, status: "provider_dispatch_started",
-      ...(event.linqChatId ? { linqChatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(event.linqChatId) } } : {}),
+      ...(chatId ? { linqChatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(chatId) } } : {}),
     },
     select: { id: true },
   });
-  if (pending) throw hostedOnboardingError({
-    code: "LINQ_RECEIPT_CORRELATION_PENDING", httpStatus: 503, retryable: true,
-    message: "Delivery receipt correlation is pending.",
-  });
-  return { event, owner };
+  return pending !== null;
 }
 
 export async function ingestHostedLinqProviderEventTx(input: {

@@ -6,11 +6,9 @@ export async function lockHostedLinqProviderReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: Pick<Prisma.TransactionClient, "$queryRaw">;
 }): Promise<void> {
-  const { event } = input;
-  const sentWithDiagnostics = event.eventType === "message.sent" && (event.failureReason || event.providerReason);
-  if ((!event.deliveryStatus && !sentWithDiagnostics) || !event.linqMessageId) return;
+  if (!input.event.deliveryStatus || !input.event.linqMessageId) return;
   await lockHostedLinqMessageReceiptsTx({
-    messageIds: [event.linqMessageId], prisma: input.prisma,
+    messageIds: [input.event.linqMessageId], prisma: input.prisma,
   });
 }
 
