@@ -51,16 +51,20 @@ hospital-specific erasure merely to suppress a warning. Link the questionnaire
 to the current privacy policy and deletion instructions. This code change does
 not edit or verify the operator's Epic questionnaire.
 
-Keep the current sharing answer for the public registration. For the replacement
-registration, the app must show the legal name, purpose and current notice for
-each readable-content processor and accept a separate decision for each. The
-companion ledger supports this screen. Replacement starts currently stop even
-after all approvals because the shared vault can reach unenumerated recipients.
-Before attesting, confirm the signed entities, actual model and delivery routes,
-every downstream or fallback recipient, and the published subprocessor list.
-Verify withdrawal against already-imported data, ordinary and scheduled turns,
-enrichment and detail delivery on the deployed system. The owner changes the
-questionnaire after those checks pass.
+Keep the public registration’s existing sharing answer. For the replacement
+registration, verify these three classes before attesting that members approve
+each entity individually.
+
+1. **Murph chooses the company.** The app shows the company’s legal name and purpose and records one current decision per company. OpenAI reads imported records for extraction, chat and scheduled turns. The hosted model connects directly to OpenAI and has no other-company fallback.
+2. **The member chooses the destination.** Connecting an app or custom connector, selecting a website or person, or asking for a call, email or export authorizes that individual destination. A detailed message to the member’s own phone is delivery to the member.
+3. **Murph can invoke an optional helper.** xAI search, Google Gemini video questions, ElevenLabs voice and Mapbox place lookups can carry details from a record. Each has its own required approval. Workers AI transcribes audio attachments, while hospital documents use local preparation. Exa has no hosted integration.
+
+Check the released app’s one-tick-per-company screen, deployed routes, signed
+legal names and published subprocessor list. Pure hosting and storage belong
+on that list. Missing or withdrawn approval stops new replacement starts and
+hospital reads. A transfer already in flight can finish and ordinary or
+scheduled turns can still read a previously imported copy. The owner submits
+the answer for the replacement registration after verifying this behavior.
 
 Persistent rollout requires the additive clinical daily-sync migration before
 Web, followed by the runtime extraction-cache build. Existing runtimes accept

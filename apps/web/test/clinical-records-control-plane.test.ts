@@ -1,4 +1,4 @@
-import { clinicalProcessors, clinicalProcessorScope, registeredClinicalRecipients } from "@/src/lib/clinical-records/processor-registry";
+import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
 import { signerPem } from "./clinical-records-synthetic-signer";
 
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
@@ -427,15 +427,7 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
-  it("requires a closed recipient set and rejects an unmapped fallback", () => {
-    const origins = clinicalProcessors.map(processor => processor.origin);
-    expect(registeredClinicalRecipients(origins)).toBe(true);
-    for (const route of [null, [], [...origins, "https://alternative.example.test"]]) {
-      expect(registeredClinicalRecipients(route)).toBe(false);
-    }
-  });
-
-  it("checks every approval before discovery and fences signed callbacks across selector rollback", async () => {
+  it.each([true, false])("checks every approval before discovery and at callback after selector rollback (current=%s)", async current => {
     provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
@@ -453,13 +445,18 @@ describe("Clinical Records authorization persistence", () => {
         .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED" });
       expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
     }
-    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
-      request: new Request("https://app.example.test/start", { method: "POST" }) }))
-      .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE" });
-    expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
+    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) });
+    expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data.clientId).toBe("signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "legacy");
-    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE" });
-    expect(harness.durableConnections).toHaveLength(0);
+    if (current) {
+      await finishAuthorization();
+      expect(harness.durableConnections).toMatchObject([{ requiresProcessorApprovals: true }]);
+    } else {
+      harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants.slice(1));
+      await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED" });
+      expect(harness.durableConnections).toHaveLength(0);
+    }
     expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
       auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),
     }));

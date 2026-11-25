@@ -1,6 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
-import { clinicalProcessorAdmissionError } from "./processor-registry";
+import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
 
@@ -791,7 +791,7 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   if (!["active", "error", "needs_reauth"].includes(record.connection.status)) return obsolete("connection-inactive");
   const unusable = (unavailable: UnusableReason) => ({ retryable: false as const, unavailable, terminalize: record.connection });
   if (!active) return unusable("member-processing-inactive");
-  if (record.connection.requiresProcessorApprovals && await clinicalProcessorAdmissionError(input.memberId, prisma)) {
+  if (record.connection.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, prisma)) {
     return { unavailable: "processor-admission-blocked", retryable: false };
   }
   if (record.connection.status === "needs_reauth") return unusable("authorization-required");
@@ -1162,7 +1162,7 @@ async function claimRetrievalPageRequest(input: {
         }
         return { claimed: false, errorCode: "member-processing-inactive", retryable: false } as const;
       }
-      if (input.requiresProcessorApprovals && await clinicalProcessorAdmissionError(input.memberId, tx)) {
+      if (input.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, tx)) {
         return { claimed: false, errorCode: "processor-admission-blocked", retryable: false } as const;
       }
       const reclaimed = await tx.clinicalRecordRetrievalRequest.updateMany({

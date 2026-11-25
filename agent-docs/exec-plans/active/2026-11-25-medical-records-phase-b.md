@@ -11,7 +11,7 @@ Prove one asymmetric Epic patient app in the sandbox, ship the companion setting
 ## Scope and tasks
 
 1. **PR A (this change), registration and sandbox proof.** Web resolves the exact client ID for each environment at start, callback and refresh. Keep public, organization-approved and Basic readers while sessions or grants need them. Publish separate public key sets, exercise S256, code exchange and two rolling renewals with same-patient reads. Production activation is a separate owner decision.
-2. **PR B, daily access and settings.** Preserve an existing offline grant against an insufficient replacement under the member lock. Fence malformed or revoked grants and monitor due lag. Ship the Web-owned, revisioned message preference and companion v2 projection. Default to notice, require separate affirmative detail consent, cancel pending delivery on off, reset to off on consent withdrawal. The owner chose processor approvals (B7). Use versioned per-entity entries in the existing consent ledger and gate start, persistence, daily admission and actual processor egress, including fallbacks. Resolve the processor inventory before attestation.
+2. **PR B, daily access and settings.** Preserve an existing offline grant against an insufficient replacement under the member lock. Fence malformed or revoked grants and monitor due lag. Ship the Web-owned, revisioned message preference and companion v2 projection. Default to notice, require separate affirmative detail consent, cancel pending delivery on off, reset to off on consent withdrawal. The owner chose processor approvals (B7). Use versioned per-entity entries in the existing consent ledger and gate replacement start, persistence, daily admission and hospital transport. Check fixed runner destinations and hosted model selection against the recipient table. Resolve the processor inventory before attestation.
 3. **PR C, first iOS release.** Show actual grant, message switch and detail consent, plus one approval per named processor. Remove misleading additions counts from the display while keeping legacy fields. Ship independently of source deletion.
 4. **PR D, durable private receipts (parallel to A).** Core commits a replayable result with the canonical write, including both empty paths. Read it before filtering on retry. Record meaningful changes with stable enrichment identity and preserve receipts across restore. Missing legacy evidence stays silent. Receipts accumulate in one file per run without pruning. Each all-skipped batch costs a canonical write and one row. Define a retention rule before daily checks run at volume.
 5. **PR E, notification admission and delivery.** Only trust receipts for runs admitted after receipt writers are deployed everywhere. Replaying a batch committed by an older runtime can write an empty receipt that looks identical to a proven no-change result. After readers converge, publish one fenced mailbox pointer per eligible daily run. Bind to the captured credential epoch and preference revision. Plain notices use the ordinary outbox directly. Detail uses a scheduled turn with the private receipt pointer. Recheck current authority, pacing, quiet hours and direct iMessage transport at dispatch. Fixed notices require product access. Prove retry, revocation, empty imports and out-of-order enrichment.
@@ -41,19 +41,22 @@ processor-approvals endpoint. The consent event and grant share the existing
 member lock. The replacement registration has a separate admission gate at
 start, callback persistence, daily check and records transport.
 
-Product rollout is on hold. Document preparation and assistant turns use direct
-OpenAI inference. Detailed messages also expose readable text to Linq. The
-shared workspace can use other providers, Web-mediated tools, persistent model
-connections and direct internet access. A host-specific interceptor cannot
-enforce the recipient set for the whole workspace. The draft refuses replacement
-imports before disclosure. The remaining design decision is how to isolate
-record-derived data or restrict all outbound effects of an affected member.
-Confirm signed recipients and the public register before attesting in Epic.
+Current approvals admit a replacement import. Missing, stale or withdrawn
+approvals block the next hospital read. The owner classifies destinations by
+who chooses them. OpenAI and four optional helpers can receive record-derived
+content without a member selecting the recipient. The app requires an individual
+approval for each. Member-directed destinations use the member’s own choice.
+Audio attachment transcription is separate from hospital document processing.
+The runner tests the fixed destinations and hosted inference selection against
+the same table that supplies the app notices. Imported copies remain available
+in the vault after withdrawal.
 
+Before the replacement rollout, confirm the deployed endpoints, signed entities
+and published disclosures. Keep the four optional helpers named unless their
+inputs are restricted. The existing public registration can continue throughout
+schema, Web and app rollout.
 
-Verification covered 231 tests across eight focused Web suites, including 32
-PostgreSQL cases against a freshly migrated local database. Both admission and
-transport rejected the shared destination. Public and Basic profile tests, the
-health-consent reset and the existing retrieval paths retained their behavior.
-Web typecheck, lint and changed-code complexity passed. The owner still needs
-production configuration and contracting-entity evidence.
+The synthetic PostgreSQL test admitted a daily run with five current grants,
+fetched a hospital page, withdrew one grant and observed no further hospital
+request. Separate callback tests cover a withdrawal while SMART is open. Adding
+a synthetic unknown runner host failed the classification test as intended.

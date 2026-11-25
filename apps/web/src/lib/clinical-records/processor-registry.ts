@@ -1,14 +1,10 @@
 import "server-only";
+import { clinicalRecordRecipients } from "@murphai/hosted-execution/clinical-records";
 import type { Prisma } from "@prisma/client";
 import { clinicalRecordsError } from "./errors";
 
 /** One notice and one ledger scope per legal entity, independent of launch consent. */
-export const clinicalProcessors = [
-  { id: "openai", name: "OpenAI OpCo, LLC", purpose: "Reads your records to organize them and answer questions about them.",
-    version: "2026-11-25", origin: "https://api.openai.com" },
-  { id: "linq", name: "Linq App Inc.", purpose: "Delivers messages that can include details from your records.",
-    version: "2026-11-25", origin: "https://api.linqapp.com" },
-] as const;
+export const clinicalProcessors = clinicalRecordRecipients.filter(row => row.kind === "named");
 
 export type ClinicalProcessor = (typeof clinicalProcessors)[number];
 
@@ -32,33 +28,13 @@ export async function readClinicalProcessorApprovals(memberId: string, prisma: G
   });
 }
 
-async function hasClinicalProcessorApprovals(memberId: string, prisma: GrantReader) {
+export async function hasClinicalProcessorApprovals(memberId: string, prisma: GrantReader) {
   return (await readClinicalProcessorApprovals(memberId, prisma)).every(row => row.approved);
 }
 
-// The current importer writes to the shared member vault. Its container has direct
-// internet access and host-specific intercepts, and effects may relay to other services.
-// There is no finite, enforced recipient set to authorize for this destination.
-const clinicalWorkspaceRecipientOrigins = null;
-
-export function registeredClinicalRecipients(origins: readonly string[] | null): boolean {
-  return origins !== null && origins.length > 0 && origins.every(origin =>
-    clinicalProcessors.some(processor => processor.origin === origin));
-}
-
-export async function clinicalProcessorAdmissionError(memberId: string, prisma: GrantReader) {
-  if (!await hasClinicalProcessorApprovals(memberId, prisma)) return "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED";
-  if (!registeredClinicalRecipients(clinicalWorkspaceRecipientOrigins)) return "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE";
-  return null;
-}
-
 export async function assertClinicalProcessorAdmission(memberId: string, prisma: GrantReader) {
-  const code = await clinicalProcessorAdmissionError(memberId, prisma);
-  if (code === "CLINICAL_RECORD_PROCESSOR_ROUTE_UNAVAILABLE") {
-    throw clinicalRecordsError({ code, httpStatus: 503, message: "This hospital connection is currently unavailable." });
-  }
-  if (code) {
-    throw clinicalRecordsError({ code, httpStatus: 403,
+  if (!await hasClinicalProcessorApprovals(memberId, prisma)) {
+    throw clinicalRecordsError({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED", httpStatus: 403,
       message: "Review the companies that process your medical records in the app." });
   }
 }

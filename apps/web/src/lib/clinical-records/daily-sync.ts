@@ -1,5 +1,5 @@
 import "server-only";
-import { clinicalProcessorAdmissionError } from "./processor-registry";
+import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { randomBytes } from "node:crypto";
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
@@ -75,7 +75,7 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
       });
       const previous = connection?.retrievalRuns[0];
       if (!connection || !previous || previous.status === "needs_reauth" || !hasDueClinicalGrant(connection, input.now)) return null;
-      if (connection.requiresProcessorApprovals && await clinicalProcessorAdmissionError(input.memberId, tx)) return null;
+      if (connection.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, tx)) return null;
       const lifecycle = classifyClinicalRun(previous, input.now);
       if (lifecycle !== "available" && lifecycle !== "recoverable") return null;
       const grantedScopesJson = previous.grantedScopesJson;
