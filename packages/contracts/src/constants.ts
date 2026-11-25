@@ -329,6 +329,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "recipe_delete",
   "recipe_upsert",
   "research_note_write",
+  "regimen_delete",
   "regimen_stop",
   "regimen_upsert",
   "protocol_upsert",

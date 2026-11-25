@@ -1,0 +1,10 @@
+{
+  "id": "regimen-delete",
+  "command": "vault-cli regimen delete <regimenId> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/health-extensions/vault-overlay/bank/regimens/supplement/magnesium-glycinate.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/list",
+  "purpose": "Remove a mistaken regimen record by id and confirm it disappears from the regimen list."
+}

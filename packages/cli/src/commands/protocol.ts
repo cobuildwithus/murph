@@ -25,6 +25,7 @@ import {
   projectRecordListResult,
   projectRecordShowResult,
 } from "./record-read-projection.js";
+import { createDirectEntityDeleteCommandDefinition } from "./record-mutation-command-helpers.js";
 
 const protocolSlugSchema = z
   .string()
@@ -496,6 +497,21 @@ export function registerProtocolCommands(
       return result;
     },
   });
+
+  regimen.command("delete", createDirectEntityDeleteCommandDefinition({
+    arg: {
+      name: "regimenId",
+      schema: z.string().min(1).describe("Canonical regimen id to delete."),
+    },
+    description: "Delete one regimen record saved by mistake.",
+    run(input) {
+      return services.core.deleteRegimen({
+        regimenId: input.lookup,
+        vault: input.vault,
+        requestId: input.requestId,
+      });
+    },
+  }));
 
   cli.command(regimen);
 

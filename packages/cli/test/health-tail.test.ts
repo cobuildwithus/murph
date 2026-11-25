@@ -1421,6 +1421,37 @@ test("regimen commands keep noun-specific and generic reads aligned", async () =
   }
 });
 
+test("regimen delete removes the saved record by id and reports a missing record on retry", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-regimen-delete-"));
+  const vault = ["--vault", vaultRoot];
+  try {
+    requireData(await runCli(["init", ...vault]));
+    const kept = requireData(await runCli<{ regimenId: string }>([
+      "regimen", "save", "Fixture habit", "--kind", "habit", ...vault,
+    ]));
+    const saved = requireData(await runCli<{ regimenId: string; entity: { path: string } }>([
+      "regimen", "save", "Fixture habit copy", "--kind", "habit", ...vault,
+    ]));
+    const deleteArgs = ["regimen", "delete", saved.regimenId, ...vault];
+    const deleted = requireData(await runCli(deleteArgs));
+    assert.deepEqual(deleted, {
+      entityId: saved.regimenId,
+      kind: "regimen",
+      deleted: true,
+      retainedPaths: [],
+    });
+    await assert.rejects(readFile(path.join(vaultRoot, saved.entity.path)), { code: "ENOENT" });
+    const list = requireData(await runCli<{ items: Array<{ id: string }> }>(["regimen", "list", ...vault]));
+    assert.deepEqual(list.items.map((item) => item.id), [kept.regimenId]);
+
+    const retry = await runCli(deleteArgs);
+    assert.equal(retry.ok, false);
+    assert.equal(retry.error.code, "not_found");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test.json");
