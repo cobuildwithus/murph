@@ -9,6 +9,6 @@
     "summary": "Your sleep card shows deep, REM and light sleep even when rounding each stage separately would put the night a minute over its total.",
     "details": "The card rounds the measured breakdown as a whole. Time your wearable leaves unclassified stays outside the stage totals.",
     "relevanceTags": ["sleep", "wearables"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5287]
   }
 }
