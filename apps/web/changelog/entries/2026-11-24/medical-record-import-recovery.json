@@ -9,6 +9,6 @@
     "summary": "If a hospital import stops making progress, you can sign in to the same portal again to start a new import.",
     "details": "The replacement starts after you finish signing in. Records already saved stay in your vault.",
     "relevanceTags": ["medical-records"],
-    "sourcePullRequests": [5293]
+    "sourcePullRequests": [5293, 5295]
   }
 }
