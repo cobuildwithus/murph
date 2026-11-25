@@ -102,6 +102,7 @@ import {
   upsertMemory,
   upsertRecipe,
   upsertRegimen,
+  listRegimens,
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
@@ -3911,6 +3912,55 @@ describeRealCodex('real Codex non-blood test kit e2e', () => {
       expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
       expect(reply).toMatch(/\b38\b/u)
       expect(reply).not.toMatch(/\b(?:47|62|71|55)\b/u)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 1_200_000)
+})
+
+describeRealCodex('real Codex supplement correction e2e', () => {
+  it('updates the saved supplement in place when the member corrects its start date', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-supplement-correction-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await initializeVault({ vaultRoot, createdAt: '2026-11-04T23:00:00.000Z', timezone: 'America/New_York' })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      // Six active products, so the corrected one is the oldest and falls past the snapshot's detailed rows.
+      for (const [title, startedOn] of [
+        ['Tidewater Vitamin D3', '2026-10-20'], ['Tidewater Creatine', '2026-10-12'],
+        ['Ferngrove Electrolyte Mix', '2026-10-02'], ['Ferngrove Probiotic', '2026-09-28'],
+        ['Ashby Zinc', '2026-09-21'],
+      ] as const) {
+        await upsertRegimen({ vaultRoot, kind: 'supplement', status: 'active', title, startedOn })
+      }
+      const magnesium = await upsertRegimen({
+        vaultRoot, kind: 'supplement', status: 'active', title: 'Larkspur Magnesium Glycinate', startedOn: '2026-09-14',
+        brand: 'Larkspur', substance: 'magnesium glycinate', dose: 2, unit: 'capsules', schedule: '2 capsules at night',
+      })
+      const instructions = await buildBloodTypeDeveloperInstructions(vaultRoot)
+      expect(instructions).toContain('1 more active supplement regimen: Larkspur Magnesium Glycinate')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: instructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'quick fix on my magnesium: i started it in early august, not mid september. still 2 caps before bed',
+        reasoningEffort: 'low', resumeSessionId: null,
+        sandbox: 'workspace-write', vaultRoot, workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const supplements = (await listRegimens(vaultRoot)).filter(record => record.entity.kind === 'supplement')
+      const corrected = supplements.find(record => record.entity.regimenId === magnesium.record.entity.regimenId)?.entity
+      process.stdout.write(`[supplement-correction-e2e] ${JSON.stringify({
+        model: config.model, commands, startedOn: corrected?.startedOn, count: supplements.length, reply: result.finalMessage,
+      })}\n`)
+      expect(supplements).toHaveLength(6)
+      expect(corrected).toMatchObject({ status: 'active', startedOn: '2026-08-01' })
+      expect(result.finalMessage).not.toMatch(/couldn.t|unable|failed|\berror\b/iu)
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
     }

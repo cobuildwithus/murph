@@ -1161,6 +1161,7 @@ test("canonical event availability collapses blood-test tombstones", async () =>
     latestBloodTestOccurredAt: older.record.occurredAt,
     latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
+    latestOtherTestOccurredAt: null,
   });
 });
 
@@ -1423,6 +1424,7 @@ test("canonical event availability collapses revisions before filtering by kind"
     latestBloodTestOccurredAt: null,
     latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
+    latestOtherTestOccurredAt: null,
   });
 });
 
@@ -1473,6 +1475,7 @@ test("canonical event availability stops between JSONL records", async () => {
     latestBloodTestOccurredAt: null,
     latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
+    latestOtherTestOccurredAt: null,
   });
   assert.equal(continuationChecks, walkContinuationChecks + 3);
 });

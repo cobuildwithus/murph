@@ -126,6 +126,7 @@ const ASSISTANT_CONTEXT_SNAPSHOT_ALL_DOMAINS =
 const MAX_ASSISTANT_CONTEXT_ACTIVE_SAFETY_RECORDS = 5
 const MAX_ASSISTANT_CONTEXT_ACTIVE_GOALS = 3
 const MAX_ASSISTANT_CONTEXT_ACTIVE_HABIT_REGIMENS = 3
+const MAX_ASSISTANT_CONTEXT_OMITTED_TITLES = 20
 const MAX_ASSISTANT_CONTEXT_RELATED_RECORDS = 3
 const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 128 * 1024
@@ -450,6 +451,7 @@ async function buildAssistantContextSnapshotPrompt(input: {
   ]
   const navigationEvidenceLines = [
     coverage.bloodTestsLine,
+    coverage.otherTestsLine,
     coverage.bodyMeasurementsLine,
     coverage.bloodPressureMeasurementsLine,
     coverage.healthContextLine,
@@ -511,6 +513,7 @@ async function buildAssistantSnapshotCoverage(input: {
   bloodTestsLine: string | null
   bodyMeasurementsLine: string | null
   bloodPressureMeasurementsLine: string | null
+  otherTestsLine: string | null
   conditionCount: number
   goalCount: number
   habitatLine: string | null
@@ -645,24 +648,24 @@ async function buildAssistantSnapshotCoverage(input: {
     activeAllergiesLine: renderActiveAllergiesLine({
       allergies: visibleActiveAllergies,
       conditionsById: activeConditionsById,
-      totalCount: activeAllergies.length,
+      omitted: activeAllergies.slice(visibleActiveAllergies.length),
     }),
     activeConditionCount: activeConditions.length,
     activeConditionsLine: renderActiveConditionsLine({
       conditions: visibleActiveConditions,
       regimens: activeRegimens,
       regimensById: activeRegimensById,
-      totalCount: activeConditions.length,
+      omitted: activeConditions.slice(visibleActiveConditions.length),
     }),
     activeGoalCount: activeGoals.length,
     activeGoalsLine: renderActiveGoalsLine(
       visibleActiveGoals,
-      activeGoals.length,
+      activeGoals.slice(visibleActiveGoals.length),
     ),
     activeHabitRegimenCount: activeHabitRegimens.length,
     activeHabitRegimensLine: renderActiveHabitRegimensLine(
       visibleActiveHabitRegimens,
-      activeHabitRegimens.length,
+      activeHabitRegimens.slice(visibleActiveHabitRegimens.length),
     ),
     activeMedicationRegimenCount: activeMedicationRegimens.length,
     activeMedicationRegimensLine: renderActiveSafetyRegimensLine({
@@ -671,7 +674,9 @@ async function buildAssistantSnapshotCoverage(input: {
       label: 'Active medication regimens',
       omittedNoun: 'medication regimen',
       regimens: visibleActiveMedicationRegimens,
-      totalCount: activeMedicationRegimens.length,
+      omitted: activeMedicationRegimens.slice(
+        visibleActiveMedicationRegimens.length,
+      ),
     }),
     activeRecordReadLine: hasActivePromptContext
       ? '- Treat this snapshot as navigation, not a completeness gate. For a concrete concern or an owning workflow\'s explicit contract, read only the relevant canonical record needed to resolve it; do not enumerate or detail-read unrelated records.'
@@ -683,7 +688,9 @@ async function buildAssistantSnapshotCoverage(input: {
       label: 'Active supplement regimens',
       omittedNoun: 'supplement regimen',
       regimens: visibleActiveSupplementRegimens,
-      totalCount: activeSupplementRegimens.length,
+      omitted: activeSupplementRegimens.slice(
+        visibleActiveSupplementRegimens.length,
+      ),
     }),
     allergyCount: allergies.length,
     bloodTestsPresent: canonicalEventCoverage.bloodTestsPresent,
@@ -699,6 +706,9 @@ async function buildAssistantSnapshotCoverage(input: {
       renderAssistantSnapshotBloodPressureMeasurementsLine(
         canonicalEventCoverage.latestBloodPressureMeasurementDate,
       ),
+    otherTestsLine: canonicalEventCoverage.latestOtherTestDate
+      ? `- Other test records, such as stool or microbiome kits, are present (latest ${canonicalEventCoverage.latestOtherTestDate}). For a named score or organism, read it with \`vault-cli diagnostic-test list --text "<name>" --format json\`.`
+      : null,
     conditionCount: conditions.length,
     goalCount: goals.length,
     habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
@@ -799,6 +809,7 @@ async function collectAssistantSnapshotCanonicalEventCoverage(input: {
   latestBloodPressureMeasurementDate: string | null
   latestBloodTestDate: string | null
   latestBodyMeasurementDate: string | null
+  latestOtherTestDate: string | null
   bloodTestsPresent: boolean
 }> {
   assertAssistantContextSnapshotCanContinue(input)
@@ -823,6 +834,7 @@ async function collectAssistantSnapshotCanonicalEventCoverage(input: {
     latestBloodTestDate: canonicalEventDate(summary.latestBloodTestOccurredAt),
     latestBodyMeasurementDate:
       canonicalEventDayKey(summary.latestBodyMeasurementDayKey),
+    latestOtherTestDate: canonicalEventDate(summary.latestOtherTestOccurredAt),
   }
 }
 
@@ -1141,7 +1153,7 @@ function compareActiveSafetyRegimens(
 function renderActiveAllergiesLine(input: {
   allergies: readonly AllergyFrontmatter[]
   conditionsById: ReadonlyMap<string, PromptLookupRecord>
-  totalCount: number
+  omitted: readonly PromptLookupRecord[]
 }): string | null {
   if (input.allergies.length === 0) {
     return null
@@ -1151,7 +1163,7 @@ function renderActiveAllergiesLine(input: {
     .map((allergy) => renderActiveAllergy(allergy, input.conditionsById))
     .join('; ')
 
-  return `- Active allergies: ${allergySummaries}${renderOmittedCount(input.totalCount - input.allergies.length, 'allergy', 'allergies')}.`
+  return `- Active allergies: ${allergySummaries}${renderOmittedTitles(input.omitted, 'allergy', 'allergies')}.`
 }
 
 function renderActiveAllergy(
@@ -1180,7 +1192,7 @@ function renderActiveConditionsLine(input: {
   conditions: readonly ConditionFrontmatter[]
   regimens: readonly RegimenFrontmatter[]
   regimensById: ReadonlyMap<string, PromptLookupRecord>
-  totalCount: number
+  omitted: readonly PromptLookupRecord[]
 }): string | null {
   if (input.conditions.length === 0) {
     return null
@@ -1192,7 +1204,7 @@ function renderActiveConditionsLine(input: {
     )
     .join('; ')
 
-  return `- Active conditions: ${conditionSummaries}${renderOmittedCount(input.totalCount - input.conditions.length, 'condition')}.`
+  return `- Active conditions: ${conditionSummaries}${renderOmittedTitles(input.omitted, 'condition')}.`
 }
 
 function renderActiveCondition(
@@ -1224,9 +1236,9 @@ function renderActiveSafetyRegimensLine(input: {
   conditions: readonly ConditionFrontmatter[]
   conditionsById: ReadonlyMap<string, PromptLookupRecord>
   label: string
+  omitted: readonly PromptLookupRecord[]
   omittedNoun: string
   regimens: readonly RegimenFrontmatter[]
-  totalCount: number
 }): string | null {
   if (input.regimens.length === 0) {
     return null
@@ -1238,7 +1250,7 @@ function renderActiveSafetyRegimensLine(input: {
     )
     .join('; ')
 
-  return `- ${input.label}: ${regimenSummaries}${renderOmittedCount(input.totalCount - input.regimens.length, input.omittedNoun)}.`
+  return `- ${input.label}: ${regimenSummaries}${renderOmittedTitles(input.omitted, input.omittedNoun)}.`
 }
 
 function renderActiveSafetyRegimen(
@@ -1273,13 +1285,13 @@ function renderActiveSafetyRegimen(
 
 function renderActiveGoalsLine(
   goals: readonly GoalFrontmatter[],
-  totalCount: number,
+  omitted: readonly PromptLookupRecord[],
 ): string | null {
   if (goals.length === 0) {
     return null
   }
 
-  return `- Active goals: ${goals.map(renderActiveGoal).join('; ')}${renderOmittedCount(totalCount - goals.length, 'goal')}.`
+  return `- Active goals: ${goals.map(renderActiveGoal).join('; ')}${renderOmittedTitles(omitted, 'goal')}.`
 }
 
 function renderActiveGoal(goal: GoalFrontmatter): string {
@@ -1360,13 +1372,13 @@ function renderHabitatLine(
 
 function renderActiveHabitRegimensLine(
   regimens: readonly RegimenFrontmatter[],
-  totalCount: number,
+  omitted: readonly PromptLookupRecord[],
 ): string | null {
   if (regimens.length === 0) {
     return null
   }
 
-  return `- Active habit regimens: ${regimens.map(renderActiveHabitRegimen).join('; ')}${renderOmittedCount(totalCount - regimens.length, 'habit regimen')}.`
+  return `- Active habit regimens: ${regimens.map(renderActiveHabitRegimen).join('; ')}${renderOmittedTitles(omitted, 'habit regimen')}.`
 }
 
 function renderActiveHabitRegimen(regimen: RegimenFrontmatter): string {
@@ -1408,14 +1420,19 @@ function renderStringList(
   return `${label} ${visible.join(', ')}${omitted}`
 }
 
-function renderOmittedCount(
-  count: number,
+function renderOmittedTitles(
+  omitted: readonly PromptLookupRecord[],
   singularNoun: string,
   pluralNoun = `${singularNoun}s`,
 ): string {
-  return count > 0
-    ? `; ${count} more active ${count === 1 ? singularNoun : pluralNoun} omitted`
-    : ''
+  if (omitted.length === 0) {
+    return ''
+  }
+
+  const noun = omitted.length === 1 ? singularNoun : pluralNoun
+  const named = omitted.slice(0, MAX_ASSISTANT_CONTEXT_OMITTED_TITLES)
+  const unnamed = omitted.length - named.length
+  return `; ${omitted.length} more active ${noun}: ${named.map((record) => renderPromptField(record.title)).join(', ')}${unnamed > 0 ? `, +${unnamed}` : ''}`
 }
 
 function renderRegimenDose(regimen: RegimenFrontmatter): string | null {

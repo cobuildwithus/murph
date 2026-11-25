@@ -138,6 +138,7 @@ export interface CanonicalEventAvailabilitySummary {
   latestBloodTestOccurredAt: string | null;
   latestBodyMeasurementDayKey: string | null;
   latestBodyMeasurementOccurredAt: string | null;
+  latestOtherTestOccurredAt: string | null;
 }
 
 const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
@@ -1402,6 +1403,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
   let latestBloodTestOccurredAt: string | null = null;
   let latestBodyMeasurementDayKey: string | null = null;
   let latestBodyMeasurementOccurredAt: string | null = null;
+  let latestOtherTestOccurredAt: string | null = null;
   for (const candidate of latestByEventId.values()) {
     if (!shouldContinue()) {
       return interruptedCanonicalEventAvailability();
@@ -1442,15 +1444,12 @@ export async function readCanonicalEventAvailabilityInterruptible(
       }
     }
 
-    if (
-      record.kind === "test"
-      && isBloodTestHistoryRecord(record)
-      && (
-        latestBloodTestOccurredAt === null
-        || record.occurredAt > latestBloodTestOccurredAt
-      )
-    ) {
-      latestBloodTestOccurredAt = record.occurredAt;
+    if (record.kind === "test") {
+      if (isBloodTestHistoryRecord(record)) {
+        latestBloodTestOccurredAt = laterOccurredAt(latestBloodTestOccurredAt, record.occurredAt);
+      } else {
+        latestOtherTestOccurredAt = laterOccurredAt(latestOtherTestOccurredAt, record.occurredAt);
+      }
     }
     if (
       canonicalEventContainsBodyMeasurement(record, providerBodyObservation)
@@ -1485,7 +1484,12 @@ export async function readCanonicalEventAvailabilityInterruptible(
     latestBloodTestOccurredAt,
     latestBodyMeasurementDayKey,
     latestBodyMeasurementOccurredAt,
+    latestOtherTestOccurredAt,
   };
+}
+
+function laterOccurredAt(current: string | null, candidate: string): string {
+  return current === null || candidate > current ? candidate : current;
 }
 
 function canonicalEventContainsBodyMeasurement(
@@ -1729,6 +1733,7 @@ function interruptedCanonicalEventAvailability(): CanonicalEventAvailabilitySumm
     latestBloodTestOccurredAt: null,
     latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
+    latestOtherTestOccurredAt: null,
   };
 }
 
