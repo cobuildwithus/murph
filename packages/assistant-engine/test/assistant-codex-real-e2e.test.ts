@@ -88,6 +88,7 @@ import {
   initializeVault,
   listGoals,
   listAutomations,
+  listRegimens,
   listWorkoutFormats,
   patchAutomation,
   readEvent,
@@ -2870,6 +2871,34 @@ describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
 })
 
 describeRealCodex('real model canonical production journeys', () => {
+  it('deletes only the mistaken habit regimen', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    try {
+      fixture.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: process.env.MURPH_REAL_CODEX_COMMAND ?? 'codex', directory: fixture.root,
+      })
+      const habit = { vaultRoot: fixture.vault, kind: 'habit' as const, startedOn: '2026-03-12' }
+      const kept = await upsertRegimen({ ...habit, title: 'Paper folding' })
+      const mistaken = await upsertRegimen({ ...habit, title: 'Paper folding draft' })
+      const before = await readCanonicalAuditRecords(fixture.vault)
+
+      const { response } = await fixture.message(
+        'Please delete the habit entry called Paper folding draft. I saved it by accident. Keep Paper folding as it is.',
+      )
+
+      const writes = (await readCanonicalAuditRecords(fixture.vault)).slice(before.length)
+      expect(writes).toMatchObject([{ action: 'regimen_delete', targetIds: [mistaken.record.entity.regimenId] }])
+      expect((await listRegimens(fixture.vault)).map(record => record.entity)).toEqual([kept.record.entity])
+      expect(response).toMatch(/delet(?:ed|ion)|remov(?:ed|al)|erased|gone/iu)
+      expect(response).not.toMatch(/\byou(?:'ve| have)? (?:stopped|quit|gave up)\b/iu)
+      process.stdout.write(`[regimen-correction] ${JSON.stringify({ model: config.model, writes: writes.length, reply: response })}\n`)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 240_000)
+
   it('keeps conversational recall and current style across warm and cold instruction updates', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-thread-continuity-'))

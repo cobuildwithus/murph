@@ -86,8 +86,9 @@ test("serializes regimen registry writes before resolving the latest target", as
   });
 
   const listed = await regimensModule.listRegimens(vaultRoot);
+  await regimensModule.deleteRegimen({ vaultRoot, regimenId: results[1].record.entity.regimenId });
 
-  expect(lockSpy).toHaveBeenCalledTimes(3);
+  expect(lockSpy).toHaveBeenCalledTimes(4);
   expect(
     lockCalls.every((resources) =>
       resources.some(

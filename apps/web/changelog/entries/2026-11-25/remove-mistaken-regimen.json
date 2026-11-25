@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-25",
+  "order": 200,
+  "item": {
+    "id": "remove-mistaken-regimen",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Remove a regimen saved by mistake",
+    "summary": "You can ask Murph to remove an extra copy of a supplement, medication, therapy, or habit from your records.",
+    "details": "Removing the copy keeps your original record and its history intact.",
+    "relevanceTags": ["regimens", "vault"],
+    "sourcePullRequests": [5317]
+  }
+}

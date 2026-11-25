@@ -5,9 +5,9 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { expect, test, vi } from "vitest";
 
-import { SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts";
+import { REGIMEN_KINDS, SUPPLEMENT_INGREDIENTS_MAX_ITEMS } from "@murphai/contracts";
 
-import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
+import { deleteRegimen, initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
 import { resolveAuditShardPath } from "../src/audit.ts";
 import {
   deleteFood,
@@ -2601,6 +2601,26 @@ test("regimens support medication and supplement groups plus stop handling", asy
   assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_upsert").length, 3);
   assert.equal(regimenOperations.filter((operation) => operation.operationType === "regimen_stop").length, 1);
   assert.ok(regimenOperations.every((operation) => operation.status === "committed"));
+});
+
+test.each(REGIMEN_KINDS)("deletes a %s regimen by id and audits its canonical path", async (kind) => {
+  const vaultRoot = await makeTempDirectory("murph-regimen-delete");
+  await initializeVault({ vaultRoot });
+  const { record } = await upsertRegimen({ vaultRoot, kind, title: "Sample entry" });
+  const { regimenId } = record.entity;
+  const { relativePath } = record.document;
+
+  assert.deepEqual(await deleteRegimen({ vaultRoot, regimenId }), { regimenId, relativePath, deleted: true });
+  await expect(fs.access(path.join(vaultRoot, relativePath))).rejects.toMatchObject({ code: "ENOENT" });
+  assert.deepEqual(await listRegimens(vaultRoot), []);
+  await expect(deleteRegimen({ vaultRoot, regimenId })).rejects.toMatchObject({ code: "VAULT_REGIMEN_MISSING" });
+  const auditRecords = await readJsonlRecords({ vaultRoot, relativePath: resolveAuditShardPath(new Date()) });
+  expect(auditRecords).toContainEqual(expect.objectContaining({
+    action: "regimen_delete",
+    commandName: "core.deleteRegimen",
+    targetIds: [regimenId],
+    changes: [expect.objectContaining({ path: relativePath, op: "delete" })],
+  }));
 });
 
 test("regimen reads reject conflicting regimenId and slug selectors", async () => {

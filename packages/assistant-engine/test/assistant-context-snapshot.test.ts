@@ -13,13 +13,17 @@ import {
   appendBloodTest,
   appendHistoryEvent,
   deleteEvent,
+  deleteRegimen,
   initializeVault,
   stringifyFrontmatterDocument,
+  upsertRegimen,
   VAULT_LAYOUT,
+  withHostedCanonicalWritePort,
 } from '@murphai/core'
 import { describe, expect, it } from 'vitest'
 
 import {
+  listAssistantContextSnapshotDirtyDomainsForCanonicalWrite,
   listAssistantContextSnapshotDirtyDomainsForPath,
   markAssistantContextSnapshotDirty,
   readAssistantContextSnapshotPrompt,
@@ -661,47 +665,33 @@ describe('assistant context snapshot', () => {
     }
   })
 
-  it('returns a fail-closed safety guidance prompt when health_context is pending dirty', async () => {
+  it('marks health context dirty on regimen save and deletion and hides the stale regimen', async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+    const title = 'Fixture tablet'
 
     try {
-      await writeVaultDocument({
-        attributes: {
-          schemaVersion: CONTRACT_SCHEMA_VERSION.regimenFrontmatter,
-          docType: FRONTMATTER_DOC_TYPES.regimen,
-          regimenId: generateContractId(ID_PREFIXES.regimen),
-          slug: 'pregabalin',
-          title: 'Pregabalin',
-          kind: 'medication',
-          status: 'active',
-          startedOn: '2026-06-01',
-          substance: 'pregabalin',
-          dose: 75,
-          unit: 'mg',
-          schedule: 'nightly',
+      await initializeVault({ vaultRoot })
+      await withHostedCanonicalWritePort({
+        async persistCanonicalWrite({ receipt }) {
+          await markAssistantContextSnapshotDirty({
+            domains: listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(receipt),
+            vaultRoot,
+          })
         },
-        relativePath: `${VAULT_LAYOUT.regimensDirectory}/pregabalin.md`,
-        vaultRoot,
+      }, async () => {
+        const { record } = await upsertRegimen({ kind: 'medication', title, vaultRoot })
+        expect((await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains)
+          .toEqual(['health_context'])
+        await refreshAssistantContextSnapshot({ vaultRoot })
+        const initialPrompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+        expect(initialPrompt).toContain('Active medication regimens:')
+        expect(initialPrompt).toContain(title)
+
+        await deleteRegimen({ regimenId: record.entity.regimenId, vaultRoot })
       })
 
-      await markAssistantContextSnapshotDirty({
-        domains: ['health_context'],
-        vaultRoot,
-      })
-      await refreshAssistantContextSnapshot({
-        now: () => '2026-06-26T12:00:00.000Z',
-        vaultRoot,
-      })
-
-      const initialPrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
-      expect(initialPrompt).toContain('Active medication regimens:')
-      expect(initialPrompt).toContain('Pregabalin')
-
-      await markAssistantContextSnapshotDirty({
-        domains: ['health_context'],
-        vaultRoot,
-      })
-
+      expect((await readAssistantContextSnapshotState(vaultRoot))?.pendingDirtyDomains)
+        .toEqual(['health_context'])
       const stalePrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(stalePrompt).toContain('Active safety-critical health context is currently unavailable')
       expect(stalePrompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
@@ -714,7 +704,12 @@ describe('assistant context snapshot', () => {
       expect(stalePrompt).not.toContain(
         'Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable',
       )
-      expect(stalePrompt).not.toContain('Pregabalin')
+      expect(stalePrompt).not.toContain(title)
+      expect(await refreshAssistantContextSnapshot({ vaultRoot })).toMatchObject({
+        pendingDirtyDomains: [],
+        refreshed: true,
+      })
+      expect((await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? '').not.toContain(title)
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
     }

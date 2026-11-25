@@ -303,7 +303,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "provider": "delete|edit|import-json|list|save|scaffold|show",
   "query": "projection rebuild|projection status",
   "recipe": "delete|edit|import-json|list|save|scaffold|show",
-  "regimen": "import-json|list|save|scaffold|show|stop",
+  "regimen": "delete|import-json|list|save|scaffold|show|stop",
   "research": "payload-schema|scout|scout-batch|scout-batch-payload-schema",
   "route": "estimate|resolve-address",
   "run": "",

@@ -1243,6 +1243,14 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
   saveSupplement(input: SupplementSaveInput): Promise<SupplementSaveResult>
   upsertPrivateProtocol(input: PrivateProtocolUpsertInput): Promise<PrivateProtocolUpsertResult>
   stopRegimen(input: StopRegimenInput): Promise<StopRegimenResult>
+  deleteRegimen(input: CommandContext & { regimenId: string }): Promise<{
+    vault: string
+    entityId: string
+    lookupId: string
+    kind: 'regimen'
+    deleted: true
+    retainedPaths: string[]
+  }>
 }
 
 export interface ImporterServices {

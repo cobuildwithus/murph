@@ -1554,6 +1554,29 @@ export function createExplicitHealthCoreServices(
         status: String(result.record.entity.status),
       };
     },
+    async deleteRegimen(input) {
+      const { core } = await loadRuntime();
+      try {
+        const result = await core.deleteRegimen({
+          vaultRoot: input.vault,
+          regimenId: input.regimenId,
+        });
+        return {
+          vault: input.vault,
+          entityId: result.regimenId,
+          lookupId: result.regimenId,
+          kind: "regimen",
+          deleted: result.deleted,
+          retainedPaths: [],
+        };
+      } catch (error) {
+        throw toVaultCliError(error, {
+          VAULT_REGIMEN_MISSING: { code: "not_found", message: "Regimen was not found." },
+          VAULT_INVALID_INPUT: { code: "contract_invalid" },
+          VAULT_INVALID_REGIMEN: { code: "contract_invalid" },
+        });
+      }
+    },
   } as Pick<
     CoreWriteServices,
     | "scaffoldGoal"
@@ -1576,6 +1599,7 @@ export function createExplicitHealthCoreServices(
     | "upsertGeneticVariant"
     | "upsertPrivateProtocol"
     | "stopRegimen"
+    | "deleteRegimen"
   >;
 }
 
