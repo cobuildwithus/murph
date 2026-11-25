@@ -249,6 +249,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "The Linux binary places Guardian metric names after the decisions path.",
     },
     {
+      candidate: "/v1/decisionsopenai",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The patched Linux binary places openai after the fixed Guardian decisions URL.",
+    },
+    {
+      candidate: "/v1/decisionsopenai.yaml.codex-plugin/plugin.json.claude-plugin/plugin.json.cursor-plugin/plugin.json",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "The patched Linux binary places local plugin manifest filenames after the fixed Guardian decisions URL.",
+    },
+    {
       candidate: "/v1/decisionstext/event-stream",
       disposition: "binary_false_positive",
       owner: "codex",
