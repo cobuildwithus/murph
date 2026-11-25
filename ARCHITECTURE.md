@@ -1350,6 +1350,11 @@ confined read-only model leaves for labs, measurements and history and a shared
 source evidence. Foreground replies can proceed during extraction. The controller
 aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
+A page's clinical change receipt digest binds its frozen proposal, so the
+accepted job is committed through the canonical write log before that receipt.
+Restore replays both in order and finishes an applied page through its saved
+receipt without extracting it again; an operational record that a canonical
+receipt binds always takes this path.
 Active extraction may defer an idle checkpoint for one finite 125-second window,
 but cannot defer pending canonical receipts or durable effects.
 Each page's own proposal apply and deferred usage therefore checkpoint per page,

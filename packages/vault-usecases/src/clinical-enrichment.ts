@@ -17,7 +17,7 @@ import {
 } from "@murphai/clinical-records";
 import { eventImportDecisionSchema, toLocalDayKey, vaultMetadataSchema, type ExternalRef } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
-import { type ClinicalChangeReceipt, type ClinicalChangeReceiptIdentity, readClinicalChangeReceipt, importEventBatch, isVaultError, resolveVaultPathOnDisk, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
+import { type ClinicalChangeReceipt, type ClinicalChangeReceiptIdentity, readClinicalChangeReceipt, importEventBatch, isVaultError, resolveVaultPathOnDisk, runCanonicalWrite, withCanonicalResourceLocks, withCanonicalWriteLock } from "@murphai/core";
 import { normalizeMetricValue, unitsEquivalent } from "@murphai/health-metrics";
 import { listCanonicalEntities, readVaultMetadataSource, type CanonicalEntity } from "@murphai/query";
 import { resolveRuntimePaths, writeJsonFileAtomic } from "@murphai/runtime-state/node";
@@ -75,6 +75,21 @@ async function readIndex(vaultRoot: string) {
 async function saveJob(vaultRoot: string, job: Job) {
   await mkdir(rootPath(vaultRoot), { recursive: true, mode: 0o700 });
   await writeJsonFileAtomic(jobPath(vaultRoot, job.jobId), jobSchema.parse(job), { mode: 0o600 });
+}
+/**
+ * The page's receipt digest binds `job.prepared`, so the accepted job joins the
+ * canonical write log before that receipt. Restore then replays both, and a
+ * lost snapshot can never re-sample a page whose receipt already exists.
+ */
+async function commitAcceptedJob(vaultRoot: string, jobId: string) {
+  const absolutePath = jobPath(vaultRoot, jobId);
+  const relativePath = path.relative(resolveRuntimePaths(vaultRoot).absoluteVaultRoot, absolutePath).split(path.sep).join("/");
+  const content = await readFile(absolutePath, "utf8");
+  await runCanonicalWrite({
+    vaultRoot, operationType: "clinical_enrichment_accept", summary: "Commit accepted clinical enrichment proposals.",
+    // The file already holds these bytes; reuse records them in the log without replacing it.
+    mutate: async ({ batch }) => { await batch.stageTextWrite(relativePath, content, { overwrite: false, allowExistingMatch: true }); },
+  });
 }
 async function readJob(vaultRoot: string, jobId: string) {
   const job = jobSchema.parse(await readOptional(jobPath(vaultRoot, jobId)));
@@ -621,6 +636,7 @@ export async function applyClinicalEnrichmentProposals(input: { vaultRoot: strin
     const attested = await attestSource(input.vaultRoot, job);
     const identity = enrichmentReceiptIdentity(job, attested);
     const saved = await readClinicalChangeReceipt(input.vaultRoot, identity);
+    if (!saved) await commitAcceptedJob(input.vaultRoot, job.jobId);
     const completeHeld = async (reason: string) => {
       const receipt = saved ?? (await importEventBatch({
         vaultRoot: input.vaultRoot, apply: true, decisions: [], receiptIdentity: identity,
