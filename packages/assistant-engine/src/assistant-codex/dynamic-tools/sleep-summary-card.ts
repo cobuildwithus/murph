@@ -33,12 +33,26 @@ export async function resolveTrustedSleepSummaryCard(input: {
 }
 
 function sleepStages(night: WearableSleepCardNight['night'], totalSleepMinutes: number): SleepSummaryResponseCardV1['stages'] {
-  const deepMinutes = rounded(night.deepMinutes.selection.value, 0, 1440)
-  const remMinutes = rounded(night.remMinutes.selection.value, 0, 1440)
-  const lightMinutes = rounded(night.lightMinutes.selection.value, 0, 1440)
-  return deepMinutes !== null && remMinutes !== null && lightMinutes !== null
-    && deepMinutes + remMinutes + lightMinutes > 0 && deepMinutes + remMinutes + lightMinutes <= totalSleepMinutes
-    ? { deepMinutes, remMinutes, lightMinutes } : null
+  const stageKeys = ['deepMinutes', 'remMinutes', 'lightMinutes'] as const
+  const stages = { deepMinutes: 0, remMinutes: 0, lightMinutes: 0 }
+  const remainders = []
+  let measuredMinutes = 0
+  let wholeMinutes = 0
+  for (const key of stageKeys) {
+    const value = night[key].selection.value
+    if (value === null || !Number.isFinite(value) || value < 0 || value > 1440) return null
+    stages[key] = Math.floor(value)
+    measuredMinutes += value
+    wholeMinutes += stages[key]
+    remainders.push({ key, fraction: value - stages[key] })
+  }
+  const subtotal = Math.round(measuredMinutes)
+  if (subtotal < 1 || subtotal > totalSleepMinutes) return null
+
+  // Round the breakdown to its own subtotal, including partially classified nights.
+  remainders.sort((left, right) => right.fraction - left.fraction)
+  for (const { key } of remainders.slice(0, subtotal - wholeMinutes)) stages[key] += 1
+  return stages
 }
 
 function rounded(value: number | null, min: number, max: number): number | null {

@@ -27,13 +27,17 @@ that night's valid window. The read is bounded to adjacent dates and 10,000
 points; saturation omits enrichment. A date-wide or daytime HRV mean is not a
 substitute. The presentation preserves the HRV method in text and Telegram.
 
-The host rounds integers before validation. Stages require all three values and
-a positive bounded sum; all-zero stages become null. Awake time and efficiency
-of zero become null. Efficiency fractions are converted to percent. Score is
+The host displays whole minutes. Stages require all three measurements and a
+rounded subtotal between one minute and the displayed sleep total. The host
+rounds each stage down, then gives the remaining minutes of the stage subtotal
+to the largest fractional remainders. Unclassified time stays unclassified.
+Awake time and efficiency of zero become null. Efficiency fractions are converted to percent. Score is
 provider sleep score, or WHOOP sleep performance when score is absent. No
 score is synthesized. Wake-ups always remain null until an importer owns them.
-Awake minutes are not awakening counts. Consumer stages remain less reliable
-than timing and total sleep.
+Awake minutes are not awakening counts. A successful attachment returns the
+verified card values for requested notes, including the combined deep and REM
+duration when stages are present. Consumer stages remain less reliable than
+timing and total sleep.
 
 ## Immutable wire and audience
 

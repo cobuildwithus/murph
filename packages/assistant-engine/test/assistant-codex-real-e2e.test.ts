@@ -2748,7 +2748,7 @@ describeRealCodex('real Codex sleep card scheduled notes', () => {
         ...common, dynamicTools: [MURPH_AUTOMATION_TOOL],
         developerInstructions: buildAssistantSystemPrompt({ ...developerOptions, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply' }),
         hostedToolContext: { ...createRealCodexSupportHostedToolContext('direct'), automationTool },
-        prompt: `My existing morning sleep recap is automation ${original.automationId}. Going forward, send my sleep card in its place along with a short note about how I'm trending and anything else interesting. Keep its schedule and destination.`,
+        prompt: `My existing morning sleep recap is automation ${original.automationId}. Going forward, send my sleep card in its place with a short note about my trend and how much restorative sleep I got. Keep its schedule and destination.`,
       })
       expect(requests.slice(0, 2).map(request => request.action)).toEqual(['inspect', 'patch'])
       expect(requests.filter(request => request.action === 'patch')).toHaveLength(1)
@@ -2780,7 +2780,9 @@ describeRealCodex('real Codex sleep card scheduled notes', () => {
       const decision = parseAssistantNotificationDecision(result.providerAuthoredFinalMessage ?? '')
       expect(decision.kind).toBe('send_message')
       if (decision.kind !== 'send_message' || !result.responseCard) throw new Error('Expected a scheduled sleep note.')
-      expect(decision.text.trim()).not.toBe('')
+      expect(decision.text).toMatch(/(?:259\s*(?:m|min)|4\s*(?:h(?:ours?)?\s*(?:and\s*)?|:)19)/iu)
+      expect(decision.text).toMatch(/restorative|deep.{0,20}rem|rem.{0,20}deep/iu)
+      expect(decision.text).toMatch(/longer|longest|above|more (?:than|sleep)|extra/iu)
       expect(decision.text).not.toMatch(/—| - |privateSummary|can't combine|cannot combine/iu)
       process.stdout.write('[sleep-card-scheduled-note-text] ' + JSON.stringify({ savedInstructions: saved?.instructions ?? null, confirmation: correction.finalMessage, scheduledNote: decision.text }) + '\n')
       const message = renderAssistantResponseCardText(result.responseCard, decision.text)

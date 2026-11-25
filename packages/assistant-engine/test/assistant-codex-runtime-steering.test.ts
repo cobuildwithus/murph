@@ -806,7 +806,7 @@ describe('steered final segments', () => {
     const composed = renderAssistantResponseCardText(SYNTHETIC_SLEEP_CARD, note)
     const steps: Parameters<typeof runScriptedSteeredFinalSegmentsTurn>[0][number][] = [
       completedItemEvent({ id: 'synthetic-request', type: 'user_message', message: 'Show my sleep card with a short note.' }),
-      { card: SYNTHETIC_SLEEP_CARD, expectedText: 'response card attached', id: 941, kind: 'attach-response-card', tool: 'attach_sleep_card' },
+      { card: SYNTHETIC_SLEEP_CARD, expectedText: expect.stringContaining('Asleep: 7h 16m'), id: 941, kind: 'attach-response-card', tool: 'attach_sleep_card' },
       completedItemEvent({ id: 'synthetic-note', type: 'assistant_message', message: note }),
     ]
     if (steer) steps.push(
