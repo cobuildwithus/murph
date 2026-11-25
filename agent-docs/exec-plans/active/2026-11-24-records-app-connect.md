@@ -25,3 +25,5 @@ Run owner-level callback, control plane, source projection, removal and browser 
 ## PR 1 handoff
 
 The five bearer routes, mixed-version schema, read-only callback dispatch and shared exchange are implemented. Receipt projection and member-locked capacity checks ship with the reader. Focused Web checks passed (409 tests), including all status pairs and proof checks. The opt-in clinical PostgreSQL suites passed all 32 tests on a fresh migrated database. The retention concurrency suite passed all nine tests. Web typecheck passed. The changelog covers the source slot freed by disconnect. The app release, final review, lifecycle work and web retirement remain pending.
+
+The full Web suite surfaced the predeploy guard’s required registration for the paired OAuth constraint. Registering the exact mixed-writer statement keeps altered and additional constraints blocked. All 91 production migration guard tests and Web typecheck passed after this change.
