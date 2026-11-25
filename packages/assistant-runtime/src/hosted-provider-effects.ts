@@ -1,5 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
+  assertClinicalTextTransportAvailable,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramMessage,
@@ -157,6 +158,7 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
+  assertClinicalTextTransportAvailable(request.idempotencyKey);
   let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,

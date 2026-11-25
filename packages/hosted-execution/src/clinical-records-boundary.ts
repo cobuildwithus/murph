@@ -58,6 +58,7 @@ export interface HostedClinicalRecordsRetrievalSliceRef {
 }
 
 export interface HostedClinicalRecordsRecordOutcomeRequest {
+  hasChangeReceipt?: true;
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode?: string;
   generation: number;
@@ -86,6 +87,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     value,
     [
       "counts",
+      "hasChangeReceipt",
       "errorCode",
       "generation",
       "retrievalProtocol",
@@ -95,6 +97,10 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     ],
     "Hosted clinical records outcome request",
   );
+  const hasChangeReceipt = Reflect.get(record, "hasChangeReceipt");
+  if (hasChangeReceipt !== undefined && (hasChangeReceipt !== true || !["completed", "partial"].includes(String(Reflect.get(record, "status"))))) {
+    throw new ContractValidationError("Invalid clinical change proof.");
+  }
   const counts = requireExactObject(
     Reflect.get(record, "counts"),
     [
@@ -125,6 +131,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     throw new ContractValidationError("Hosted clinical records outcome retrieval identity is invalid.");
   }
   return {
+    ...(hasChangeReceipt === true ? { hasChangeReceipt } : {}),
     counts: {
       createdCount: parseNonNegativeCount(Reflect.get(counts, "createdCount")),
       executableDecisionCount: parseNonNegativeCount(
@@ -149,6 +156,25 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     retrievalSlices: retrievalSlices.map(parseRetrievalSliceRef),
     runId: parseHostedClinicalRecordsIdentifier(Reflect.get(record, "runId")),
     status: parseOutcomeStatus(Reflect.get(record, "status")),
+  };
+}
+
+export interface HostedClinicalChangeProof {
+  kind: "change-receipt" | "change-scheduled";
+  generation: number;
+  runId: string;
+}
+
+export function parseHostedClinicalCheckpointRequest(value: unknown): HostedClinicalRecordsRecordOutcomeRequest | HostedClinicalChangeProof {
+  const kind: unknown = value && typeof value === "object" ? Reflect.get(value, "kind") : null;
+  if (kind !== "change-receipt" && kind !== "change-scheduled") {
+    return parseHostedClinicalRecordsRecordOutcomeRequest(value);
+  }
+  const record = requireExactObject(value, ["kind", "generation", "runId"], "Hosted clinical change proof");
+  return {
+    kind,
+    generation: parsePositiveSafeInteger(Reflect.get(record, "generation")),
+    runId: parseHostedClinicalRecordsIdentifier(Reflect.get(record, "runId")),
   };
 }
 
@@ -224,3 +250,7 @@ function parseOutcomeStatus(
   }
   throw new ContractValidationError("Hosted clinical records outcome status is invalid.");
 }
+
+// Linq selects a service per plain-text send. Neither a chat projection nor
+// preferred_service guarantees that the provider will reject an SMS downgrade.
+export const CLINICAL_TEXT_TRANSPORT_BLOCK = "clinical_imessage_only_unavailable";

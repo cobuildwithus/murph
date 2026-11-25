@@ -1,3 +1,4 @@
+import { CLINICAL_TEXT_TRANSPORT_BLOCK } from "@murphai/hosted-execution/clinical-records-boundary";
 import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
@@ -818,7 +819,7 @@ async function preflightHostedAssistantVaultFileDispatch(input: {
   };
 }
 
-async function preflightHostedAssistantDispatch(input: {
+type HostedAssistantDispatchPreflightInput = {
   onEvent?: (event: AssistantRunEvent) => void;
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   effectsPort: Pick<HostedRuntimeEffectsPort, "assertLinqRecentInboundEngagement">;
@@ -828,7 +829,15 @@ async function preflightHostedAssistantDispatch(input: {
   payload: HostedAssistantDeliveryPayload;
   signal: AbortSignal | null;
   vaultRoot: string;
-}): Promise<AssistantOutboxDispatchPreflightResult> {
+};
+
+function preflightHostedAssistantDispatch(input: HostedAssistantDispatchPreflightInput): Promise<AssistantOutboxDispatchPreflightResult> {
+  return input.intent.deliveryIdempotencyKey?.startsWith("clinical-change:")
+    ? preflightClinicalDispatch(input)
+    : preflightHostedAssistantApprovals(input);
+}
+
+async function preflightHostedAssistantApprovals(input: HostedAssistantDispatchPreflightInput): Promise<AssistantOutboxDispatchPreflightResult> {
   const vaultFile = await preflightHostedAssistantVaultFileDispatch({
     onEvent: input.onEvent,
     actionApprovalPort: input.actionApprovalPort,
@@ -946,6 +955,26 @@ async function preflightHostedAssistantDispatch(input: {
     });
   }
   return { action: "continue" };
+}
+
+async function preflightClinicalDispatch(input: HostedAssistantDispatchPreflightInput): Promise<AssistantOutboxDispatchPreflightResult> {
+  const { intent } = input;
+  const target = intent.threadId;
+  const authority = target && intent.channel === "linq" && intent.threadIsDirect
+    ? await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+        answeredMailboxItemIds: intent.answeredMailboxItemIds, authorityCheckOnly: true, effectsPort: input.effectsPort,
+        directRecipientPhoneNumber: null, fromPhoneNumber: null, homeRouteFallbackAllowed: false,
+        idempotencyKey: intent.deliveryIdempotencyKey, intentId: intent.intentId, replyToMessageId: intent.replyToMessageId,
+        signal: input.signal, target, targetKind: "thread",
+      }) : null;
+  // An older host can return a valid ordinary route without any clinical policy.
+  const block = authority?.deliveryBlockCode ?? CLINICAL_TEXT_TRANSPORT_BLOCK;
+  const failed = await markAssistantOutboxIntentMirrorTerminalById({
+    error: createAssistantDeliveryTerminalError(`ASSISTANT_LINQ_EGRESS_${block.toUpperCase()}`, "Clinical notification delivery is blocked."),
+    intentId: intent.intentId, onEvent: input.onEvent, onlyCurrentStatuses: ["pending", "retryable"],
+    status: "failed", vault: input.vaultRoot,
+  });
+  return { action: "stop", intent: failed ?? intent };
 }
 
 function isHostedPrivateAssistantAskCompletionIntent(

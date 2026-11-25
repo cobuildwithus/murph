@@ -1,3 +1,4 @@
+import { hasClinicalRunChanges } from "@murphai/core";
 import type { HostedExecutionSystemWake } from "@murphai/hosted-execution";
 import {
   applyClinicalEnrichmentProposals,
@@ -21,7 +22,13 @@ export async function executeHostedClinicalEnrichmentWake(input: {
     status = await readClinicalEnrichmentStatus(job);
   }
   const pending = status.status === "pending" || status.status === "prepared";
+  const changeRun = input.wake.changeRun;
+  // The canonical shard survives a crash after apply and before checkpoint publication.
+  const proved = changeRun && await hasClinicalRunChanges(input.vaultRoot, changeRun.runId);
   return createNoopMailboxEffect({
+    ...(proved ? { postCheckpointRecord: { kind: "clinical-records.outcome-recorded",
+      ...(pending ? { resumeEnrichmentAt: status.nextAttemptAt ?? new Date(Date.now() + 60_000).toISOString() } : {}),
+      request: { kind: "change-receipt", ...changeRun } } } : {}),
     conversationMetrics: null,
     mailboxLane: "clinical-records",
     ...(applied ? { systemProgressed: true as const } : {}),

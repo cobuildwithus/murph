@@ -273,7 +273,7 @@ const commandGroups: Readonly<Record<string, string>> = {
   "commons": "goal list|goal show|knowledge search|protocol explore|protocol list|protocol show",
   "condition": "import-json|list|payload-schema|save|scaffold|show",
   "device": "account disconnect|account list|account reconcile|account show|connect|daemon start|daemon status|daemon stop|provider list",
-  "diagnostic-test": "import-json|payload-schema|save|scaffold",
+  "diagnostic-test": "import-json|list|payload-schema|save|scaffold|show",
   "doctor": "",
   "document": "delete|edit|import|list|manifest|show|workout-import-status",
   "encounter": "import-json|payload-schema|scaffold",

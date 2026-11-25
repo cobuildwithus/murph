@@ -2141,6 +2141,8 @@ test('clinical import descriptors expose scaffolds and payload schemas', () => {
         'diagnostic-test save',
         'diagnostic-test import-json',
         'diagnostic-test payload-schema',
+        'diagnostic-test show',
+        'diagnostic-test list',
       ],
     ],
     [

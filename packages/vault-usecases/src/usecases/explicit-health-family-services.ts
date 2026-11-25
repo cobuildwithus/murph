@@ -1084,12 +1084,12 @@ function toNestedHealthEntityData(record: object) {
   );
 }
 
-function toBloodTestReadEntity(record: object) {
+function toTestReadEntity(record: object, kind: "blood_test" | "test") {
   const data = toNestedHealthEntityData(record);
 
   return {
     id: firstNonEmptyString(record, ["id"]) ?? "",
-    kind: "blood_test" as const,
+    kind,
     title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
     occurredAt: firstNonEmptyString(record, [
       "occurredAt",
@@ -1108,7 +1108,7 @@ function toBloodTestReadEntity(record: object) {
   };
 }
 
-function toBloodTestMatchedResult(
+function toTestMatchedResult(
   data: Record<string, unknown>,
   text: string | undefined,
 ): Record<string, unknown> | null {
@@ -1155,7 +1155,7 @@ function toBloodTestMatchedResult(
     return null;
   }
   const result = matchedResult;
-  const analyte = boundedBloodTestMatchedResultString(result.analyte, 80);
+  const analyte = boundedMatchedResultString(result.analyte, 80);
   if (!analyte) {
     return null;
   }
@@ -1171,7 +1171,7 @@ function toBloodTestMatchedResult(
     ["comparator", 16],
     ["flag", 16],
   ] as const) {
-    const scalar = boundedBloodTestMatchedResultString(result[key], maxLength);
+    const scalar = boundedMatchedResultString(result[key], maxLength);
     if (scalar) {
       summary[key] = scalar;
     }
@@ -1190,7 +1190,7 @@ function toBloodTestMatchedResult(
         referenceRangeSummary[key] = boundary;
       }
     }
-    const rangeText = boundedBloodTestMatchedResultString(referenceRange.text, 80);
+    const rangeText = boundedMatchedResultString(referenceRange.text, 80);
     if (rangeText) {
       referenceRangeSummary.text = rangeText;
     }
@@ -1202,7 +1202,7 @@ function toBloodTestMatchedResult(
   return summary;
 }
 
-function boundedBloodTestMatchedResultString(
+function boundedMatchedResultString(
   value: unknown,
   maxLength: number,
 ): string | null {
@@ -1218,16 +1218,16 @@ function boundedBloodTestMatchedResultString(
     : `${normalized.slice(0, Math.max(1, maxLength - 3)).trimEnd()}...`;
 }
 
-function toBloodTestListEntity(record: object, text?: string) {
+function toTestListEntity(record: object, kind: "blood_test" | "test", text?: string) {
   const data = toNestedHealthEntityData(record)
-  const matchedResult = toBloodTestMatchedResult(data, text)
+  const matchedResult = toTestMatchedResult(data, text)
   if (matchedResult) {
     data.matchedResult = matchedResult
   }
 
   return toListEntity({
     id: firstNonEmptyString(record, ["id"]) ?? "",
-    kind: "blood_test" as const,
+    kind,
     title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
     occurredAt: firstNonEmptyString(record, [
       "occurredAt",
@@ -1703,7 +1703,7 @@ export function createExplicitHealthQueryServices(
 
       return asEntityEnvelope(
         input.vault,
-        record ? toBloodTestReadEntity(record) : null,
+        record ? toTestReadEntity(record, "blood_test") : null,
         `No blood test found for "${input.id}".`,
       );
     },
@@ -1726,7 +1726,37 @@ export function createExplicitHealthQueryServices(
           to: input.to,
           limit: input.limit ?? 10,
         },
-        records.map((record) => toBloodTestListEntity(record, input.text)),
+        records.map((record) => toTestListEntity(record, "blood_test", input.text)),
+      );
+    },
+    async showDiagnosticTest(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showDiagnosticTest(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toTestReadEntity(record, "test") : null,
+        `No test found for "${input.id}".`,
+      );
+    },
+    async listDiagnosticTests(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listDiagnosticTests(input.vault, {
+        from: input.from,
+        text: input.text,
+        to: input.to,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          text: input.text,
+          to: input.to,
+          limit: input.limit ?? 10,
+        },
+        records.map((record) => toTestListEntity(record, "test", input.text)),
       );
     },
     async showImmunization(input: EntityLookupInput) {
@@ -1860,6 +1890,8 @@ export function createExplicitHealthQueryServices(
     | "listPrivateProtocols"
     | "showBloodTest"
     | "listBloodTests"
+    | "showDiagnosticTest"
+    | "listDiagnosticTests"
     | "showImmunization"
     | "listImmunizations"
     | "showFamilyMember"

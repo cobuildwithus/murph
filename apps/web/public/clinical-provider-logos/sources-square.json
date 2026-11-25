@@ -1,0 +1,2997 @@
+{
+  "note": "Each PNG is a 144x144 rasterisation on white of the listed source.",
+  "providers": {
+    "epic-1001": {
+      "method": "wordmark-symbol-crop",
+      "name": "CEENTA",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/63FF35D3-C24D-451F-8969-C98CCD857AC4/25c0911ed71c386409ca0141addbb228.png",
+      "sourcePixels": "141x144"
+    },
+    "epic-1003": {
+      "method": "wordmark-symbol-crop",
+      "name": "MyMichigan Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8A39E5B3-872B-4970-9E9B-F3F8250FAB41/0ac0322df620466a492395eb4599ce9a.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-1003-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Nimkee",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/A384D828-B4EF-423A-B4A8-DE6E35284F44/807696c2ea60bf2e9f39346d0a0e46bd.png",
+      "sourcePixels": "205x210"
+    },
+    "epic-1006": {
+      "method": "app-store-icon",
+      "name": "Northeast Georgia Health System",
+      "site": "https://apps.apple.com/us/app/nghs-connect-news/id6744895897",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/f7/d9/52/f7d9525f-ffe8-4a25-1278-d6f15cfd4192/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1006-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Longstreet Clinic",
+      "site": "https://www.longstreetclinic.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.longstreetclinic.com/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1008": {
+      "method": "app-store-icon",
+      "name": "Vanderbilt University Medical Center",
+      "site": "https://apps.apple.com/us/app/my-health-at-vanderbilt/id1114939674",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0a/d3/46/0ad346fb-01b8-d0a7-76a6-100dd2acfb63/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1013": {
+      "method": "site-apple-touch-icon",
+      "name": "Hill Physicians Medical Group",
+      "site": "https://www.hillphysicians.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.hillphysicians.com/wp-content/uploads/2024/08/cropped-android-chrome-512x512-1-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1015": {
+      "method": "wordmark-symbol-crop",
+      "name": "OrthoVirginia",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/12E9CC92-D549-4312-9F0E-753D9A49B4DE/905fb3f29ac6b49a514105d2401cf741.png",
+      "sourcePixels": "130x143"
+    },
+    "epic-1017-1": {
+      "method": "mychart-logo-square",
+      "name": "Cherry Hill Free Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4108CB0C-FDFC-4332-AFA6-9DACE689FBCA/97b55a0ff454172f4bd521198ca67756.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-1023-1": {
+      "method": "site-apple-touch-icon",
+      "name": "UNLV Health",
+      "site": "https://www.unlvhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.unlvhealth.org/sites/default/themes/dtheme/icons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1024": {
+      "method": "site-apple-touch-icon",
+      "name": "SGMC",
+      "site": "https://www.sgmc.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.sgmc.org/wp-content/uploads/2018/10/cropped-favicon-180x180.jpg",
+      "sourcePixels": "180x180"
+    },
+    "epic-1025-10": {
+      "method": "site-apple-touch-icon",
+      "name": "Pascack Valley Medical Center",
+      "site": "https://pascackmedicalcenter.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/pvmc/wp-content/uploads/sites/7/2024/05/09101228/cropped-pascack-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1025-11": {
+      "method": "site-apple-touch-icon",
+      "name": "Mountainside Medical Center",
+      "site": "https://mountainsidemedicalcenter.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/mmc/wp-content/uploads/sites/6/2024/05/09100312/cropped-hackensack-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1025-13": {
+      "method": "site-apple-touch-icon",
+      "name": "Seton Medical Center and Wellstone Health Partners",
+      "site": "https://setonharkerheights.net/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/smchh/wp-content/uploads/sites/2/2024/05/09095302/cropped-seton-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1025-5": {
+      "method": "site-apple-touch-icon",
+      "name": "Tulsa Spine & Specialty Hospital",
+      "site": "https://www.tulsaspinehospital.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/tssh/wp-content/uploads/sites/13/2026/09/18171857/cropped-careers-icon-512_1-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1025-6": {
+      "method": "site-apple-touch-icon",
+      "name": "Oklahoma Heart Institute",
+      "site": "https://oklahomaheart.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/ohi/wp-content/uploads/sites/16/2025/03/09114105/favicon.png",
+      "sourcePixels": "512x512"
+    },
+    "epic-1025-9": {
+      "method": "site-apple-touch-icon",
+      "name": "Portneuf Medical Center",
+      "site": "https://www.portneuf.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.ardenthealthservices.com/pmc/wp-content/uploads/sites/11/2024/11/09104048/favicon.png",
+      "sourcePixels": "512x512"
+    },
+    "epic-1030-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Bay Area Hospital",
+      "site": "https://bayareahospital.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://bayareahospital.org/wp-content/themes/bayareahospital/assets/favicon.png",
+      "sourcePixels": "512x512"
+    },
+    "epic-1030-3": {
+      "method": "mychart-logo-square",
+      "name": "Bay Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E7E6E38B-6577-4AE1-B8E3-7A0CF0F5EAF4/77596848ef0f0ec5bedd4ed2b1bbfe64.png",
+      "sourcePixels": "229x210"
+    },
+    "epic-1030-4": {
+      "method": "site-apple-touch-icon",
+      "name": "Santiam Hospital",
+      "site": "https://santiamhospital.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://santiamhospital.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1035": {
+      "method": "site-link-icon",
+      "name": "Trinity Health",
+      "site": "https://www.trinity-health.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.trinity-health.org/sites/default/files/hg_brands/869a0585c5738963022ba2d45f6e8a3e.png",
+      "sourcePixels": "295x295"
+    },
+    "epic-1036": {
+      "method": "site-link-icon",
+      "name": "Arkansas Children's",
+      "site": "https://www.archildrens.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.archildrens.org/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-1041": {
+      "method": "site-apple-touch-icon",
+      "name": "Acumen Physician Solutions",
+      "site": "https://www.interwellhealth.com/what-we-offer/interwell-acumen/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.interwellhealth.com/etc.clientlibs/interwellhealth/clientlibs/clientlib-site/resources/apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1043": {
+      "method": "wordmark-symbol-crop",
+      "name": "Brooklyn Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/9B16EC7C-FC58-4A43-A784-D124E162F412/7d7c70c5a4a0100488fe3c60fb5eb80d.png",
+      "sourcePixels": "195x196"
+    },
+    "epic-1055": {
+      "method": "app-store-icon",
+      "name": "Mary Washington",
+      "site": "https://apps.apple.com/us/app/my-mwhc/id1387980837",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/dc/f0/6d/dcf06d59-8ceb-5cef-66eb-ad92f7a5bb91/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1060": {
+      "method": "wordmark-symbol-crop",
+      "name": "North Mississippi Health Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E9EDC1A3-9022-4B17-A86A-A36DF5696970/9c32d443de8a8d92c61d99cbf6bee0bd.png",
+      "sourcePixels": "123x122"
+    },
+    "epic-1077": {
+      "method": "wordmark-symbol-crop",
+      "name": "Olmsted Medical Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D2189D0E-EFCE-4E17-ADC1-4676F4E19784/e5078085ec302a92414cb95385eeb919.png",
+      "sourcePixels": "220x210"
+    },
+    "epic-1079": {
+      "method": "site-apple-touch-icon",
+      "name": "Smile Generation MyChart",
+      "site": "https://www.smilegeneration.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.smilegeneration.com/content/dam/web-production/sg/logos/apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1082": {
+      "method": "wordmark-symbol-crop",
+      "name": "San Francisco Dept of Public Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/85CEBD71-5F23-486D-B96D-F40C850CA145/cc71d129036ad2e67d26eba9dc287501.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-1087": {
+      "method": "site-apple-touch-icon",
+      "name": "DaVita Physician Solutions",
+      "site": "https://davitaphysiciansolutions.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://davitaphysiciansolutions.com/wp-content/uploads/sites/7/2025/12/cropped-davita-star.png?w=180",
+      "sourcePixels": "180x180"
+    },
+    "epic-1089-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Weill Cornell Medicine",
+      "site": "https://weillcornell.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://weillcornell.org/profiles/wcmc/themes/wcm_brand_base/favicons/apple-touch-icon-180x180.png?v=2",
+      "sourcePixels": "180x180"
+    },
+    "epic-1105": {
+      "method": "site-link-icon",
+      "name": "Boulder Community Health",
+      "site": "https://www.bch.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.bch.org/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-1123": {
+      "method": "site-link-icon",
+      "name": "AltaMed",
+      "site": "https://www.altamed.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.altamed.org/themes/custom/am22/favicon.ico",
+      "sourcePixels": "128x128"
+    },
+    "epic-1130": {
+      "method": "wordmark-symbol-crop",
+      "name": "University Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/CB4100E5-C3CD-47D4-A56D-CAD4644D4F01/26cf697c0e4cfe75121ea8e3094b72cb.png",
+      "sourcePixels": "164x163"
+    },
+    "epic-1131": {
+      "method": "app-store-icon",
+      "name": "Orlando Health",
+      "site": "https://apps.apple.com/us/app/orlando-health-mobile/id1329084073",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/a6/dd/cd/a6ddcde6-8a30-2c50-7c40-8a4884208e2d/appicon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1134": {
+      "method": "site-link-icon",
+      "name": "Phelps Health",
+      "site": "https://phelpshealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://phelpshealth.org/sites/default/files/phelps-favicon.png",
+      "sourcePixels": "128x128"
+    },
+    "epic-1138": {
+      "method": "site-link-icon",
+      "name": "Altais Health Solutions",
+      "site": "https://altais.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://altais.com/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-1154": {
+      "method": "site-apple-touch-icon",
+      "name": "Planned Parenthood",
+      "site": "https://www.plannedparenthood.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.plannedparenthood.org/static/assets/favicons/blue-pp-favicon.19574a0cbf8f.png",
+      "sourcePixels": "200x200"
+    },
+    "epic-1155": {
+      "method": "site-link-icon",
+      "name": "UK Healthcare",
+      "site": "https://ukhealthcare.uky.edu/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://ukhealthcare.uky.edu/themes/custom/ukhc/favicon.ico",
+      "sourcePixels": "192x192"
+    },
+    "epic-1156": {
+      "method": "site-manifest-icon",
+      "name": "Southeast Health",
+      "site": "https://www.southeasthealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.southeasthealth.org/wp-content/uploads/cropped-SEHealth-LogoElement-NoBackground.png",
+      "sourcePixels": "512x512"
+    },
+    "epic-1157-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Saint James Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/941BE324-66F3-43C0-9F48-67692E0E3BBF/609faa875d3dd2cba10fcd85a8665825.png",
+      "sourcePixels": "206x204"
+    },
+    "epic-1164": {
+      "method": "site-apple-touch-icon",
+      "name": "CommUnityCare",
+      "site": "https://communitycaretx.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://communitycaretx.org/wp-content/uploads/2024/07/cropped-Logo-Mark-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-118": {
+      "method": "wordmark-symbol-crop",
+      "name": "Waco Family Medicine",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F32A6D0C-4295-418F-B756-D93161176663/1fe809172035d131f77155d7c8519ebd.png",
+      "sourcePixels": "213x210"
+    },
+    "epic-1190-4": {
+      "method": "site-apple-touch-icon",
+      "name": "AvanceCare",
+      "site": "https://www.avancecare.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.avancecare.com/wp-content/uploads/2021/11/cropped-cropped-favicon-500x500.png",
+      "sourcePixels": "500x500"
+    },
+    "epic-1193": {
+      "method": "site-apple-touch-icon",
+      "name": "University of Louisville Physicians",
+      "site": "https://uoflhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://uoflhealth.org/wp-content/uploads/2022/01/cropped-ULH_Favicon-01-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1194": {
+      "method": "app-store-icon",
+      "name": "AdventHealth",
+      "site": "https://apps.apple.com/us/app/adventhealth/id1468538150",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/43/d2/d9/43d2d9f9-216b-6486-9852-87b2d7fcfa72/AppIcon-0-0-1x_U007emarketing-0-6-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1195": {
+      "method": "site-link-icon",
+      "name": "Illinois Bone & Joint Institute",
+      "site": "https://www.ibji.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://assets.yourpractice.online/2623/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-1206": {
+      "method": "site-apple-touch-icon",
+      "name": "Baptist Health - Northeast Florida",
+      "site": "https://www.baptistjax.com/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.baptistjax.com/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1206-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Jacksonville Lung Clinic",
+      "site": "https://www.floridalungclinic.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.prod.website-files.com/67c8951bf47a8124d9ec0430/689ded63090271229a2d2d7a_fav-icon-big.png",
+      "sourcePixels": "256x256"
+    },
+    "epic-1208": {
+      "method": "app-store-icon",
+      "name": "Emory Healthcare",
+      "site": "https://apps.apple.com/us/app/myemoryhealth/id6446915145",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f9/3e/da/f93edab9-dec1-d354-2d9a-fb8bf610753a/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1220": {
+      "method": "wordmark-symbol-crop",
+      "name": "Reid Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/7526BFD6-6BE1-4A53-B435-5AB7329A1B00/19de522fb8e24393f8c2f7df0af6014c.png",
+      "sourcePixels": "191x180"
+    },
+    "epic-1225": {
+      "method": "wordmark-symbol-crop",
+      "name": "Pikeville Medical Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/C0200738-F8E0-4A98-886A-6042621484A5/576e7ebe9e5432864c0f8048b9601fd0.png",
+      "sourcePixels": "141x138"
+    },
+    "epic-1233": {
+      "method": "site-apple-touch-icon",
+      "name": "NCH Healthcare System",
+      "site": "https://nchmd.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://nchmd.org/wp-content/uploads/2023/11/cropped-NCH-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1233-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Upwell Primary Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/45F9CB14-F48B-4325-8A26-D673F1BF33A9/00835d2dc677a63f9e8758cc8ced9406.png",
+      "sourcePixels": "202x210"
+    },
+    "epic-1235": {
+      "method": "site-apple-touch-icon",
+      "name": "Self Regional",
+      "site": "https://www.selfregional.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.selfregional.org/wp-content/uploads/cropped-disc-1-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1243": {
+      "method": "wordmark-symbol-crop",
+      "name": "West Tennessee Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3ED4A7D7-0782-4743-A1BD-DF6831B8F04C/81f3d34cf6066cd47cce42e8c9902a26.png",
+      "sourcePixels": "135x135"
+    },
+    "epic-1246": {
+      "method": "site-link-icon",
+      "name": "Children's of Alabama",
+      "site": "https://www.childrensal.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.childrensal.org/sites/default/files/hg_brands/childrens-of-alabama-favicon1_0.png",
+      "sourcePixels": "330x330"
+    },
+    "epic-1253": {
+      "method": "site-apple-touch-icon",
+      "name": "Chickasaw Nation Health",
+      "site": "https://www.chickasawnationhealth.net/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.chickasawnationhealth.net/Health/apple-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1254": {
+      "method": "wordmark-symbol-crop",
+      "name": "Aspen Valley Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6338E8AF-E486-444B-98E3-B195B1AF09AD/326b4af8e79bd213f9babaf66f5c5235.png",
+      "sourcePixels": "185x197"
+    },
+    "epic-1256-12": {
+      "method": "wordmark-symbol-crop",
+      "name": "Orange Blossom Family Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/04AC8535-1B9F-45D8-860B-4ECF6BD30125/5e8623df03218fe417d6fba9faeeb933.png",
+      "sourcePixels": "153x158"
+    },
+    "epic-1256-13": {
+      "method": "wordmark-symbol-crop",
+      "name": "CareArc",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B31C6EE9-24BE-454E-818A-B4C02C454814/a3a9aeaa6ef9d26b0b0c0071a49c674b.png",
+      "sourcePixels": "147x150"
+    },
+    "epic-1256-18": {
+      "method": "wordmark-symbol-crop",
+      "name": "NeoMed Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/941B7185-0543-4A8C-A100-8BDB28DE1724/6a90446d0b3156e63b09d7c006bdb4eb.png",
+      "sourcePixels": "144x148"
+    },
+    "epic-1256-21": {
+      "method": "wordmark-symbol-crop",
+      "name": "Genesis Community Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/5BFB639E-1AD8-4B51-B713-FBAB849993C0/16a4e2c42872812e92d0b1f00ef8cc57.png",
+      "sourcePixels": "195x193"
+    },
+    "epic-1256-26": {
+      "method": "wordmark-symbol-crop",
+      "name": "True Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8A87ECE2-A66B-4AE5-BDCD-1386B304056C/f29b0fc874315e603cc4f255d29757f9.png",
+      "sourcePixels": "165x163"
+    },
+    "epic-1256-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Jessie Trice Community Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D595F7FD-8B65-401F-B0D8-711517017DF4/0d8bf3c56ee7ea706e6f3d2d1717cc8f.png",
+      "sourcePixels": "196x179"
+    },
+    "epic-1256-30": {
+      "method": "wordmark-symbol-crop",
+      "name": "District Health Care Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/1B43073F-2B17-4A17-A92D-08BEB266823A/17a9800232d7735eda03f6fadc20e5a5.png",
+      "sourcePixels": "162x153"
+    },
+    "epic-1256-35": {
+      "method": "mychart-logo-square",
+      "name": "Family Christian Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/848D546D-6F43-45AD-8D0C-DC0A45ADD924/9f83cbe79bc7781300318e81b27c4b83.png",
+      "sourcePixels": "212x212"
+    },
+    "epic-1256-4": {
+      "method": "wordmark-symbol-crop",
+      "name": "Miami Beach Community Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8E11D833-1CBB-486A-B6BA-B9922DD1166D/1e1f46b69027276cc747a17e15a37bdc.png",
+      "sourcePixels": "142x143"
+    },
+    "epic-1275": {
+      "method": "app-store-icon",
+      "name": "Sharp Healthcare",
+      "site": "https://apps.apple.com/us/app/sharp-healthcare/id6444066770",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/82/19/05/821905b7-50b9-4be6-95db-79d3975d6fbe/AppIcon-0-0-1x_U007ephone-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1277": {
+      "method": "site-apple-touch-icon",
+      "name": "Valley Health",
+      "site": "https://valleyhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://valleyhealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1283": {
+      "method": "site-apple-touch-icon",
+      "name": "Shriner's Childrens",
+      "site": "https://www.shrinerschildrens.org/en",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.shrinerschildrens.org/favicons/shc/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1284": {
+      "method": "site-apple-touch-icon",
+      "name": "KeyCare",
+      "site": "https://keycare.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://keycare.org/apple-touch-icon.png",
+      "sourcePixels": "1500x1500"
+    },
+    "epic-1296": {
+      "method": "site-link-icon",
+      "name": "Duly Health and Care",
+      "site": "https://www.dulyhealthandcare.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.dulyhealthandcare.com/favicon.ico",
+      "sourcePixels": "223x223"
+    },
+    "epic-1299": {
+      "method": "site-apple-touch-icon",
+      "name": "Albany Med Health System",
+      "site": "https://www.albanymed.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.albanymed.org/wp-content/uploads/sites/2/2023/01/amc-hs-mark-00216A.svg",
+      "sourcePixels": "512x506"
+    },
+    "epic-132": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Northwest",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1320": {
+      "method": "app-store-icon",
+      "name": "Valley Health System",
+      "site": "https://apps.apple.com/us/app/myvalleyhealth/id6463043773",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/82/7c/1e/827c1e47-2ccf-c950-61ee-22a8c98dbba2/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1326": {
+      "method": "app-store-icon",
+      "name": "Memorial Hermann Health System",
+      "site": "https://apps.apple.com/us/app/my-memorial-hermann/id6464439441",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/92/7c/1c/927c1c84-7ffa-6382-d471-62fdb9ed3dd5/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1326-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Maeville Pediatrics",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E72445F2-5D81-4136-87AD-2F4EF17E031A/cc96a89193b6c7a0a11e001e6fa5b537.png",
+      "sourcePixels": "145x150"
+    },
+    "epic-1326-12": {
+      "method": "mychart-logo-square",
+      "name": "Pinnacle Primary Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/43F480B5-C626-4AA2-A2F2-F4429A6BBBC0/96676213f006c2a5f5ddf25e44747673.png",
+      "sourcePixels": "193x181"
+    },
+    "epic-1326-15": {
+      "method": "wordmark-symbol-crop",
+      "name": "Family and Aging Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/7236D2B8-AA39-45FB-B0AD-C1B5A8B375F5/1d0ec6506e41d8c5531368abcee4ecbe.png",
+      "sourcePixels": "208x210"
+    },
+    "epic-1326-18": {
+      "method": "wordmark-symbol-crop",
+      "name": "Healthy Living Heart and Vein",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/CA0F1C92-997F-462E-AFF5-D1091EB52955/5f072623c3e11e4348aec8b1ddc1c249.png",
+      "sourcePixels": "147x134"
+    },
+    "epic-1326-23": {
+      "method": "mychart-logo-square",
+      "name": "Pozitiv Wellness",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6D916A0E-37FB-4F8D-8726-4A88655E735A/4574780dd6025f6f0f84494124336f96.png",
+      "sourcePixels": "211x210"
+    },
+    "epic-1326-29": {
+      "method": "wordmark-symbol-crop",
+      "name": "Advanced Spine and Pain Specialists",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/ADACCCD3-0D6D-4574-B4BE-6E4DBC25401B/7c6a0bd424eea902595f42ee4589331f.png",
+      "sourcePixels": "151x143"
+    },
+    "epic-1326-6": {
+      "method": "mychart-logo-square",
+      "name": "Moonat Med Associates",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/403E055A-1C30-4BEF-9B3A-37FA97EF2F4A/780699093d4463c1a987d8c7812a403b.png",
+      "sourcePixels": "213x210"
+    },
+    "epic-1326-7": {
+      "method": "mychart-logo-square",
+      "name": "Pearland Family Wellness Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F5D3236C-BC6D-4CAB-B5DC-02090179C11D/e7cb9aca41750037a6207c667ed4f4df.png",
+      "sourcePixels": "185x205"
+    },
+    "epic-1326-8": {
+      "method": "wordmark-symbol-crop",
+      "name": "Over the Moon Pediatrics",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/9224C230-CFA8-4CCC-B3BD-992405E09B42/5c2e5ba76273e742663b89be5ac3ef55.png",
+      "sourcePixels": "137x137"
+    },
+    "epic-1327": {
+      "method": "site-apple-touch-icon",
+      "name": "San Ysidro Health",
+      "site": "https://www.syhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.prod.website-files.com/634334b7b9d4ce4304b2afc4/636f2df8b73c8d7e5f5b77d6_webclip.png",
+      "sourcePixels": "256x256"
+    },
+    "epic-1329": {
+      "method": "site-apple-touch-icon",
+      "name": "Midwestern University Clinics",
+      "site": "https://clinics.midwestern.edu/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://clinics.midwestern.edu/themes/custom/midwestern/assets/favicons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1332": {
+      "method": "site-apple-touch-icon",
+      "name": "North East Medical Services",
+      "site": "https://www.nems.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.nems.org/wp-content/uploads/cropped-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1336": {
+      "method": "site-apple-touch-icon",
+      "name": "Vitruvian Health",
+      "site": "https://vitruvianhealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://vitruvianhealth.com/wp-content/uploads/2017/06/cropped-hh-300x300.png",
+      "sourcePixels": "300x300"
+    },
+    "epic-1338": {
+      "method": "site-apple-touch-icon",
+      "name": "Oklahoma Heart Hospital",
+      "site": "https://www.okheart.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.okheart.com/wp-content/uploads/2021/02/Mobile-Icon.png",
+      "sourcePixels": "144x144"
+    },
+    "epic-1342": {
+      "method": "site-apple-touch-icon",
+      "name": "Methodist Le Bonheur Healthcare",
+      "site": "https://www.methodisthealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.methodisthealth.org/meth-ad/images/apple-touch-icon-144x144.png",
+      "sourcePixels": "144x144"
+    },
+    "epic-1356": {
+      "method": "site-apple-touch-icon",
+      "name": "County of San Mateo",
+      "site": "https://smchealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://smchealth.org/wp-content/uploads/2026/02/cropped-SMCH_FinalIcon_Color-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1358": {
+      "method": "wordmark-symbol-crop",
+      "name": "Carelon",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/51BCB4E9-3B38-4B46-8CE5-D57FFE33511A/c5b84c63b8e98fdc1e2d3875cc5eb778.png",
+      "sourcePixels": "135x135"
+    },
+    "epic-1361": {
+      "method": "app-store-icon",
+      "name": "Northwell Health",
+      "site": "https://apps.apple.com/us/app/mynorthwell/id1448555590",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/b1/de/4e/b1de4e95-7e69-9735-fed5-ebda6441f34c/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1364": {
+      "method": "wordmark-symbol-crop",
+      "name": "North Carolina Department of Health and Human Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/328AB1EA-60BE-43AD-BAC2-7774810047AB/4ab2264e4ec238a961c63c1c23c3b531.png",
+      "sourcePixels": "212x212"
+    },
+    "epic-1365": {
+      "method": "wordmark-symbol-crop",
+      "name": "Jupiter Medical Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/BEDE774F-85F6-44B5-911E-60A801CCC685/51c07ec66f2e8266eef9ffc7dbedc84c.png",
+      "sourcePixels": "206x210"
+    },
+    "epic-1380": {
+      "method": "wordmark-symbol-crop",
+      "name": "Choctaw Nation",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/DDAE89F4-F3A5-41BF-B4D6-1890859004A2/d5165ecc66bedb311c1fcd7daca1c519.png",
+      "sourcePixels": "159x159"
+    },
+    "epic-1381": {
+      "method": "site-apple-touch-icon",
+      "name": "Centralus Health",
+      "site": "https://centralushealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://centralushealth.org/wp-content/uploads/cropped-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1387": {
+      "method": "site-link-icon",
+      "name": "Tallahassee Memorial Healthcare",
+      "site": "https://www.tmh.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.tmh.org/sites/default/files/hg_brands/tmh-favicon-1.png",
+      "sourcePixels": "200x200"
+    },
+    "epic-1392": {
+      "method": "app-store-icon",
+      "name": "UPMC Patient Portal",
+      "site": "https://apps.apple.com/us/app/myupmc/id1365606965",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/75/3e/c8/753ec884-4b79-0b52-c6d3-10db6fa45a2e/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1395": {
+      "method": "app-store-icon",
+      "name": "HealthPoint",
+      "site": "https://apps.apple.com/us/app/healthpoint-beat/id6747201042",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/6f/d2/49/6fd249f0-62c4-bb8f-03a7-9528d44e6462/CustomAppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-1430": {
+      "method": "site-apple-touch-icon",
+      "name": "Clinica Sierra Vista",
+      "site": "https://clinicasierravista.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://clinicasierravista.org/wp-content/uploads/2022/11/Small-Logo-1-300x300.png",
+      "sourcePixels": "300x300"
+    },
+    "epic-1439-15": {
+      "method": "wordmark-symbol-crop",
+      "name": "Osceola Regional Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/FBD144FF-9B72-407E-9B8F-908AB0BACFCE/d7c792b6dcd40f7541b19fd1a75adfdd.png",
+      "sourcePixels": "154x154"
+    },
+    "epic-1439-8": {
+      "method": "wordmark-symbol-crop",
+      "name": "Hegg Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6ECD70E9-6B1A-4D92-9495-CCA66611FBFE/3de277f6c751fd84f1dc210615d4651a.png",
+      "sourcePixels": "212x198"
+    },
+    "epic-1442": {
+      "method": "site-apple-touch-icon",
+      "name": "UMC Health System",
+      "site": "https://www.umchealthsystem.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.umchealthsystem.com/wp-content/themes/wp-foundation-six/assets/icons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1447": {
+      "method": "wordmark-symbol-crop",
+      "name": "Citizen Potawatomi Nation",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/862B44FE-632A-42B6-8A9E-41E95C1C03DA/f543a5b8bf30dc29d0b51251f46b68ae.png",
+      "sourcePixels": "159x159"
+    },
+    "epic-1453": {
+      "method": "site-apple-touch-icon",
+      "name": "South Central Regional Medical Center",
+      "site": "https://scrmc.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://scrmc.com/wp-content/uploads/2026/03/logo.png",
+      "sourcePixels": "150x150"
+    },
+    "epic-1453-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Covington County Hospital",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/ABE81B04-AE5B-4133-8286-EFB33593FBBB/f78ecbf925e5e5b059232b11a6d4173d.png",
+      "sourcePixels": "136x138"
+    },
+    "epic-1453-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Simpson General Hospital",
+      "site": "https://simpsongeneral.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://simpsongeneral.com/wp-content/uploads/2025/01/cropped-default-image-news-temp-180x180.jpg",
+      "sourcePixels": "180x180"
+    },
+    "epic-1453-3": {
+      "method": "site-apple-touch-icon",
+      "name": "Magee General Hospital",
+      "site": "https://mghosp.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://mghosp.org/wp-content/uploads/2021/05/cropped-mgh_favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1454": {
+      "method": "site-apple-touch-icon",
+      "name": "Hawaii Health Systems Corp",
+      "site": "https://www.hhsc.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.hhsc.org/wp-content/uploads/cropped-icon-hhsc-180x180.jpg",
+      "sourcePixels": "180x180"
+    },
+    "epic-1455": {
+      "method": "site-apple-touch-icon",
+      "name": "Kaleida",
+      "site": "https://www.kaleidahealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.kaleidahealth.org/images/favicons/apple-touch-icon.png",
+      "sourcePixels": "152x152"
+    },
+    "epic-1462": {
+      "method": "site-apple-touch-icon",
+      "name": "GoHealth Urgent Care",
+      "site": "https://www.gohealthuc.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.gohealthuc.com/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-1475": {
+      "method": "site-apple-touch-icon",
+      "name": "Great River Health",
+      "site": "https://www.greatriverhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.greatriverhealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-159": {
+      "method": "site-apple-touch-icon",
+      "name": "Ann & Robert H. Lurie Children's Hospital of Chicago",
+      "site": "https://www.luriechildrens.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.luriechildrens.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-160": {
+      "method": "app-store-icon",
+      "name": "Children's Hospital Colorado",
+      "site": "https://apps.apple.com/us/app/childrensmd/id423650585",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4a/f7/4d/4af74dee-0f74-9843-3c9c-b8a75cfc4e0c/AppIcon-1x_U007emarketing-0-10-0-85-220-0.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-166": {
+      "method": "site-apple-touch-icon",
+      "name": "UCSF",
+      "site": "https://www.ucsfhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.ucsfhealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-223-4": {
+      "method": "site-link-icon",
+      "name": "Evangelical Community Hospital",
+      "site": "https://www.wellspan.org/WellSpan-Evangelical-Community-Hospital-Patient-Resources",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.wellspan.org/favicon.svg",
+      "sourcePixels": "512x512"
+    },
+    "epic-237": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Georgia",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-261": {
+      "method": "app-store-icon",
+      "name": "UPMC",
+      "site": "https://apps.apple.com/us/app/myupmc/id1365606965",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/75/3e/c8/753ec884-4b79-0b52-c6d3-10db6fa45a2e/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-265": {
+      "method": "site-apple-touch-icon",
+      "name": "NeighborHealth",
+      "site": "https://www.neighborhealth.com/en/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.neighborhealth.com/wp-content/themes/neighborhealth/assets/fav/apple-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-278": {
+      "method": "app-store-icon",
+      "name": "Sutter Health",
+      "site": "https://apps.apple.com/us/app/sutter-health-my-health-online/id1103892054",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/d9/33/b1/d933b124-3e67-4e65-2b21-d6ddedbc5571/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-279-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Kootenai Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3F1498E7-159E-4C6B-BF18-2B0457420AD3/fa8d1e409e0c4e7ef271b7dbb53723e9.png",
+      "sourcePixels": "172x172"
+    },
+    "epic-279-6": {
+      "method": "wordmark-symbol-crop",
+      "name": "Western Washington Medical Group",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/74295128-E94C-4F59-8617-DC10786CEAA9/a6f6e26f50cc143b84e66d7ca2f3e89d.png",
+      "sourcePixels": "127x139"
+    },
+    "epic-292": {
+      "method": "site-apple-touch-icon",
+      "name": "MetroHealth OH",
+      "site": "https://www.metrohealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.metrohealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-292-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Lumina",
+      "site": "https://www.luminaimaging.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn-ilekogj.nitrocdn.com/kzpJiYKbCEeDlyyEHsROlbuQHuvxLIIQ/assets/images/optimized/rev-4766a72/www.luminaimaging.com/wp-content/uploads/2023/04/cropped-lumina-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-292-3": {
+      "method": "site-apple-touch-icon",
+      "name": "SprySenior",
+      "site": "https://www.sprysenior.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn-ilehfab.nitrocdn.com/uaJBpUUWbpsXBqbFhMnpzpbiaHemMppA/assets/images/optimized/rev-26a10ce/www.sprysenior.com/wp-content/uploads/2023/07/cropped-spry-senior-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-292-4": {
+      "method": "site-apple-touch-icon",
+      "name": "Ovatient",
+      "site": "https://ovatient.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://ovatient.com/wp-content/uploads/2022/10/cropped-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-294": {
+      "method": "app-store-icon",
+      "name": "Rush University Medical Center",
+      "site": "https://apps.apple.com/us/app/my-rush/id6740248396",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ad/0b/0a/ad0b0ae7-268b-ac5a-b1d8-52c04392db8c/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-297": {
+      "method": "app-store-icon",
+      "name": "Penn Medicine",
+      "site": "https://apps.apple.com/us/app/mypennmedicine/id1440687165",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/da/c2/04/dac204dc-7f5b-a5ae-267d-c428663f5697/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-300": {
+      "method": "wordmark-symbol-crop",
+      "name": "Parkland",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D38BF378-B92B-4C28-9299-F9E19580FE23/935ebf7864e30980d896bfc2d3e81faa.png",
+      "sourcePixels": "154x166"
+    },
+    "epic-301": {
+      "method": "site-apple-touch-icon",
+      "name": "Advocate Aurora Health",
+      "site": "https://www.advocatehealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.advocatehealth.org/-/media/Project/Health-System-Enterprise/AdvocateHealthOrg/apple-touch-icons/apple-touch-icon.png?rev=5b1af8b4d6c349799b99d13de592f524",
+      "sourcePixels": "180x180"
+    },
+    "epic-301-2": {
+      "method": "site-link-icon",
+      "name": "BayCare Clinic",
+      "site": "https://www.baycareclinic.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.baycareclinic.com/favicon.ico",
+      "sourcePixels": "128x128"
+    },
+    "epic-301-3": {
+      "method": "site-apple-touch-icon",
+      "name": "PediaTrust",
+      "site": "https://www.pediatrust.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://irp.cdn-website.com/de058d15/dms3rep/multi/PediaTrust+Logo.png",
+      "sourcePixels": "709x709"
+    },
+    "epic-303": {
+      "method": "site-apple-touch-icon",
+      "name": "University of Utah",
+      "site": "https://www.utah.edu/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://templates.utah.edu/_main-v3-1/images/template/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-306": {
+      "method": "site-apple-touch-icon",
+      "name": "Thedacare",
+      "site": "https://thedacare.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://thedacare.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-312": {
+      "method": "site-link-icon",
+      "name": "M Health Fairview",
+      "site": "https://www.mhealthfairview.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.mhealthfairview.org/sites/default/files/FMH-Favicon.jpeg",
+      "sourcePixels": "240x240"
+    },
+    "epic-316-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Christie Clinic",
+      "site": "https://www.christieclinic.com/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.christieclinic.com/themes/Christie-Clinic/assets/dist/images/icons/apple-touch-icon.png?v=2",
+      "sourcePixels": "180x180"
+    },
+    "epic-319": {
+      "method": "site-apple-touch-icon",
+      "name": "TriHealth",
+      "site": "https://www.trihealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.trihealth.com/public/images/apple-touch-icon.png",
+      "sourcePixels": "150x150"
+    },
+    "epic-319-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Highland District Hospital",
+      "site": "https://www.hdh.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.hdh.org/assets/img/logos/favicons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-320": {
+      "method": "site-apple-touch-icon",
+      "name": "Cleveland Clinic",
+      "site": "https://my.clevelandclinic.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://my.clevelandclinic.org/assets/imgs/touch-icon-iphone-retina.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-320-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Cleveland Clinic",
+      "site": "https://my.clevelandclinic.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://my.clevelandclinic.org/assets/imgs/touch-icon-iphone-retina.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-321": {
+      "method": "app-store-icon",
+      "name": "Nemours Children's Health",
+      "site": "https://apps.apple.com/us/app/nemours-childrens-mychart/id1333256093",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/62/fd/e1/62fde1b1-4c01-e824-a36d-07ba2479274b/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-343-9": {
+      "method": "site-apple-touch-icon",
+      "name": "Spooner Health",
+      "site": "https://spoonerhealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://spoonerhealth.com/wp-content/uploads/2021/08/cropped-favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-4001-22": {
+      "method": "wordmark-symbol-crop",
+      "name": "Texas A&M Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/52921226-1098-42D8-A0E9-FE50FF2C5BCC/68232874ca16b59732fae9f2ea758989.png",
+      "sourcePixels": "164x165"
+    },
+    "epic-4001-6": {
+      "method": "wordmark-symbol-crop",
+      "name": "Caldera Family Medicine",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/1EA8127E-BA53-4838-98B6-5C3177D10AAD/b9864f7f9c4b8dac21d088a04a72cc66.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-4006-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "The Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B44A2931-D3DC-451C-BA07-EDB7D419ED40/965c5a5c8fe1856f463ab08d5f4167b2.png",
+      "sourcePixels": "160x170"
+    },
+    "epic-4006-2": {
+      "method": "wordmark-symbol-crop",
+      "name": "Articularis",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B27994FC-CEFB-457A-BB55-DBA552C3141F/db1714569ea9a7b18ea46b9bc30fcabe.png",
+      "sourcePixels": "134x134"
+    },
+    "epic-4006-5": {
+      "method": "wordmark-symbol-crop",
+      "name": "Northwest Orthopaedic Specialists",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/5B32FD50-D656-4B17-92C4-A68D6FFE9A20/dffc37eb19310822567f0ee2380102be.png",
+      "sourcePixels": "178x180"
+    },
+    "epic-412-3": {
+      "method": "site-link-icon",
+      "name": "SwedishAmerican",
+      "site": "https://www.uwhealth.org/mychart/mychart-transition",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.uwhealth.org/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-416": {
+      "method": "site-apple-touch-icon",
+      "name": "Presbyterian Healthcare Services",
+      "site": "https://www.phs.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.phs.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-420-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Healthcare for the Homeless Houston",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/57BF0A9C-49F2-48E7-9F8C-030B55682769/bf43de329727c798ccbdfe9e7a978dbb.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-432-102": {
+      "method": "wordmark-symbol-crop",
+      "name": "Howard Brown Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/80179415-5280-4419-80AB-312BAD70C929/fc9174a087a810f56ba79ecc0777f1be.png",
+      "sourcePixels": "162x150"
+    },
+    "epic-432-104": {
+      "method": "wordmark-symbol-crop",
+      "name": "Bee Busy Wellness Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/676F06F8-2A14-4DC4-928E-D9541955DC91/faab6e0cb83939e43f832cabf1121a44.png",
+      "sourcePixels": "123x120"
+    },
+    "epic-432-107": {
+      "method": "wordmark-symbol-crop",
+      "name": "Gardner Health Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D9221D80-3879-41C4-A272-F6394C2A7D00/2f9852ee5dcef53b547c1d50b5a04365.png",
+      "sourcePixels": "195x191"
+    },
+    "epic-432-108": {
+      "method": "mychart-logo-square",
+      "name": "Monterey County Health Department Clinic Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/153C15C4-9D22-45A4-B882-47C4440F105B/d6493e38fd8d58797142ca823259fea5.png",
+      "sourcePixels": "200x200"
+    },
+    "epic-432-109": {
+      "method": "wordmark-symbol-crop",
+      "name": "Marin Community Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/211F2468-24AE-4E97-8D13-9FAB6F0B0C3D/6c01e99fd3e537e4ccc41e14d5170940.png",
+      "sourcePixels": "205x204"
+    },
+    "epic-432-11": {
+      "method": "site-link-icon",
+      "name": "Kintegra Health",
+      "site": "https://www.kintegra.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.kintegra.org/wp-content/themes/kintegra/images/favicon.ico",
+      "sourcePixels": "512x512"
+    },
+    "epic-432-111": {
+      "method": "wordmark-symbol-crop",
+      "name": "VNA Health Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/224FACF2-3CC0-49B3-B451-C57FB528FB5A/1c6bbdcd97bd4b336ff8519b99bff644.png",
+      "sourcePixels": "136x135"
+    },
+    "epic-432-123": {
+      "method": "wordmark-symbol-crop",
+      "name": "Community Mental Health Affiliates",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/28F69BDE-412C-4530-A7FE-41DAB59C6493/ad89c12ce9496bab8987cf6af5142b2a.png",
+      "sourcePixels": "175x176"
+    },
+    "epic-432-132": {
+      "method": "wordmark-symbol-crop",
+      "name": "Santa Rosa Community Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/999DE841-1045-468B-B794-51D92C5863F3/08680a136de3eafb0970d68fad6e4e30.png",
+      "sourcePixels": "236x228"
+    },
+    "epic-432-140": {
+      "method": "wordmark-symbol-crop",
+      "name": "Community Health Center of Southeastern Iowa",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0094CA64-764E-4585-A828-30631307EE1D/118c156fdb00f6a727d2d695d1404e6c.png",
+      "sourcePixels": "228x210"
+    },
+    "epic-432-141": {
+      "method": "wordmark-symbol-crop",
+      "name": "All Care Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/ACECE089-92F5-436A-9D64-AFEC42FE47EF/d928e082e6266b26a86de627d2681bc3.png",
+      "sourcePixels": "161x163"
+    },
+    "epic-432-146": {
+      "method": "wordmark-symbol-crop",
+      "name": "Family Health Center of Marshfield",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D5E69FAA-1AF0-412C-BBF4-1B83C1BE94A6/06602265edbefb53336168a965fbf7b8.png",
+      "sourcePixels": "161x148"
+    },
+    "epic-432-151": {
+      "method": "wordmark-symbol-crop",
+      "name": "Harmony Health Medical Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8D9505B2-CE99-4BB0-97F0-658442628067/070e4e1e1df28d413313cf0c7dc3019f.png",
+      "sourcePixels": "201x201"
+    },
+    "epic-432-16": {
+      "method": "site-apple-touch-icon",
+      "name": "Full Circle Health",
+      "site": "https://www.fullcircleidaho.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.fullcircleidaho.org/wp-content/uploads/2024/04/cropped-full-circl-health-logo-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-432-164": {
+      "method": "wordmark-symbol-crop",
+      "name": "Ko-Kwel Wellness Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/55C55ABD-8200-4427-BED7-D5128A11A78B/f5044bbf1adfdd3a6311aba4c7a10f0a.png",
+      "sourcePixels": "196x182"
+    },
+    "epic-432-166": {
+      "method": "mychart-logo-square",
+      "name": "Native American Community Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/DB167C99-1407-486E-9A32-145328CA1F44/b03223ca482affb88755a95c356744d0.png",
+      "sourcePixels": "220x210"
+    },
+    "epic-432-171": {
+      "method": "wordmark-symbol-crop",
+      "name": "Indian Health Board of Minneapolis",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/5EC3B371-896A-4A0E-9598-9605AA9FA3CF/6b36621a766079a2652552bbe4f9010d.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-432-180": {
+      "method": "wordmark-symbol-crop",
+      "name": "Solano County",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/CCD497F0-3CEA-48B7-882D-E3DE4C2EA505/8e96765a52fe5535b10ffec83d00e03f.png",
+      "sourcePixels": "163x164"
+    },
+    "epic-432-182": {
+      "method": "wordmark-symbol-crop",
+      "name": "Indian Health Council",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/213AA6B4-B500-4CCD-BA8A-0009727FCC5A/5896a9817465e7c5f7e02fe43cefe944.png",
+      "sourcePixels": "162x169"
+    },
+    "epic-432-185": {
+      "method": "wordmark-symbol-crop",
+      "name": "Santa Cruz Community Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/91E469B1-FA6C-4096-86FB-FD8BE2768E25/4729b42afb889bd6903db6b5ebc0e94d.png",
+      "sourcePixels": "201x201"
+    },
+    "epic-432-189": {
+      "method": "wordmark-symbol-crop",
+      "name": "Ray County Hospital and Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3E7EDDFB-3514-46C4-94EE-81980DA29E35/e186ebdbd26c056a39366f43c156319b.png",
+      "sourcePixels": "173x175"
+    },
+    "epic-432-192": {
+      "method": "wordmark-symbol-crop",
+      "name": "Minnesota Community Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/CB5F325B-884B-4043-9DF9-F1F8CA667957/5f79e599fd41c336743eaa746fcd9a7e.png",
+      "sourcePixels": "183x177"
+    },
+    "epic-432-198": {
+      "method": "wordmark-symbol-crop",
+      "name": "Community Medical Centers",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/95B888E5-1C06-464E-A7C1-8EE127A96617/5d7f15621fd82bfd48ffea06c9d612cc.png",
+      "sourcePixels": "188x191"
+    },
+    "epic-432-2": {
+      "method": "wordmark-symbol-crop",
+      "name": "Saban",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6A448D63-B6B4-42E3-B195-549FD2D28893/86c33a2548bfc097654d8dfeb836b187.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-432-202": {
+      "method": "wordmark-symbol-crop",
+      "name": "Root Center for Advanced Recovery",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E37EC101-5E9F-4A40-BD93-DBB65271EC90/8ad2cd657b5f396a0cb120b8f647a6ce.png",
+      "sourcePixels": "158x158"
+    },
+    "epic-432-205": {
+      "method": "wordmark-symbol-crop",
+      "name": "Sonoma County Indian Health Project",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3DA8CE81-3FC6-431F-B497-41A91397C6CD/57c5d8776d44f45e1d8a9161287c9aa0.png",
+      "sourcePixels": "126x126"
+    },
+    "epic-432-207": {
+      "method": "wordmark-symbol-crop",
+      "name": "Bertie County Rural Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F161287A-AC40-4F3E-B836-AA50A13B11A6/e312954180de1c85c283cc3b196820d2.png",
+      "sourcePixels": "199x199"
+    },
+    "epic-432-208": {
+      "method": "site-apple-touch-icon",
+      "name": "Charles B. Wang Community Health Center",
+      "site": "https://www.cbwchc.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://cdn.prod.website-files.com/65525600ad11f5d8bc8c342b/65525600ad11f5d8bc8c349c_CBWCHC-webclip.png",
+      "sourcePixels": "256x256"
+    },
+    "epic-432-216": {
+      "method": "mychart-logo-square",
+      "name": "Chehalis Tribal Wellness Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B257038A-ABF9-4CAF-95D3-09C0EECFB05F/d8fb5a38643d459a0d2d9da47d4db564.png",
+      "sourcePixels": "206x210"
+    },
+    "epic-432-217": {
+      "method": "wordmark-symbol-crop",
+      "name": "Marimn Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/55D916CF-D4E3-4883-B5E1-14022B3823B4/3c9a0f088e4a105b4d496b30885606bb.png",
+      "sourcePixels": "166x165"
+    },
+    "epic-432-22": {
+      "method": "mychart-logo-square",
+      "name": "Bay Area Community Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/36AC75A7-75CB-4671-BFBE-52EF768A04FD/2d9630bb9f4672efc60bdf9659a5483e.png",
+      "sourcePixels": "200x210"
+    },
+    "epic-432-234": {
+      "method": "wordmark-symbol-crop",
+      "name": "Open Door Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/1A2BBC05-FAFC-40A7-862A-165F6CD42A7F/7aeda64b219f405fae4a8a4de11c88ba.png",
+      "sourcePixels": "137x137"
+    },
+    "epic-432-239": {
+      "method": "wordmark-symbol-crop",
+      "name": "CITTHS",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/63D4BB72-9FD9-42B6-BF4F-6CC4EE440E28/48e094d9461b7a126be9a53d4c9580d1.png",
+      "sourcePixels": "179x170"
+    },
+    "epic-432-243": {
+      "method": "wordmark-symbol-crop",
+      "name": "Muckleshoot Tribal Health & Wellness Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/185726C7-BEDC-47DB-8FCB-447D39DB5942/912b21062f84c104ea7f825f112147c4.png",
+      "sourcePixels": "159x162"
+    },
+    "epic-432-28": {
+      "method": "wordmark-symbol-crop",
+      "name": "Native American Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/7EC9768C-F742-4E0D-B6F9-B9D670423324/45d5db97a91db7cb4a9c5fef14ad5096.png",
+      "sourcePixels": "147x146"
+    },
+    "epic-432-3": {
+      "method": "mychart-logo-square",
+      "name": "GoldenShore Medical",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/62ED9D80-D9B9-4AA6-AB36-E1A9E6475BD0/0c7504a2bca16ad8cd9baa08396c1a38.png",
+      "sourcePixels": "216x210"
+    },
+    "epic-432-54": {
+      "method": "wordmark-symbol-crop",
+      "name": "Hot Springs Health Program",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B1D3AAC9-FA2F-4D24-A341-4DC3DD6B4E08/db3ab4a6d21f688f8bf3ba075c53b498.png",
+      "sourcePixels": "188x188"
+    },
+    "epic-432-56": {
+      "method": "wordmark-symbol-crop",
+      "name": "San Francisco Community Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3463C7D4-5EDA-495C-B758-0BB4EA3E13C9/4a65cf6d84a459c40daab9a117d21783.png",
+      "sourcePixels": "214x210"
+    },
+    "epic-432-58": {
+      "method": "wordmark-symbol-crop",
+      "name": "Franklin Primary Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0CED0B3E-A76A-4BD8-BFBF-9924D8F3273D/1ce3abe287c20ffe134b0184cfc67955.png",
+      "sourcePixels": "210x211"
+    },
+    "epic-432-69": {
+      "method": "wordmark-symbol-crop",
+      "name": "Nehalem Bay Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4DB8EB80-D701-43C4-A251-FA32C3C41117/9303ca18afddfa61d08f32e5bcc3f68e.png",
+      "sourcePixels": "156x155"
+    },
+    "epic-432-7": {
+      "method": "wordmark-symbol-crop",
+      "name": "South Boston Community Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D6396F8F-25A7-4919-91A3-6AD977D4FF8B/89ee3df9732d45457a1fd0590eacdc6c.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-432-73": {
+      "method": "wordmark-symbol-crop",
+      "name": "Clackamas County Health Centers",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/5388CEDC-4636-4326-AA38-2DBAF53CA453/8bebfb80e95a1e1c24d84dc4b9b71b87.png",
+      "sourcePixels": "161x160"
+    },
+    "epic-432-83": {
+      "method": "wordmark-symbol-crop",
+      "name": "Albany County Department of Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/688F7A3C-0B0C-4AA8-A567-D7486A94A5CC/22c0625d40429882f18ccbdd8de4fe5c.png",
+      "sourcePixels": "156x155"
+    },
+    "epic-432-87": {
+      "method": "wordmark-symbol-crop",
+      "name": "InterCommunity Health Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/3A144D86-0E39-4331-B0C1-CD47198C3FEF/146d1664038aee62f6b30cfe655628a8.png",
+      "sourcePixels": "143x156"
+    },
+    "epic-432-91": {
+      "method": "site-apple-touch-icon",
+      "name": "Signature Health",
+      "site": "https://www.signaturehealthinc.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.signaturehealthinc.org/Assets/icons/apple-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-432-93": {
+      "method": "wordmark-symbol-crop",
+      "name": "Advance Community Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/D94797BC-21FB-40F6-AE7B-E2C17B583D26/3b85306254e09d3a04d1130c89e52fa6.png",
+      "sourcePixels": "149x148"
+    },
+    "epic-439": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Washington",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-441": {
+      "method": "wordmark-symbol-crop",
+      "name": "Hospital Sisters Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/7CAF78B4-2EC3-4DE8-8DE3-FD21CA9BCA1B/e4149a9d0c46df36735eb0639ae5fcdc.png",
+      "sourcePixels": "194x209"
+    },
+    "epic-441-4": {
+      "method": "wordmark-symbol-crop",
+      "name": "HSHS Medical Group",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/36C758B0-7538-4847-B60E-99AF752E6EF2/94e335d87cd630bb1d72bf3cf7bac76d.png",
+      "sourcePixels": "148x159"
+    },
+    "epic-443": {
+      "method": "wordmark-symbol-crop",
+      "name": "Austin Regional Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/14CEFB3C-948C-4AE5-9F3A-D8D8FD32441A/259f8d6a683bddacb3f1296f0643ada9.png",
+      "sourcePixels": "204x210"
+    },
+    "epic-453": {
+      "method": "app-store-icon",
+      "name": "Froedtert",
+      "site": "https://apps.apple.com/us/app/froedtert-mcw/id1487838349",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/75/bf/49/75bf490f-e682-bb9c-3e79-7e730a2eb88b/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-453-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Froedtert South",
+      "site": "https://www.froedtertsouth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.froedtertsouth.com/static/img/favicon/large-icon.png",
+      "sourcePixels": "192x192"
+    },
+    "epic-456": {
+      "method": "app-store-icon",
+      "name": "Aspirus",
+      "site": "https://apps.apple.com/us/app/myaspirus/id1531018306",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/a8/a9/ea/a8a9eafd-a021-5c9c-2e56-254defd6999a/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-465": {
+      "method": "site-apple-touch-icon",
+      "name": "Allina",
+      "site": "https://www.allinahealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.allinahealth.org/allinahealth.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-465-5": {
+      "method": "wordmark-symbol-crop",
+      "name": "Glencoe Regional Health Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8ED825BC-FA2C-4198-8041-61F3EE8A3597/5edc97a94a05d646a78e90b1a981af55.png",
+      "sourcePixels": "154x154"
+    },
+    "epic-469": {
+      "method": "site-apple-touch-icon",
+      "name": "Children's Healthcare of Atlanta",
+      "site": "https://www.choa.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.choa.org/Content/Microsite/images/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-471": {
+      "method": "site-apple-touch-icon",
+      "name": "Hawaii Pacific Health",
+      "site": "https://www.hawaiipacifichealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.hawaiipacifichealth.org/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-477": {
+      "method": "site-apple-touch-icon",
+      "name": "UTMB",
+      "site": "https://www.utmb.edu/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://utmb-cdn.azureedge.net/web/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-478": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Colorado",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-479": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Hawaii",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-480": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Mid-Atlantic",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-482": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Northern California",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-483": {
+      "method": "app-store-icon",
+      "name": "Kaiser Permanente - Southern California",
+      "site": "https://apps.apple.com/us/app/kaiser-permanente/id493390354",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/73/fd/dc/73fddc9f-fff0-2c39-52e3-71102f808dff/KPAppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-491": {
+      "method": "site-link-icon",
+      "name": "Texas Health Resources",
+      "site": "https://www.texashealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.texashealth.org/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-494": {
+      "method": "site-apple-touch-icon",
+      "name": "Premier Health",
+      "site": "https://www.premierhealth.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://premierhealth.azureedge.net/img/Icons/favicon-228.png",
+      "sourcePixels": "228x228"
+    },
+    "epic-498": {
+      "method": "app-store-icon",
+      "name": "MemorialCare",
+      "site": "https://apps.apple.com/us/app/memorialcare/id6446598264",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/31/8a/49/318a49c3-4e97-e924-b28d-749eb5273bd8/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-501": {
+      "method": "site-apple-touch-icon",
+      "name": "The Queen's Health System",
+      "site": "https://www.queens.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.queens.org/wp-content/uploads/cropped-android-chrome-512x512-2-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-501-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Queen's Connect",
+      "site": "https://www.queens.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.queens.org/wp-content/uploads/cropped-android-chrome-512x512-2-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-502": {
+      "method": "app-store-icon",
+      "name": "UC San Diego",
+      "site": "https://apps.apple.com/us/app/uc-san-diego/id318646412",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/b6/98/58/b69858ce-4e9f-c84b-68c8-bcae4a6b38ac/AppIcon-0-0-1x_U007emarketing-0-10-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-502-18": {
+      "method": "wordmark-symbol-crop",
+      "name": "Aligned Geriatrics",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/2211B304-52D5-428B-9076-B7BBA3C9225B/b6a4e1ae030c779ca9e96e58a3fc1a61.png",
+      "sourcePixels": "171x171"
+    },
+    "epic-507": {
+      "method": "site-apple-touch-icon",
+      "name": "Sanford",
+      "site": "https://www.sanfordhealth.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.sanfordhealth.org/favicons/org/apple-touch-icon.png?v=87542e3f13843b17",
+      "sourcePixels": "180x180"
+    },
+    "epic-507-12": {
+      "method": "wordmark-symbol-crop",
+      "name": "Orange City Area Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6E6A1E87-676B-4472-A665-D15BAC883ECB/94173ea0f537edbd8401105a88298b83.png",
+      "sourcePixels": "193x197"
+    },
+    "epic-507-17": {
+      "method": "wordmark-symbol-crop",
+      "name": "Riverview Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/A7F4880E-BA56-405D-BBD0-1B4F8A3BF7B5/8f65b93b83ab07acd74bb38147f19198.png",
+      "sourcePixels": "189x196"
+    },
+    "epic-507-22": {
+      "method": "wordmark-symbol-crop",
+      "name": "Kittson Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/A1368752-75DD-4802-BED4-930419A46EF3/20b6f37447acaa87763146fb86cf7168.png",
+      "sourcePixels": "195x195"
+    },
+    "epic-507-25": {
+      "method": "wordmark-symbol-crop",
+      "name": "Winner Regional Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0A9B04E5-84D3-497B-B6BF-9C1085DD3E41/39989cbbb6f638c6b92d9fbaecb015e1.png",
+      "sourcePixels": "209x210"
+    },
+    "epic-507-3": {
+      "method": "site-apple-touch-icon",
+      "name": "Sanford Health Plan",
+      "site": "https://www.sanfordhealthplan.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.sanfordhealthplan.com/favicons/healthplans/apple-touch-icon.png?v=8b88069f420475b0",
+      "sourcePixels": "180x180"
+    },
+    "epic-507-5": {
+      "method": "wordmark-symbol-crop",
+      "name": "Lake Region Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4BEF4943-17BC-4FDD-8D3B-2825E0F2FD66/399ea3966bcee5fa5a76578f829addf6.png",
+      "sourcePixels": "178x178"
+    },
+    "epic-511": {
+      "method": "site-apple-touch-icon",
+      "name": "Reliant Medical Group",
+      "site": "https://reliantmedicalgroup.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://reliantmedicalgroup.org/wp-content/uploads/fbrfg/apple-touch-icon.png?x68062",
+      "sourcePixels": "180x180"
+    },
+    "epic-514": {
+      "method": "site-apple-touch-icon",
+      "name": "Renown",
+      "site": "https://www.renown.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.renown.org/apple-icon.png?apple-icon.0m61-fga2pcg8.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-515": {
+      "method": "app-store-icon",
+      "name": "CentraCare",
+      "site": "https://apps.apple.com/us/app/mycentracare/id6587576160",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/cd/5c/f0/cd5cf0bc-77e6-ffc4-fb3a-a2315b5f1080/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-515-10": {
+      "method": "wordmark-symbol-crop",
+      "name": "Appleton Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/32E8EAC3-A37A-4771-B718-4FA4B7A5EDA4/f2503ca5fc3001697278e2491ddb49ca.png",
+      "sourcePixels": "207x206"
+    },
+    "epic-515-11": {
+      "method": "site-apple-touch-icon",
+      "name": "Mille Lacs Band of Ojibwe",
+      "site": "https://www.millelacsband.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.millelacsband.com/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-516": {
+      "method": "wordmark-symbol-crop",
+      "name": "Salem Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0425B269-A87B-4C65-9728-77E833F88F0B/65108cec87d0217e8256abd5a0fd529c.png",
+      "sourcePixels": "128x128"
+    },
+    "epic-517": {
+      "method": "site-apple-touch-icon",
+      "name": "ECU Health",
+      "site": "https://www.ecuhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.ecuhealth.org/wp-content/uploads/2022/05/cropped-Favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-523": {
+      "method": "site-link-icon",
+      "name": "Lee Health Systems, Inc",
+      "site": "https://www.leehealth.org",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.leehealth.org/leehealthfav.ico",
+      "sourcePixels": "200x202"
+    },
+    "epic-525": {
+      "method": "site-link-icon",
+      "name": "Nationwide Children's Hospital",
+      "site": "https://www.nationwidechildrens.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.nationwidechildrens.org/frontend/assets/img/favicon-194x194.png",
+      "sourcePixels": "194x194"
+    },
+    "epic-545-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Mary Free Bed",
+      "site": "https://www.maryfreebed.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.maryfreebed.com/wp-content/uploads/2025/12/cropped-Yelp_ID_Icon_Primary_12_24-scaled-1-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-545-4": {
+      "method": "wordmark-symbol-crop",
+      "name": "Central Michigan University",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6D1ADF52-110E-4DE7-B5FC-75A12D529FCF/f7684f45d6a3e93fd718db2f9f872d60.png",
+      "sourcePixels": "165x164"
+    },
+    "epic-551": {
+      "method": "app-store-icon",
+      "name": "Texas Children's",
+      "site": "https://apps.apple.com/us/app/texas-childrens/id6474006028",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f4/47/98/f4479832-7089-f659-620f-313a3252c781/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-553": {
+      "method": "site-apple-touch-icon",
+      "name": "Children's Nebraska",
+      "site": "https://www.childrensnebraska.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.childrensnebraska.org/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-563": {
+      "method": "site-link-icon",
+      "name": "West Virginia University",
+      "site": "https://wvumedicine.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://wvumedicine.org/wp-content/uploads/svg_favicon/svg-favicon.svg?date=2025-08-28T15:21:33+00:00?svg-favicon=2025-08-28T15:21:33+00:00",
+      "sourcePixels": "512x512"
+    },
+    "epic-567": {
+      "method": "site-apple-touch-icon",
+      "name": "Dayton Children's Hospital",
+      "site": "https://childrensdayton.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://childrensdayton.org/wp-content/uploads/2025/12/DCH-favicon.png",
+      "sourcePixels": "164x164"
+    },
+    "epic-574": {
+      "method": "site-apple-touch-icon",
+      "name": "Seattle Children's MyChart",
+      "site": "https://www.seattlechildrens.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.seattlechildrens.org/apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-575": {
+      "method": "app-store-icon",
+      "name": "Mercy",
+      "site": "https://apps.apple.com/us/app/mymercy/id1049963222",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/0e/7f/69/0e7f69b3-2823-254a-9189-5ef036989f5d/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-592-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Iowa Specialty Hospitals and Clinics",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/893E9FF5-F0AD-418C-9B67-6A04ADF173DD/d4f3094c9ca13ced956971c68f0665e6.png",
+      "sourcePixels": "130x124"
+    },
+    "epic-592-2": {
+      "method": "wordmark-symbol-crop",
+      "name": "Cass County Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B17DC221-4E41-4C3F-9B6E-66176687CAA7/83c2aa00d305bfbbf70420e25378ed70.png",
+      "sourcePixels": "130x130"
+    },
+    "epic-594": {
+      "method": "app-store-icon",
+      "name": "Children's Health",
+      "site": "https://apps.apple.com/us/app/childrens-health/id1437657749",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/09/1b/4c/091b4c69-a97d-2976-92b2-14bfd68b0c86/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-598": {
+      "method": "wordmark-symbol-crop",
+      "name": "Leon Medical Centers",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/54646AF7-7FCB-40F3-B680-F4EEBF80CCA8/b34c51efde0987dcd9c62f9d7b92d264.png",
+      "sourcePixels": "170x181"
+    },
+    "epic-600": {
+      "method": "site-apple-touch-icon",
+      "name": "Carilion Clinic",
+      "site": "https://www.carilionclinic.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.carilionclinic.org/themes/custom/cc_theme/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-605": {
+      "method": "site-apple-touch-icon",
+      "name": "Emplify Health",
+      "site": "https://www.emplifyhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.emplifyhealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-612": {
+      "method": "app-store-icon",
+      "name": "Cedars-Sinai",
+      "site": "https://apps.apple.com/us/app/cedars-sinai/id1034088603",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/08/df/39/08df39b7-dbbd-f24c-6464-d135a64727cb/AppIcon-0-0-1x_U007emarketing-0-9-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-637": {
+      "method": "site-apple-touch-icon",
+      "name": "Rady Children's",
+      "site": "https://www.rchsd.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.rchsd.org/apple-touch-icon.png",
+      "sourcePixels": "152x152"
+    },
+    "epic-645": {
+      "method": "site-apple-touch-icon",
+      "name": "Intermountain Health",
+      "site": "https://www.intermountainhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.intermountainhealth.org/sc10/ih-apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-645-4": {
+      "method": "wordmark-symbol-crop",
+      "name": "Uptown Community Health Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/DEA44526-003B-4A4C-ACA2-87CDB626E9E9/2baa46ef57deb81ca03f16357c1b8d77.png",
+      "sourcePixels": "171x170"
+    },
+    "epic-645-9": {
+      "method": "wordmark-symbol-crop",
+      "name": "Family Health West",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/C76B7047-156D-4635-AC9E-5FEB669BF00A/7afb70e20fb4a92b2bcc075e1e6f226b.png",
+      "sourcePixels": "215x210"
+    },
+    "epic-650": {
+      "method": "app-store-icon",
+      "name": "Northwestern Medicine",
+      "site": "https://apps.apple.com/us/app/mynm-by-northwestern-medicine/id1442290209",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/44/d0/fd/44d0fdfb-90f7-f7f0-43db-9612b4b6357d/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-655": {
+      "method": "site-apple-touch-icon",
+      "name": "The Christ Hospital",
+      "site": "https://www.thechristhospital.com/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.thechristhospital.com/apple-icon.png?43e86f08a6fe2abc",
+      "sourcePixels": "180x180"
+    },
+    "epic-660": {
+      "method": "site-apple-touch-icon",
+      "name": "TempleHealth",
+      "site": "https://www.templehealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.templehealth.org/themes/custom/tuhsmasterbrand/favicon/TH_Vert_RGB_Red_White_180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-665": {
+      "method": "site-apple-touch-icon",
+      "name": "Onvida",
+      "site": "https://www.onvidahealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.onvidahealth.org/nitropack_static/EqYuAcuHNYqUPlXnSQFtKQbvFsQqsHVO/assets/images/optimized/rev-cd72727/www.onvidahealth.org/wp-content/uploads/2024/09/spark_split-250x250.png",
+      "sourcePixels": "250x250"
+    },
+    "epic-668": {
+      "method": "app-store-icon",
+      "name": "Community Medical Centers",
+      "site": "https://apps.apple.com/us/app/myhealthmate/id1420300824",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/05/90/39/0590390b-c43c-7513-dc84-e1fd3e1e0bb8/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-677": {
+      "method": "site-apple-touch-icon",
+      "name": "University of Florida",
+      "site": "https://ufhealth.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://ufhealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-691": {
+      "method": "wordmark-symbol-crop",
+      "name": "Akron Children's",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/AFB84EEC-5518-4972-91DA-7BE72AB56D83/43529dd660e981794f17b9fd30f5586b.png",
+      "sourcePixels": "202x202"
+    },
+    "epic-691-2": {
+      "method": "mychart-logo-square",
+      "name": "Summit County Public Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0110F175-16F7-4119-BA43-6D1A65A2CDFE/b9a912e72d5cd3099b2193dc3e0d7873.png",
+      "sourcePixels": "204x210"
+    },
+    "epic-701": {
+      "method": "app-store-icon",
+      "name": "Hackensack Meridian Health",
+      "site": "https://apps.apple.com/us/app/hmh-wayfinding/id1453558192",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple112/v4/f5/e0/02/f5e002ee-ba38-7935-d3bf-15a9e2f3df2b/AppIcon-0-0-1x_U007emarketing-0-0-0-5-0-0-sRGB-0-0-0-GLES2_U002c0-512MB-85-220-0-0.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-712": {
+      "method": "site-apple-touch-icon",
+      "name": "St. Elizabeth Healthcare",
+      "site": "https://www.stelizabeth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.stelizabeth.com/wp-content/uploads/2024/06/cropped-SEH-Logo-Google-180x180.jpg",
+      "sourcePixels": "180x180"
+    },
+    "epic-712-2": {
+      "method": "wordmark-symbol-crop",
+      "name": "Hendricks Regional Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/9EFF94E0-DEF8-421C-AF64-C45A80F5A1A1/97e1deb2631e9dca183137bd92f3db86.png",
+      "sourcePixels": "198x198"
+    },
+    "epic-718": {
+      "method": "site-apple-touch-icon",
+      "name": "NYU Langone",
+      "site": "https://nyulangone.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://nyulangone.org/themes/custom/nyulh_base_v4/assets/icons/favicons/apple-touch-icon.png",
+      "sourcePixels": "144x144"
+    },
+    "epic-722": {
+      "method": "site-apple-touch-icon",
+      "name": "Dartmouth",
+      "site": "https://www.dartmouth-health.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://www.dartmouth-health.org/themes/custom/d_hh/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-733": {
+      "method": "site-apple-touch-icon",
+      "name": "Corewell Health",
+      "site": "https://corewellhealth.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://corewellhealth.org/icons/icon-512x512.png?v=5d457e75c93670175c0d2e7152bddacc",
+      "sourcePixels": "512x512"
+    },
+    "epic-742-8": {
+      "method": "site-link-icon",
+      "name": "Chesapeake Regional Healthcare",
+      "site": "https://chesapeakeregional.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://chesapeakeregional.com/sites/default/files/CRH-Favicon_updated_0.png",
+      "sourcePixels": "281x280"
+    },
+    "epic-747": {
+      "method": "app-store-icon",
+      "name": "University of Miami",
+      "site": "https://apps.apple.com/us/app/uhealth/id784684138",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/69/12/85/6912850c-4608-f6f0-9f7f-ec16fca7ea4f/AppIcon-0-0-1x_U007emarketing-0-10-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-748": {
+      "method": "site-apple-touch-icon",
+      "name": "Grady Health System",
+      "site": "https://www.gradyhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.gradyhealth.org/wp-content/smush-webp/2019/05/cropped-Grady-Fav-180x180.png.webp",
+      "sourcePixels": "180x180"
+    },
+    "epic-750": {
+      "method": "site-apple-touch-icon",
+      "name": "Powers Health",
+      "site": "https://www.powershealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.powershealth.org/apple-touch-icon.png",
+      "sourcePixels": "181x182"
+    },
+    "epic-751": {
+      "method": "app-store-icon",
+      "name": "University of Rochester",
+      "site": "https://apps.apple.com/us/app/myurmedicine/id1312923707",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/c9/22/48/c9224857-6537-f2cc-bc50-c8bbb8830c0c/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-755-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Orthopaedic & Spine Center of the Rockies",
+      "site": "https://www.orthohealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.orthohealth.com/wp-content/smush-webp/2024/04/cropped-OCR_favicon_3-180x180.png.webp",
+      "sourcePixels": "180x180"
+    },
+    "epic-755-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Valley View Hospital",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/BBF4406C-291B-4EF8-9EEC-5F499311645C/37f7333c81a9b94111ab3a9526a2160c.png",
+      "sourcePixels": "147x146"
+    },
+    "epic-758": {
+      "method": "app-store-icon",
+      "name": "Providence Health & Services",
+      "site": "https://apps.apple.com/us/app/providence/id1306970679",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/1c/a5/7d/1ca57df5-a2b8-952d-3705-f1f8f3d53aab/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-758-8": {
+      "method": "wordmark-symbol-crop",
+      "name": "South Peninsula Hospital",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/82B4A5FF-F481-479C-AC39-10A4CDD934C3/59dfe3f24aba26fa4869b854411fc444.png",
+      "sourcePixels": "188x191"
+    },
+    "epic-759": {
+      "method": "site-apple-touch-icon",
+      "name": "Vancouver Clinic",
+      "site": "https://www.tvc.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.tvc.org/wp-content/themes/vancouver-clinic/img/favicon-152.png",
+      "sourcePixels": "152x152"
+    },
+    "epic-762": {
+      "method": "wordmark-symbol-crop",
+      "name": "Access Community Health Network",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/20D06619-9FB4-49C8-82D9-B56593A2FB16/848cef707d804833e15f2d0ebf9f495f.png",
+      "sourcePixels": "209x210"
+    },
+    "epic-771": {
+      "method": "site-apple-touch-icon",
+      "name": "Riverside Medical Clinic",
+      "site": "https://www.riversidemedicalclinic.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.riversidemedicalclinic.com/favicon/apple-touch-iphone.png",
+      "sourcePixels": "152x152"
+    },
+    "epic-772": {
+      "method": "site-link-icon",
+      "name": "Rochester Regional Health",
+      "site": "https://www.rochesterregional.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.rochesterregional.org/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-774": {
+      "method": "site-apple-touch-icon",
+      "name": "Hurley Medical Center",
+      "site": "https://www.hurleymc.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.hurleymc.com/images/favicon/apple-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-782": {
+      "method": "site-apple-touch-icon",
+      "name": "Baptist Health",
+      "site": "https://www.baptist-health.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.baptist-health.org/apple-icon.png?f59ac56a9a8d2092",
+      "sourcePixels": "180x180"
+    },
+    "epic-784": {
+      "method": "site-apple-touch-icon",
+      "name": "University of Mississippi Medical Center",
+      "site": "https://www.umc.edu/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.umc.edu/img/apple-touch-icon-180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-788": {
+      "method": "wordmark-symbol-crop",
+      "name": "Washington Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4F148F3D-FE5C-4605-935B-2256EF673C71/41ba6086256a9fa3214bf86a6503a7b1.png",
+      "sourcePixels": "172x165"
+    },
+    "epic-789": {
+      "method": "wordmark-symbol-crop",
+      "name": "JPS Health Network",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/35107A90-FD80-4382-97B0-EEA6B4E2199D/33a290dccaf8a723643f3acc60c8b1c6.png",
+      "sourcePixels": "126x126"
+    },
+    "epic-790": {
+      "method": "site-apple-touch-icon",
+      "name": "UnityPoint Health",
+      "site": "https://www.unitypoint.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.unitypoint.org/assets/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-792": {
+      "method": "app-store-icon",
+      "name": "ProHealth Care",
+      "site": "https://apps.apple.com/us/app/prohealth-connections/id1446635903",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/76/a2/74/76a27404-5aaa-ef27-0ca4-2b4c294261d4/AppIcon-0-0-1x_U007epad-0-0-0-1-0-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-796-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Terrebonne General Medical Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B3CA949C-E278-42EE-9B95-4FF45E7E175B/f0650e69755e877454f98bfcce137fab.png",
+      "sourcePixels": "137x137"
+    },
+    "epic-802": {
+      "method": "app-store-icon",
+      "name": "Providence Health & Services",
+      "site": "https://apps.apple.com/us/app/providence/id1306970679",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/1c/a5/7d/1ca57df5-a2b8-952d-3705-f1f8f3d53aab/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-802-18": {
+      "method": "wordmark-symbol-crop",
+      "name": "Prosser Memorial Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F2CC3998-A0B7-4EB8-BE65-A23392AC0436/2637c2a2ec811c3c2ac4852d461ad921.png",
+      "sourcePixels": "144x132"
+    },
+    "epic-802-23": {
+      "method": "mychart-logo-square",
+      "name": "Newport Hospital & Health Services",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F7F7EB47-8291-4CDE-95C7-18D69A72DE1A/606251b17181dd1f361afa858ceeef1e.png",
+      "sourcePixels": "210x210"
+    },
+    "epic-802-26": {
+      "method": "wordmark-symbol-crop",
+      "name": "Kinwell",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/7A6322CA-12E5-43B7-A46F-A106F37360E6/edc859b49eb239f02b3d49c003b35132.png",
+      "sourcePixels": "162x162"
+    },
+    "epic-802-32": {
+      "method": "wordmark-symbol-crop",
+      "name": "Stillaguamish Tribe of Indians",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/8177EAFD-B4BF-4836-B042-1A84898EA686/8ce71f563fbe9525fe57bc1b922b101b.png",
+      "sourcePixels": "121x130"
+    },
+    "epic-802-33": {
+      "method": "wordmark-symbol-crop",
+      "name": "Seattle Premier Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/60EA6ED0-FC6F-42CA-884F-DDDB9689E262/ee770a2ba918d278fd788b2adbbe1ab7.png",
+      "sourcePixels": "141x141"
+    },
+    "epic-802-4": {
+      "method": "wordmark-symbol-crop",
+      "name": "Grande Ronde",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/1C9F1662-D230-4FED-8636-957575A9C2C5/5babcec34d2d0f3dc3be0574c914d6e6.png",
+      "sourcePixels": "174x174"
+    },
+    "epic-802-6": {
+      "method": "wordmark-symbol-crop",
+      "name": "Jamestown Family Health Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/714FBD7C-866D-4DBC-981D-A55693430BEC/72308fb0d9611e5b9baff9fe27c31615.png",
+      "sourcePixels": "152x152"
+    },
+    "epic-802-9": {
+      "method": "wordmark-symbol-crop",
+      "name": "Barrett Hospital and Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4D9B6CE3-0405-4745-890C-009243C5311D/9046ca5f68344b7fa63c62fec89a435f.png",
+      "sourcePixels": "154x153"
+    },
+    "epic-808": {
+      "method": "app-store-icon",
+      "name": "Providence Health & Services",
+      "site": "https://apps.apple.com/us/app/providence/id1306970679",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/1c/a5/7d/1ca57df5-a2b8-952d-3705-f1f8f3d53aab/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-808-10": {
+      "method": "app-store-icon",
+      "name": "Providence Health & Services",
+      "site": "https://apps.apple.com/us/app/providence/id1306970679",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/1c/a5/7d/1ca57df5-a2b8-952d-3705-f1f8f3d53aab/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-808-12": {
+      "method": "mychart-logo-square",
+      "name": "Orange County Thoracic and Cardiovascular Surgeons",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/ED74E469-625F-4885-8BA0-0D294BF94BF0/7ab8929b3a606c9427afc4ad958cbc81.png",
+      "sourcePixels": "230x230"
+    },
+    "epic-808-27": {
+      "method": "wordmark-symbol-crop",
+      "name": "Curry Health Network",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/0719F247-3BFE-4520-8E1F-457E5476CF87/6166e5cd84b5737e69b29a5f6e008957.png",
+      "sourcePixels": "135x134"
+    },
+    "epic-808-30": {
+      "method": "wordmark-symbol-crop",
+      "name": "Community Memorial Healthcare",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/532DDBCA-D4FA-49F4-B3E6-91C212640C80/ed24102687d3f941902312a4c1073f5d.png",
+      "sourcePixels": "198x198"
+    },
+    "epic-808-9": {
+      "method": "wordmark-symbol-crop",
+      "name": "Columbia Gorge Family Medicine",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/BD908C3B-D840-4411-AF4B-5CDCDBFDD3E4/524bdd4206b323ae4b04b041bd3b68dc.png",
+      "sourcePixels": "191x190"
+    },
+    "epic-816": {
+      "method": "app-store-icon",
+      "name": "Inova Health System",
+      "site": "https://apps.apple.com/us/app/inova/id533878685",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/bb/38/14/bb38149d-068d-f307-7cba-ec667ade036f/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-819": {
+      "method": "app-store-icon",
+      "name": "Norton Healthcare",
+      "site": "https://apps.apple.com/us/app/norton-healthcare/id383631877",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/bd/c8/a3/bdc8a3ef-c91a-5cf4-fd15-c754f4677686/AppIcon-0-0-1x_U007emarketing-0-11-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-824": {
+      "method": "site-apple-touch-icon",
+      "name": "MUSC Health",
+      "site": "https://muschealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://d3crna64wemw02.cloudfront.net/asset/339713052848/image_mm92lu8uqd1pl64qa937agao1n/?content-disposition=inline",
+      "sourcePixels": "180x180"
+    },
+    "epic-825": {
+      "method": "app-store-icon",
+      "name": "The Nebraska Medical Center",
+      "site": "https://apps.apple.com/us/app/nebraska-medicine/id1487196388",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/cf/3b/23/cf3b2321-d974-6eda-e703-e0db3cfb1a38/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-830-17": {
+      "method": "wordmark-symbol-crop",
+      "name": "Madison Ridgeland Medical Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B57D8C4D-B84B-47D7-8BFE-759AD98D9CDE/950de1b60f7252114d32c5a9804c6315.png",
+      "sourcePixels": "133x133"
+    },
+    "epic-830-18": {
+      "method": "wordmark-symbol-crop",
+      "name": "Lake Charles Memorial Health System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6B3EF9AB-A388-437A-8CD9-5EE59B72EB17/81668e3ed5074a772c2b5deea8ca0226.png",
+      "sourcePixels": "128x128"
+    },
+    "epic-830-2": {
+      "method": "mychart-logo-square",
+      "name": "The Baton Rouge Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/168FA899-EAD4-4624-816A-3C2D9557590F/9a4db355f42afbfbba69f13e3cadca6c.png",
+      "sourcePixels": "209x210"
+    },
+    "epic-835": {
+      "method": "app-store-icon",
+      "name": "Duke University Health System",
+      "site": "https://apps.apple.com/us/app/my-duke-health/id1553694037",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/dc/74/9e/dc749e7b-4298-5ac3-7b4a-cdce46cb272d/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-836": {
+      "method": "site-apple-touch-icon",
+      "name": "Loma Linda",
+      "site": "https://lluh.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://lluh.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-838": {
+      "method": "app-store-icon",
+      "name": "Parkview Health",
+      "site": "https://apps.apple.com/us/app/parkview-health/id1470163948",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/ac/66/b4/ac66b4f8-fde8-619a-8ef9-e27228f7e475/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-838-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Cameron Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/F4789A15-BF2B-4BB1-A1C9-C12EB7368F1A/d75cde5b0093a8e401954f6301f2806b.png",
+      "sourcePixels": "135x132"
+    },
+    "epic-838-11": {
+      "method": "wordmark-symbol-crop",
+      "name": "Linke Urology and Robotics",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/57A3F558-510D-4140-853A-9607C685D5A5/29dd70c4a026fc69ca388228780ffcf3.png",
+      "sourcePixels": "152x151"
+    },
+    "epic-838-12": {
+      "method": "wordmark-symbol-crop",
+      "name": "Monarch Medicine",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E6DADB2C-E9C7-4F7F-94AC-D37F8731B4F6/18ee77437416bd86960ba3361bc3d509.png",
+      "sourcePixels": "148x148"
+    },
+    "epic-839": {
+      "method": "app-store-icon",
+      "name": "Piedmont Healthcare",
+      "site": "https://apps.apple.com/us/app/piedmont-clinic-connect/id1149208010",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple71/v4/ec/f8/86/ecf8863b-558c-7121-722f-0ab62b120fab/mzl.lidavvwy.jpg/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-839-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Shepherd Center",
+      "site": "https://shepherd.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn-ilemdgm.nitrocdn.com/fGjBAVfQbPmmYmHlHKeFRbFdlexGXfXq/assets/images/optimized/rev-74d3181/shepherd.org/wp-content/uploads/2025/01/9abea9d6f8b7912832f4413fa8d95ed1.favicon-black-300x300.png",
+      "sourcePixels": "300x300"
+    },
+    "epic-844": {
+      "method": "app-store-icon",
+      "name": "Tower Health",
+      "site": "https://apps.apple.com/us/app/mytowerhealth/id1534302656",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0f/4b/b9/0f4bb948-98af-6734-01ac-18328702cfa8/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-846": {
+      "method": "wordmark-symbol-crop",
+      "name": "Memorial Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/EC1F62FD-C317-4356-9D3E-E7C9D59A9A3E/06e6a340fd58f0da914e6247bb799438.png",
+      "sourcePixels": "153x153"
+    },
+    "epic-848": {
+      "method": "app-store-icon",
+      "name": "Henry Ford Health",
+      "site": "https://apps.apple.com/us/app/henry-ford-rx/id876382583",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple122/v4/00/f3/91/00f391aa-98ac-247c-e59f-3ff79ebed800/HenryFord-0-0-1x_U007emarketing-0-0-0-7-0-0-sRGB-0-0-0-GLES2_U002c0-512MB-85-220-0-0.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-849": {
+      "method": "site-apple-touch-icon",
+      "name": "Samaritan Health Services",
+      "site": "https://samhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://samhealth.org/wp-content/uploads/2024/01/cropped-SHS-Official-Site-Icon-Web-Colors-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-851-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Snoqualmie Valley Health",
+      "site": "https://snoqualmievalleyhealth.org/",
+      "siteFoundBy": "portal-page-link",
+      "source": "https://snoqualmievalleyhealth.org/wp-content/uploads/2025/09/cropped-SVG-Fav-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-854": {
+      "method": "wordmark-symbol-crop",
+      "name": "Cheyenne Regional Medical Center",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/A60E703B-B56B-48EA-AA51-A8C80AB4181B/43145ba2012c274ef76a5b15411ed6aa.png",
+      "sourcePixels": "160x166"
+    },
+    "epic-856": {
+      "method": "app-store-icon",
+      "name": "Baylor Scott & White Health",
+      "site": "https://apps.apple.com/us/app/mybswhealth/id1000856979",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/4b/db/f5/4bdbf5b7-f7c1-e1b2-d902-1b8669a0b178/AppIcon-0-0-1x_U007ephone-0-7-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-863": {
+      "method": "site-link-icon",
+      "name": "WellStar",
+      "site": "https://www.wellstar.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.wellstar.org/-/media/Themes/WellStar/Org/WellStarOrg/WellStarTheme/images/favicon.ico",
+      "sourcePixels": "256x256"
+    },
+    "epic-864-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Steindler Orthopedic Clinic",
+      "site": "https://steindler.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://img.aelieve.com/w:180/h:180/q:89/g:sm/f:best/https://cdn.aelieve.com/3ddd9a9a-favicon-01.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-865": {
+      "method": "app-store-icon",
+      "name": "University of Arkansas for Medical Sciences",
+      "site": "https://apps.apple.com/us/app/uams-health/id1482318420",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0c/b7/09/0cb709fc-d584-70a2-d516-fe70ea093210/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-866": {
+      "method": "site-link-icon",
+      "name": "CHI Franciscan Health",
+      "site": "https://www.vmfh.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.vmfh.org/content/dam/vmfhorg/icons/VMFHfavicon.ico",
+      "sourcePixels": "500x500"
+    },
+    "epic-866-2": {
+      "method": "site-apple-touch-icon",
+      "name": "Puget Sound Orthopaedics",
+      "site": "https://pugetsoundorthopaedics.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://pugetsoundorthopaedics.com/wp-content/uploads/2022/04/cropped-pso_favicon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-869": {
+      "method": "site-apple-touch-icon",
+      "name": "John Muir Health",
+      "site": "https://www.johnmuirhealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.johnmuirhealth.com/webcommon/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-873": {
+      "method": "app-store-icon",
+      "name": "Mass General Brigham",
+      "site": "https://apps.apple.com/us/app/patient-gateway/id1175078347",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/ca/55/a2/ca55a2db-c919-919c-dc49-71b84a931fd7/AppIcon-1x_U007emarketing-0-8-0-85-220-0.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-875": {
+      "method": "mychart-logo-square",
+      "name": "Baptist Memorial Health Care",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4A168067-CA73-4461-AF7A-A9FC06FE8CC3/b17f858671d85976daeb46aacbf8e0f2.png",
+      "sourcePixels": "209x209"
+    },
+    "epic-875-2": {
+      "method": "mychart-logo-square",
+      "name": "Mitchell Family Medicine and The Ark Children's Clinic",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/6EEC02FD-5902-4F32-9092-1EC2858B6116/a6b47bd92ca3c6e24ced3c6937b96650.png",
+      "sourcePixels": "233x214"
+    },
+    "epic-875-7": {
+      "method": "wordmark-symbol-crop",
+      "name": "Harmony",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/97640920-3E47-4AF0-8D4D-53D169934037/7780fc11ec08ca7796e5aef1e2a8db56.png",
+      "sourcePixels": "221x221"
+    },
+    "epic-876": {
+      "method": "site-apple-touch-icon",
+      "name": "Mercy Health Services",
+      "site": "https://mdmercy.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://mdmercy.com/assets/favicon/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-886": {
+      "method": "site-apple-touch-icon",
+      "name": "OhioHealth",
+      "site": "https://www.ohiohealth.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.ohiohealth.com/static/images/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-890": {
+      "method": "app-store-icon",
+      "name": "Beth Israel Lahey Health",
+      "site": "https://apps.apple.com/us/app/mybilh/id6473653155",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/d7/fa/65/d7fa6534-7e54-4032-0124-1967d550c06c/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-892": {
+      "method": "site-link-icon",
+      "name": "WakeMed Health and Hospitals",
+      "site": "https://www.wakemed.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.wakemed.org/sites/default/files/hg_brands/wakemed-favicon-1.png",
+      "sourcePixels": "200x200"
+    },
+    "epic-895": {
+      "method": "site-apple-touch-icon",
+      "name": "Lifespan",
+      "site": "https://www.brownhealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.brownhealth.org/sites/default/files/favicons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-898": {
+      "method": "wordmark-symbol-crop",
+      "name": "Allegheny Health Network",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/B405BED2-B252-41FC-9404-F3ED010E1885/f90ab097bb84da3c8362a5847e68f1b8.png",
+      "sourcePixels": "200x192"
+    },
+    "epic-902": {
+      "method": "site-apple-touch-icon",
+      "name": "Lehigh Valley Health Network",
+      "site": "https://www.lvhn.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.lvhn.org/themes/custom/ts_lvhn/apple-touch-icon.png?v=Lbyn24zMMN",
+      "sourcePixels": "180x180"
+    },
+    "epic-902-2": {
+      "method": "mychart-logo-square",
+      "name": "City of Allentown Pennsylvania",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/DEE421D5-3D21-48D7-BA92-81F4412DAFCA/1f2b7db3efb1165c05c2eb16f72e45a4.png",
+      "sourcePixels": "209x209"
+    },
+    "epic-903": {
+      "method": "site-apple-touch-icon",
+      "name": "City of Hope",
+      "site": "https://www.cityofhope.org/",
+      "siteFoundBy": "curated-official-site",
+      "source": "https://www.cityofhope.org/themes/custom/cityofhope/favicons/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-905": {
+      "method": "app-store-icon",
+      "name": "Atrium Health",
+      "site": "https://apps.apple.com/us/app/myatriumhealth/id451927337",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/fb/10/be/fb10be21-a44d-63b2-32ad-252cf2b508f5/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-905-2": {
+      "method": "wordmark-symbol-crop",
+      "name": "Scotland Health Care System",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/173FB720-D1EF-4C5F-BD2C-82AC96E45AE3/a38a5d191894615763d3693a0cfa08c1.png",
+      "sourcePixels": "140x154"
+    },
+    "epic-905-7": {
+      "method": "site-apple-touch-icon",
+      "name": "Camino Health Center",
+      "site": "https://www.caminosalud.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://cdn.prod.website-files.com/685f01d86e644d736117bb74/688639a25f03592985709b7f_Adobe%20Express%20-%20file.png",
+      "sourcePixels": "256x256"
+    },
+    "epic-907": {
+      "method": "site-apple-touch-icon",
+      "name": "Atlantic Health",
+      "site": "https://www.atlantichealth.org/home",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.atlantichealth.org/etc.clientlibs/ahs/clientlibs/clientlib-react/resources/ahs-logo-apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-910": {
+      "method": "site-apple-touch-icon",
+      "name": "Montefiore Health System, Inc",
+      "site": "https://montefioreeinstein.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://montefioreeinstein.org/themes/montefiore_einstein/meda/favicons/apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-913": {
+      "method": "site-apple-touch-icon",
+      "name": "Prime Healthcare",
+      "site": "https://www.primehealthcare.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.primehealthcare.com/wp-content/uploads/2023/06/cropped-PrimeMasterLogo_PMS-2162-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-914": {
+      "method": "site-apple-touch-icon",
+      "name": "Southcoast Health System",
+      "site": "https://www.southcoast.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.southcoast.org/wp-content/uploads/2025/05/cropped-Favicon-1-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-915": {
+      "method": "site-apple-touch-icon",
+      "name": "Prisma Health",
+      "site": "https://prismahealth.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://prismahealth.org/apple-touch-icon.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-919": {
+      "method": "app-store-icon",
+      "name": "St Luke's",
+      "site": "https://apps.apple.com/us/app/st-lukes/id1245649855",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/8a/95/50/8a95502f-f46c-fa25-309b-7d9aee519003/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-920": {
+      "method": "app-store-icon",
+      "name": "El Camino Hospital",
+      "site": "https://apps.apple.com/us/app/el-camino-health/id1445205888",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e5/47/c2/e547c22b-8438-dbb4-72a0-bd530d43fc23/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-920-1": {
+      "method": "app-store-icon",
+      "name": "El Camino",
+      "site": "https://apps.apple.com/us/app/el-camino-health/id1445205888",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/e5/47/c2/e547c22b-8438-dbb4-72a0-bd530d43fc23/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-927": {
+      "method": "app-store-icon",
+      "name": "Hospital for Special Surgery",
+      "site": "https://apps.apple.com/us/app/myhss/id1555932065",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/09/85/d5/0985d5bf-9638-7fcc-3dfc-92b1efd2b60e/AppIcon-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-935": {
+      "method": "app-store-icon",
+      "name": "Baptist Healthcare",
+      "site": "https://apps.apple.com/us/app/baptist-health-myhealth/id1527615090",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/54/6b/c3/546bc358-22ce-4736-3f23-dfbc15b66e9f/MyChartAppIcon-0-0-1x_U007epad-0-1-sRGB-0-85-220.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-936": {
+      "method": "site-apple-touch-icon",
+      "name": "Summit Health - Oregon",
+      "site": "https://www.smgoregon.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.smgoregon.com/wp-content/uploads/2025/01/smg-favicon-300x300.png",
+      "sourcePixels": "300x300"
+    },
+    "epic-939": {
+      "method": "app-store-icon",
+      "name": "Spartanburg Regional Healthcare System",
+      "site": "https://apps.apple.com/us/app/mysrhs/id1563943801",
+      "siteFoundBy": "itunes-search-api",
+      "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple122/v4/e6/15/d5/e615d52e-2fa0-8800-9861-20504fb5139d/AppIcon-0-0-1x_U007emarketing-0-0-0-10-0-0-sRGB-0-0-0-GLES2_U002c0-512MB-85-220-0-0.png/512x512bb.jpg",
+      "sourcePixels": "512x512"
+    },
+    "epic-944-3": {
+      "method": "wordmark-symbol-crop",
+      "name": "Dedicated to Women",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/E6CBB7C1-E95D-4227-A918-74AAF94578E5/37b6d9d10d2cc880a9c144d58a8468d7.png",
+      "sourcePixels": "123x122"
+    },
+    "epic-945": {
+      "method": "site-link-icon",
+      "name": "Saint Francis Healthcare System",
+      "site": "https://www.sfmc.net/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.sfmc.net/wp-content/themes/sfhs_2021/images/favicon.svg",
+      "sourcePixels": "512x512"
+    },
+    "epic-948-1": {
+      "method": "site-apple-touch-icon",
+      "name": "Concentra",
+      "site": "https://www.concentra.com/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.concentra.com/-/media/project/concentra/dotcom/usa/images/favicon/apple-touch-icon-180x180.png",
+      "sourcePixels": "180x180"
+    },
+    "epic-964": {
+      "method": "wordmark-symbol-crop",
+      "name": "Scripps Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/777E282F-A340-4F4F-AFE4-74416556D53C/9d32ea62685134b84716b26269c80299.png",
+      "sourcePixels": "155x146"
+    },
+    "epic-972": {
+      "method": "wordmark-symbol-crop",
+      "name": "TidalHealth",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/97FE6CD8-A93F-4007-9423-ED25A700AB7C/de2ee50874f53da79d7a9ef7f614fd9c.png",
+      "sourcePixels": "131x122"
+    },
+    "epic-975": {
+      "method": "site-link-icon",
+      "name": "WellSpan",
+      "site": "https://www.wellspan.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.wellspan.org/favicon.svg",
+      "sourcePixels": "512x512"
+    },
+    "epic-975-1": {
+      "method": "wordmark-symbol-crop",
+      "name": "Keystone Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/911CA0AC-DA57-4447-8AFD-8F69CB1921B6/1270c8325d14217443fa7dd4751d5db5.png",
+      "sourcePixels": "201x195"
+    },
+    "epic-980": {
+      "method": "site-link-icon",
+      "name": "Methodist Health System",
+      "site": "https://www.methodisthealthsystem.org/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://www.methodisthealthsystem.org/sites/default/files/hg_brands/mhs-favicon.png",
+      "sourcePixels": "120x120"
+    },
+    "epic-996": {
+      "method": "site-apple-touch-icon",
+      "name": "UConn Health",
+      "site": "https://uconn.edu/",
+      "siteFoundBy": "portal-domain-root",
+      "source": "https://uconn.edu/wp-content/uploads/sites/23/2019/09/cropped-uconn-white-favicon-180x180.jpg",
+      "sourcePixels": "180x180"
+    },
+    "epic-997": {
+      "method": "wordmark-symbol-crop",
+      "name": "Eisenhower Health",
+      "site": "https://www.mychart.org/cached-api/help/organizations/?locale=en-us&includeOrganizations=1",
+      "siteFoundBy": "mychart-directory",
+      "source": "https://media.epic.com/mychartdotorg/directus/organizations/4D9FA37B-F3F9-4606-8BEB-09980767F5DA/e85a1aec3e0d34f8d0cb1fc94726b2fd.png",
+      "sourcePixels": "149x150"
+    }
+  }
+}

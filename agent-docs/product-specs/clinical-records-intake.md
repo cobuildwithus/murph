@@ -92,6 +92,49 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
 | POST `message-preference` | `{ mode }` | `{ messageMode }` |
+| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }] }` |
+| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | Same fresh processor list |
+
+On a start response requiring named approval, the app fetches the current list,
+displays one tick per company on a single screen and sends one decision per
+request. It retries start after the final approval. A missing route on an older server leaves the feature unavailable.
+Send the displayed version, including on withdrawal. A stale version returns
+409 `CONSENT_DOCUMENT_VERSIONS_STALE`. Either decision requires a current native
+bearer. Withdrawal remains available after product access lapses. Neither
+decision changes the medical-record message setting. Withdrawing health consent
+still turns that setting off and blocks further grants until reconsent.
+
+The asymmetric registration checks every current notice before SMART discovery,
+before callback token exchange and again under the member lock before saving the connection. Missing approvals
+return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
+governs daily admission and transport even after the start selector changes.
+Legacy profiles keep their current admission rules.
+
+For the replacement Epic registration, the sharing answer rests on three rules.
+
+1. **Named companies.** When Murph chooses a company that can read hospital information, the member approves that company before import. OpenAI reads records for enrichment, chat and scheduled turns. Hosted inference goes directly to OpenAI, including on a transport retry.
+2. **Member-directed destinations.** Connecting an app or connector, choosing a website or recipient, or requesting a call, email or export authorizes that destination. Delivery to the member’s own phone includes the detail text they enabled.
+3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally.
+
+The app shows all five named companies. Current grants let the connection and
+its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
+admission or hospital page/document request. Web closes a blocked open run as
+failed and preserves its daily grant. Re-approval permits the next due check.
+The companion source reports `reason: "processor_approval_required"` while
+approval pauses an import or daily checks. `updates` still reports the hospital
+grant. A transfer already in flight may finish.
+Records already imported stay in the vault and remain available to ordinary and
+scheduled turns. Member-directed actions continue to use their own authority.
+Hosting, encrypted storage and pointer-only workflows stay on the subprocessor list.
+
+The classification test covers the runner’s by-host intercept table and allowed model providers, but cannot see deployment secret allowlists or a tool that calls a new fixed origin through the open-internet path.
+Deploy the nullable profile column first. Keep the public selector active until
+all Web replicas enforce the same registry, then release the native approval
+screen and verify the company names and routes before selecting the replacement.
+Confirm that no earlier server admitted an unmarked replacement grant. Keep the
+decision and withdrawal routes after the first app grant and the profile-aware
+admission and transport readers after the first replacement connection. Converge
+new or revised notices on Web before enabling the corresponding runner route.
 
 The list, completion and removal responses include `messageMode` only while at
 least one connected source reports `updates: "daily"`. With only one-time
@@ -112,7 +155,7 @@ in the health-consent revocation transaction. Keep the withdrawal bridge while
 older Web versions can serve traffic or be restored. Once clients use the setting,
 retain a Web version that serves the preference route and honors existing opt-outs.
 
-Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. Each app start gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
+Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifests: the square mark when the provider has one, otherwise the wide wordmark. Each app start gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 
 Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
 
@@ -234,6 +277,12 @@ MyChart's public organization directory and documented official-site overrides.
 `provider-logos.json` maps IDs to content-hashed assets. No hospital search is
 sent to a branding service. Unknown or failed images show initials. SVG input
 is restricted to the exact reviewed official asset hash.
+
+The app shows logos in a square tile. `provider-logos-square.json` maps the
+providers that have a 144-pixel square mark to content-hashed PNGs in the same
+folder, with provenance in `sources-square.json`. The companion routes prefer
+it and fall back to the wide PNG; the web pages keep the wide wordmarks. The
+square set is produced offline and the refresh script does not rewrite it.
 
 Refresh the artifact from the repository root with:
 
@@ -547,11 +596,38 @@ additional shard and preserve it in encrypted workspace snapshots. They can
 continue importing without writing receipts. A receipt-aware reader treats
 missing history as unproved. If a previous runtime committed a batch, replay
 under a receipt writer can produce an empty receipt indistinguishable from a
-proven no-change result. Notifications may trust only runs admitted after receipt
-writers are deployed everywhere. During rollback, retain the shard and require
+proven no-change result. Notifications may trust only freshly admitted runs whose pinned protocol
+requires a receipt writer on every retrieval and enrichment path. During rollback, retain the shard and require
 receipt-capable runners wherever complete evidence is needed. App counts retain
 their existing wire contract. Web outcomes, orchestration and diagnostics carry
 no receipt contents.
+
+### Daily record texts
+
+The notification readers are dormant. Every current run creation path leaves
+the notification fields empty. A future daily admission may freeze the current
+credential epoch, message revision and verified private home route only after an
+accepted baseline under the same authorization and a receipt-required
+protocol for the entire run. Initial imports, recovery of a missing baseline, member starts
+and legacy enrichment remain silent for their entire lifetime.
+
+A signed, write-fenced callback can attest a committed change for one run.
+Web accepts its terminal outcome before publishing a pointer. A private
+enrichment page can supply the first proof before or after that outcome.
+The run row retains publication and scheduling coverage through queue cleanup.
+Missing and empty evidence leave the member's conversation alone.
+
+In notice mode the private runtime writes one ordinary proactive outbox intent.
+It renders “New records came in from <source name>. Want me to go through them?”
+using the brand name from the server-owned provider directory entry recorded
+on the connection. An unavailable label becomes “your connected hospital”.
+The member can answer in the existing conversation. Detail mode schedules a
+one-shot job with the private run receipt reference. Off suppresses publication.
+
+Linq currently selects the transport for each plain-text send. Strict iMessage
+delivery is unavailable, so the host skips the detail job before opening tools
+and blocks notice dispatch. Registering a new hospital client alone cannot
+enable delivery.
 
 ### Bounded repeat import
 

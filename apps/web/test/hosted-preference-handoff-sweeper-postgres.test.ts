@@ -292,6 +292,7 @@ describe.skipIf(!runPostgresProof)(
     });
 
     it.each([
+      "clinical-records.change-recorded",
       "member.action.requested",
       "member.preferences.updated",
       "device-sync.wake",

@@ -1,4 +1,5 @@
 import "server-only";
+import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { randomBytes } from "node:crypto";
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
@@ -14,7 +15,7 @@ import { readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
 import { buildEpicDailyRetrievalPlan } from "./epic-policy";
-import { appendClinicalRetrievalWakeTx, signalClinicalRetrievalWake } from "./retrieval";
+import { appendClinicalRetrievalWakeTx, endUnusableRunTx, signalClinicalRetrievalWake } from "./retrieval";
 
 // Just under the 15-minute sweep, so the next sweep sees the row.
 export const CLINICAL_DAILY_ADMISSION_RETRY_MS = 14 * 60_000;
@@ -72,8 +73,15 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
         where: { id: input.connectionId, memberId: input.memberId },
         include: { retrievalRuns: { orderBy: { generation: "desc" }, take: 1, select: { ...lifecycleRunSelect, grantedScopesJson: true, retrievalPlanJson: true } } },
       });
-      const previous = connection?.retrievalRuns[0];
-      if (!connection || !previous || previous.status === "needs_reauth" || !hasDueClinicalGrant(connection, input.now)) return null;
+      if (!connection || !hasDueClinicalGrant(connection, input.now)) return null;
+      const previous = connection.retrievalRuns[0];
+      if (!previous || previous.status === "needs_reauth") return null;
+      if (connection.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, tx)) {
+        if (!previous.completedAt) await endUnusableRunTx(tx, {
+          memberId: input.memberId, runId: previous.id, generation: previous.generation,
+        }, connection, "processor-admission-blocked", input.now);
+        return null;
+      }
       const lifecycle = classifyClinicalRun(previous, input.now);
       if (lifecycle !== "available" && lifecycle !== "recoverable") return null;
       const grantedScopesJson = previous.grantedScopesJson;

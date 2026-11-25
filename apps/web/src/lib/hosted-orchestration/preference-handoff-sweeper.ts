@@ -203,6 +203,7 @@ function createHostedPreferenceHandoffCandidateStore(
       const recoverableSystemItem = Prisma.sql`
         (
           "item"."kind" IN (
+            'clinical-records.change-recorded',
             'member.preferences.updated',
             'member.action.requested',
             'device-sync.wake',

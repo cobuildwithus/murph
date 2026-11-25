@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { POST as decide } from "../app/api/clinical-records/companion/processor-approvals/[id]/route";
+import { GET as listProcessors } from "../app/api/clinical-records/companion/processor-approvals/route";
+import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
+import { parseHostedConsentAcceptRequest } from "@/src/lib/legal/consent";
 import { POST as complete } from "../app/api/clinical-records/companion/complete/route";
 import { POST as setPreference } from "../app/api/clinical-records/companion/message-preference/route";
 import { POST as remove } from "../app/api/clinical-records/companion/sources/[id]/remove/route";
@@ -55,6 +59,40 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     return getPrisma().hostedMember.findUniqueOrThrow({ where: { id: memberId },
       select: { clinicalRecordMessageMode: true, clinicalRecordMessageRevision: true } });
   }
+
+  it("records one current processor at a time and audits a new version even after a grant", async () => {
+    const first = clinicalProcessors[0]!;
+    const second = clinicalProcessors[1]!;
+    const post = (body: object, id: string = first.id) => decide(request(`processor-approvals/${id}`, "POST", body),
+      { params: Promise.resolve({ id }) });
+    const body = { version: first.version, approved: true };
+    const approvals = async () => (await (await listProcessors(request("processor-approvals"))).json()).processors;
+    expect(await approvals()).toEqual(clinicalProcessors.map(({ id, name, purpose, version }) => ({ id, name, purpose, version, approved: false })));
+    expect((await post({ ...body, ids: [first.id, second.id] })).status).toBe(400);
+    expect((await post({ ...body, id: [first.id, second.id] })).status).toBe(400);
+    expect((await post(body, "unknown")).status).toBe(400);
+    expect((await post({ ...body, version: "obsolete" })).status).toBe(409);
+    expect(() => parseHostedConsentAcceptRequest({ scope: clinicalProcessorScope(first),
+      acceptedDocumentVersions: { [first.id]: first.version } })).toThrow();
+    expect((await post(body)).status).toBe(200);
+    expect((await post(body)).status).toBe(200);
+    const scope = clinicalProcessorScope(first);
+    const events = () => getPrisma().hostedConsentEvent.count({ where: { memberId, scope } });
+    expect(await events()).toBe(1);
+    await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId, scope } },
+      data: { documentVersionsJson: { [first.id]: "obsolete" } } });
+    expect(await approvals()).toMatchObject(clinicalProcessors.map(() => ({ approved: false })));
+    expect((await post(body)).status).toBe(200);
+    expect(await events()).toBe(2);
+    expect(await approvals()).toMatchObject(clinicalProcessors.map(row => ({ approved: row.id === first.id })));
+    expect((await postMode("detail")).status).toBe(200);
+    expect((await post({ ...body, approved: false })).status).toBe(200);
+    expect(await approvals()).toMatchObject(clinicalProcessors.map(() => ({ approved: false })));
+    await withdrawHostedHealthDataConsent({ memberId, prisma: getPrisma() });
+    expect((await post(body)).status).toBe(403);
+    expect((await post({ ...body, approved: false })).status).toBe(200);
+    await expect(setting()).resolves.toMatchObject({ clinicalRecordMessageMode: "off" });
+  });
 
   it("persists all transitions for a lapsed member, incrementing only on change", async () => {
     await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
@@ -121,14 +159,26 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     expect(await read()).toEqual({ sources: [], canAdd: true });
     const source = { memberId, sourceSystem: "epic-fhir", displayName: "Synthetic portal", connectedAt: new Date(),
       fhirBaseUrlEncrypted: "synthetic-sealed", fhirBaseHash: "synthetic-hash", requestedScopesJson: [] };
-    const add = (id: string, persistent: boolean) => getPrisma().clinicalRecordConnection.create({
-      data: { ...source, id, providerDirectoryEntryId: id, refreshTokenEncrypted: persistent ? "synthetic-sealed" : null },
+    const add = (id: string, persistent: boolean, requiresProcessorApprovals = false) => getPrisma().clinicalRecordConnection.create({
+      data: { ...source, id, requiresProcessorApprovals, providerDirectoryEntryId: id, refreshTokenEncrypted: persistent ? "synthetic-sealed" : null },
     });
     const disconnect = async (id: string) => (await remove(request(`sources/${id}/remove`, "POST"),
       { params: Promise.resolve({ id }) })).json();
     const once = await add(randomUUID(), false);
     expect(await read()).not.toHaveProperty("messageMode");
-    const daily = await add(randomUUID(), true);
+    const daily = await add(randomUUID(), true, true);
+    const reasons = async () => (await read()).sources.map((row: { reason: string | null }) => row.reason);
+    expect(await reasons()).toEqual(expect.arrayContaining(["processor_approval_required", null]));
+    for (const { id, version } of clinicalProcessors) {
+      await decide(request(`processor-approvals/${id}`, "POST", { approved: true, version }), { params: Promise.resolve({ id }) });
+    }
+    expect(await reasons()).toEqual([null, null]);
+    await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } },
+      data: { documentVersionsJson: { openai: "obsolete" } } });
+    expect((await read()).sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: daily.id, updates: "daily", reason: "processor_approval_required" }),
+      expect.objectContaining({ id: once.id, reason: null }),
+    ]));
     expect((await postMode("detail")).status).toBe(200);
     const projection = await read();
     expect(projection).toMatchObject({ messageMode: "detail", canAdd: true });
@@ -141,6 +191,6 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     const disconnected = await disconnect(daily.id);
     expect(disconnected).not.toHaveProperty("messageMode");
     expect(disconnected.sources).toHaveLength(2);
-    expect(disconnected.sources).toEqual(Array(2).fill(expect.objectContaining({ updates: "one_time", state: "disconnected" })));
+    expect(disconnected.sources).toEqual(Array(2).fill(expect.objectContaining({ updates: "one_time", state: "disconnected", reason: null })));
   });
 });

@@ -110,7 +110,7 @@ import {
 import { createHostedWorkspaceSystemWork, HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./hosted-runtime/workspace-system-work.ts";
 import { createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
 import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
-import { makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
+import { hasDueHostedClinicalEnrichmentWake, isHostedClinicalEnrichmentWakeItem, makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
   cancelHostedLinqInputTyping,
   createHostedAssistantChannelTypingDependencies,
@@ -1775,6 +1775,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
   let deviceImportAdmissionOpenedAt: number | null = null;
   let detachedAssistantAskController: HostedDetachedAssistantAskController | null = null;
   let clinicalEnrichmentController: HostedClinicalEnrichmentController | null = null;
+  // Only an invocation whose extractor found work may continue it after a checkpoint.
+  let clinicalEnrichmentWorkObserved = false;
   let exactDetachedAssistantAskCompletion: Promise<void> | null = null;
   let startExactDetachedAssistantAsk: (() => Promise<void>) | null = null;
   let ordinaryConsentedAssistantAskSelected = false;
@@ -5139,6 +5141,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           workspaceSystemWork.kick();
         },
         onStateMutation() {
+          clinicalEnrichmentWorkObserved = true;
           runtimeStateDirty = true;
           ensureIdleCheckpointTimerAfterDirtyWork();
           options.runtimeWakeSignal?.notify();
@@ -5147,6 +5150,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onError(error) {
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
       },
+      // Either one voids the extraction window, so the next checkpoint is due.
+      deferNextJobUntilCheckpoint: () =>
+        pendingDurableCheckpointEffects.length > 0 || pendingCanonicalReceiptCount > 0,
     });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
       await Promise.all([
@@ -6372,6 +6378,99 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           await runForegroundPass({ requestIdKind: "checkpoint-wake", signal });
           if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
         }
+      };
+      // Every enrichment page leaves its own canonical receipt and usage effect,
+      // so each page needs a checkpoint. When the job is the only due work,
+      // continue it here instead of restoring a successor for every page.
+      const continueClinicalEnrichmentAfterCheckpoint = async (
+        idleMaintenance: HostedIdleMaintenanceOutcome,
+      ): Promise<boolean> => {
+        const controller = clinicalEnrichmentController;
+        if (
+          !controller
+          || !clinicalEnrichmentWorkObserved
+          || backgroundWorkSignal.aborted
+          || runtimeOwnerHandoffRequested
+          || mailboxBudgetExhausted()
+          || resolveForegroundProcessingMode() !== "default"
+          || readOutstandingDurableCheckpointEffects().length > 0
+          || durableCheckpointFollowUpPending
+        ) {
+          return false;
+        }
+        const nowMs = Date.now();
+        const mailboxState = await readHostedSystemMailboxState(restored.vaultRoot);
+        const clinicalWakeDue = hasDueHostedClinicalEnrichmentWake(mailboxState, nowMs);
+        if (!controller.canContinueAfterCheckpoint(clinicalWakeDue)) {
+          return false;
+        }
+        const otherWake = await resolveHostedSystemMailboxProcessingModeWake({
+          assistantExecutionBlocked,
+          autonomousWakeWindow: floorWindowForMemberAwaitedWork(
+            readHostedAutonomousWakeWindow(redactedStatus, nowMs),
+            memberAwaitedWorkObserved,
+          ),
+          extraCandidates: [
+            // Clinical pointers project as assistant wakes; the durable reads
+            // here recompute every assistant wake without them.
+            ...(pendingWake.nextWakeReason === HOSTED_ASSISTANT_WAKE_REASON
+              ? []
+              : [createHostedRuntimeWakeCandidate(pendingWake.nextWakeAt, pendingWake.nextWakeReason)]),
+            createHostedRuntimeWakeCandidate(committedWorkspace?.inboxMediaRetentionWakeAt, "inbox_media_retention"),
+            createHostedRuntimeWakeCandidate(idleMaintenance.nextWakeAt, idleMaintenance.nextWakeReason),
+          ],
+          nowMs,
+          operatorHomeRoot: restored.operatorHomeRoot,
+          runtimeEnv: invocationRuntimeEnv,
+          systemMailboxState: {
+            pending: mailboxState.pending.filter((item) => !isHostedClinicalEnrichmentWakeItem(item)),
+          },
+          vaultRoot: restored.vaultRoot,
+        });
+        if (otherWake.nextWakeAt !== null && Date.parse(otherWake.nextWakeAt) <= nowMs) {
+          return false;
+        }
+        if (!controller.continueAfterCheckpoint(clinicalWakeDue)) {
+          return false;
+        }
+        // The job starts in a microtask, so this resumes before it can request
+        // its proposal apply from system work.
+        workspaceSystemWork.resume();
+        await controller.waitForExtraction();
+        if (!runtimeStateDirty) {
+          // Nothing ran. Restore the checkpoint-only boundary before release.
+          await Promise.all([workspaceSystemWork.quiesce(), controller.pauseAndRequeue()]);
+        }
+        return runtimeStateDirty;
+      };
+      // Clinical continuation is the last post-checkpoint choice before the
+      // invocation finishes. Null loops back, exactly like a finish retry.
+      const continueClinicalEnrichmentOrFinishDirtyRuntimeInvocation = async (input: {
+        browserVaultRefresh: Parameters<typeof finishDirtyRuntimeInvocation>[0]["browserVaultRefresh"];
+        deferredBrowserVaultWakePrefetch: HostedMailboxPrefixPrefetch | null;
+        deferredDeviceSyncWake: HostedVaultShareOfferWake | null;
+        idleMaintenance: HostedIdleMaintenanceOutcome;
+        mailboxWakeNeedsReplacement: boolean;
+        mayRunPostCheckpointWork: () => boolean;
+        postCheckpointWorkSignal: AbortSignal;
+      }) => {
+        if (
+          !runtimeStateDirty
+          && input.mayRunPostCheckpointWork()
+          && !input.mailboxWakeNeedsReplacement
+          && !input.deferredBrowserVaultWakePrefetch
+          && !input.deferredDeviceSyncWake
+          && input.browserVaultRefresh?.status !== "deferred_runtime_wake"
+          && await continueClinicalEnrichmentAfterCheckpoint(input.idleMaintenance)
+        ) {
+          return null;
+        }
+        return await finishDirtyRuntimeInvocation({
+          browserVaultRefresh: input.browserVaultRefresh,
+          idleMaintenance: input.idleMaintenance,
+          mayRunPostCheckpointWork: input.mayRunPostCheckpointWork(),
+          postCheckpointWorkSignal: input.postCheckpointWorkSignal,
+        });
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
@@ -7996,10 +8095,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           scheduleReplacementForRetainedMailboxWake();
         }
         await runOptionalPostCheckpointWork(() => runNextCheckpointedMailboxItem(postCheckpointWorkSignal));
-        const invocationResult = await finishDirtyRuntimeInvocation({
+        const invocationResult = await continueClinicalEnrichmentOrFinishDirtyRuntimeInvocation({
           browserVaultRefresh,
+          deferredBrowserVaultWakePrefetch,
+          deferredDeviceSyncWake,
           idleMaintenance,
-          mayRunPostCheckpointWork: mayRunPostCheckpointWork(),
+          mailboxWakeNeedsReplacement,
+          mayRunPostCheckpointWork,
           postCheckpointWorkSignal,
         });
         if (invocationResult === null) {
@@ -9340,6 +9442,14 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new ContractValidationError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
+function createAbortGuardedClinicalNotificationReader(
+  platform: HostedRuntimePlatform,
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): NonNullable<HostedRuntimePlatform["clinicalRecordsPort"]>["readNotification"] {
+  const read = platform.clinicalRecordsPort?.readNotification;
+  return read ? (request, options) => guard(() => read(request, options)) : undefined;
+}
+
 function createAbortGuardedClinicalDocumentFetcher(
   platform: HostedRuntimePlatform,
   guard: <T>(run: () => Promise<T>) => Promise<T>,
@@ -9437,6 +9547,7 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.clinicalRecordsPort
       ? {
           clinicalRecordsPort: {
+            readNotification: createAbortGuardedClinicalNotificationReader(platform, guard),
             ...(platform.clinicalRecordsPort.createConnectLink
               ? {
                   createConnectLink: (options) =>

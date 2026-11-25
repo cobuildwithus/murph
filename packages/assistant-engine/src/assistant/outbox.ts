@@ -1,3 +1,4 @@
+import { assertClinicalTextTransportAvailable } from './channels/runtime.js'
 import {
   reportHostedAssistantPersistenceTiming,
   type HostedAssistantPersistenceTiming,
@@ -2104,6 +2105,7 @@ export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxD
   signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
+  assertClinicalTextTransportAvailable(input.deliveryIdempotencyKey)
   const subject = normalizeAssistantOutboxDispatchSubject(input)
 
   return materializeAssistantOutboxDeliveredSession({
@@ -2172,6 +2174,7 @@ async function sendAssistantOutboxDispatchReaction(input: AssistantOutboxDispatc
   dependencies?: AssistantChannelDependencies
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
+  assertClinicalTextTransportAvailable(input.deliveryIdempotencyKey)
   const channel = normalizeNullableString(input.channel)
   const adapter = getAssistantChannelAdapter(channel)
   if (!adapter?.setMessageReaction) {

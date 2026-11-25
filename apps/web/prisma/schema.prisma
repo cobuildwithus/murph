@@ -328,6 +328,8 @@ model ClinicalRecordConnection {
   fhirBaseUrlEncrypted     String                           @map("fhir_base_url_encrypted")
   fhirBaseHash             String                           @map("fhir_base_hash")
   status                   String                           @default("active")
+  /// True identifies the replacement Epic profile. Both historical NULL and explicit false use legacy admission.
+  requiresProcessorApprovals Boolean?                       @map("requires_processor_approvals")
   patientBindingEncrypted  String?                          @map("patient_binding_encrypted")
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
@@ -358,6 +360,12 @@ model ClinicalRecordConnection {
 }
 
 model ClinicalRecordRetrievalRun {
+  // Frozen together at eligible daily admission. NULL is silent for all legacy and member runs.
+  notificationTokenVersion Int? @map("notification_token_version")
+  notificationRouteKey String? @map("notification_route_key")
+  notificationSettingRevision Int? @map("notification_setting_revision")
+  // Private proof can precede acceptance. Published and scheduled survive mailbox retention.
+  notificationCoverage String? @map("notification_coverage")
   id                   String                           @id
   memberId             String                           @map("member_id")
   connectionId         String                           @map("connection_id")

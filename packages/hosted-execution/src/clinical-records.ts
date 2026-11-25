@@ -1,3 +1,4 @@
+export { clinicalRecordRecipients } from "./clinical-record-recipients.ts";
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
   clinicalFhirResourceTypeSchema,
@@ -69,6 +70,8 @@ const identifierSchema = z
   .min(1)
   .max(HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS)
   .regex(HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN);
+export { CLINICAL_TEXT_TRANSPORT_BLOCK, parseHostedClinicalCheckpointRequest, type HostedClinicalChangeProof } from "./clinical-records-boundary.ts";
+
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const errorCodeSchema = z
   .string()
@@ -105,6 +108,17 @@ export const hostedClinicalRecordsReadRunRequestSchema = z.object({
   runId: identifierSchema,
 }).strict();
 
+export const clinicalNotificationRequestSchema = hostedClinicalRecordsReadRunRequestSchema.extend({
+  purpose: z.literal("notification"),
+}).strict();
+
+export const clinicalNotificationDecisionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("off") }).strict(),
+  z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256), directoryLabel: z.string().min(1).max(256).nullable() }).strict(),
+  z.object({ mode: z.literal("detail"), threadId: z.string().min(1).max(256) }).strict(),
+]);
+export type ClinicalNotificationDecision = z.infer<typeof clinicalNotificationDecisionSchema>;
+
 export const hostedClinicalRecordsRetrievalSliceSchema = clinicalFhirRetrievalSliceSchema;
 
 const hostedClinicalRecordsRunDescriptorBaseShape = {
@@ -123,6 +137,7 @@ const hostedClinicalRecordsRunDescriptorBaseShape = {
 
 export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   ...hostedClinicalRecordsRunDescriptorBaseShape,
+  changeReceipts: z.literal(true).optional(),
   retrievalProtocol: z.literal("query-slices-v2"),
   retrievalSlices: clinicalFhirRetrievalSlicesSchema,
 }).strict();

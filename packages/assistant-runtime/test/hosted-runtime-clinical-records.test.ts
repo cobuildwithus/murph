@@ -137,7 +137,8 @@ describe("hosted clinical records maintenance", () => {
       .mockResolvedValueOnce({ body: bundle([lab("saved-a1c")], nextUrl), nextCursor: "cursor-2", status: "page" })
       .mockResolvedValueOnce({ status: "unavailable", errorCode: "provider_denied", retryable: false });
     const importSnapshot = vi.fn(importClinicalFhirSnapshot);
-    const result = await run(createPort({ fetchPage }), importSnapshot);
+    const result = await run(createPort({ fetchPage, readRun: async () => ({ status: "ready", run: { ...RUN, changeReceipts: true } }) }), importSnapshot);
+    expect(result.outcome?.hasChangeReceipt).toBe(true);
     expect(result).toMatchObject({ status: "partial", counts: { createdCount: 1, labResultCount: 1, fetchedResourceFamilyCount: 0 }, outcome: { errorCode: "provider_denied" } });
     const imported = await importSnapshot.mock.results[0]!.value;
     const manifest = JSON.parse(await readFile(path.join(vaultRoot, imported.manifestPath), "utf8"));

@@ -102,6 +102,8 @@ const queryServiceMethodNames = [
   "listSupplements",
   "showSupplementCompound",
   "listSupplementCompounds",
+  "showDiagnosticTest",
+  "listDiagnosticTests",
   "showDocument",
   "listDocuments",
   "showDocumentManifest",

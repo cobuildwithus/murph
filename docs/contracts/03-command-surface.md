@@ -125,6 +125,8 @@ vault-cli diagnostic-test scaffold --vault <path>
 vault-cli diagnostic-test save <testName> --vault <path> [--result-status <status>] [--summary <text>] [--test-category <text>] [--specimen-type <text>] [--lab-name <text>] [--reported-at <ts>] [--occurred-at <ts>] [--source <source>] [--title <title>] [--note <text>]
 vault-cli diagnostic-test import-json --vault <path> --input @file.json|-
 vault-cli diagnostic-test payload-schema
+vault-cli diagnostic-test show <id> --vault <path>
+vault-cli diagnostic-test list --vault <path> [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>] [--text <text>] [--limit <n>]
 vault-cli clinical-note scaffold --vault <path>
 vault-cli clinical-note import-json --vault <path> --input @file.json|-
 vault-cli clinical-note payload-schema
@@ -331,7 +333,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 - `profile` is the facade for stable personal health facts with no other record family. `profile show` returns the current blood type and `profile set --blood-type` saves one as a single blood-test result with slug `blood-type`; it adds no storage family. The current value is the most recently saved recognizable result (by `recordedAt`, then `occurredAt`, then id), including legacy results labelled ABO group, ABO/Rh or blood type and panels with separate ABO and Rh rows. `set` returns `unchanged` only for an exact retry; new evidence for the same value is appended.
 - `assertion` is the bounded explicit clinical assertion facade for negative, denied, normality, and no-known-* facts. It writes canonical `kind: "clinical_assertion"` events rather than allergy, condition, or social-history records.
 - `vitals` is a visit-import convenience facade over canonical `kind: "measurement"` events.
-- `diagnostic-test` is a general test-result import facade over canonical `kind: "test"` events when the specialized `blood-test` noun is too narrow.
+- `diagnostic-test` is a general test-result facade over canonical `kind: "test"` events when the specialized `blood-test` noun is too narrow. Its `list` and `show` read every test event, blood included, with the same projection and filters as `blood-test list|show`.
 - `clinical-note` is a structured-note import facade over canonical `kind: "note"` events.
 - `social-history` is an import facade that writes canonical `clinical_assertion`, `exposure`, or tagged `note` events in one validated batch and does not introduce a `social_history` event kind or registry. Every entry carries its own `externalRef`; `status: "current"` and `status: "former"` write exposures for exposure categories, `denied`/`never`/`not_applicable` write assertions, and `unknown` or missing statuses write notes.
 - `immunization` is a dedicated user-facing payload-CRUD noun backed by canonical `kind: "immunization"` records on the shared `ledger/events` seam; it remains a projected event view rather than a separate query/storage family.
@@ -356,7 +358,7 @@ The placeholder grammar above applies to health nouns that expose the shared sca
 
 These are semantic groupings, not a parallel command registry. For example, `event` remains the generic write/read surface for non-specialized event kinds, and `provider` remains the registry-backed noun for `bank/providers/*.md`.
 
-Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, `--to`, and `--text`; `immunization list` exposes `--from` and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
+Registry-backed readable/list surfaces may expose noun-specific filters where the underlying records justify them. `goal`, `condition`, `allergy`, `regimen`, `protocol`, and similar registry nouns may expose `--status <status>`. `blood-test list` exposes `--status`, `--from`, `--to`, and `--text`; `diagnostic-test list` exposes `--from`, `--to`, and `--text`; `immunization list` exposes `--from` and `--to`. Generic top-level `list` adds `--record-type`, `--status`, `--stream`, and `--tag` parity, while `event list --kind <kind>` remains the generic event-ledger filter surface.
 
 ## Native Incur Contract
 
@@ -385,7 +387,7 @@ Read surfaces intentionally separate summary from detail:
   `data.lifecycle.revision` stays the value for `--expected-revision`. `show`
   keeps `rawRefs`, `timeZone`, and the record's own file `path`; list rows omit
   all three, and a supplement list row summarizes each ingredient as text.
-- A text-filtered `blood-test list` row may add one bounded
+- A text-filtered `blood-test list` or `diagnostic-test list` row may add one bounded
   `data.matchedResult` containing only the matched analyte's answer-bearing
   scalars (`analyte`, numeric or text value, unit, comparator, flag, and compact
   reference range). It does not embed the full panel or unrelated results;

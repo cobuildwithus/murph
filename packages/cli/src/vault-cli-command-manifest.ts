@@ -596,15 +596,31 @@ export const vaultCliCommandDescriptors = [
   },
   {
     id: 'diagnostic-test',
-    bindingMode: 'none',
+    bindingMode: 'direct',
     rootCommandNames: ['diagnostic-test'],
-    leafCommands: createClinicalImportLeafCommands({
-      root: 'diagnostic-test',
-      scaffoldOutput: diagnosticTestScaffoldResultSchema,
-      includeSave: true,
-    }),
-    register({ cli }) {
-      registerDiagnosticTestCommands(cli)
+    leafCommands: [
+      ...createClinicalImportLeafCommands({
+        root: 'diagnostic-test',
+        scaffoldOutput: diagnosticTestScaffoldResultSchema,
+        includeSave: true,
+      }),
+      {
+        path: ['diagnostic-test', 'show'],
+        description: 'Show one saved test with every result row.',
+        output: healthShowResultSchema,
+      },
+      {
+        path: ['diagnostic-test', 'list'],
+        description:
+          'List saved tests of every kind (stool, microbiome, urine, saliva and blood), newest first.',
+        output: healthListResultSchema,
+      },
+    ],
+    directVaultServiceBindings: {
+      query: ['showDiagnosticTest', 'listDiagnosticTests'],
+    },
+    register({ cli, services }) {
+      registerDiagnosticTestCommands(cli, services)
     },
   },
   {

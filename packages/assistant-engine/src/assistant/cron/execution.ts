@@ -1,3 +1,4 @@
+import { CLINICAL_TEXT_TRANSPORT_BLOCK } from '@murphai/hosted-execution/clinical-records-boundary'
 import { randomUUID } from 'node:crypto'
 import {
   parseAutomationSupportSeriesTag,
@@ -648,6 +649,7 @@ export async function executeClaimedAssistantCronJob(
       input.shouldYieldBackgroundMaintenance ?? null,
   })
   try {
+    await assertClinicalCronTransport(claimedJob, input.executionContext, yieldCancellation.signal)
     if (yieldCancellation.signal.aborted) {
       if (yieldCancellation.yieldRequested()) {
         throw createAssistantCronBackgroundMaintenanceYieldError()
@@ -3165,6 +3167,20 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
 /** A gate stopped this run, so it is recorded as skipped rather than failed. */
 abstract class AssistantCronGateSkipError extends VaultCliError {
   abstract readonly skipReason: string
+}
+
+async function assertClinicalCronTransport(job: AssistantCronJob, context: AssistantExecutionContext | null | undefined, signal: AbortSignal) {
+  if (!job.clinicalChange) return
+  const resolve = context?.hosted?.resolveScheduledLinqRoute
+  if (job.target.channel === 'linq' && job.target.threadIsDirect && job.target.threadId && resolve) {
+    const authority = await resolve({
+      homeRouteFallbackAllowed: false, idempotencyKey: `clinical-change:v1:${job.clinicalChange.runId}:detail`,
+      signal, target: job.target.threadId, targetKind: 'thread',
+    })
+    if (authority.deliveryBlockCode) throw new AssistantCronLinqHealthPreflightBlockedError(authority.deliveryBlockCode)
+  }
+  // Remain closed even with a stale reader that returns an ordinary allowed route.
+  throw new AssistantCronLinqHealthPreflightBlockedError(CLINICAL_TEXT_TRANSPORT_BLOCK)
 }
 
 class AssistantCronLinqHealthPreflightBlockedError extends AssistantCronGateSkipError {

@@ -78,6 +78,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.change-recorded",
   "device-sync.wake",
   "member.action.requested",
   "member.action.completed",
@@ -101,6 +102,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
+  "clinical-records.change-recorded",
   "clinical-records.enrichment-requested",
   "device-sync.wake",
   "journal.group-fact.recorded",
@@ -602,6 +604,13 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
+export interface HostedExecutionClinicalRecordsChangeRecordedEvent
+  extends HostedExecutionBaseEvent {
+  generation: number;
+  kind: "clinical-records.change-recorded";
+  runId: string;
+}
+
 export interface HostedExecutionMemberActionRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: "member.action.requested";
@@ -649,6 +658,7 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantNotificationRequestedEvent
   | HostedExecutionAssistantAskRequestedEvent
   | HostedExecutionAssistantAskCompletedEvent
+  | HostedExecutionClinicalRecordsChangeRecordedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionMemberActionRequestedEvent
@@ -915,11 +925,19 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
   runId: string;
 }
 
+export interface HostedExecutionClinicalRecordsChangeRecordedWake
+  extends HostedExecutionBaseWake {
+  generation: number;
+  kind: "clinical-records.change-recorded";
+  runId: string;
+}
+
 /** Local durable work points to retained clinical evidence, never provider credentials. */
 
 export interface HostedExecutionClinicalEnrichmentRequestedWake
   extends HostedExecutionBaseWake {
   jobId: string;
+  changeRun?: { runId: string; generation: number };
   kind: "clinical-records.enrichment-requested";
 }
 
@@ -1018,6 +1036,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantNotificationRequestedWake
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantAskCompletedWake
+  | HostedExecutionClinicalRecordsChangeRecordedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionClinicalEnrichmentRequestedWake
   | HostedExecutionDeviceSyncWake

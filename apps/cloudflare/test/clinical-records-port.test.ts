@@ -186,6 +186,22 @@ describe("hosted clinical records runtime port", () => {
     expect(JSON.stringify(received)).not.toContain("member_1");
   });
 
+  it("forwards only opaque notification pointers and strict signed decisions", async () => {
+    const pointer = { runId: "synthetic-origin", generation: 2 };
+    const decision = { mode: "notice", threadId: "synthetic-thread", directoryLabel: null };
+    const bodies: unknown[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(input, init);
+      bodies.push(await req.json());
+      return Response.json(bodies.length === 1 ? decision : { ...decision, unexpected: true });
+    });
+    const port = createHostedWebClinicalRecordsPort({ boundUserId: "member_1", fetchImpl,
+      timeoutMs: 5_000, transport: { mode: "proxy" } });
+    expect(await port.readNotification!(pointer)).toEqual(decision);
+    await expect(port.readNotification!(pointer)).rejects.toThrow();
+    expect(bodies).toEqual(Array(2).fill({ purpose: "notification", ...pointer }));
+  });
+
   it("replays only deterministic scheduled connect-link requests after a retryable failure", async () => {
     const connectLink = {
       connectUrl: "https://web.example.test/records/connect?launch=clinical-records",

@@ -256,6 +256,12 @@ export async function readHostedMemberRoutingHomeLinqRecipientPhones(
   });
 }
 
+export async function readHostedMemberHomeLinqChatId(routing: Pick<HostedMemberRouting, "linqChatIdEncrypted" | "memberId">,
+  prisma: HostedWebEncryptionPrismaClient) {
+  return decryptHostedWebNullableString({ field: HOSTED_MEMBER_ROUTING_HOME_LINQ_CHAT_FIELD,
+    memberId: routing.memberId, prisma, value: routing.linqChatIdEncrypted });
+}
+
 export async function readHostedMemberRoutingPrivateState(
   routing: Pick<
     HostedMemberRouting,

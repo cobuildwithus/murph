@@ -755,6 +755,7 @@ describe("hosted execution coverage gaps", () => {
       "assistant.ask.requested",
       "assistant.ask.completed",
       "clinical-records.sync-requested",
+      "clinical-records.change-recorded",
       "device-sync.wake",
       "member.action.requested",
       "member.action.completed",

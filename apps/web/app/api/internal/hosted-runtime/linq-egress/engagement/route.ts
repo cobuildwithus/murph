@@ -91,6 +91,20 @@ async function prepareGroupMoveEgressRequest(input: {
 const HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES = 8 * 1024;
 const HOSTED_LINQ_ENGAGEMENT_ANSWERED_MAILBOX_ITEM_ID_LIMIT = 100;
 
+function clinicalProactiveKey(input: {
+  idempotencyKey: string | null; answeredMailboxItemIds: string[]; replyToMessageId: string | null;
+  deliveryPurpose: unknown; assistantAskFallback: unknown; assistantAskCompletionExpiresAt: unknown;
+  homeRouteFallbackAllowed: unknown; targetKind: string | null; target: string | null;
+}) {
+  if (!input.idempotencyKey?.startsWith("clinical-change:")) return null;
+  if (input.answeredMailboxItemIds.length || input.replyToMessageId || input.deliveryPurpose || input.assistantAskFallback
+    || input.assistantAskCompletionExpiresAt || input.homeRouteFallbackAllowed || input.targetKind !== "thread" || !input.target) {
+    throw hostedOnboardingError({ code: "CLINICAL_RECORD_PROACTIVE_ROUTE_REQUIRED", httpStatus: 403,
+      message: "Clinical record notifications require the exact private proactive route." });
+  }
+  return input.idempotencyKey;
+}
+
 export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_LINQ_EGRESS_ENGAGEMENT_BODY_LIMIT_BYTES,
@@ -122,6 +136,10 @@ export const POST = withJsonError(async (request: Request) => {
   const target = readOptionalBodyString(body.target);
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
+
+  const clinicalKey = clinicalProactiveKey({ idempotencyKey, answeredMailboxItemIds, replyToMessageId,
+    deliveryPurpose: body.deliveryPurpose, assistantAskFallback, assistantAskCompletionExpiresAt,
+    homeRouteFallbackAllowed: body.homeRouteFallbackAllowed, targetKind, target });
 
   // Advisory typing coverage is read-only and never enters delivery serialization.
   if (authorityCheckOnly && body.deliveryPurpose === "typing") {
@@ -292,6 +310,13 @@ export const POST = withJsonError(async (request: Request) => {
       };
     }
 
+    if (clinicalKey) {
+      const { clinicalEgressBlock } = await import("@/src/lib/clinical-records/notification");
+      const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
+        route: finalAuthority.resolvedRoute });
+      return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
+        deliveryPosture: null, ackReaction: null, progressUpdateSuppressed: false, providerDispatchClaimed: null };
+    }
     const dispatch = await claimHostedLinqEngagementProviderDispatchTx({
       assistantAskFallbackRequired:
         assistantAskAuthority?.assistantAskFallbackRequired === true,
