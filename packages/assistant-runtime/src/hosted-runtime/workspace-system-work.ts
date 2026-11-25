@@ -21,6 +21,7 @@ import {
 export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
   "run-device-sync-wake",
   "run-clinical-records-sync",
+  "consume-clinical-change",
   "apply-clinical-enrichment",
 ] as const satisfies readonly HostedSystemMailboxRouteAction[];
 

@@ -1205,7 +1205,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const resumed = await resumeRecapAfterCheckpoint(input, recordResult.recorded);
+    const resumed = await resumeWorkAfterCheckpoint(input, recordResult.recorded);
     if (resumed) return resumed;
     const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
@@ -1825,6 +1825,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
+    || item.route.action === "consume-clinical-change"
     || item.route.action === "apply-clinical-enrichment"
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "import-group-journal-fact"
@@ -2271,12 +2272,22 @@ async function completeSystemMailboxItemWithoutRecord(input: Parameters<typeof r
     };
 }
 
-async function resumeRecapAfterCheckpoint(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0], recorded: number) {
-  if (input.item.postCheckpointRecord?.kind !== "game.recap-lore-checkpointed" || !input.item.postCheckpointRecord.resume) return null;
-      const nextAttemptAt = new Date().toISOString();
-      await updateHostedSystemMailboxState(input.vaultRoot, state => ({ ...state,
-        pending: state.pending.map(item => hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
-          ? { ...item, status: "pending" as const, postCheckpointRecord: null, nextAttemptAt, lastErrorCode: null, lastErrorMessage: null } : item) }));
-      const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot });
-      return { failed: 0, nextWakeAt: nextWake.at, ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}), recorded: recorded };
+async function resumeWorkAfterCheckpoint(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0], recorded: number) {
+  const record = input.item.postCheckpointRecord;
+  const nextAttemptAt = record?.kind === "game.recap-lore-checkpointed" && record.resume
+    ? new Date().toISOString()
+    : record?.kind === "clinical-records.outcome-recorded" && input.item.wake.kind === "clinical-records.enrichment-requested"
+      ? record.resumeEnrichmentAt : null;
+  if (!nextAttemptAt) return null;
+  await updateHostedSystemMailboxState(input.vaultRoot, state => ({ ...state,
+    pending: state.pending.map(item => {
+      if (!hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)) return item;
+      // Web now holds this run's proof. Further pages only need their original job identity.
+      const wake = item.wake.kind === "clinical-records.enrichment-requested"
+        ? { ...item.wake, changeRun: undefined } : item.wake;
+      return { ...item, wake, status: "pending" as const, postCheckpointRecord: null, nextAttemptAt,
+        lastErrorCode: null, lastErrorMessage: null };
+    }) }));
+  const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot });
+  return { failed: 0, nextWakeAt: nextWake.at, ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}), recorded };
 }

@@ -9,6 +9,8 @@ import type {
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
+  HostedClinicalChangeProof,
+  ClinicalNotificationDecision,
   HostedClinicalRecordsReadRunRequest,
   HostedClinicalRecordsReadRunResponse,
 } from "@murphai/hosted-execution/clinical-records";
@@ -373,6 +375,7 @@ export function parseHostedRuntimeAssistantResponseMedia(
 }
 
 export interface HostedRuntimeLinqSendRequest {
+  requiredService?: "iMessage";
   card?: AssistantResponseCard | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -612,6 +615,7 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
+  readNotification?(request: HostedClinicalRecordsReadRunRequest, options?: { signal?: AbortSignal | null }): Promise<ClinicalNotificationDecision>;
   createConnectLink?(
     options?: HostedClinicalRecordsConnectLinkRequest & {
       signal?: AbortSignal | null
@@ -630,7 +634,7 @@ export interface HostedRuntimeClinicalRecordsPort {
     options?: { signal?: AbortSignal | null },
   ): Promise<HostedClinicalRecordsReadRunResponse>;
   recordOutcome(
-    request: HostedClinicalRecordsRecordOutcomeRequest,
+    request: HostedClinicalRecordsRecordOutcomeRequest | HostedClinicalChangeProof,
     options?: { signal?: AbortSignal | null },
   ): Promise<void>;
 }

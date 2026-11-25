@@ -55,7 +55,6 @@ import type {
   HostedExecutionOperatorTaskNotification,
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   HostedExecutionPrivateAssistantAskCompletionNotification,
-  HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
   HostedExecutionMemberActivationSignupWelcome,
@@ -244,10 +243,21 @@ export {
   parseHostedRuntimeSignal,
 } from "./parsers/orchestration-control.ts";
 
+function isClinicalRunPointerKind(kind: string): kind is "clinical-records.sync-requested" | "clinical-records.change-recorded" {
+  return kind === "clinical-records.sync-requested" || kind === "clinical-records.change-recorded";
+}
+
+function parseClinicalChangeRun(value: unknown) {
+  const record = requireObject(value, "Clinical change run");
+  assertExactHostedClinicalRecordsKeys(record, ["runId", "generation"], "Clinical change run");
+  return { runId: parseHostedClinicalRecordsIdentifier(record.runId),
+    generation: parseHostedExecutionPositiveGeneration(record.generation, "Clinical change generation") };
+}
+
 function parseHostedClinicalEnrichmentWakeJobId(record: Record<string, unknown>): string {
   assertExactHostedClinicalRecordsKeys(
     record,
-    ["eventId", "jobId", "kind", "occurredAt", "userId"],
+    ["changeRun", "eventId", "jobId", "kind", "occurredAt", "userId"],
     "Hosted execution wake clinical-records.enrichment-requested",
   );
   if (typeof record.jobId !== "string" || !/^[a-f0-9]{64}$/u.test(record.jobId)) {
@@ -267,6 +277,7 @@ function parseHostedExecutionVaultDataWake(input: {
     return {
       eventId: input.eventId,
       jobId: parseHostedClinicalEnrichmentWakeJobId(input.record),
+      ...(input.record.changeRun === undefined ? {} : { changeRun: parseClinicalChangeRun(input.record.changeRun) }),
       occurredAt: input.occurredAt,
       kind: input.kind,
       userId: input.wireUserId,
@@ -320,6 +331,25 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     wireUserId,
   });
   if (vaultDataWake) return vaultDataWake;
+
+  if (isClinicalRunPointerKind(kind)) {
+    assertExactHostedClinicalRecordsKeys(
+      record,
+      ["eventId", "generation", "kind", "occurredAt", "runId", "userId"],
+      "Hosted execution wake clinical-records.sync-requested",
+    );
+    return {
+      eventId,
+      generation: parseHostedExecutionPositiveGeneration(
+        record.generation,
+        "Hosted execution wake clinical-records.sync-requested generation",
+      ),
+      occurredAt,
+      kind,
+      runId: parseHostedClinicalRecordsIdentifier(record.runId),
+      userId: wireUserId,
+    };
+  }
 
   switch (kind) {
     case "conversation.message":
@@ -463,23 +493,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         memberId: wireUserId,
         occurredAt,
       });
-    case "clinical-records.sync-requested":
-      assertExactHostedClinicalRecordsKeys(
-        record,
-        ["eventId", "generation", "kind", "occurredAt", "runId", "userId"],
-        "Hosted execution wake clinical-records.sync-requested",
-      );
-      return {
-        eventId,
-        generation: parseHostedExecutionPositiveGeneration(
-          record.generation,
-          "Hosted execution wake clinical-records.sync-requested generation",
-        ),
-        occurredAt,
-        kind,
-        runId: parseHostedClinicalRecordsIdentifier(record.runId),
-        userId: wireUserId,
-      };
     case "member.action.requested":
       assertExactHostedExecutionKeys(record, [
         "eventId",
@@ -1282,6 +1295,23 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
   const kind = requireString(record.kind, "Hosted execution event kind");
   const userId = requireString(record.userId, "Hosted execution event userId");
 
+  if (isClinicalRunPointerKind(kind)) {
+    assertExactHostedClinicalRecordsKeys(
+      record,
+      ["generation", "kind", "runId", "userId"],
+      "Hosted execution clinical-records.sync-requested",
+    );
+    return {
+      generation: parseHostedExecutionPositiveGeneration(
+        record.generation,
+        "Hosted execution clinical-records.sync-requested generation",
+      ),
+      kind,
+      runId: parseHostedClinicalRecordsIdentifier(record.runId),
+      userId,
+    };
+  }
+
   switch (kind) {
     case "member.activated": {
       const timeZone = parseHostedExecutionOptionalTimeZone(
@@ -1395,21 +1425,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         kind,
         userId,
       } satisfies HostedExecutionAssistantAskCompletedEvent;
-    case "clinical-records.sync-requested":
-      assertExactHostedClinicalRecordsKeys(
-        record,
-        ["generation", "kind", "runId", "userId"],
-        "Hosted execution clinical-records.sync-requested",
-      );
-      return {
-        generation: parseHostedExecutionPositiveGeneration(
-          record.generation,
-          "Hosted execution clinical-records.sync-requested generation",
-        ),
-        kind,
-        runId: parseHostedClinicalRecordsIdentifier(record.runId),
-        userId,
-      } satisfies HostedExecutionClinicalRecordsSyncRequestedEvent;
     case "member.action.requested":
       assertExactHostedExecutionKeys(record, [
         "kind",

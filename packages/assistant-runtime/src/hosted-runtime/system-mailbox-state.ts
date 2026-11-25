@@ -22,7 +22,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
-  parseHostedClinicalRecordsRecordOutcomeRequest,
+  parseHostedClinicalCheckpointRequest,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 import {
   persistHostedRuntimeStateAtCanonicalBoundary,
@@ -88,6 +88,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-assistant-ask"
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
+  | "consume-clinical-change"
   | "apply-clinical-enrichment"
   | "run-device-sync-wake"
   | "import-group-journal-fact"
@@ -1480,6 +1481,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-assistant-ask"
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
+    || value === "consume-clinical-change"
     || value === "apply-clinical-enrichment"
     || value === "run-device-sync-wake"
     || value === "import-group-journal-fact"
@@ -1512,6 +1514,30 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMail
   return parseHostedSystemMailboxRecordRequestLegacy(value);
 }
 
+function parseClinicalCheckpointRecord(record: Record<string, unknown>): HostedSystemMailboxPostCheckpointRecord {
+  assertHostedSystemMailboxRecordKeys(
+    record,
+    ["kind", "nextWakeAt", "request", "resumeEnrichmentAt"],
+    "hosted system mailbox Clinical Records postCheckpointRecord",
+  );
+  if (record.nextWakeAt !== undefined && record.nextWakeAt !== null) {
+    throw new ContractValidationError(
+      "hosted system mailbox Clinical Records postCheckpointRecord nextWakeAt must be null.",
+    );
+  }
+  const request = parseHostedClinicalCheckpointRequest(record.request);
+  const resume = record.resumeEnrichmentAt;
+  if (resume !== undefined && ((!("kind" in request) || request.kind !== "change-receipt") || typeof resume !== "string" || !Number.isFinite(Date.parse(resume)))) {
+    throw new ContractValidationError("Invalid clinical enrichment continuation.");
+  }
+  return {
+    kind: "clinical-records.outcome-recorded",
+    ...(typeof resume === "string" ? { resumeEnrichmentAt: resume } : {}),
+    ...(record.nextWakeAt === null ? { nextWakeAt: null } : {}),
+    request,
+  };
+}
+
 function parseHostedSystemMailboxRecordRequestLegacy(
   value: unknown,
 ): HostedSystemMailboxPostCheckpointRecord {
@@ -1530,21 +1556,7 @@ function parseHostedSystemMailboxRecordRequestLegacy(
   }
 
   if (record.kind === "clinical-records.outcome-recorded") {
-    assertHostedSystemMailboxRecordKeys(
-      record,
-      ["kind", "nextWakeAt", "request"],
-      "hosted system mailbox Clinical Records postCheckpointRecord",
-    );
-    if (record.nextWakeAt !== undefined && record.nextWakeAt !== null) {
-      throw new ContractValidationError(
-        "hosted system mailbox Clinical Records postCheckpointRecord nextWakeAt must be null.",
-      );
-    }
-    return {
-      kind: "clinical-records.outcome-recorded",
-      ...(record.nextWakeAt === null ? { nextWakeAt: null } : {}),
-      request: parseHostedClinicalRecordsRecordOutcomeRequest(record.request),
-    };
+    return parseClinicalCheckpointRecord(record);
   }
 
   if (record.kind === "device-sync.dirty-processed") {

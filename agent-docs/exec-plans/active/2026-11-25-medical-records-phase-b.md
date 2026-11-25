@@ -1,6 +1,6 @@
 # Phase B hospital records
 
-Status: active (PR A in this draft)
+Status: active (daily notification readers in draft)
 Created: 2026-11-25
 Updated: 2026-11-25
 
@@ -32,3 +32,59 @@ PR A runs focused SMART, control-plane and daily-sync/renewal tests, Web typeche
 ### PR A evidence
 
 The three focused suites passed 87 tests. Web typecheck and lint exited 0. Complexity reported zero hotspots above 20. A synthetic provider and browser exercised the proof entry point through its HTTPS loopback listener, both rolling refreshes and both patient reads. Omitting a successor failed at refresh, and changing the patient failed at read. Live sandbox discovery advertised the required capabilities. The interactive Epic grant, hosted key visibility, rotation and revocation remain deployment acceptance checks. The plan stays active across the remaining Phase B PRs.
+
+### PR E1 · Dormant daily notification consumers
+
+Deploy the nullable run columns first. Deploy the Web readers, Worker port and
+hosted workspace readers before any admission writer. All creation paths in E1
+leave the fences NULL. Old Web and old runners keep the original descriptor,
+outcome and mailbox shapes. E1 can consume a synthetic eligible run through
+private outbox or one-shot scheduling. The production plain-text provider
+cannot promise iMessage-only delivery. The host blocks provider dispatch and
+skips detail generation before exposing tools. Ordinary outbox preflight and
+scheduled preflight both present the run key to the signed Linq engagement
+owner with home-route fallback disabled. Local and hosted provider entry
+reject a clinical text even if an older host returns an ordinary allowed route.
+
+Local synthetic journeys queued one notice intent, one detail job, and no work
+for off. No model or provider was entered. PostgreSQL exercised a real accepted
+terminal, first late enrichment under a newer generation, lost handoff, durable
+coverage, and revision, route and credential changes. A private workspace replay
+rendered the generic notice and checkpointed the pointer. Real handset delivery
+and revocation during an actual model turn require the strict sender in E2.
+
+### PR E2 · Admission and activation boundary
+
+1. Extend the existing protected post-deployment contract-migration lane with
+   a machine gate. Require the compatible Web production SHA, all serving
+   Worker versions and their port, and the exact receipt-capable runner image
+   digest. Use the runner release provider's completed native rollout and
+   drained-instance checks for every serving target. Refuse a pending rollout,
+   mixed traffic, missing evidence or a pre-floor rollback target. Only then
+   may the migration owner commit a pinned migration ID and checksum to
+   `_hosted_web_contract_migration`. A Web build, an environment flag or a
+   single successful callback supplies no fleet proof.
+2. Have Web read that exact committed marker under the daily admission lock.
+   Absence, mismatch or an unavailable marker keeps admission silent. Pin a
+   receipt-required retrieval protocol for eligible runs so an older Web or
+   runner cannot acquire their pages on rollback. Under the same lock prove
+   the replacement-client ongoing grant, an accepted baseline for the current
+   credential epoch, the live message revision and exact verified home route.
+   Persist the epoch, revision and route fingerprint only on that new run.
+   Establish baseline authority explicitly under each new authorization.
+   Never backfill old rows from connection dates or generation numbers.
+3. Before enabling successful text delivery, obtain and test an enforceable
+   strict-text transport. Retain the provider refusal and the pre-model skip
+   until the signed preflight and each outbound tool, retry and bubble are
+   bound to the run and its single recipient. Recheck AI allowance for detail
+   through ordinary scheduled execution. Prove an attempted alternate send,
+   withdrawal during generation and downgrade between accepted bubbles using
+   the strict sender. A service preference or capability lookup cannot clear
+   this gate. Complete the positive detail journey with synthetic vault data.
+4. Stop new admissions first on rollback. After the first eligible run, retain
+   compatible receipt writers, schema, Web/Worker/snapshot readers, settings
+   fences, recovery and egress guards until all outstanding work and restorable
+   checkpoints are covered. Prevent selecting an older serving writer while
+   the admission marker can authorize a new generation. Retain durable run
+   coverage across mailbox, outbox and cron cleanup. E1 alone writes no
+   eligible production runs and does not change the existing receipts floor.

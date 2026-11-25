@@ -9340,6 +9340,14 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
   throw new ContractValidationError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
+function createAbortGuardedClinicalNotificationReader(
+  platform: HostedRuntimePlatform,
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): NonNullable<HostedRuntimePlatform["clinicalRecordsPort"]>["readNotification"] {
+  const read = platform.clinicalRecordsPort?.readNotification;
+  return read ? (request, options) => guard(() => read(request, options)) : undefined;
+}
+
 function createAbortGuardedClinicalDocumentFetcher(
   platform: HostedRuntimePlatform,
   guard: <T>(run: () => Promise<T>) => Promise<T>,
@@ -9437,6 +9445,7 @@ function createAbortGuardedHostedRuntimePlatform(
     ...(platform.clinicalRecordsPort
       ? {
           clinicalRecordsPort: {
+            readNotification: createAbortGuardedClinicalNotificationReader(platform, guard),
             ...(platform.clinicalRecordsPort.createConnectLink
               ? {
                   createConnectLink: (options) =>

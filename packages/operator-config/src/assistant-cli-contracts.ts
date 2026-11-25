@@ -1219,6 +1219,8 @@ export const assistantCronJobSchema = z
     schedule: assistantCronScheduleSchema,
     target: assistantCronTargetSchema,
     scheduledLog: assistantCronScheduledLogSchema.optional(),
+    clinicalChange: z.object({ runId: z.string().regex(/^[A-Za-z0-9._-]{1,120}$/u),
+      receiptRef: z.string().regex(/^[a-f0-9]{64}$/u) }).strict().optional(),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
     state: assistantCronJobStateSchema,

@@ -684,6 +684,7 @@ export interface AssistantHostedExecutionContext {
   publicInternetFetch?: typeof fetch | null
   releaseSha?: string | null
   resolveScheduledLinqRoute?(input: {
+    idempotencyKey?: string
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null

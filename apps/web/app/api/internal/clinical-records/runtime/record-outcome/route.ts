@@ -2,12 +2,12 @@ import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
-  parseHostedClinicalRecordsRecordOutcomeRequest,
+  parseHostedClinicalCheckpointRequest,
 } from "@murphai/hosted-execution/clinical-records";
 
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { clinicalJsonOk, withClinicalJsonError } from "@/src/lib/clinical-records/http";
-import { recordClinicalRetrievalOutcome } from "@/src/lib/clinical-records/retrieval";
+import { recordClinicalChangeProof, recordClinicalRetrievalOutcome } from "@/src/lib/clinical-records/retrieval";
 import { requireClinicalRecordsRuntimeWriteFence } from "@/src/lib/clinical-records/runtime-write-fence";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
@@ -26,9 +26,9 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",
     message: "Clinical Records runtime access is inactive.",
   });
-  let parsed: ReturnType<typeof parseHostedClinicalRecordsRecordOutcomeRequest>;
+  let parsed: ReturnType<typeof parseHostedClinicalCheckpointRequest>;
   try {
-    parsed = parseHostedClinicalRecordsRecordOutcomeRequest(
+    parsed = parseHostedClinicalCheckpointRequest(
       await readJsonObject(request, {
         limitBytes: HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
       }),
@@ -37,7 +37,8 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     if (!(error instanceof ContractValidationError) && !(error instanceof RequestInputError)) throw error;
     throw invalidRequestError();
   }
-  await recordClinicalRetrievalOutcome({ memberId, request: parsed });
+  if ("kind" in parsed) await recordClinicalChangeProof({ memberId, ...parsed });
+  else await recordClinicalRetrievalOutcome({ memberId, request: parsed });
   return clinicalJsonOk({ ok: true });
 });
 

@@ -1,4 +1,5 @@
 export {
+  assertClinicalTextTransportAvailable,
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,

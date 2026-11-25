@@ -1,3 +1,4 @@
+import { CLINICAL_TEXT_TRANSPORT_BLOCK } from '@murphai/hosted-execution/clinical-records-boundary'
 import {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
@@ -709,11 +710,18 @@ function buildLinqAppCardDeliveryResult(
   }
 }
 
+export function assertClinicalTextTransportAvailable(idempotencyKey?: string | null, requiredService?: 'iMessage') {
+  if (requiredService === 'iMessage' || idempotencyKey?.startsWith('clinical-change:')) {
+    throw new VaultCliError(CLINICAL_TEXT_TRANSPORT_BLOCK, 'Strict iMessage delivery is unavailable.', { retryable: false })
+  }
+}
+
 export async function sendLinqMessage(
   input: {
     card?: AssistantResponseCard | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
+    requiredService?: 'iMessage'
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
@@ -734,6 +742,7 @@ export async function sendLinqMessage(
   providerThreadId: string | null
   target: string | null
 }> {
+  assertClinicalTextTransportAvailable(input.idempotencyKey, input.requiredService)
   const env = dependencies.env ?? process.env
   const token = resolveLinqApiToken(env)
   if (!token) {

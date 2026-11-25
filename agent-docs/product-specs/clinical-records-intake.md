@@ -553,6 +553,33 @@ receipt-capable runners wherever complete evidence is needed. App counts retain
 their existing wire contract. Web outcomes, orchestration and diagnostics carry
 no receipt contents.
 
+### Daily record texts
+
+The notification readers are dormant. Every current run creation path leaves
+the notification fields empty. A future daily admission may freeze the current
+credential epoch, message revision and verified private home route only after an
+accepted baseline under the same authorization and proof of the compatible
+runner rollout. Initial imports, recovery of a missing baseline, member starts
+and legacy enrichment remain silent for their entire lifetime.
+
+A signed, write-fenced callback can attest a committed change for one run.
+Web accepts its terminal outcome before publishing a pointer. A private
+enrichment page can supply the first proof before or after that outcome.
+The run row retains publication and scheduling coverage through queue cleanup.
+Missing and empty evidence leave the member's conversation alone.
+
+In notice mode the private runtime writes one ordinary proactive outbox intent.
+It renders “New records came in from <source name>. Want me to go through them?”
+using the brand name from the server-owned provider directory entry recorded
+on the connection. An unavailable label becomes “your connected hospital”.
+The member can answer in the existing conversation. Detail mode schedules a
+one-shot job with the private run receipt reference. Off suppresses publication.
+
+Linq currently selects the transport for each plain-text send. Strict iMessage
+delivery is unavailable, so the host skips the detail job before opening tools
+and blocks notice dispatch. Registering a new hospital client alone cannot
+enable delivery.
+
 ### Bounded repeat import
 
 A member has at most twenty sources and one unfinished retrieval per source.
