@@ -431,10 +431,13 @@ a retry or another bubble, must recheck the run, preference, named approvals,
 private recipient, proactive pause, line health and recipient-region window.
 A group, replacement thread or different channel cannot receive the text.
 
-Admission and dispatch remain disabled. Linq can echo outbound text to the Web
-receipt endpoint. The Web terminal-failure retry also fetches message parts from
-Linq and reconstructs the send. Resolve both content boundaries before enabling
-clinical texts. [Linq webhook payloads and retention](https://docs.linqapp.com/channel/imessage/guides/platform/zero-day-retention/)
+Linq can echo the sent text in a signed outbound receipt. Web verifies the body
+in memory, projects receipt metadata, and discards the text and free-form
+provider failure reason before persistence, logging, tracing or orchestration.
+This applies to ordinary replies, notices and explicit detail. Web's terminal
+retry excludes clinical deliveries by their opaque delivery template before
+fetching any message parts. A definite terminal failure consumes an attempted
+clinical occurrence. Admission remains closed through the reader rollout.
 
 ## Prompt and copy guidance
 

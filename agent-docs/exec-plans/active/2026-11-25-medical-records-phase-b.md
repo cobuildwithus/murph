@@ -122,21 +122,35 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    protocol, egress checks and durable coverage through outstanding work and
    restorable snapshots. E1 alone admits no eligible runs.
 
-**Activation hold.** Normal Linq outbound receipt webhooks can contain the
-sent text. Web reads the signed raw body before extracting receipt metadata.
-After a definite send failure, the Web terminal-retry owner can also fetch
-the original parts and resend them outside the private outbox. This conflicts
-with the pointer-only callback boundary for a detail turn. Linq documents
-content-free outbound receipts for zero-day-retention lines, with a per-event
-flag and no pre-send lookup. The registration change alone does not establish
-this property. Resolve webhook ingress and terminal retry ownership before
-enabling admission. [Linq retention contract](https://docs.linqapp.com/channel/imessage/guides/platform/zero-day-retention/)
+**Reader rollout (draft #5318).** The owner accepts signed outbound receipt
+text passing through Web memory on the ordinary webhook. Web verifies it,
+projects receipt metadata and discards message parts and provider prose before
+storage, logging, tracing or orchestration. The Web retry owner excludes
+clinical deliveries using the existing delivery template. A definite terminal
+failure consumes the attempted occurrence. This avoids fetching private text
+or generating a second message after a provider attempt.
 
-The private notice renderer and signed decision now omit the source label.
-This partial change keeps the E1 creation and dispatch gates. New and old
-strict notice parsers reject the other version’s decision. No production
-run can request one. For eventual activation deploy compatible Web readers,
-the hosted runtime, then the Cloudflare port manually from main before opening
-daily admissions. On rollback stop admission first and keep all compatible
-readers, the per-run fence, dispatch policy and coverage through restorable
-snapshots. A fleet-wide receipt attestation cannot authorize a run.
+Web, the hosted runtime and the manually deployed Cloudflare port can read
+the receipt-required protocol. The run, page, document and outcome protocols
+must agree. The protocol travels in private checkpoints, batch manifests and
+enrichment jobs. Ordinary imports continue on v2. Publication remains on the
+run row. A private checkpoint, including one from an older runner, cannot
+advance coverage. The daily writer still has no path to pin or admit a
+notification. Deploy Web, then the hosted runtime, then Cloudflare manually
+from main. Keep all three compatible readers through outstanding work and
+restorable snapshots once the first pinned run exists.
+
+A synthetic restore opened the new on-disk state with the E1 checkpoint and
+enrichment readers from the previous head. Both rejected the pinned work.
+The current readers restored that checkpoint and applied the prepared job.
+The webhook-owner tests check echoed text against writes, traces, logs and
+the Temporal handoff. The PostgreSQL retry test checks the persisted clinical
+marker and zero provider reads or replacement sends after a terminal failure.
+
+**Activation change.** Before enabling the daily writer, implement locked
+baseline, grant, named approval, epoch, revision and route admission, the
+per-effect detail and private provider authority checks, model-free notice
+drain, coverage at the provider attempt and quiet-hours retry. Exercise all
+three settings against the real admission path. Roll back by stopping new
+admissions first and retaining those readers, authorization checks, retry
+exclusion and durable coverage through the restore horizon.

@@ -1404,6 +1404,32 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it.each(["message.sent", "message.delivered", "message.failed"] as const)(
+    "redacts an echoed outbound text at the %s webhook before storage or diagnostics",
+    async eventType => {
+      const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({ sourceRef: "synthetic-delivery", template: null });
+      const event = buildHostedLinqProviderReceiptEvent({
+        eventId: "synthetic-receipt", eventType, messageId: "synthetic-message",
+      });
+      if (!event.data || typeof event.data !== "object") throw new Error("Expected synthetic receipt data.");
+      const text = "Synthetic receipt body sentinel";
+      const rawBody = JSON.stringify({ ...event, data: {
+        ...event.data, parts: [{ type: "text", value: text }], reason: text, error: { message: text },
+      } });
+      const response = await handleHostedOnboardingLinqWebhook({ prisma, rawBody, signature: null, timestamp: null });
+      expect(response).toMatchObject({ ok: true, ignored: true });
+      expect(prisma.hostedLinqProviderEvent?.createMany).toHaveBeenCalled();
+      const writes = [prisma.hostedLinqProviderEvent?.createMany, prisma.hostedLinqDelivery?.updateMany,
+        prisma.hostedLinqAlert?.createMany, mocks.startHostedOnboardingTiming, mocks.finishHostedOnboardingTiming,
+        mocks.logHostedOnboardingDiagnostic, mocks.logHostedOnboardingWarning];
+      for (const write of writes) {
+        if (!vi.isMockFunction(write)) throw new Error("Expected webhook sink spy.");
+        expect(JSON.stringify(write.mock.calls)).not.toContain(text);
+      }
+      expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { template: "instant_first_turn_v1" as const, path: "instant iMessage signup" },
     { template: null, path: "app or website signup welcome" },

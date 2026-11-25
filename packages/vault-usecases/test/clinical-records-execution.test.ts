@@ -346,7 +346,7 @@ describe("importClinicalFhirSnapshot", () => {
     expect(await findEventByExternalRef({ vaultRoot: first.vaultRoot, system: `epic-fhir-${FHIR_BASE_URL_HASH}-${PATIENT_ID_HASH}`, resourceType: "observation", resourceId: "page-one" })).not.toBeNull();
   });
 
-  it("keeps retrieval checkpoints private, run-bound, and terminally clearable", async () => {
+  it.each(["query-slices-v2", "query-slices-receipts-v3"] as const)("restores only the pinned %s checkpoint", async retrievalProtocol => {
     const input = await createSnapshotInput({
       pages: [],
       resourceTypes: ["Observation"],
@@ -360,7 +360,7 @@ describe("importClinicalFhirSnapshot", () => {
       patientIdHash: input.patientIdHash,
       requestedScopes: input.requestedScopes,
       retrievalJobId: input.retrievalJobId,
-      retrievalProtocol: "query-slices-v2" as const,
+      retrievalProtocol,
       retrievalSlices: input.retrievalSlices,
       runId: "clinical-run-1",
       sourceSystem: input.sourceSystem,
@@ -419,7 +419,12 @@ describe("importClinicalFhirSnapshot", () => {
     const persistedCheckpointValue = JSON.parse(persistedCheckpoint);
     expect(persistedCheckpointValue.schema)
       .toBe("murph.clinical-retrieval-checkpoint.v4");
-    expect(persistedCheckpointValue.identity.retrievalProtocol).toBe("query-slices-v2");
+    expect(persistedCheckpointValue.identity.retrievalProtocol).toBe(retrievalProtocol);
+    if (retrievalProtocol === "query-slices-receipts-v3") {
+      await expect(readClinicalFhirRetrievalCheckpoint({
+        identity: { ...identity, retrievalProtocol: "query-slices-v2" }, vaultRoot: input.vaultRoot,
+      })).rejects.toBeInstanceOf(ClinicalFhirRetrievalCheckpointError);
+    }
     expect(persistedCheckpointValue.identity.retrievalSlices).toEqual(input.retrievalSlices);
     await expect(readClinicalFhirRetrievalCheckpoint({
       identity,

@@ -693,6 +693,9 @@ function parseGenericHostedLinqProviderEvent(input: {
       ? "failed"
       : null;
 
+  const receipt = ["message.sent", "message.delivered", "message.failed"].includes(input.event.event_type);
+  // A provider error may quote a failed bubble. Only the reviewed terminal
+  // reason has operational semantics in a message receipt.
   return buildParsedProviderEvent({
     chatId,
     deliveryStatus,
@@ -710,7 +713,7 @@ function parseGenericHostedLinqProviderEvent(input: {
       servicePresent: service !== null,
     },
     failureCode,
-    failureReason,
+    failureReason: receipt && failureReason !== "Message send failed" ? null : failureReason,
     messageId,
     phoneNumber,
     phoneNumberRole,
@@ -719,7 +722,7 @@ function parseGenericHostedLinqProviderEvent(input: {
       ? parseProviderDate(readStringAtPath(data, ["delivered_at"]))
         ?? parseProviderDate(readStringAtPath(data, ["message", "delivered_at"]))
       : null,
-    providerReason,
+    providerReason: receipt ? null : providerReason,
     providerStatus,
     rawBody: input.rawBody,
     reactionCustomEmoji: null,

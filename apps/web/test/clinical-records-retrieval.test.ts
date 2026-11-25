@@ -392,6 +392,29 @@ describe("Clinical Records retrieval control plane", () => {
     } else expect(run).toEqual(before);
   });
 
+  it("refuses a legacy runner on every read and outcome of a receipt-required run", async () => {
+    const { state } = createHarness(["Observation"]);
+    state.run.retrievalProtocol = "query-slices-receipts-v3";
+    const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
+    expect(await readClinicalRetrievalRun(pointer)).toMatchObject({
+      status: "ready", run: { retrievalProtocol: "query-slices-receipts-v3" },
+    });
+    const before = structuredClone(state.run);
+    const refused = { status: "unavailable", errorCode: "retrieval-protocol-mismatch", retryable: true };
+    const fetchImpl = vi.fn();
+    for (const cursor of [null, "synthetic-restored-cursor"]) {
+      expect(await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl,
+        request: queryObservationPageRequest("synthetic-page", { cursor }) })).toEqual(refused);
+    }
+    expect(await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { generation: 1, runId: RUN_ID, ticket: "synthetic-ticket" } })).toEqual(refused);
+    await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "completed", counts: outcomeCounts(),
+    } })).rejects.toMatchObject({ httpStatus: 409 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(state.run).toEqual(before);
+  });
+
   it.each(["protocol", "schema"])("retries descriptor and receipt on an unknown %s without changing the run", async kind => {
     const { state } = createHarness(["Observation"]);
     if (kind === "protocol") state.run.retrievalProtocol = "future-protocol";

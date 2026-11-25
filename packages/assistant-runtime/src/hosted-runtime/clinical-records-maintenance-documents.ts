@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { createHash } from "node:crypto";
 
 import {
@@ -73,6 +74,7 @@ export function stageClinicalPageDocuments(input: {
 export async function fetchPendingClinicalDocuments(input: {
   checkpoint: ClinicalFhirRetrievalCheckpoint;
   generation: number;
+  retrievalProtocol?: ClinicalRetrievalProtocol;
   persist: () => Promise<void>;
   port: HostedRuntimeClinicalRecordsPort;
   runId: string;
@@ -93,6 +95,7 @@ export async function fetchPendingClinicalDocuments(input: {
     } else {
       if (!input.port.fetchDocument) throw Object.assign(new Error("Clinical document transport is unavailable."), { code: "CLINICAL_RECORDS_DOCUMENT_PORT_NOT_CONFIGURED" });
       const response = parseHostedClinicalRecordsFetchDocumentResponse(await input.port.fetchDocument({
+        ...(input.retrievalProtocol === CLINICAL_RECEIPT_PROTOCOL ? { retrievalProtocol: input.retrievalProtocol } : {}),
         runId: input.runId, generation: input.generation, ticket,
       }, { signal: input.signal }));
       if (response.status === "unavailable") {

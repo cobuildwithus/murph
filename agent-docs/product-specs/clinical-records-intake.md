@@ -614,7 +614,7 @@ and legacy enrichment remain silent for their entire lifetime.
 A signed, write-fenced callback can attest a committed change for one run.
 Web accepts its terminal outcome before publishing a pointer. A private
 enrichment page can supply the first proof before or after that outcome.
-The run row retains publication and scheduling coverage through queue cleanup.
+The run row retains publication through queue cleanup. Private scheduling leaves coverage open.
 Missing and empty evidence leave the member's conversation alone.
 
 In notice mode the private runtime writes one ordinary proactive outbox intent.
@@ -624,8 +624,12 @@ run receipt reference and the member’s explicit detail setting.
 
 The owner withdrew the iMessage-only requirement. Notices and details may use
 the exact verified private thread frozen at admission, including when Linq
-selects RCS or SMS. No second consent step is required. Admission remains
-disabled pending the delivery and privacy proofs in the Phase B execution plan.
+selects RCS or SMS. No second consent step is required. A signed delivery
+receipt may carry the text through Web memory. Web verifies it and drops
+the text before persistence, logging, tracing or Temporal. Web excludes
+clinical deliveries from terminal retry before reading provider message parts.
+A definite terminal failure consumes an attempted occurrence. Daily admission
+remains disabled through the reader rollout.
 
 ### Bounded repeat import
 

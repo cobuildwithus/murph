@@ -237,6 +237,20 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("private sent text");
   });
 
+  it.each(["message.sent", "message.delivered", "message.failed"] as const)(
+    "removes outbound text before %s is handed to persistence, diagnostics or retry",
+    eventType => {
+      const text = "Synthetic outbound content sentinel";
+      const event = buildGenericEvent({ eventType, data: {
+        direction: "outbound", id: "synthetic-message", chat_id: "synthetic-thread",
+        parts: [{ type: "text", value: text }], reason: text, error: { message: text },
+      } });
+      const parsed = parseHostedLinqProviderEvent({ event, rawBody: JSON.stringify(event) });
+      expect(parsed?.eventType).toBe(eventType);
+      expect(JSON.stringify(parsed)).not.toContain(text);
+    },
+  );
+
   it("parses delivered and failed events with shape metadata only", () => {
     const delivered = parseHostedLinqProviderEvent({
       event: buildGenericEvent({
@@ -274,7 +288,7 @@ describe("parseHostedLinqProviderEvent", () => {
       deliveryStatus: "failed",
       eventType: "message.failed",
       failureCode: "30007",
-      failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
+      failureReason: null,
       phoneNumberRole: "line",
     });
     expect(JSON.stringify(failed)).not.toContain("+15551234567");
@@ -313,9 +327,7 @@ describe("parseHostedLinqProviderEvent", () => {
       }),
     });
 
-    expect(failed?.failureReason).toBe(
-      "bounced for <redacted-email> at <redacted-phone>, see <redacted-url>",
-    );
+    expect(failed?.failureReason).toBeNull();
     expect(status?.providerReason).toBe(
       "review requested by <redacted-email> at <redacted-phone>",
     );

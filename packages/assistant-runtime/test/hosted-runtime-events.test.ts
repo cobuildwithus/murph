@@ -223,8 +223,7 @@ describe("executeHostedMailboxEvent", () => {
           readNotification, readRun: vi.fn(), fetchPage: vi.fn(), recordOutcome: vi.fn(),
         } } } });
       const first = await consume();
-      expect(first.postCheckpointRecord).toEqual({ kind: "clinical-records.outcome-recorded",
-        request: { kind: "change-scheduled", generation: 2, runId: "synthetic-run" } });
+      expect(first.postCheckpointRecord).toBeNull();
       expect((await consume()).deliveryIntentIds).toEqual(first.deliveryIntentIds);
       expect(await listAssistantOutboxIntents(workspace.vaultRoot)).toMatchObject([{
         message: "New records came in. Want me to go through them?",

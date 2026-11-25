@@ -806,6 +806,12 @@ async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
   });
 }
 
+export const CLINICAL_LINQ_DELIVERY_TEMPLATE = "clinical_change";
+
+function runtimeDeliveryTemplate(key: string | null | undefined) {
+  return key?.startsWith("clinical-change:") ? CLINICAL_LINQ_DELIVERY_TEMPLATE : null;
+}
+
 export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   attemptedAt?: Date;
   idempotencyKey: string;
@@ -826,6 +832,7 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
     sourceRef: input.sourceRef,
     status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
     targetKind: input.targetKind,
+    template: runtimeDeliveryTemplate(input.idempotencyKey),
   });
 }
 
@@ -1405,7 +1412,7 @@ export async function recordHostedLinqRuntimeDeliveryOutcomeTx(input: {
     source: "hosted_runtime_linq_delivery",
     sourceRef: createHostedLinqDeliverySourceRefLookupKey(normalizeNullable(input.sourceRef)),
     targetKind: normalizeNullable(input.targetKind),
-    template: null,
+    template: runtimeDeliveryTemplate(input.idempotencyKey),
     threadIsDirect:
       typeof input.threadIsDirect === "boolean" ? input.threadIsDirect : null,
   };

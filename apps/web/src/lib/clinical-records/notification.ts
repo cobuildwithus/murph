@@ -1,4 +1,5 @@
 import "server-only";
+import { CLINICAL_RECEIPT_PROTOCOL } from "@murphai/clinical-records/retrieval-limits";
 import { createHash } from "node:crypto";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
@@ -22,7 +23,7 @@ export function clinicalNotificationRouteKey(participantKey: string, lineKey: st
 
 async function readClinicalNotificationRun(tx: Prisma.TransactionClient, input: Omit<RunPointer, "generation"> & { generation?: number }) {
   const run = await tx.clinicalRecordRetrievalRun.findFirst({
-    where: { id: input.runId, memberId: input.memberId, generation: input.generation },
+    where: { id: input.runId, memberId: input.memberId, generation: input.generation, retrievalProtocol: CLINICAL_RECEIPT_PROTOCOL },
     select: {
       status: true, completedAt: true, notificationTokenVersion: true, notificationRouteKey: true,
       notificationSettingRevision: true, notificationCoverage: true,

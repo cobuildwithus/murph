@@ -20,7 +20,7 @@ const parentExternalRef = externalRefForFhir({ sourceSystem: "epic-fhir", fhirBa
 
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-async function fixture(twoDocuments = false, timezone = "UTC", clinicalDate?: string | (string | undefined)[]) {
+async function fixture(twoDocuments = false, timezone = "UTC", clinicalDate?: string | (string | undefined)[], receiptRequired = false) {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-enrichment-"));
   roots.push(vaultRoot);
   await initializeVault({ vaultRoot, createdAt: "2026-07-10T12:00:00.000Z", timezone });
@@ -39,6 +39,7 @@ async function fixture(twoDocuments = false, timezone = "UTC", clinicalDate?: st
   const parentPagePath = "documentreference/whole/DocumentReference/page-0001.json";
   const parentPageSha256 = digest(parentPage);
   const manifest = clinicalRawManifestSchema.parse({
+    ...(receiptRequired ? { retrievalProtocol: "query-slices-receipts-v3" } : {}),
     schemaVersion: "murph.clinical-raw-manifest.v3", kind: "clinical_fhir_retrieval",
     sourceSystem: "epic-fhir", connectionId: "synthetic-connection", retrievalJobId: "synthetic-batch",
     fhirBaseUrlHash: "a".repeat(64), patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), fetchedAt: "2026-07-10T12:00:00.000Z",
@@ -67,6 +68,21 @@ async function prepare(input: Awaited<ReturnType<typeof fixture>>, options: { pa
 }
 
 describe("clinical document enrichment durable application", () => {
+  it("refuses restored prepared work whose protocol no longer matches its manifest", async () => {
+    const input = await fixture(false, "UTC", occurredAt, true);
+    await prepare(input);
+    const file = path.join(input.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${input.jobId}.json`);
+    const original = await readFile(file, "utf8");
+    const restored = JSON.parse(original);
+    expect(restored.retrievalProtocol).toBe("query-slices-receipts-v3");
+    delete restored.retrievalProtocol;
+    await writeFile(file, JSON.stringify(restored));
+    await expect(applyClinicalEnrichmentProposals(input)).rejects.toThrow("protocol mismatch");
+    expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 1 })).toEqual([]);
+    await writeFile(file, original);
+    expect((await applyClinicalEnrichmentProposals(input)).counts.created).toBe(1);
+  });
+
   it.each([undefined, "unknown"] as const)("holds a delayed fresh proposal without supported provenance: %s", async (dateBasis) => {
     const input = await fixture(false, "UTC", occurredAt);
     await prepare(input, { outputs: { labs: empty, history: empty, measurements: {

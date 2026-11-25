@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { hasClinicalProcessorApprovals } from "./processor-registry";
@@ -101,7 +102,6 @@ interface ClinicalMailboxCheckpoint {
 }
 
 interface RunnableClinicalRun {
-  changeReceipts: boolean;
   connection: {
     requiresProcessorApprovals: boolean | null;
     accessTokenEncrypted: string | null;
@@ -129,7 +129,7 @@ interface RunnableClinicalRun {
   pageCount: number;
   providerRequestCount: number;
   retrievalPlan: ClinicalFhirRetrievalPlan;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   status: string;
 }
@@ -178,7 +178,6 @@ export async function readClinicalRetrievalRun(input: {
     patientIdHash,
     providerDirectoryEntryId: run.connection.providerDirectoryEntryId,
     requestedScopes,
-    ...(run.changeReceipts ? { changeReceipts: true as const } : {}),
     retrievalJobId: run.id,
     runId: run.id,
     sourceSystem: run.connection.sourceSystem,
@@ -195,6 +194,7 @@ export async function fetchClinicalRetrievalPage(input: {
   request: HostedClinicalRecordsFetchPageRequest;
 }): Promise<HostedClinicalRecordsFetchPageResponse> {
   const loaded = await loadRunnableClinicalRun({
+    expectedProtocol: input.request.retrievalProtocol,
     generation: input.request.generation,
     memberId: input.memberId,
     runId: input.request.runId,
@@ -234,7 +234,7 @@ export async function fetchClinicalRetrievalPage(input: {
     ? await openClinicalPageCursor({
         generation: run.generation,
         memberId: input.memberId,
-        ...queryCursorIdentity(retrievalSlice),
+        ...queryCursorIdentity(retrievalSlice, run.retrievalProtocol),
         resourceType: input.request.resourceType,
         runId: run.id,
         value: input.request.cursor,
@@ -350,7 +350,7 @@ export async function fetchClinicalRetrievalDocument(input: {
   memberId: string;
   request: HostedClinicalRecordsFetchDocumentRequest;
 }): Promise<HostedClinicalRecordsFetchDocumentResponse> {
-  const loaded = await loadRunnableClinicalRun({ generation: input.request.generation,
+  const loaded = await loadRunnableClinicalRun({ expectedProtocol: input.request.retrievalProtocol ?? "query-slices-v2", generation: input.request.generation,
     memberId: input.memberId, runId: input.request.runId });
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
@@ -503,7 +503,7 @@ async function sealClinicalContinuationCursor(input: {
 }): Promise<string | null> {
   if (!input.nextUrl) return null;
   const cursor = await sealClinicalPageCursor({ generation: input.run.generation, memberId: input.input.memberId,
-    ...queryCursorIdentity(input.retrievalSlice), resourceType: input.input.request.resourceType, runId: input.run.id,
+    ...queryCursorIdentity(input.retrievalSlice, input.run.retrievalProtocol), resourceType: input.input.request.resourceType, runId: input.run.id,
     value: JSON.stringify({ queryFingerprint: input.retrievalSlice.queryFingerprint,
       queryScopeId: input.retrievalSlice.queryScopeId, resourceType: input.retrievalSlice.resourceType,
       schema: "murph.clinical-page-cursor.v3", sliceId: input.retrievalSlice.sliceId, url: input.nextUrl.raw }) });
@@ -547,10 +547,7 @@ export async function recordClinicalRetrievalOutcome(input: {
       },
     });
     if (!run || run.connection.retrievalGeneration !== run.generation) throw staleRunError();
-    if (hasUnsupportedRetrievalFormat(run)) throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_RETRIEVAL_FORMAT_UNSUPPORTED", httpStatus: 503, retryable: true,
-      message: "This server cannot read the stored retrieval format.",
-    });
+    assertOutcomeProtocol(input.request.retrievalProtocol, run);
     const rejection = validateOutcomeForRun(input.request, run);
     if (rejection) {
       if (!run.completedAt && ["active", "error"].includes(run.connection.status)) {
@@ -665,13 +662,10 @@ function publishTerminalChangeProof(tx: ClinicalRetrievalTx, input: { memberId: 
 
 /** A delayed enrichment belongs to the original accepted run, even after a later daily admission. */
 export async function recordClinicalChangeProof(input: RunPointer & { kind?: "change-receipt" | "change-scheduled" }): Promise<void> {
+  // Older runners acknowledge a private checkpoint. It proves no provider attempt.
+  if (input.kind === "change-scheduled") return;
   const notification = await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
-    if (input.kind === "change-scheduled") {
-      await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: input.runId, memberId: input.memberId,
-        generation: input.generation, notificationCoverage: "published" }, data: { notificationCoverage: "scheduled" } });
-      return null;
-    }
     return publishClinicalChangeTx(tx, input);
   });
   if (notification) await signalClinicalRetrievalWake(notification);
@@ -744,11 +738,12 @@ export async function signalClinicalRetrievalWake(
 }
 
 type RunPointer = { generation: number; memberId: string; runId: string };
+type ClinicalReadPointer = RunPointer & { expectedProtocol?: ClinicalRetrievalProtocol };
 type RunConnection = Pick<RunnableClinicalRun["connection"], "id" | "refreshTokenEncrypted" | "tokenVersion">;
 type UnusableReason = "patient-context-unavailable" | "member-processing-inactive" | "run-configuration-invalid"
   | "processor-admission-blocked" | "credentials-unavailable" | "run-status-invalid" | "authorization-required";
 
-async function loadRunnableClinicalRun(input: RunPointer) {
+async function loadRunnableClinicalRun(input: ClinicalReadPointer) {
   const loaded = await inspectRunnableClinicalRun(input, getPrisma());
   if (!("terminalize" in loaded) || !loaded.terminalize) return loaded;
   // Repeat the decision under the member lock. A reconnect, consent renewal or outcome can win the race.
@@ -762,7 +757,7 @@ async function loadRunnableClinicalRun(input: RunPointer) {
   });
 }
 
-async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRetrievalTx): Promise<
+async function inspectRunnableClinicalRun(input: ClinicalReadPointer, prisma: ClinicalRetrievalTx): Promise<
   | { run: RunnableClinicalRun }
   | { retryable: false; unavailable: UnusableReason; terminalize: RunConnection }
   | { retryable: boolean; unavailable: string; terminalize?: never }
@@ -789,8 +784,6 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
         },
       },
       completedAt: true,
-      notificationTokenVersion: true,
-      notificationSettingRevision: true,
       startedAt: true,
       createdAt: true,
       egressBytes: true,
@@ -814,6 +807,9 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   const obsolete = (code: string) => ({ retryable: false as const, unavailable: active ? code : "member-processing-inactive" });
   if (!record) return obsolete("run-not-found");
   if (record.connection.retrievalGeneration !== record.generation) return obsolete("run-generation-stale");
+  if (input.expectedProtocol && input.expectedProtocol !== record.retrievalProtocol) {
+    return active ? { unavailable: "retrieval-protocol-mismatch", retryable: true } : obsolete("member-processing-inactive");
+  }
   if (record.completedAt || CLINICAL_RECORD_TERMINAL_RUN_STATUSES.some(status => status === record.status)) {
     return obsolete(record.connection.status === "needs_reauth" && record.status === "needs_reauth"
       ? HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE : "run-already-terminal");
@@ -828,21 +824,11 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   if (hasUnsupportedRetrievalFormat(record)) return { unavailable: "run-format-unsupported", retryable: true };
   if (!CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === record.status)) return unusable("run-status-invalid");
   if (!record.connection.accessTokenEncrypted || !record.connection.patientIdEncrypted) return unusable("credentials-unavailable");
-  let requestedScopes: string[];
-  let grantedScopes: string[];
-  let retrievalPlan: ClinicalFhirRetrievalPlan;
-  let sourceSystem: ClinicalSourceSystem;
-  try {
-    requestedScopes = parseStoredStringArray(record.connection.requestedScopesJson, "requested scopes");
-    grantedScopes = parseStoredStringArray(record.grantedScopesJson, "granted scopes");
-    retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
-    sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
-  } catch {
-    return unusable("run-configuration-invalid");
-  }
+  const configuration = parseRunnableClinicalConfiguration(record);
+  if (!configuration) return unusable("run-configuration-invalid");
+  const { requestedScopes, grantedScopes, retrievalPlan, sourceSystem, retrievalProtocol } = configuration;
   return {
     run: {
-      changeReceipts: record.notificationTokenVersion === record.connection.tokenVersion && Number.isInteger(record.notificationSettingRevision),
       connection: { ...record.connection, sourceSystem },
       createdAt: record.createdAt,
       startedAt: record.startedAt,
@@ -854,11 +840,28 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
       pageCount: record.pageCount,
       providerRequestCount: record.providerRequestCount,
       retrievalPlan,
-      retrievalProtocol: "query-slices-v2",
+      retrievalProtocol,
       resourceTypes: [...new Set(retrievalPlan.slices.map((slice) => slice.resourceType))],
       status: record.status,
     },
   };
+}
+
+function parseRunnableClinicalConfiguration(record: {
+  connection: { requestedScopesJson: Prisma.JsonValue; sourceSystem: string };
+  grantedScopesJson: Prisma.JsonValue; retrievalPlanJson: Prisma.JsonValue; retrievalProtocol: string | null;
+}) {
+  try {
+    const requestedScopes = parseStoredStringArray(record.connection.requestedScopesJson, "requested scopes");
+    const grantedScopes = parseStoredStringArray(record.grantedScopesJson, "granted scopes");
+    const retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
+    const sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
+    const retrievalProtocol = record.retrievalProtocol;
+    if (retrievalProtocol !== "query-slices-v2" && retrievalProtocol !== CLINICAL_RECEIPT_PROTOCOL) return null;
+    return { requestedScopes, grantedScopes, retrievalPlan, sourceSystem, retrievalProtocol } as const;
+  } catch {
+    return null;
+  }
 }
 
 function buildInitialFhirPageUrl(input: {
@@ -908,17 +911,17 @@ function resolveRequestedRetrievalSlice(
 }
 
 function queryCursorIdentity(
-  slice: ClinicalFhirRetrievalSlice,
+  slice: ClinicalFhirRetrievalSlice, retrievalProtocol: ClinicalRetrievalProtocol,
 ): {
   queryFingerprint: string;
   queryScopeId: string;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   sliceId: string;
 } {
   return {
     queryFingerprint: slice.queryFingerprint,
     queryScopeId: slice.queryScopeId,
-    retrievalProtocol: "query-slices-v2",
+    retrievalProtocol,
     sliceId: slice.sliceId,
   };
 }
@@ -1388,8 +1391,16 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
 
 function hasUnsupportedRetrievalFormat(run: { retrievalProtocol: string | null; retrievalPlanJson: Prisma.JsonValue }) {
   const plan = run.retrievalPlanJson;
-  return run.retrievalProtocol !== "query-slices-v2" || (plan !== null && typeof plan === "object"
+  return (run.retrievalProtocol !== "query-slices-v2" && run.retrievalProtocol !== CLINICAL_RECEIPT_PROTOCOL) || (plan !== null && typeof plan === "object"
     && "schemaVersion" in plan && plan.schemaVersion !== clinicalFhirRetrievalPlanSchema.shape.schemaVersion.value);
+}
+
+function assertOutcomeProtocol(protocol: ClinicalRetrievalProtocol, run: { retrievalProtocol: string | null; retrievalPlanJson: Prisma.JsonValue }) {
+  if (hasUnsupportedRetrievalFormat(run)) throw clinicalRecordsError({
+    code: "CLINICAL_RECORD_RETRIEVAL_FORMAT_UNSUPPORTED", httpStatus: 503, retryable: true,
+    message: "This server cannot read the stored retrieval format.",
+  });
+  if (protocol !== run.retrievalProtocol) throw outcomeConflictError();
 }
 
 function validateOutcomeForRun(request: HostedClinicalRecordsRecordOutcomeRequest, run: {

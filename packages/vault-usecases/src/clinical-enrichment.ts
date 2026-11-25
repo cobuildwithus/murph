@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL } from "@murphai/clinical-records/retrieval-limits";
 import { createHash } from "node:crypto";
 import { mkdir, opendir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import path from "node:path";
@@ -32,6 +33,7 @@ const sourceSchema = z.object({ rawRef: clinicalRawPathSchema, sha256: digestSch
 const outputsSchema = z.object({ labs: clinicalDocumentExtractionOutputSchema, measurements: clinicalDocumentExtractionOutputSchema, history: clinicalDocumentExtractionOutputSchema }).strict();
 const countsSchema = z.object({ created: z.number().int().nonnegative(), existing: z.number().int().nonnegative(), held: z.number().int().nonnegative(), pages: z.number().int().nonnegative(), documents: z.number().int().nonnegative() }).strict();
 const jobSchema = z.object({
+  retrievalProtocol: z.literal(CLINICAL_RECEIPT_PROTOCOL).optional(),
   schema: z.enum(["murph.clinical-enrichment.v1", "murph.clinical-enrichment.v2", "murph.clinical-enrichment.v3"]),
   jobId: digestSchema,
   root: manifestRefSchema,
@@ -89,8 +91,15 @@ async function readManifest(vaultRoot: string, ref: z.infer<typeof manifestRefSc
   if (hash(bytes) !== ref.sha256) throw new Error("Clinical enrichment manifest digest mismatch.");
   return clinicalRawManifestSchema.parse(JSON.parse(bytes.toString("utf8")));
 }
-async function attestSource(vaultRoot: string, job: Job) {
+async function readJobManifest(vaultRoot: string, job: Job) {
   const manifest = await readManifest(vaultRoot, job.root);
+  if (job.retrievalProtocol !== ("retrievalProtocol" in manifest ? manifest.retrievalProtocol : undefined)) {
+    throw new Error("Clinical enrichment protocol mismatch.");
+  }
+  return manifest;
+}
+async function attestSource(vaultRoot: string, job: Job) {
+  const manifest = await readJobManifest(vaultRoot, job);
   if (job.source?.resource) {
     const current = job.structuredSources?.[job.resourceIndex ?? 0];
     if (!current || stable(current) !== stable(job.source.resource)) throw new Error("Clinical resource cursor is stale.");
@@ -111,10 +120,12 @@ async function attestSource(vaultRoot: string, job: Job) {
 export async function enqueueClinicalEnrichment(input: { vaultRoot: string; manifestPath: string; manifestSha256: string; structuredSources?: ClinicalStructuredSource[] }): Promise<{ jobId: string }> {
   return locked(input.vaultRoot, async () => {
     const root = manifestRefSchema.parse({ manifestPath: input.manifestPath, sha256: input.manifestSha256 });
-    await readManifest(input.vaultRoot, root);
+    const manifest = await readManifest(input.vaultRoot, root);
+    const retrievalProtocol = "retrievalProtocol" in manifest ? manifest.retrievalProtocol : undefined;
     const jobId = root.sha256;
     const existing = await readOptional(jobPath(input.vaultRoot, jobId));
-    const job = existing ? jobSchema.parse(existing) : jobSchema.parse({ schema: "murph.clinical-enrichment.v3", jobId, root, attachmentIndex: 0, ...(input.structuredSources?.length ? { structuredSources: input.structuredSources, resourceIndex: 0 } : {}), page: 1, status: "pending", counts: { created: 0, existing: 0, held: 0, pages: 0, documents: 0 } });
+    const job = existing ? jobSchema.parse(existing) : jobSchema.parse({ schema: "murph.clinical-enrichment.v3", jobId, root, retrievalProtocol, attachmentIndex: 0, ...(input.structuredSources?.length ? { structuredSources: input.structuredSources, resourceIndex: 0 } : {}), page: 1, status: "pending", counts: { created: 0, existing: 0, held: 0, pages: 0, documents: 0 } });
+    if (job.retrievalProtocol !== retrievalProtocol) throw new Error("Clinical enrichment protocol mismatch.");
     if (job.status === "complete" || job.status === "blocked") return { jobId };
     const index = await readIndex(input.vaultRoot);
     if (!index.pending.includes(jobId)) index.pending.push(jobId);
@@ -149,7 +160,7 @@ export async function readNextClinicalEnrichment(input: { vaultRoot: string; now
       }
       if (job.status === "prepared") return { status: "apply", jobId };
       let manifest;
-      try { manifest = await readManifest(input.vaultRoot, job.root); }
+      try { manifest = await readJobManifest(input.vaultRoot, job); }
       catch {
         job.status = "blocked";
         job.reason = "Clinical source manifest failed integrity validation.";

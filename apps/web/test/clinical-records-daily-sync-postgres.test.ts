@@ -107,13 +107,13 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const pointer = { memberId, runId: run!.id, generation: run!.generation };
     // Only this fixture simulates the future admission writer.
     await client.clinicalRecordRetrievalRun.update({ where: { id: pointer.runId }, data: {
-      notificationTokenVersion: 1, notificationSettingRevision: 0, notificationRouteKey: clinicalNotificationRouteKey(participant, line, chat),
+      retrievalProtocol: "query-slices-receipts-v3", notificationTokenVersion: 1, notificationSettingRevision: 0, notificationRouteKey: clinicalNotificationRouteKey(participant, line, chat),
     } });
     const count = () => client.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.change-recorded" } });
     const terminal = async (proof = false) => {
       const plan = clinicalFhirRetrievalPlanSchema.parse(run!.retrievalPlanJson);
       await recordClinicalRetrievalOutcome({ memberId, request: { generation: pointer.generation, runId: pointer.runId,
-        status: "partial", retrievalProtocol: "query-slices-v2",
+        status: "partial", retrievalProtocol: "query-slices-receipts-v3",
         retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
         counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
           rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
@@ -138,7 +138,10 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await Promise.all([recordClinicalChangeProof(f.pointer), recordClinicalChangeProof(f.pointer)]);
       expect((await f.authority())?.mode ?? "off").toBe(mode);
       expect(await f.count()).toBe(mode === "off" ? 0 : 1);
+      const beforeCheckpoint = await f.runs();
       await recordClinicalChangeProof({ ...f.pointer, kind: "change-scheduled" });
+      expect(await f.runs()).toEqual(beforeCheckpoint);
+      if (mode !== "off") expect(beforeCheckpoint[0]?.notificationCoverage).toBe("published");
       await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
       await recordClinicalChangeProof(f.pointer);
       expect(await f.count()).toBe(0);
