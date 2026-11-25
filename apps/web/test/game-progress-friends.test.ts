@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { friendAmount, friendChallenge, friendPasses, friendsView, type FriendSeries } from "../src/lib/game/progress/friends";
+import { friendAmount, friendChallenge, friendPasses, friendsView, isEveryoneMeasure, type FriendSeries } from "../src/lib/game/progress/friends";
 
 const measure = { id: "pushups.reps", label: "Pushups", icon: "pushups", format: "count" as const, noun: "pushups" };
 const person = (memberId: string, firstName: string, amount: number, me = false): FriendSeries => ({
@@ -123,4 +123,16 @@ it.each(["sleep", "steps"])("leaves an unobserved %s range unranked and counts a
   expect(result.rows).toMatchObject([{ memberId: "jordan", rank: 1 }, { memberId: "priya", rank: 2, total: { value: 0 } },
     { memberId: "nora", private: false, rank: null, total: null }]);
   expect(result.chart.map(line => line.memberId)).toEqual(["jordan", "priya"]);
+});
+
+
+it.each([
+  ["pushups.reps", true], ["planks.seconds", true], ["walk.meters", true], ["yoga.seconds", true],
+  ["steps", false], ["sleep", false], ["steps.steps", false], ["sleep.seconds", false],
+  ["custom.reps", false], ["pushups.days", false], ["pushups", false], ["pushups.reps.extra", false],
+] as const)("uses one Everyone eligibility rule for the %s pill", (id, everyone) => {
+  expect(isEveryoneMeasure(id)).toBe(everyone);
+  const board = friendsView({ units: "us", people: [], measure, pills: [{ ...measure, id }],
+    query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], departureNotice: null, challenge: null });
+  expect(board.pills[0].everyone).toBe(everyone);
 });

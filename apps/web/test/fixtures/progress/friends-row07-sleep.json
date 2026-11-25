@@ -3,22 +3,26 @@
     {
       "id": "pushups.reps",
       "label": "Pushups",
-      "icon": "pushups"
+      "icon": "pushups",
+      "everyone": true
     },
     {
       "id": "pullups.reps",
       "label": "Pull-ups",
-      "icon": "pullups"
+      "icon": "pullups",
+      "everyone": true
     },
     {
       "id": "steps",
       "label": "Steps",
-      "icon": "steps"
+      "icon": "steps",
+      "everyone": false
     },
     {
       "id": "sleep",
       "label": "Sleep",
-      "icon": "sleep"
+      "icon": "sleep",
+      "everyone": false
     }
   ],
   "pill": "sleep",
@@ -274,5 +278,7 @@
   "challenge": {
     "task": "Lights out by 11 every night",
     "category": "calm"
-  }
+  },
+  "scope": "friends",
+  "everyoneJoined": false
 }

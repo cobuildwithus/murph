@@ -6385,6 +6385,7 @@ receipt check and needs no post-insert read for presentation.
 
 Each foreground Prizes, Health and Friends GET emits one
 `game.progress.read.timing` event with its fixed route, bounded pill category,
+Friends/Everyone scope (null on other Progress reads),
 elapsed stage and total milliseconds, and counts of games, entries, friends
 and boards. The game-series stage includes its initial award read on Prizes.
 Parallel branches can overlap. Private query values and identifiers stay out
@@ -6608,6 +6609,30 @@ and `Friends.incomplete` are always false; shipped app builds still require them
 Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
+Everyone is a separate read-only monthly scope on the Friends endpoint. The
+profile command owns nullable `game_profile.everyone_joined_at`; omitted leaves
+it unchanged, joining again preserves the timestamp, and leaving clears it.
+The thin GET/PUT `/api/game/v1/progress/everyone` adapters read or set that fact
+without opening the member's name. Every Friends response identifies its scope
+and membership, and one exercise eligibility predicate drives both pill flags
+and Everyone admission: a registered exercise with a supported unit other than
+`days`. Everyone rejects health/custom measures and individual-friend filters
+before opening private inputs.
+
+`everyone.ts` reads joined, unsuspended profiles in pages of 500 and applies
+both directions of the canonical block predicate. It reuses the existing game
+series reader, daily aggregation and numeric ordering. Only the viewer and up
+to three neighbours on each side by sorted position have names opened; totals
+are positive except that the viewer always remains. The public projection has
+null rank/join date and at most seven rows; chart lines cover only up to three
+ahead and the viewer. After private reads it rechecks membership, suspension,
+blocks and the session. A viewer who left gets `EVERYONE_NOT_JOINED`; departed
+subjects disappear. No health, sharing-room, inference or award work runs for
+Everyone. Request cancellation reaches the shared game-series decrypt batches.
+The existing canonical-profile-photo media authorization also admits joined,
+unsuspended viewer/subject pairs for the current photo key only, retaining
+blocks and report masking; other uploads and old avatars gain no access.
+
 The main read's background Friends phase returns before game-series loading
 when no co-player has joined. Otherwise it uses one cohort and one game-series
 load for every exercise pill offered by the Friends page, without reading sharing

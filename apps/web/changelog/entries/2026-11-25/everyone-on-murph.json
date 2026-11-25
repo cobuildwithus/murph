@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-25",
+  "order": 100,
+  "item": {
+    "id": "everyone-on-murph",
+    "kind": "feature",
+    "priority": 2,
+    "title": "See where you stand on everyone on Murph",
+    "summary": "On Progress → Friends, tap Friends inside the exercise pill and pick Everyone to see the people just ahead of you and just behind, this month.",
+    "details": "Everyone is opt-in: the first time you pick it, Murph asks before showing your name, photo and exercise totals to everyone else on it. Your chats and game photos never show. Leave any time in Settings.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": [5311]
+  }
+}

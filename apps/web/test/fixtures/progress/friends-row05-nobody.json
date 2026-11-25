@@ -3,22 +3,26 @@
     {
       "id": "pushups.reps",
       "label": "Pushups",
-      "icon": "pushups"
+      "icon": "pushups",
+      "everyone": true
     },
     {
       "id": "pullups.reps",
       "label": "Pull-ups",
-      "icon": "pullups"
+      "icon": "pullups",
+      "everyone": true
     },
     {
       "id": "steps",
       "label": "Steps",
-      "icon": "steps"
+      "icon": "steps",
+      "everyone": false
     },
     {
       "id": "sleep",
       "label": "Sleep",
-      "icon": "sleep"
+      "icon": "sleep",
+      "everyone": false
     }
   ],
   "pill": "pushups.reps",
@@ -50,5 +54,7 @@
   "shareAudience": [],
   "departureNotice": null,
   "incomplete": false,
-  "challenge": null
+  "challenge": null,
+  "scope": "friends",
+  "everyoneJoined": false
 }

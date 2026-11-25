@@ -1,7 +1,7 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
 import type { ClientUnits } from "../../companion/client-info";
 import type { Amount, Friends, FriendsQuery, Measure } from "./contract";
-import type { Candidate } from "./registry";
+import { EXERCISES, type Candidate, type DayAmount } from "./registry";
 import { formatAmount, formatNumber } from "./format";
 import { HEALTH_RECS } from "./health";
 
@@ -22,15 +22,34 @@ export function friendRangeStart(range: FriendsQuery["range"], today: string) {
 }
 
 export function friendsView(input: {
-  people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
+  people: readonly FriendSeries[]; measure: FriendMeasure;
+  pills: readonly Pick<Friends["pills"][number], "id" | "label" | "icon">[]; everyoneJoined?: boolean;
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
   departureNotice: string | null;
   units: ClientUnits; challenge: Friends["challenge"];
 }): Friends {
   const { measure, query, today } = input;
-  const from = friendRangeStart(query.range, today);
-  const people = input.people.filter(person => !query.with || person.me || person.memberId === query.with);
   const health = measure.id === "steps" || measure.id === "sleep";
+  const { ranked, unranked } = orderFriends(input.people, measure.id, query, today);
+  const rows: Friends["rows"] = [...ranked, ...unranked].map(({ person, total, ranked: hasTotal }) => {
+    const identity = { memberId: person.memberId, firstName: person.firstName, avatarUrl: person.avatarUrl,
+      me: person.me, invited: false, joinedOn: person.joinedOn };
+    return person.daily === null ? { ...identity, private: true, rank: null, total: null }
+      : { ...identity, private: false, rank: hasTotal && ranked.length > 1 ? ranked.findIndex(row => row.total === total) + 1 : null,
+        total: hasTotal ? friendAmount(total, measure, input.units) : null };
+  });
+  const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
+  return { scope: "friends", everyoneJoined: input.everyoneJoined ?? false, incomplete: false, departureNotice: input.departureNotice,
+    pills: input.pills.map(pill => ({ ...pill, everyone: isEveryoneMeasure(pill.id) })), pill: measure.id, range: query.range, rows, chart,
+    shareAsk: health && input.shareAudience.length > 0,
+    shareAudience: input.shareAudience, challenge: input.challenge };
+}
+
+/** Shared numeric ordering for Friends and the bounded Everyone neighbourhood. */
+export function orderFriends(peopleInput: readonly FriendSeries[], measureId: string, query: FriendsQuery, today: string) {
+  const from = friendRangeStart(query.range, today);
+  const people = peopleInput.filter(person => !query.with || person.me || person.memberId === query.with);
+  const health = measureId === "steps" || measureId === "sleep";
   const series = people.map(person => {
     let total = 0;
     const points: [string, number][] = (person.daily ?? [])
@@ -44,18 +63,20 @@ export function friendsView(input: {
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));
   // A friend who keeps this number private isn't on the board; your own row always is.
   const unranked = series.filter(row => !row.ranked && (row.person.me || row.person.daily !== null));
-  const rows: Friends["rows"] = [...ranked, ...unranked].map(({ person, total, ranked: hasTotal }) => {
-    const identity = { memberId: person.memberId, firstName: person.firstName, avatarUrl: person.avatarUrl,
-      me: person.me, invited: false, joinedOn: person.joinedOn };
-    return person.daily === null ? { ...identity, private: true, rank: null, total: null }
-      : { ...identity, private: false, rank: hasTotal && ranked.length > 1 ? ranked.findIndex(row => row.total === total) + 1 : null,
-        total: hasTotal ? friendAmount(total, measure, input.units) : null };
-  });
-  const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
-  return { incomplete: false, departureNotice: input.departureNotice,
-    pills: input.pills, pill: measure.id, range: query.range, rows, chart,
-    shareAsk: health && input.shareAudience.length > 0,
-    shareAudience: input.shareAudience, challenge: input.challenge };
+  return { ranked, unranked };
+}
+
+/** Only registered exercise quantities may be disclosed on Everyone. */
+export function isEveryoneMeasure(id: string): boolean {
+  const [name, unit, extra] = id.split(".");
+  return Object.hasOwn(EXERCISES, name) && ["reps", "seconds", "meters", "steps"].includes(unit) && extra === undefined;
+}
+
+/** Several games on one date contribute once to that date's aggregate point. */
+export function friendDaily(amounts: readonly DayAmount[], measureId: string): NonNullable<FriendSeries["daily"]> {
+  const daily = new Map<string, number>();
+  for (const point of amounts) if (point.measureId === measureId) daily.set(point.date, (daily.get(point.date) ?? 0) + point.amount);
+  return [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => ({ date, amount }));
 }
 
 /** Steps and sleep suggest what Health does; an exercise, your own last task on it. */

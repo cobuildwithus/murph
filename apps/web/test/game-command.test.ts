@@ -6,6 +6,16 @@ import { GameRuleError } from "@/src/lib/game/rules";
 const PHOTO_KEY = `game/hbm_leo/${"a".repeat(64)}.jpg`;
 const SUMMARY = { durationSec: 60, avgBpm: 120, lowBpm: 100, peakBpm: 140 };
 
+it("accepts explicit Everyone membership without changing omitted profile fields", () => {
+  for (const everyoneJoined of [true, false]) {
+    expect(parseGameCommand({ type: "setProfile", everyoneJoined })).toEqual({ type: "setProfile", everyoneJoined });
+  }
+  expect(parseGameCommand({ type: "setProfile", timeZone: "UTC" })).toEqual({ type: "setProfile", timeZone: "UTC" });
+  for (const everyoneJoined of [null, "true", 1, {}]) {
+    expect(() => parseGameCommand({ type: "setProfile", everyoneJoined })).toThrow(GameRuleError);
+  }
+});
+
 it("parses Prove it client ids without accepting caller identity or deadline", () => {
   expect(parseGameCommand({ type: "challenge", gameId: "game_prove_it", entryId: "entry_prove_it", memberId: "other", deadlineAt: "later" }))
     .toEqual({ type: "challenge", gameId: "game_prove_it", entryId: "entry_prove_it" });

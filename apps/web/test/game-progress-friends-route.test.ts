@@ -2,11 +2,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
-  gameIds: vi.fn(), board: vi.fn(), replica: vi.fn(),
+  profile: vi.fn(), gameIds: vi.fn(), board: vi.fn(), replica: vi.fn(),
   health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(), after: vi.fn(),
 }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.gameIds, game: { findMany: mocks.games },
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.gameIds, gameProfile: { findUnique: mocks.profile }, game: { findMany: mocks.games },
   gameEntry: { findMany: mocks.entries }, gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states } }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
   assertGameMemberAuthCurrentTx: mocks.current }));
@@ -42,6 +42,7 @@ beforeEach(() => {
     { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, joinedOn: "2026-10-21", daily: null },
     { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn: "2026-10-21", daily: null },
   ] });
+  mocks.profile.mockResolvedValue({ everyoneJoinedAt: null });
   mocks.rooms.mockResolvedValue([]);
   mocks.ids.mockResolvedValue({ ids: ["ava", "leo"] });
   mocks.gameIds.mockResolvedValue([{ id: "shared", windowed: false }, { id: "other-game", windowed: false }]);
@@ -310,7 +311,7 @@ it("logs foreground counts once per request and omits drawer identity and custom
       counts: { games: 2, entries: 5, friends: 1, boards: 1 } });
     expect(custom.pill).toBe("exercise");
     expect(exercise.pill).toBe("pushups.reps");
-    expect(Object.keys(steps).sort()).toEqual(["counts", "event", "phaseMs", "pill", "route", "totalMs"]);
+    expect(Object.keys(steps).sort()).toEqual(["counts", "event", "phaseMs", "pill", "route", "scope", "totalMs"]);
     expect(Object.values(steps.phaseMs).every(ms => typeof ms === "number" && ms >= 0)).toBe(true);
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/ava|leo|with=|pushups daily/i);
   } finally { log.mockRestore(); }
@@ -333,4 +334,15 @@ it("returns an actionable non-retryable result for missing health consent", asyn
   expect(response.status).toBe(403);
   expect(await response.json()).toMatchObject({ error: { code: "HOSTED_CONSENT_REQUIRED", retryable: false,
     details: { missingScopes: ["launch.health-data"] } } });
+});
+
+
+it("adds scope and membership to the unchanged Friends projection", async () => {
+  mocks.profile.mockResolvedValue({ everyoneJoinedAt: new Date() });
+  const body = friendsSchema.parse(await (await GET(request())).json());
+  expect(body.scope).toBe("friends");
+  expect(body.everyoneJoined).toBe(true);
+  expect(body.pills.map(pill => [pill.id, pill.everyone])).toEqual([
+    ["pushups.reps", true], ["steps", false], ["sleep", false],
+  ]);
 });

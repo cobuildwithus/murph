@@ -3,22 +3,26 @@
     {
       "id": "pushups.reps",
       "label": "Pushups",
-      "icon": "pushups"
+      "icon": "pushups",
+      "everyone": true
     },
     {
       "id": "pullups.reps",
       "label": "Pull-ups",
-      "icon": "pullups"
+      "icon": "pullups",
+      "everyone": true
     },
     {
       "id": "steps",
       "label": "Steps",
-      "icon": "steps"
+      "icon": "steps",
+      "everyone": false
     },
     {
       "id": "sleep",
       "label": "Sleep",
-      "icon": "sleep"
+      "icon": "sleep",
+      "everyone": false
     }
   ],
   "pill": "steps",
@@ -270,5 +274,7 @@
   "challenge": {
     "task": "10,000 steps every day",
     "category": "move"
-  }
+  },
+  "scope": "friends",
+  "everyoneJoined": false
 }

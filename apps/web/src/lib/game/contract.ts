@@ -114,6 +114,8 @@ export interface GameInviteeLabel {
 
 /** PUT /me/profile */
 export interface SetProfileBody {
+  /** Omitted keeps membership; joining again preserves the original join time. */
+  everyoneJoined?: boolean;
   /** Whole list; omitted keeps it, [] clears it. */
   notForMe?: string[];
   firstName?: string;
