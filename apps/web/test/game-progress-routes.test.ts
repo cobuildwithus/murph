@@ -132,7 +132,11 @@ describe("Progress HTTP contracts", () => {
     const view = progressSchema.parse(await response.json());
     expect(view.measures).toHaveLength(2);
     expect(view.measures.every(measure => measure.route !== null && !measure.route.goalPicked)).toBe(true);
-    expect(mocks.resolveRoute).toHaveBeenCalledTimes(1); expect(mocks.patch).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveRoute).toHaveBeenCalledTimes(1);
+    // Running first starts counting from the join day, then both routes are set.
+    expect(mocks.patch).toHaveBeenCalledTimes(3);
+    const [, measureId, mark] = mocks.patch.mock.calls[0]!;
+    expect([measureId, mark({})]).toEqual(["run.meters", { runsFrom: expect.stringMatching(/^2026-11-0[12]$/u) }]);
   });
   it("keeps a completed route and its original medal after the final source post is withdrawn", async () => {
     const entry = routeEntry(); mocks.entries.mockResolvedValue([entry]);

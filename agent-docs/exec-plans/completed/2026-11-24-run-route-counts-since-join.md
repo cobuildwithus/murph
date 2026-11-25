@@ -1,6 +1,6 @@
 # Run route counts runs from the join day
 
-Status: revised after ReviewGPT (architecture round, then PR #5285 round 1), shipping in two phases.
+Status: done. Phase 1 #5285 (live), phase 2 turns the mark on.
 Owner approved the product change on Nov 24 (Paper, "Run route · before and
 after"): Run's route counts runs from the day the member joined, the same
 rule as the Steps walking route. Medals already won and routes already
