@@ -530,9 +530,8 @@ export function buildEpicDailyRetrievalPlan(input: {
   const queries = input.previous.slices
     .map(slice => QUERIES.find(query => query.queryScopeId === slice.queryScopeId))
     .filter(query => query !== undefined);
-  if (queries.length < input.previous.slices.length) console.warn("Skipped retired medical-record queries in a daily plan.", {
-    skipped: input.previous.slices.length - queries.length,
-  });
+  const skipped = input.previous.slices.length - queries.length;
+  if (skipped > 0) console.warn("Skipped retired medical-record queries in a daily plan.", { skipped });
   if (queries.length === 0) return null;
   return clinicalFhirRetrievalPlanSchema.parse({
     schemaVersion: input.previous.schemaVersion,
