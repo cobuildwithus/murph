@@ -4,6 +4,11 @@ Use this directory for destructive hosted web database cleanup that must run
 after the new Vercel production deployment is live and the prior production
 function window has drained.
 
+Retire the `hosted_clinical_record_message_withdrawal_bridge` trigger and its
+`disable_withdrawn_clinical_record_messages()` function in a later contract
+migration once older Web instances have drained and every supported rollback
+target resets the preference in `revokeHostedConsentScope`.
+
 The immutable `20261031190000_recover_missing_game_recap` was a one-off
 recovery through the normal lifecycle receipt and minute sweep. The direct game
 storage migration `20261102230000_game_seat_storage` removes a column its SQL
