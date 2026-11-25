@@ -24,57 +24,66 @@ function readRegistrations(provider: ClinicalProviderDirectoryEntry) {
   const prefix = production ? "EPIC_SMART_" : "EPIC_SMART_NON_PRODUCTION_";
   const activeId = process.env[provider.clientIdEnvironmentKey]?.trim();
   const asymmetricId = process.env[prefix + "ASYMMETRIC_CLIENT_ID"]?.trim();
-  // Before asymmetric provisioning the existing automatic registration is public.
-  const publicId = process.env[prefix + "PUBLIC_CLIENT_ID"]?.trim() || (!asymmetricId ? activeId : undefined);
+  const publicId = process.env[prefix + "PUBLIC_CLIENT_ID"]?.trim() || activeId;
   const approvedId = process.env[production ? "EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID"
     : "EPIC_SMART_HOSPITAL_APPROVED_NON_PRODUCTION_CLIENT_ID"]?.trim();
-  const basic = readEpicPersistentCredentials(provider.id);
-  return { production, prefix, activeId, asymmetricId, publicId, approvedId, basic };
+  const approved = epicHospitalApprovedImportsEnabled(provider.id);
+  const basic = approved ? null : readEpicPersistentCredentials(provider.id);
+  return { production, prefix, activeId, asymmetricId, publicId, approvedId, approved, basic };
 }
 
-function activeRegistration(ids: ReturnType<typeof readRegistrations>, approved: boolean) {
-  if (approved) return ids.approvedId;
-  if (!ids.activeId) throw configurationError();
+function activeRegistration(ids: ReturnType<typeof readRegistrations>) {
+  if (ids.approved) return ids.approvedId;
+  if (!ids.activeId || ids.activeId.length > 512) throw configurationError();
   if (ids.activeId === ids.asymmetricId) return ids.asymmetricId;
-  if (ids.activeId !== ids.publicId) throw configurationError();
+  if (ids.activeId !== ids.publicId) {
+    throw configurationError(undefined, "The active Epic client ID must match the pinned public or asymmetric client ID.");
+  }
   return ids.basic?.clientId ?? ids.publicId;
+}
+
+function resolveAsymmetricAuth(ids: ReturnType<typeof readRegistrations>, clientId: string, stored?: StoredRegistration) {
+  if (ids.publicId === clientId) {
+    throw configurationError(stored, `Set ${ids.prefix}PUBLIC_CLIENT_ID to the distinct existing public ID before selecting the asymmetric client.`);
+  }
+  if (ids.approvedId === clientId || ids.basic?.clientId === clientId) {
+    throw configurationError(stored, "The asymmetric Epic client ID must be distinct from the hospital-approved and Basic client IDs.");
+  }
+  if (ids.approved && stored?.grant !== "refresh") throw configurationError(stored);
+  try {
+    return epicAssertionSigner(clientId, process.env[ids.prefix + "PRIVATE_KEY_PEM"] ?? "",
+      ids.production ? productionSet.keys : sandboxSet.keys);
+  } catch {
+    throw configurationError();
+  }
+}
+
+function resolveAuth(ids: ReturnType<typeof readRegistrations>, stored?: StoredRegistration): EpicClientAuth {
+  const { asymmetricId, publicId, approvedId, approved, basic } = ids;
+  const clientId = stored?.clientId ?? activeRegistration(ids);
+  if (!clientId || clientId.length > 512) throw configurationError(stored);
+  if (clientId === asymmetricId) return resolveAsymmetricAuth(ids, clientId, stored);
+  if (basic?.clientId === clientId) return { method: "basic", ...basic };
+  if (approved && (clientId === ids.activeId || clientId === publicId)) throw configurationError(stored);
+  if (clientId !== (approved ? approvedId : publicId)) throw configurationError(stored);
+  return { method: "public", clientId };
 }
 
 export function resolveEpicClient(provider: ClinicalProviderDirectoryEntry, stored?: StoredRegistration) {
   const registrations = readRegistrations(provider);
-  const { production, prefix, asymmetricId, publicId, approvedId, basic } = registrations;
-  const approved = epicHospitalApprovedImportsEnabled(provider.id);
-  const clientId = stored ? stored.clientId : activeRegistration(registrations, approved);
-  const ids = [publicId, approvedId, asymmetricId, basic?.clientId];
-  if (!clientId || clientId.length > 512 || ids.filter(id => id === clientId).length !== 1) {
-    throw configurationError(stored);
-  }
-  const hospitalApprovedImports = clientId === approvedId;
-  if (stored?.grant !== "refresh" && hospitalApprovedImports !== approved) throw configurationError(stored);
-  let auth: EpicClientAuth;
-  if (asymmetricId === clientId) {
-    try {
-      auth = epicAssertionSigner(clientId, process.env[prefix + "PRIVATE_KEY_PEM"] ?? "",
-        production ? productionSet.keys : sandboxSet.keys);
-    } catch {
-      throw configurationError();
-    }
-  } else if (basic?.clientId === clientId) {
-    auth = { method: "basic", ...basic };
-  } else {
-    auth = { method: "public", clientId };
-  }
+  const auth = resolveAuth(registrations, stored);
+  const hospitalApprovedImports = registrations.approved && auth.clientId === registrations.approvedId;
   return { auth, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
     : provider.resourceTypes.filter(type => EPIC_AUTOMATIC_RESOURCE_TYPES.includes(type)) };
 }
 
-function configurationError(stored?: StoredRegistration) {
+function configurationError(stored?: StoredRegistration, message?: string) {
   return clinicalRecordsError(stored ? {
     code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED", httpStatus: 409,
-    message: "The provider configuration changed. Start the connection again.",
+    message: message ?? "The provider configuration changed. Start the connection again.",
   } : {
     code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED", httpStatus: 503, retryable: true,
-    message: "The selected Clinical Records provider is not configured yet.",
+    message: message ?? "The selected Clinical Records provider is not configured yet.",
   });
 }
 

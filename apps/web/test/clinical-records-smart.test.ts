@@ -289,7 +289,10 @@ describe("persistent SMART access", () => {
 });
 
 describe("Epic signed client authentication", () => {
-  it("signs a one-time PKCE exchange and each rolling refresh for the pinned endpoint", async () => {
+  it("signs a one-time PKCE exchange and each rolling refresh for the pinned endpoint", async ({ onTestFinished }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const now = Math.floor(Date.now() / 1000);
     const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const { n, e } = publicKey.export({ format: "jwk" });
     const publicJwk = { kty: "RSA", alg: "RS384", use: "sig", kid: "synthetic-key", n: n!, e: e! };
@@ -309,13 +312,12 @@ describe("Epic signed client authentication", () => {
       expect(fields.get("client_assertion_type")).toBe("urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
       const assertion = fields.get("client_assertion")!;
       const { payload, protectedHeader } = await jwtVerify(assertion, createLocalJWKSet({ keys: [previous, publicJwk] }), { audience: tokenEndpoint,
-        issuer: auth.clientId, subject: auth.clientId, algorithms: ["RS384"] });
+        issuer: auth.clientId, subject: auth.clientId, algorithms: ["RS384"], currentDate: new Date((now - 60) * 1000) });
       expect(protectedHeader).toEqual({ alg: "RS384", typ: "JWT", kid: publicJwk.kid });
       await expect(jwtVerify(assertion, publicKey, { audience: "https://other.example.test/token" })).rejects.toThrow();
       await expect(jwtVerify(assertion, createLocalJWKSet({ keys: [{ ...publicJwk, kid: "wrong-key" }] })))
         .rejects.toMatchObject({ code: "ERR_JWKS_NO_MATCHING_KEY" });
-      expect(payload.exp! - payload.iat!).toBe(120);
-      expect(payload.iat).toBe(payload.nbf);
+      expect(payload).toMatchObject({ iat: now - 60, nbf: now - 60, exp: now + 120 });
       expect(payload.jti).toMatch(/^[a-f0-9-]{36}$/u);
       ids.add(payload.jti);
       if (fields.get("grant_type") === "authorization_code") {

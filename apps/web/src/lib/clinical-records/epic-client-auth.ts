@@ -33,10 +33,11 @@ export async function epicTokenRequest(auth: EpicClientAuth, tokenEndpoint: stri
     }
     case "private_key_jwt": {
       const now = Math.floor(Date.now() / 1000);
+      const issuedAt = now - 60;
       const assertion = await new SignJWT({})
         .setProtectedHeader({ alg: "RS384", typ: "JWT", kid: auth.kid })
         .setIssuer(auth.clientId).setSubject(auth.clientId).setAudience(tokenEndpoint)
-        .setJti(randomUUID()).setIssuedAt(now).setNotBefore(now).setExpirationTime(now + 120)
+        .setJti(randomUUID()).setIssuedAt(issuedAt).setNotBefore(issuedAt).setExpirationTime(now + 120)
         .sign(auth.key);
       body.set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
       body.set("client_assertion", assertion);
