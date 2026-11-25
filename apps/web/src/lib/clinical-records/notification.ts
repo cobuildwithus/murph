@@ -75,7 +75,7 @@ function verifiedClinicalHomeRoute(member: Awaited<ReturnType<typeof readClinica
 }
 
 function acceptedClinicalOccurrence(authority: Awaited<ReturnType<typeof readClinicalNotificationAuthority>>) {
-  return authority && ["published", "scheduled"].includes(authority.run.notificationCoverage ?? "") && authority.run.completedAt
+  return authority && authority.run.notificationCoverage === "published" && authority.run.completedAt
     && ["complete", "partial"].includes(authority.run.status) ? authority : null;
 }
 
@@ -85,7 +85,7 @@ export async function readClinicalNotificationDecision(input: RunPointer): Promi
     await lockHostedMemberRow(tx, input.memberId);
     return acceptedClinicalOccurrence(await readClinicalNotificationAuthority(tx, input));
   });
-  if (!authority || authority.run.notificationCoverage !== "published") return { mode: "off" };
+  if (!authority) return { mode: "off" };
   const threadId = await readHostedMemberHomeLinqChatId(authority.routing, prisma);
   if (!threadId || createHostedLinqChatLookupKey(threadId) !== authority.chatLookupKey) return { mode: "off" };
   return { mode: authority.mode, threadId };

@@ -423,8 +423,9 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 ## Daily hospital record texts
 
-Clinical texts may go to the exact verified private Murph thread frozen at
-daily admission. The owner withdrew the iMessage-only requirement. Linq may
+Web and the private runtime block all clinical sends at this head. After
+activation, clinical texts may go to the exact verified private Murph thread
+frozen at daily admission. The owner withdrew the iMessage-only requirement. Linq may
 select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
 requires the member’s existing explicit detail setting. Each attempt, including
 a retry or another bubble, must recheck the run, preference, named approvals,
@@ -432,9 +433,9 @@ private recipient, proactive pause, line health and recipient-region window.
 A group, replacement thread or different channel cannot receive the text.
 
 Linq can echo the sent text in a signed outbound receipt. Web verifies the body
-in memory, projects receipt metadata, and discards the text and free-form
-provider failure reason before persistence, logging, tracing or orchestration.
-This applies to ordinary replies, notices and explicit detail. Web's terminal
+in memory and discards echoed text before persistence, logging, tracing or
+orchestration. Ordinary deliveries retain sanitized provider failure reasons
+for operations. Clinical deliveries discard both failure and provider reasons. Web's terminal
 retry excludes clinical deliveries by their opaque delivery template before
 fetching any message parts. A definite terminal failure consumes an attempted
 clinical occurrence. Admission remains closed through the reader rollout.

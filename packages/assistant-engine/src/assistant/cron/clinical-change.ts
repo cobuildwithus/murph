@@ -6,9 +6,7 @@ import { resolveAssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import { readAssistantCronStore, sortAssistantCronJobs, writeAssistantCronStore } from './store.js'
 
-/** The host supplies the verified thread.
- * The Web run owns coverage. The private job/intent and its acknowledgement
- * are checkpointed together before Web can advance coverage to scheduled. */
+/** Stages one notice intent or detail job on the verified thread. Staging leaves Web coverage open. */
 export async function queueClinicalChange(input: {
   vault: string
   runId: string

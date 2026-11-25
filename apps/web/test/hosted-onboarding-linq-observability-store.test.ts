@@ -299,21 +299,41 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
   });
 
-  it("records failed provider events, updates projections, and claims one event-scoped alert", async () => {
+  it("retries an uncorrelated receipt before any writes while a clinical dispatch could own it", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "synthetic-pending" });
+    const event = requireParsedProviderEvent(buildProviderEvent({ eventId: "synthetic-early", eventType: "message.failed", data: {
+      message_id: "synthetic-message", chat_id: "synthetic-chat", reason: "synthetic carrier reason",
+    } }));
+    await expect(ingestHostedLinqProviderEventTx({ event, prisma: fixture.prisma as never }))
+      .rejects.toMatchObject({ httpStatus: 503, retryable: true });
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ template: "clinical_change", status: "provider_dispatch_started",
+        linqChatLookupKey: { in: expect.arrayContaining([event.linqChatLookupKey]) } }),
+    }));
+    expect(fixture.hostedLinqProviderEventCreateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqAlertCreateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "clinical_change"])("projects permitted failure diagnostics for delivery template %s", async template => {
+    const failureReason = template ? null : "carrier filtered <redacted-phone>";
+    const providerReason = template ? null : "carrier policy";
     const fixture = createObservabilityPrismaFixture();
     fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
       id: "hld_attempt_123",
       idempotencyKey: null,
       phoneNumberLookupKey: null,
       sourceRef: null,
-      template: null,
+      template,
     });
     const event = requireParsedProviderEvent(buildProviderEvent({
       data: {
         error: {
           code: "30007",
-          message: "carrier filtered +15551234567 provider_msg_123 private text",
+          message: "carrier filtered +15551234567",
         },
+        reason: "carrier policy",
+        parts: [{ type: "text", value: "Synthetic outbound text sentinel" }],
         message_id: "msg_failed_123",
         phone_number: "+15550000000",
         service: "sms",
@@ -338,9 +358,7 @@ describe("hosted Linq observability stores", () => {
           eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           eventType: "message.failed",
           failureCode: "30007",
-          // The provider's wording is the operator's evidence for why the send
-          // failed, so it survives; the phone number inside it does not.
-          failureReason: null,
+          failureReason, providerReason,
         }),
         skipDuplicates: true,
       }),
@@ -353,7 +371,7 @@ describe("hosted Linq observability stores", () => {
         data: expect.objectContaining({
           healthStatus: "warning",
           lastFailureCode: "30007",
-          lastFailureReason: null,
+          lastFailureReason: failureReason,
           lastReceiptEventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           totalFailedCount: { increment: 1 },
         }),
@@ -363,7 +381,7 @@ describe("hosted Linq observability stores", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           failureCode: "30007",
-          failureReason: null,
+          failureReason,
           status: "failed",
         }),
         where: expect.objectContaining({
@@ -377,11 +395,16 @@ describe("hosted Linq observability stores", () => {
           deliveryId: "hld_attempt_123",
           eventId: createHostedLinqProviderEventLookupKey("evt_failed_123"),
           kind: "message_failed",
+          detailsJson: expect.objectContaining({ failureReason, providerReason }),
           status: "pending",
         }),
         skipDuplicates: true,
       }),
     );
+    for (const write of [fixture.hostedLinqProviderEventCreateMany, fixture.hostedLinqLineUpdateMany,
+      fixture.hostedLinqDeliveryUpdateMany, fixture.hostedLinqAlertCreateMany]) {
+      expect(JSON.stringify(write.mock.calls)).not.toContain("Synthetic outbound text sentinel");
+    }
   });
 
   it("names the line on a message.failed alert whose payload carries no phone number", async () => {

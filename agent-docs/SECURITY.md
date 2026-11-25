@@ -935,16 +935,21 @@ Existing product admission, delivery and runtime safety rules still apply.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - Daily clinical change proof crosses the signed, active-write-fenced callback
   as a run pointer and a policy result. Receipt entries and notice rendering
-  belong to the private runtime. Web checks the originating run, credential
+  belong to the private runtime. The notification reader checks the originating run, credential
   epoch, product access, health consent, named approvals, preference revision,
   and the verified participant, assigned line and direct thread frozen at
-  admission. The owner withdrew the iMessage-only requirement. Linq may
+  admission. Current admission writers leave the notification fields empty.
+  Web and the private runtime currently block every clinical dispatch.
+  The activation PR must enforce the agreed route before opening either gate.
+  The owner withdrew the iMessage-only requirement. Linq may
   select iMessage, RCS or SMS. Notices omit the hospital name. The existing
   explicit detail setting authorizes detail on that same thread. Each
   outbound effect must use the current authority for its run and recipient.
   Signed provider receipts can echo sent text, including clinical replies, through
   Web memory. Web verifies and reduces each receipt to operational metadata
-  before persistence, logging, tracing or handoff. Web terminal retry excludes
+  before persistence, logging, tracing or handoff. Ordinary diagnostics retain
+  sanitized provider wording. The clinical template suppresses both receipt
+  reasons before the event, line, delivery or alert is written. Web terminal retry excludes
   the clinical delivery template before fetching provider content. A definite
   terminal failure consumes an attempted occurrence. Private staging alone
   leaves coverage open.

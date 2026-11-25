@@ -96,9 +96,9 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    the replacement-client ongoing grant,
    an accepted baseline under the current credential epoch, the current message
    revision and exact verified private route. Freeze these on the new run.
-   Keep admissions disabled until the chosen channel can send. Today a private
-   checkpoint advances coverage to `scheduled` even if the intent fails or
-   the job skips. Enabling admission earlier would consume the only occurrence.
+   Keep admissions disabled until the chosen channel can send. A private
+   checkpoint leaves coverage at `published`. Activation must advance coverage
+   only on a real provider attempt and preserve a blocked or skipped occurrence.
 3. Send on the exact verified private thread frozen at admission. The owner
    withdrew the iMessage-only requirement. Linq may choose iMessage, RCS or
    SMS. Render the notice privately without a source name. The existing
@@ -124,8 +124,9 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
 
 **Reader rollout (draft #5318).** The owner accepts signed outbound receipt
 text passing through Web memory on the ordinary webhook. Web verifies it,
-projects receipt metadata and discards message parts and provider prose before
-storage, logging, tracing or orchestration. The Web retry owner excludes
+drops echoed message parts for every receipt and suppresses clinical provider
+prose before storage, logging, tracing or orchestration. Ordinary receipts
+retain sanitized provider diagnostics. The Web retry owner excludes
 clinical deliveries using the existing delivery template. A definite terminal
 failure consumes the attempted occurrence. This avoids fetching private text
 or generating a second message after a provider attempt.
@@ -154,3 +155,17 @@ drain, coverage at the provider attempt and quiet-hours retry. Exercise all
 three settings against the real admission path. Roll back by stopping new
 admissions first and retaining those readers, authorization checks, retry
 exclusion and durable coverage through the restore horizon.
+
+Activation must also close these replay and deployment hazards.
+
+- Every detail bubble must carry a production-minted `clinical-change:`
+  idempotency key. Exercise those actual keys at the Web dispatch fence and
+  verify the resulting template excludes every bubble from terminal retry.
+- A restored wake can read `published` again. The notice key deduplicates its
+  intent, but the one-shot detail job disappears after execution
+  (`keepAfterRun: false`). Prove that replay after checkpoint and after job
+  removal cannot start a second detail turn for the same run.
+- The strict notice decision lost `directoryLabel`. Mixed versions reject
+  notice decisions in either direction. Keep the eligibility writer closed
+  until Web, hosted runtime and the manually deployed Cloudflare port all
+  support the decision shape from this reader rollout.

@@ -2065,8 +2065,61 @@ export async function markHostedLinqDeliverySkippedTx(input: {
   }
 }
 
+function readHostedLinqReceiptMessageTx(prisma: HostedLinqDeliveryClient, messageLookupKeys: string[]) {
+  return prisma.hostedLinqDeliveryMessage?.findFirst({
+    where: {
+      OR: [
+        { messageLookupKey: { in: messageLookupKeys } },
+        { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
+        { terminalRetryPreviousMessageLookupKeys: { hasSome: messageLookupKeys } },
+      ],
+    },
+    select: {
+      delivery: {
+        select: {
+          id: true,
+          idempotencyKey: true,
+          phoneNumberLookupKey: true,
+          sourceRef: true,
+          template: true,
+        },
+      },
+      id: true,
+      messageLookupKey: true,
+      terminalRetryOriginalMessageLookupKey: true,
+    },
+  });
+}
+
+/** Resolve multipart, replacement and older single-message ownership under the receipt lock. */
+export async function readHostedLinqReceiptOwnerTx(event: ParsedHostedLinqProviderEvent, prisma: HostedLinqDeliveryClient) {
+  if (!event.messageLookupKey) return null;
+  const messageLookupKeys = event.messageLookupKeyReadCandidates.length
+    ? event.messageLookupKeyReadCandidates : [event.messageLookupKey];
+  const message = await readHostedLinqReceiptMessageTx(prisma, messageLookupKeys);
+  if (message) return { kind: "part", delivery: message.delivery, message, messageLookupKeys } as const;
+  const delivery = await prisma.hostedLinqDelivery.findFirst({
+    where: {
+      messageLookupKey: { in: messageLookupKeys },
+    },
+    select: {
+      failureCode: true,
+      id: true,
+      idempotencyKey: true,
+      phoneNumberLookupKey: true,
+      sourceRef: true,
+      status: true,
+      template: true,
+    },
+  });
+  return delivery ? { kind: "single", delivery, messageLookupKeys } as const : null;
+}
+
+type ReceiptOwner = Awaited<ReturnType<typeof readHostedLinqReceiptOwnerTx>>;
+
 export async function applyHostedLinqDeliveryReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
+  owner?: ReceiptOwner;
   prisma: HostedLinqDeliveryClient;
 }): Promise<{
   advanced: boolean;
@@ -2082,30 +2135,9 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       restoreOnboardingLink: null,
     };
   }
-  const ownedMessageReceipt =
-    await applyHostedLinqDeliveryMessageReceiptTx(input);
-  if (ownedMessageReceipt) {
-    return ownedMessageReceipt;
-  }
-  const messageLookupKeys = input.event.messageLookupKeyReadCandidates.length > 0
-    ? input.event.messageLookupKeyReadCandidates
-    : [input.event.messageLookupKey];
-  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
-    where: {
-      messageLookupKey: { in: messageLookupKeys },
-    },
-    select: {
-      failureCode: true,
-      id: true,
-      idempotencyKey: true,
-      phoneNumberLookupKey: true,
-      sourceRef: true,
-      status: true,
-      template: true,
-    },
-  });
-
-  if (!delivery) {
+  const owner = input.owner === undefined ? await readHostedLinqReceiptOwnerTx(input.event, input.prisma) : input.owner;
+  if (owner?.kind === "part") return applyHostedLinqDeliveryMessageReceiptTx(input, owner);
+  if (!owner) {
     return {
       advanced: true,
       deliveryId: null,
@@ -2113,6 +2145,7 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
       restoreOnboardingLink: null,
     };
   }
+  const { delivery, messageLookupKeys } = owner;
   if (
     delivery.status === "failed"
     && delivery.failureCode
@@ -2139,8 +2172,8 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
   // A terminal retry can promote a legacy parent-only delivery to a message
   // owner after our first lookup. Recheck under the same lock as promotion.
   const previousStatus = await lockHostedLinqDeliveryRow(input.prisma, delivery.id);
-  const promotedMessageReceipt = await applyHostedLinqDeliveryMessageReceiptTx(input);
-  if (promotedMessageReceipt) return promotedMessageReceipt;
+  const promoted = await readHostedLinqReceiptMessageTx(input.prisma, messageLookupKeys);
+  if (promoted) return applyHostedLinqDeliveryMessageReceiptTx(input, { message: promoted, messageLookupKeys });
 
   if (input.event.deliveryStatus === "delivered") {
     const deliveredAt = input.event.providerDeliveredAt ?? input.event.providerCreatedAt;
@@ -2191,50 +2224,13 @@ export async function applyHostedLinqDeliveryReceiptTx(input: {
 async function applyHostedLinqDeliveryMessageReceiptTx(input: {
   event: ParsedHostedLinqProviderEvent;
   prisma: HostedLinqDeliveryClient;
-}): Promise<{
+}, owner: Pick<Extract<ReceiptOwner, { kind: "part" }>, "message" | "messageLookupKeys">): Promise<{
   advanced: boolean;
   deliveryId: string;
   phoneNumberLookupKey: string | null;
   restoreOnboardingLink: HostedLinqDeliveredOnboardingLink | null;
-} | null> {
-  const messageClient = input.prisma.hostedLinqDeliveryMessage;
-  if (
-    !messageClient
-    || !input.event.messageLookupKey
-    || !input.event.deliveryStatus
-  ) {
-    return null;
-  }
-  const messageLookupKeys =
-    input.event.messageLookupKeyReadCandidates.length > 0
-      ? input.event.messageLookupKeyReadCandidates
-      : [input.event.messageLookupKey];
-  const message = await messageClient.findFirst({
-    where: {
-      OR: [
-        { messageLookupKey: { in: messageLookupKeys } },
-        { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
-        { terminalRetryPreviousMessageLookupKeys: { hasSome: messageLookupKeys } },
-      ],
-    },
-    select: {
-      delivery: {
-        select: {
-          id: true,
-          idempotencyKey: true,
-          phoneNumberLookupKey: true,
-          sourceRef: true,
-          template: true,
-        },
-      },
-      id: true,
-      messageLookupKey: true,
-      terminalRetryOriginalMessageLookupKey: true,
-    },
-  });
-  if (!message) {
-    return null;
-  }
+}> {
+  const { message, messageLookupKeys } = owner;
   const delivery = message.delivery;
   // Once replaced, receipts for the definitively failed original cannot
   // overwrite the retry's lifecycle or reopen any sending authority.
@@ -2259,7 +2255,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
     ? input.event.providerDeliveredAt ?? receipt.providerCreatedAt
     : null;
   const refined = deliveredAt
-    ? await messageClient.updateMany({
+    ? await input.prisma.hostedLinqDeliveryMessage.updateMany({
         where: {
           id: message.id,
           messageLookupKey: { in: messageLookupKeys },

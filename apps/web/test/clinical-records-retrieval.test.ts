@@ -392,6 +392,56 @@ describe("Clinical Records retrieval control plane", () => {
     } else expect(run).toEqual(before);
   });
 
+  it("accepts both pages, a bound cursor, the document and the outcome under the pinned protocol", async () => {
+    const { state } = createHarness(["DocumentReference"]);
+    const retrievalProtocol = "query-slices-receipts-v3";
+    state.run.retrievalProtocol = retrievalProtocol;
+    state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    const secrets = await vi.importActual<typeof import("@/src/lib/clinical-records/secrets")>("@/src/lib/clinical-records/secrets");
+    mocks.sealClinicalPageCursor.mockImplementation(secrets.sealClinicalPageCursor);
+    mocks.openClinicalPageCursor.mockImplementation(secrets.openClinicalPageCursor);
+    mocks.sealClinicalDocumentTicket.mockImplementation(secrets.sealClinicalDocumentTicket);
+    mocks.openClinicalDocumentTicket.mockImplementation(secrets.openClinicalDocumentTicket);
+    const pointer = { memberId: MEMBER_ID, runId: RUN_ID, generation: 1 };
+    const descriptor = await readClinicalRetrievalRun(pointer);
+    if (descriptor.status !== "ready") throw new Error("Expected a runnable synthetic import.");
+    const { queryFingerprint, queryScopeId, sliceId } = descriptor.run.retrievalSlices[0]!;
+    const request = { runId: RUN_ID, generation: 1, retrievalProtocol, resourceType: "DocumentReference",
+      queryFingerprint, queryScopeId, sliceId } as const;
+    const content = Buffer.from("Synthetic attachment");
+    const parent = { resourceType: "DocumentReference", id: "synthetic-note", status: "current",
+      subject: { reference: "Patient/patient-1" }, content: [{ attachment: {
+        url: "Binary/synthetic-document", contentType: "text/plain", size: content.length,
+      } }] };
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      const next = new URL(String(url));
+      if (next.pathname.includes("/Binary/")) return fhirResponse({
+        resourceType: "Binary", id: "synthetic-document", contentType: "text/plain", data: content.toString("base64"),
+      });
+      if (next.searchParams.has("page")) return fhirResponse({ resourceType: "Bundle", entry: [] });
+      next.searchParams.set("page", "2");
+      return fhirResponse({ resourceType: "Bundle", entry: [{ resource: parent }], link: [{ relation: "next", url: next.href }] });
+    });
+    const page = (requestId: string, cursor: string | null) => fetchClinicalRetrievalPage({
+      memberId: MEMBER_ID, fetchImpl, request: { ...request, requestId, cursor },
+    });
+    const first = await page("synthetic-first", null);
+    if (first.status !== "page" || !first.nextCursor || !first.documents?.[0]?.ticket) throw new Error("Expected a cursor and ticket.");
+    await expect(secrets.openClinicalPageCursor({ ...pointer, ...request, retrievalProtocol: "query-slices-v2",
+      value: first.nextCursor })).rejects.toThrow();
+    expect(await page("synthetic-next", first.nextCursor)).toMatchObject({ status: "page", nextCursor: null });
+    expect(await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl, request: {
+      runId: RUN_ID, generation: 1, retrievalProtocol, ticket: first.documents[0].ticket,
+    } })).toMatchObject({ status: "document", contentBase64: content.toString("base64") });
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      runId: RUN_ID, generation: 1, retrievalProtocol, status: "completed",
+      retrievalSlices: descriptor.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+      counts: { ...outcomeCounts(), fetchedPageCount: 2, fetchedResourceFamilyCount: 1 },
+    } });
+    expect(state.run).toMatchObject({ status: "complete", pageCount: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
   it("refuses a legacy runner on every read and outcome of a receipt-required run", async () => {
     const { state } = createHarness(["Observation"]);
     state.run.retrievalProtocol = "query-slices-receipts-v3";

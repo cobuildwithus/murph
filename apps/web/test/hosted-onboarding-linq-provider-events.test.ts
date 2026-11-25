@@ -288,7 +288,7 @@ describe("parseHostedLinqProviderEvent", () => {
       deliveryStatus: "failed",
       eventType: "message.failed",
       failureCode: "30007",
-      failureReason: null,
+      failureReason: "carrier filtered <redacted-phone> provider_msg_123 private text",
       phoneNumberRole: "line",
     });
     expect(JSON.stringify(failed)).not.toContain("+15551234567");
@@ -327,7 +327,9 @@ describe("parseHostedLinqProviderEvent", () => {
       }),
     });
 
-    expect(failed?.failureReason).toBeNull();
+    expect(failed?.failureReason).toBe(
+      "bounced for <redacted-email> at <redacted-phone>, see <redacted-url>",
+    );
     expect(status?.providerReason).toBe(
       "review requested by <redacted-email> at <redacted-phone>",
     );
