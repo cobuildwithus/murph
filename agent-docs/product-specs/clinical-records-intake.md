@@ -92,14 +92,16 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
 | POST `message-preference` | `{ mode }` | `{ messageMode }` |
-| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }] }` |
-| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | Same fresh processor list |
+| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }], alsoUsed: [{ id, name, purpose }] }` |
+| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | `{ processors: [{ id, name, purpose, version, approved }] }` |
 
 On a start response requiring named approval, the app fetches the current list,
-displays one tick per company on a single screen and sends one decision per
-request. It retries start after the final approval. A missing route on an older server leaves the feature unavailable.
+displays one tick per named company and sends one decision per request. It
+joins the names and purposes from `alsoUsed` in one sentence on that screen
+and retries start after the final approval. Older clients can ignore the extra
+field. A missing route on an older server leaves the feature unavailable.
 Send the displayed version, including on withdrawal. A stale version returns
-409 `CONSENT_DOCUMENT_VERSIONS_STALE`. Either decision requires a current native
+409 `CONSENT_DOCUMENT_VERSIONS_STALE`. A retired or unknown id returns 404 `CLINICAL_RECORD_PROCESSOR_NOT_FOUND`. Reads ignore its ledger scope. Either decision requires a current native
 bearer. Withdrawal remains available after product access lapses. Neither
 decision changes the medical-record message setting. Withdrawing health consent
 still turns that setting off and blocks further grants until reconsent.
@@ -110,14 +112,17 @@ return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
 governs daily admission and transport even after the start selector changes.
 Legacy profiles keep their current admission rules.
 
-For the replacement Epic registration, the sharing answer rests on three rules.
+For the replacement registration, the owner attests that each member approves
+sharing with each entity individually. OpenAI alone requires that approval.
+It reads records to organize them and answer questions. Hosted inference goes
+directly to OpenAI, including retries. The four helpers receive only what Murph
+sends at the member’s request. The approval screen names xAI for X search,
+Google for questions about shared videos, ElevenLabs for voice messages and
+Mapbox for places and directions. Hosting and delivery are service providers.
+Connecting an app or choosing another recipient authorizes that destination.
+Workers AI transcribes audio attachments. Hospital documents are prepared locally.
 
-1. **Named companies.** When Murph chooses a company that can read hospital information, the member approves that company before import. OpenAI reads records for enrichment, chat and scheduled turns. Hosted inference goes directly to OpenAI, including on a transport retry.
-2. **Member-directed destinations.** Connecting an app or connector, choosing a website or recipient, or requesting a call, email or export authorizes that destination. Delivery to the member’s own phone includes the detail text they enabled.
-3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally.
-
-The app shows all five named companies. Current grants let the connection and
-its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
+A current OpenAI grant lets the connection and its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
 admission or hospital page/document request. Web closes a blocked open run as
 failed and preserves its daily grant. Re-approval permits the next due check.
 The companion source reports `reason: "processor_approval_required"` while

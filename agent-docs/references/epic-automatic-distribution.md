@@ -51,20 +51,17 @@ hospital-specific erasure merely to suppress a warning. Link the questionnaire
 to the current privacy policy and deletion instructions. This code change does
 not edit or verify the operator's Epic questionnaire.
 
-Keep the public registration’s existing sharing answer. For the replacement
-registration, verify these three classes before attesting that members approve
-each entity individually.
+Keep the public registration’s existing sharing answer. For the replacement,
+the owner selects the answer that users specifically approve sharing with each
+entity individually. The owner makes this attestation on these conditions.
 
-1. **Murph chooses the company.** The app shows the company’s brand name and purpose and records one current decision per company. OpenAI reads imported records for extraction, chat and scheduled turns. The hosted model connects directly to OpenAI and has no other-company fallback.
-2. **The member chooses the destination.** Connecting an app or custom connector, selecting a website or person, or asking for a call, email or export authorizes that individual destination. A detailed message to the member’s own phone is delivery to the member.
-3. **Murph can invoke an optional helper.** xAI search, Google Gemini video questions, ElevenLabs voice and Mapbox place lookups can carry details from a record. Each has its own required approval. Workers AI transcribes audio attachments, while hospital documents use local preparation.
+1. Each member approves OpenAI by name before connecting a hospital. OpenAI reads records to organize them and answer questions. A missing, stale or withdrawn grant stops the next replacement start or hospital read.
+2. The approval screen also names xAI for X search, Google for questions about a shared video, ElevenLabs for voice messages and Mapbox for places and directions. Each receives data only at the member’s request. A detail notification that Murph starts must have no access to them.
+3. Hosting, storage and message delivery are service providers. The member chooses any connected app, website or other destination for a requested action.
 
-Check the released app’s one-tick-per-company screen, deployed routes and
-published subprocessor list. Pure hosting and storage belong
-on that list. Missing or withdrawn approval stops new replacement starts and
-hospital reads. A transfer already in flight can finish and ordinary or
-scheduled turns can still read a previously imported copy. The owner submits
-the answer for the replacement registration after verifying this behavior.
+Before submitting, the owner verifies the released screen, deployed routes and
+published subprocessor list. A transfer in flight can finish after withdrawal.
+Previously imported copies remain available to vault-capable turns.
 
 Persistent rollout requires the additive clinical daily-sync migration before
 Web, followed by the runtime extraction-cache build. Existing runtimes accept

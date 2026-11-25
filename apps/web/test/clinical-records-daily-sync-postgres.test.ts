@@ -251,7 +251,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     } finally { await f.cleanup(); }
   });
 
-  it("gates a replacement daily run and its transport at the current version of every processor", async () => {
+  it("gates a replacement daily run and its transport on current OpenAI approval", async () => {
     const f = await fixture();
     const pointer = { connectionId: f.connectionId, memberId: f.memberId, now };
     await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-test", userId: f.memberId });
@@ -264,14 +264,12 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       sourceSystem: "epic-fhir", patientIdEncrypted, accessTokenEncrypted, fhirBaseUrlEncrypted,
       accessTokenExpiresAt: new Date(Date.now() + daily),
     } });
-    for (const processor of clinicalProcessors) {
-      expect(await admitClinicalDailySync(pointer)).toBe(false);
-      await client.hostedConsentGrant.create({ data: { memberId: f.memberId, scope: clinicalProcessorScope(processor),
-        status: "granted", grantedAt: now, source: "synthetic", documentVersionsJson: { [processor.id]: processor.version } } });
-    }
     const processor = clinicalProcessors[0]!;
+    expect(processor.id).toBe("openai");
     const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(processor) } };
-    await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: "obsolete" } } });
+    expect(await admitClinicalDailySync(pointer)).toBe(false);
+    await client.hostedConsentGrant.create({ data: { ...where.memberId_scope, status: "granted",
+      grantedAt: now, source: "synthetic", documentVersionsJson: { openai: "obsolete" } } });
     expect(await admitClinicalDailySync(pointer)).toBe(false);
     expect(await f.mailbox()).toBe(0);
     await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: processor.version } } });

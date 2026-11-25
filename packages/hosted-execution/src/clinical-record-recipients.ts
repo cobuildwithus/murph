@@ -1,10 +1,12 @@
 type ClinicalRecordRecipient = { id: string; hosts: readonly string[] } & (
   | { kind: "named"; name: string; purpose: string; version: string }
-  | { kind: "member-directed" | "no-hospital-content" | "infrastructure"; reason: string }
+  | { kind: "member-directed"; name?: string; reason: string }
+  | { kind: "no-hospital-content" | "infrastructure"; reason: string }
 );
 
 // Each named row supplies one companion notice and one stable consent scope.
-// Version the notice when its receiving company or purpose changes.
+// Version the notice when its receiving company or purpose changes. Member-directed
+// rows with a company name supply the companion disclosure about requested services.
 export const clinicalRecordRecipients = [
   {
     id: "openai", kind: "named", hosts: ["api.openai.com"],
@@ -12,24 +14,24 @@ export const clinicalRecordRecipients = [
     purpose: "Reads your records to organize them and answer questions about them.",
   },
   {
-    id: "xai", kind: "named", hosts: ["api.x.ai"],
-    name: "xAI", version: "2026-11-25",
-    purpose: "May receive details from your records in questions Murph sends to search X.",
+    id: "xai", kind: "member-directed", hosts: ["api.x.ai"],
+    name: "xAI",
+    reason: "searches X when you ask",
   },
   {
-    id: "gemini", kind: "named", hosts: ["generativelanguage.googleapis.com"],
-    name: "Google", version: "2026-11-25",
-    purpose: "May receive details from your records in questions about a video you share.",
+    id: "gemini", kind: "member-directed", hosts: ["generativelanguage.googleapis.com"],
+    name: "Google",
+    reason: "answers your questions about a video you share",
   },
   {
-    id: "elevenlabs", kind: "named", hosts: ["api.elevenlabs.io"],
-    name: "ElevenLabs", version: "2026-11-25",
-    purpose: "May turn a reply containing details from your records into a voice message.",
+    id: "elevenlabs", kind: "member-directed", hosts: ["api.elevenlabs.io"],
+    name: "ElevenLabs",
+    reason: "makes voice messages you request",
   },
   {
-    id: "mapbox", kind: "named", hosts: ["api.mapbox.com"],
-    name: "Mapbox", version: "2026-11-25",
-    purpose: "May look up places or directions using details from your records.",
+    id: "mapbox", kind: "member-directed", hosts: ["api.mapbox.com"],
+    name: "Mapbox",
+    reason: "finds places and directions when you ask",
   },
   {
     id: "delivery", kind: "member-directed", hosts: ["api.linqapp.com", "api.telegram.org"],

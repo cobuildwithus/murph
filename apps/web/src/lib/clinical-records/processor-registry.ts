@@ -6,6 +6,10 @@ import { clinicalRecordsError } from "./errors";
 /** One notice and one ledger scope per named company, independent of launch consent. */
 export const clinicalProcessors = clinicalRecordRecipients.filter(row => row.kind === "named");
 
+export const clinicalAlsoUsed = clinicalRecordRecipients
+  .filter(row => row.kind === "member-directed" && "name" in row)
+  .map(({ id, name, reason }) => ({ id, name, purpose: reason }));
+
 export type ClinicalProcessor = (typeof clinicalProcessors)[number];
 
 export function clinicalProcessorScope(processor: ClinicalProcessor) {

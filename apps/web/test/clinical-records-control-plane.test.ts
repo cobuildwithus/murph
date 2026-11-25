@@ -427,17 +427,35 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
-  it.each(["current", "before exchange", "before persistence"])("checks signed callbacks across selector rollback (%s)", async decision => {
+  function selectSignedClient() {
     provider = { ...productionProvider, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" };
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PUBLIC_CLIENT_ID", "legacy");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID", "signed");
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
+  }
+
+  it("requires only current OpenAI approval for a native replacement start", async () => {
+    selectSignedClient();
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    mocks.bearer.mockResolvedValue(nativeAuth);
+    mocks.createSmartState.mockReturnValue({ state: nativeState, stateHash: "state-hash" });
+    const start = () => nativeStart(post({ providerId: PROVIDER_ID, appReturn: "ios-dev" }));
+    harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce([]);
+    expect((await (await start()).json()).error.code).toBe("CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED");
+    expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+    expect((await start()).status).toBe(200);
+  });
+
+  it.each(["current", "before exchange", "before persistence"])("checks signed callbacks across selector rollback (%s)", async decision => {
+    selectSignedClient();
     const harness = createHarness(null, { clientId: "signed" });
     mocks.getPrisma.mockReturnValue(harness.prisma);
     const grants = await harness.prisma.hostedConsentGrant.findMany();
-    harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants.slice(1)).mockResolvedValueOnce([
-      { scope: grants[0]!.scope, documentVersionsJson: { openai: "stale" } }, ...grants.slice(1),
+    expect(grants.map(grant => grant.scope)).toEqual(["clinical.processor.openai"]);
+    harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { scope: grants[0]!.scope, documentVersionsJson: { openai: "stale" } },
     ]);
     for (const reason of ["missing", "stale"]) {
       await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
@@ -454,7 +472,7 @@ describe("Clinical Records authorization persistence", () => {
       expect(harness.durableConnections).toMatchObject([{ requiresProcessorApprovals: true }]);
     } else {
       if (decision === "before persistence") harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants);
-      harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce(grants.slice(1));
+      harness.prisma.hostedConsentGrant.findMany.mockResolvedValueOnce([]);
       await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED" });
       expect(harness.durableConnections).toHaveLength(0);
       if (decision === "before exchange") {

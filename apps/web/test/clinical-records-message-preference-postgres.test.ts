@@ -61,33 +61,51 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
   }
 
   it("records one current processor at a time and audits a new version even after a grant", async () => {
-    const first = clinicalProcessors[0]!;
-    const second = clinicalProcessors[1]!;
-    const post = (body: object, id: string = first.id) => decide(request(`processor-approvals/${id}`, "POST", body),
+    const processor = clinicalProcessors[0]!;
+    const post = (body: object, id: string = processor.id) => decide(request(`processor-approvals/${id}`, "POST", body),
       { params: Promise.resolve({ id }) });
-    const body = { version: first.version, approved: true };
-    const approvals = async () => (await (await listProcessors(request("processor-approvals"))).json()).processors;
-    expect(await approvals()).toEqual(clinicalProcessors.map(({ id, name, purpose, version }) => ({ id, name, purpose, version, approved: false })));
-    expect((await post({ ...body, ids: [first.id, second.id] })).status).toBe(400);
-    expect((await post({ ...body, id: [first.id, second.id] })).status).toBe(400);
-    expect((await post(body, "unknown")).status).toBe(400);
+    const body = { version: processor.version, approved: true };
+    const approvals = async () => (await listProcessors(request("processor-approvals"))).json();
+    const unusedIds = ["xai", "gemini", "elevenlabs", "mapbox", "unknown"];
+    await getPrisma().hostedConsentGrant.createMany({ data: unusedIds.map(id => ({
+      memberId, scope: `clinical.processor.${id}`, grantedAt: new Date(), source: "synthetic",
+      documentVersionsJson: { [id]: processor.version },
+    })) });
+    expect(await approvals()).toEqual({
+      processors: [{ id: "openai", name: "OpenAI", purpose: processor.purpose, version: processor.version, approved: false }],
+      alsoUsed: [
+        { id: "xai", name: "xAI", purpose: expect.stringMatching(/searches X/) },
+        { id: "gemini", name: "Google", purpose: expect.stringMatching(/video/) },
+        { id: "elevenlabs", name: "ElevenLabs", purpose: expect.stringMatching(/voice messages/) },
+        { id: "mapbox", name: "Mapbox", purpose: expect.stringMatching(/places and directions/) },
+      ],
+    });
+    expect((await post({ ...body, ids: [processor.id, "xai"] })).status).toBe(400);
+    expect((await post({ ...body, id: [processor.id, "xai"] })).status).toBe(400);
+    for (const id of unusedIds) {
+      const response = await post(body, id);
+      expect(response.status).toBe(404);
+      expect((await response.json()).error.code).toBe("CLINICAL_RECORD_PROCESSOR_NOT_FOUND");
+    }
+    expect(await getPrisma().hostedConsentGrant.count({ where: { memberId,
+      scope: { in: unusedIds.map(id => `clinical.processor.${id}`) }, status: "granted" } })).toBe(unusedIds.length);
     expect((await post({ ...body, version: "obsolete" })).status).toBe(409);
-    expect(() => parseHostedConsentAcceptRequest({ scope: clinicalProcessorScope(first),
-      acceptedDocumentVersions: { [first.id]: first.version } })).toThrow();
+    expect(() => parseHostedConsentAcceptRequest({ scope: clinicalProcessorScope(processor),
+      acceptedDocumentVersions: { [processor.id]: processor.version } })).toThrow();
     expect((await post(body)).status).toBe(200);
     expect((await post(body)).status).toBe(200);
-    const scope = clinicalProcessorScope(first);
+    const scope = clinicalProcessorScope(processor);
     const events = () => getPrisma().hostedConsentEvent.count({ where: { memberId, scope } });
     expect(await events()).toBe(1);
     await getPrisma().hostedConsentGrant.update({ where: { memberId_scope: { memberId, scope } },
-      data: { documentVersionsJson: { [first.id]: "obsolete" } } });
-    expect(await approvals()).toMatchObject(clinicalProcessors.map(() => ({ approved: false })));
+      data: { documentVersionsJson: { [processor.id]: "obsolete" } } });
+    expect((await approvals()).processors).toMatchObject([{ approved: false }]);
     expect((await post(body)).status).toBe(200);
     expect(await events()).toBe(2);
-    expect(await approvals()).toMatchObject(clinicalProcessors.map(row => ({ approved: row.id === first.id })));
+    expect((await approvals()).processors).toMatchObject([{ approved: true }]);
     expect((await postMode("detail")).status).toBe(200);
     expect((await post({ ...body, approved: false })).status).toBe(200);
-    expect(await approvals()).toMatchObject(clinicalProcessors.map(() => ({ approved: false })));
+    expect((await approvals()).processors).toMatchObject([{ approved: false }]);
     await withdrawHostedHealthDataConsent({ memberId, prisma: getPrisma() });
     expect((await post(body)).status).toBe(403);
     expect((await post({ ...body, approved: false })).status).toBe(200);

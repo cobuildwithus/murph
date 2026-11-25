@@ -41,10 +41,8 @@ member lock. The replacement registration has a separate admission gate at
 start, callback persistence, daily check and records transport.
 
 Current approvals admit a replacement import. Missing, stale or withdrawn
-approvals block the next hospital read. The owner classifies destinations by
-who chooses them. OpenAI and four optional helpers can receive record-derived
-content without a member selecting the recipient. The app requires an individual
-approval for each. Member-directed destinations use the member’s own choice.
+approvals block the next hospital read. B7 initially classified five companies as named.
+B8 below records the owner's final classification.
 Audio attachment transcription is separate from hospital document processing.
 The runner tests the fixed destinations and hosted inference selection against
 the same table that supplies the app notices. Imported copies remain available
@@ -54,12 +52,18 @@ Before the owner attests in Epic:
 
 1. Confirm from registration and deployment history that no replacement-profile connection was saved before the profile marker deployed. The client ID is inside the encrypted grant, so existing unmarked rows cannot be backfilled from control metadata.
 2. Reconcile the published subprocessor list with the processor inventory.
-3. Confirm which optional helpers are enabled in production and their deployed routes. Keep helpers that may receive hospital content individually named until their inputs are restricted.
+3. Verify the released approval screen and the member-requested uses in B8 against deployed routes.
 
 The synthetic PostgreSQL test admitted a daily run with five current grants,
 fetched a hospital page, withdrew one grant and observed no further hospital
 request. Separate callback tests cover a withdrawal while SMART is open. Adding
 a synthetic unknown runner host failed the classification test as intended.
+
+### PR B8 · Optional helpers
+
+Under the replacement registration, each member approves OpenAI by name before connecting a hospital. OpenAI reads records to organize them and answer questions. At the member’s request, xAI searches X, Google answers questions about a shared video, ElevenLabs makes a voice message and Mapbox finds places and directions. The approval screen names all four in one sentence supplied by the registry.
+
+B7 and E1 continue to check every named company. The four member-directed services need no grant. The companion GET adds their names and purposes in `alsoUsed`. Retired scopes stay in the ledger and have no effect. The owner chose this classification because the member requests the service, as with delivery. It needs no switches, per-member restrictions or egress changes. E2 item 4 owns the separate authority for a detail turn Murph starts.
 
 ### PR E1 · Dormant daily notification consumers
 
@@ -108,7 +112,13 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    replies mint ordinary keys today. No code mints clinical per-bubble keys
    and those replies would bypass `clinicalEgressBlock`. Test revocation during
    generation, between bubbles, on alternate tools and on retry. Preserve
-   the ordinary AI allowance rules. Demonstrate that the system-work path
+   the ordinary AI allowance rules. Today `assertClinicalCronTransport` stops
+   the job before `sendAssistantNotificationLocal` can expose scheduled tools.
+   Worker provider authority belongs to the running container. Before opening
+   the gate, exclude xAI, Google video, ElevenLabs and Mapbox
+   from the detail turn and its outbound authority, including shell and indirect
+   tool paths. Prove zero requests to all four during generation and retry on
+   an otherwise authorized run. Scope this to the clinical job alone. Demonstrate that the system-work path
    drains the fixed notice's `deliveryIntentIds` through actual outbox egress.
 5. Defer an occurrence during quiet hours and persist its next safe wake.
    Recheck authority at that wake before sending. If the verified number
