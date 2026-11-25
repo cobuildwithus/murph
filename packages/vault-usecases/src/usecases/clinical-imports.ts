@@ -82,7 +82,7 @@ const rawRefSchema = z.string().regex(RAW_PATH_PATTERN, 'Expected a vault-relati
 const ISO_DATE_TIME_TEXT = z.string().refine(
   (value) => isStrictIsoDateTime(value),
   'Invalid ISO date-time string.',
-)
+).describe('ISO 8601 date-time with an offset, such as 2026-06-17T14:00:00Z. A date alone is rejected.')
 const ISO_DATE_TEXT = z.string().refine(
   (value) => isStrictIsoDate(value),
   'Invalid ISO date string.',
@@ -157,7 +157,9 @@ const diagnosticTestPayloadShape = {
 }
 
 export const diagnosticTestSavePayloadSchema = commonEventPayloadSchema.extend(diagnosticTestPayloadShape)
-export const diagnosticTestImportPayloadSchema = commonImportEventPayloadSchema.extend(diagnosticTestPayloadShape)
+export const diagnosticTestImportPayloadSchema = commonImportEventPayloadSchema
+  .extend(diagnosticTestPayloadShape)
+  .describe('One test. Write it to a file and pass --input @<file>.json, or pipe it with --input -. Inline JSON is rejected.')
 
 const clinicalNotePayloadShape = {
   clinicalFact: clinicalFactSchema.optional(),

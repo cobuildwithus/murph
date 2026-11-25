@@ -14,7 +14,7 @@ value belongs in a lab record, never only in memory or a note.
 | What the member sent | Command |
 | --- | --- |
 | Blood lab results and panels | `vault-cli blood-test` (`scaffold` shows the payload for `import-json`) |
-| Other tests, such as stool, microbiome, urine or saliva | `vault-cli diagnostic-test import-json` with `testCategory` and `specimenType` (`payload-schema` shows the payload) |
+| Other tests, such as stool, microbiome, urine or saliva | `vault-cli diagnostic-test import-json --input @<payload.json>` with `testCategory` and `specimenType` (`payload-schema` shows the payload) |
 | Vitals and body values | `vault-cli measurement add` |
 | Visits, assessments, plans, diagnoses, procedures, orders, imaging reports, test summaries | `vault-cli encounter scaffold`, then `vault-cli encounter import-json` |
 | A medicine or supplement they take now | `vault-cli regimen save` with its kind, status and dates |
