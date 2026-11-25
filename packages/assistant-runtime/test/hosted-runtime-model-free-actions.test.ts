@@ -130,9 +130,10 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
     expect(await findEventByExternalRef({ vaultRoot, system: `epic-fhir-${run.fhirBaseUrlHash}-${run.patientIdHash}`, resourceType: "observation", resourceId: "narrative" })).not.toBeNull();
     expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining({ routeAction: "apply-clinical-enrichment", status: "pending" })]);
     expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract" });
-    // A local enrichment item has no Web sequence and conservatively pins the frontier.
+    // A local enrichment item has no Web sequence and keeps its own wake, so it
+    // must not hold the Web system lane behind it.
     expect(workspace.redactedStatus).toMatchObject({
-      hostedMailboxSystemHandledThroughSeq: "0",
+      hostedMailboxSystemHandledThroughSeq: "4",
       hostedMailboxSystemImportedSeq: "4",
       hostedMailboxSystemModelFreeWakeAt: null,
       hostedMailboxSystemModelFreeWakeVersion: workspace.version,
