@@ -15,7 +15,7 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { readHostedLinqFailedMessage, resendHostedLinqMessage } from "./linq-client";
-import { recordHostedLinqTerminalRetryAcceptedTx } from "./linq-delivery-store";
+import { CLINICAL_LINQ_DELIVERY_TEMPLATE, recordHostedLinqTerminalRetryAcceptedTx } from "./linq-delivery-store";
 import { evaluateHostedLinqEgressPolicy } from "./linq-egress-policy";
 import { readHostedRuntimeAiAccessDecision } from "./member-access";
 import { HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS, HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
@@ -123,6 +123,7 @@ async function readRetryCandidate(input: {
     select: {
       id: true,
       source: true,
+      template: true,
       acceptedAt: true,
       deliveredAt: true,
       messageLookupKey: true,
@@ -160,6 +161,7 @@ async function readRetryCandidate(input: {
     },
   });
   if (!delivery) return { candidate: null, reason: "delivery_missing" } as const;
+  if (delivery.template === CLINICAL_LINQ_DELIVERY_TEMPLATE) return { candidate: null, reason: "clinical_delivery" } as const;
   if (delivery.source !== "hosted_runtime_linq_delivery") {
     return { candidate: null, reason: "delivery_not_runtime_owned" } as const;
   }

@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL } from "./retrieval-limits.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
 export * from "./attachments.ts";
@@ -526,6 +527,7 @@ export const clinicalRawManifestV3Schema = z
     fetchedAt: clinicalIsoDateTimeSchema,
     resourceFiles: clinicalRawManifestV3ResourceFilesSchema,
     batch: clinicalRawManifestBatchSchema.optional(),
+    retrievalProtocol: z.literal(CLINICAL_RECEIPT_PROTOCOL).optional(),
     documentAttachments: clinicalDocumentAttachmentsSchema.optional(),
     retrievalSlices: clinicalFhirRetrievalSlicesSchema,
     completedRetrievalSlices: z.array(clinicalFhirRetrievalSliceRefSchema)

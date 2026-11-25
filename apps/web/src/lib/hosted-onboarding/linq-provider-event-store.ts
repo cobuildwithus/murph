@@ -2,7 +2,9 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   applyHostedLinqDeliveryReceiptTx,
+  CLINICAL_LINQ_DELIVERY_TEMPLATE,
   readHostedLinqDeliveryForProviderMessageTx,
+  readHostedLinqReceiptOwnerTx,
 } from "./linq-delivery-store";
 import {
   ensureHostedLinqLineForProviderEventTx,
@@ -19,9 +21,35 @@ import {
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { sha256Hex } from "../primitives";
+import { createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
 import { lockHostedLinqProviderReceiptTx } from "./linq-message-receipt-lock";
 
 type HostedLinqProviderEventClient = PrismaClient | Prisma.TransactionClient;
+
+async function projectReceiptReasons(event: ParsedHostedLinqProviderEvent, prisma: HostedLinqProviderEventClient) {
+  if ((!event.failureReason && !event.providerReason) ||
+      !["message.sent", "message.delivered", "message.failed"].includes(event.eventType)) return { event };
+  // Sent receipts do not lock the message. Read pending dispatches first so
+  // acceptance cannot move a clinical delivery out of view between the reads.
+  const pendingBeforeOwner = event.eventType === "message.sent"
+    ? await hasPendingClinicalDispatch(event.linqChatId, prisma) : undefined;
+  const owner = await readHostedLinqReceiptOwnerTx(event, prisma);
+  const redact = owner
+    ? owner.delivery.template === CLINICAL_LINQ_DELIVERY_TEMPLATE
+    : pendingBeforeOwner ?? await hasPendingClinicalDispatch(event.linqChatId, prisma);
+  return { owner, event: redact ? { ...event, failureReason: null, providerReason: null } : event };
+}
+
+async function hasPendingClinicalDispatch(chatId: string | null, prisma: HostedLinqProviderEventClient) {
+  const pending = await prisma.hostedLinqDelivery.findFirst({
+    where: {
+      template: CLINICAL_LINQ_DELIVERY_TEMPLATE, status: "provider_dispatch_started",
+      ...(chatId ? { linqChatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(chatId) } } : {}),
+    },
+    select: { id: true },
+  });
+  return pending !== null;
+}
 
 export async function ingestHostedLinqProviderEventTx(input: {
   event: ParsedHostedLinqProviderEvent;
@@ -37,13 +65,14 @@ export async function ingestHostedLinqProviderEventTx(input: {
 }> {
   const receivedAt = input.receivedAt ?? new Date();
   await lockHostedLinqProviderReceiptTx(input);
-  const health = input.event.providerHealth ?? {
+  const { event, owner } = await projectReceiptReasons(input.event, input.prisma);
+  const health = event.providerHealth ?? {
     chat: null,
     line: null,
   };
-  const eventLookupKey = createHostedLinqProviderEventLookupKey(input.event.eventId);
+  const eventLookupKey = createHostedLinqProviderEventLookupKey(event.eventId);
   let lineLookupKey = await ensureHostedLinqLineForProviderEventTx({
-    event: input.event,
+    event,
     prisma: input.prisma,
   });
   const healthLinePhoneNumber = health.line?.phoneNumber
@@ -60,35 +89,35 @@ export async function ingestHostedLinqProviderEventTx(input: {
   }
   const created = await input.prisma.hostedLinqProviderEvent.createMany({
     data: {
-      apiVersion: input.event.apiVersion,
-      deliveryStatus: input.event.deliveryStatus,
-      direction: input.event.direction,
+      apiVersion: event.apiVersion,
+      deliveryStatus: event.deliveryStatus,
+      direction: event.direction,
       eventId: eventLookupKey,
-      eventType: input.event.eventType,
-      extractionJson: input.event.extractionJson,
+      eventType: event.eventType,
+      extractionJson: event.extractionJson,
       extractionVersion: 1,
-      failureCode: input.event.failureCode,
-      failureReason: input.event.failureReason,
-      linqChatLookupKey: input.event.linqChatLookupKey,
-      messageIdSuffix: input.event.messageIdSuffix,
-      messageLookupKey: input.event.messageLookupKey,
-      payloadHash: input.event.payloadHash,
-      payloadSanitizedJson: input.event.payloadSanitizedJson,
-      payloadShapeJson: input.event.payloadShapeJson,
-      phoneNumberHint: input.event.phoneNumberHint,
+      failureCode: event.failureCode,
+      failureReason: event.failureReason,
+      linqChatLookupKey: event.linqChatLookupKey,
+      messageIdSuffix: event.messageIdSuffix,
+      messageLookupKey: event.messageLookupKey,
+      payloadHash: event.payloadHash,
+      payloadSanitizedJson: event.payloadSanitizedJson,
+      payloadShapeJson: event.payloadShapeJson,
+      phoneNumberHint: event.phoneNumberHint,
       phoneNumberLookupKey: lineLookupKey,
-      phoneNumberRole: input.event.phoneNumberRole,
-      providerCreatedAt: input.event.providerCreatedAt,
-      providerReason: input.event.providerReason,
+      phoneNumberRole: event.phoneNumberRole,
+      providerCreatedAt: event.providerCreatedAt,
+      providerReason: event.providerReason,
       providerReputationStatus: health.line?.reputationStatus ?? null,
       providerServiceStatus: health.line?.serviceStatus ?? null,
-      providerStatus: input.event.providerStatus,
+      providerStatus: event.providerStatus,
       chatHealthStatus: health.chat?.providerStatus ?? null,
       chatHealthUpdatedAt: health.chat?.providerUpdatedAt ?? null,
       receivedAt,
-      service: input.event.service,
-      traceIdSuffix: input.event.traceIdSuffix,
-      webhookVersion: input.event.webhookVersion,
+      service: event.service,
+      traceIdSuffix: event.traceIdSuffix,
+      webhookVersion: event.webhookVersion,
     },
     skipDuplicates: true,
   });
@@ -101,8 +130,8 @@ export async function ingestHostedLinqProviderEventTx(input: {
     const replayDurableReactionProjection = Boolean(existing)
       && !existing?.groupJoinOfferHandledAt
       && (
-        input.event.eventType === "reaction.added"
-        || input.event.eventType === "reaction.removed"
+        event.eventType === "reaction.added"
+        || event.eventType === "reaction.removed"
       );
     // Provider-event persistence is not the terminal owner for reaction
     // context. Until a reaction was consumed by the join-offer owner, replay
@@ -118,13 +147,13 @@ export async function ingestHostedLinqProviderEventTx(input: {
   }
 
   const deliveryReceipt = await applyHostedLinqDeliveryReceiptTx({
-    event: input.event,
+    event, owner,
     prisma: input.prisma,
   });
-  const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(input.event)
+  const outboundEchoDelivery = isHostedRuntimeOwnedOutboundEcho(event)
     ? await readHostedLinqDeliveryForProviderMessageTx({
-        messageLookupKey: input.event.messageLookupKey,
-        messageLookupKeyCandidates: input.event.messageLookupKeyReadCandidates,
+        messageLookupKey: event.messageLookupKey,
+        messageLookupKeyCandidates: event.messageLookupKeyReadCandidates,
         prisma: input.prisma,
       })
     : null;
@@ -136,12 +165,12 @@ export async function ingestHostedLinqProviderEventTx(input: {
   // Delivery projections remain Murph-observed state. Linq's line service and
   // reputation snapshot is projected independently below.
   if (
-    input.event.eventType !== "phone_number.status_updated"
+    event.eventType !== "phone_number.status_updated"
     && !staleDeliveryReceipt
     && !outboundEchoDelivery?.runtimeOwned
   ) {
     await projectHostedLinqLineForProviderEventTx({
-      event: input.event,
+      event,
       lineLookupKey: projectionLineLookupKey,
       prisma: input.prisma,
     });
@@ -173,7 +202,7 @@ export async function ingestHostedLinqProviderEventTx(input: {
 
   const alertIds = await claimHostedLinqAlertsForProviderEventTx({
     deliveryId: deliveryReceipt.deliveryId ?? outboundEchoDelivery?.deliveryId ?? null,
-    event: input.event,
+    event,
     eventLookupKey,
     lineLookupKey: projectionLineLookupKey,
     prisma: input.prisma,

@@ -188,12 +188,12 @@ describe("hosted clinical records runtime port", () => {
 
   it("forwards only opaque notification pointers and strict signed decisions", async () => {
     const pointer = { runId: "synthetic-origin", generation: 2 };
-    const decision = { mode: "notice", threadId: "synthetic-thread", directoryLabel: null };
+    const decision = { mode: "notice", threadId: "synthetic-thread" };
     const bodies: unknown[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = input instanceof Request ? input : new Request(input, init);
       bodies.push(await req.json());
-      return Response.json(bodies.length === 1 ? decision : { ...decision, unexpected: true });
+      return Response.json(bodies.length === 1 ? decision : { ...decision, directoryLabel: "Synthetic source" });
     });
     const port = createHostedWebClinicalRecordsPort({ boundUserId: "member_1", fetchImpl,
       timeoutMs: 5_000, transport: { mode: "proxy" } });

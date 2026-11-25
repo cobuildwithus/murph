@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { hasClinicalRunChanges } from "@murphai/core";
 import { createHash } from "node:crypto";
 import type {
@@ -179,7 +180,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
 
   await persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule });
   const fetchDocuments = () => fetchPendingClinicalDocuments({
-    checkpoint, generation: checkpointIdentity.generation, runId: checkpointIdentity.runId, port, signal: input.signal,
+    checkpoint, retrievalProtocol: checkpointIdentity.retrievalProtocol, generation: checkpointIdentity.generation, runId: checkpointIdentity.runId, port, signal: input.signal,
     persist: () => persistRetrievalCheckpoint({ checkpoint, checkpointIdentity, input, vaultModule }),
     throwIfPreempted: () => throwIfPreempted(input),
   });
@@ -208,7 +209,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     if (!scope) throw new HostedClinicalRecordsRuntimeError("CLINICAL_RECORDS_SCOPE_UNAVAILABLE", "Clinical page scope is unavailable.");
     const nextPageUrlHash = clinicalPageNextUrlHash(page.content);
     const result = await (input.importSnapshot ?? vaultModule.importClinicalFhirSnapshot)({
-      assertCurrent: () => assertClinicalRecordsRunCurrent({ allowAuthorizationRequired: checkpoint.authorizationRequired, input, port }),
+      assertCurrent: () => assertClinicalRecordsRunCurrent({ allowAuthorizationRequired: checkpoint.authorizationRequired, expectedProtocol: checkpointIdentity.retrievalProtocol, input, port }),
       attachments: checkpoint.attachments,
       documentAttachments: checkpoint.documentAttachments,
       batch: {
@@ -248,7 +249,8 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         vaultRoot: input.vaultRoot,
         userId: input.wake.userId,
         jobId,
-        ...clinicalChangeRun(readResponse, input.wake),
+        ...(checkpointIdentity.retrievalProtocol === CLINICAL_RECEIPT_PROTOCOL
+          ? { changeRun: { runId: input.wake.runId, generation: input.wake.generation } } : {}),
         occurredAt: input.wake.occurredAt,
       });
     }
@@ -475,7 +477,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       ? "partial"
       : "completed";
   const outcome = {
-    ...await terminalClinicalProof(readResponse, checkpoint, input),
+    ...await terminalClinicalProof(checkpointIdentity.retrievalProtocol, checkpoint, input),
     counts,
     ...(checkpoint.authorizationRequired
       ? { errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE }
@@ -492,14 +494,9 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
   return { counts, outcome, status };
 }
 
-function clinicalChangeRun(response: ReturnType<typeof parseHostedClinicalRecordsReadRunResponse>, wake: HostedExecutionClinicalRecordsSyncRequestedWake) {
-  return response.status === "ready" && response.run.changeReceipts
-    ? { changeRun: { runId: wake.runId, generation: wake.generation } } : {};
-}
-
-async function terminalClinicalProof(response: ReturnType<typeof parseHostedClinicalRecordsReadRunResponse>,
-  checkpoint: ClinicalFhirRetrievalCheckpoint, input: { vaultRoot: string; wake: HostedExecutionClinicalRecordsSyncRequestedWake }) {
-  if (!clinicalChangeRun(response, input.wake).changeRun || checkpoint.authorizationRequired) return {};
+async function terminalClinicalProof(protocol: ClinicalRetrievalProtocol, checkpoint: ClinicalFhirRetrievalCheckpoint,
+  input: { vaultRoot: string; wake: HostedExecutionClinicalRecordsSyncRequestedWake }) {
+  if (protocol !== CLINICAL_RECEIPT_PROTOCOL || checkpoint.authorizationRequired) return {};
   return await hasClinicalRunChanges(input.vaultRoot, input.wake.runId) ? { hasChangeReceipt: true as const } : {};
 }
 
@@ -626,6 +623,7 @@ async function terminalFailureAfterClearingCheckpoint(input: {
 
 async function assertClinicalRecordsRunCurrent(input: {
   allowAuthorizationRequired: boolean;
+  expectedProtocol: ClinicalRetrievalProtocol;
   input: {
     signal: AbortSignal | null;
     shouldYieldClinicalRecords?: (() => boolean) | null;
@@ -659,6 +657,7 @@ async function assertClinicalRecordsRunCurrent(input: {
     throw new HostedClinicalRecordsRunNoLongerCurrentError();
   }
   assertRunMatchesWake(response.run, input.input.wake);
+  if (response.run.retrievalProtocol !== input.expectedProtocol) throw new HostedClinicalRecordsRunNoLongerCurrentError();
   throwIfPreempted(input.input);
 }
 
@@ -717,7 +716,7 @@ function terminalFailure(input: {
 function retrievalOutcomeIdentity(
   identity: ClinicalFhirRetrievalCheckpointIdentity,
 ): {
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   retrievalSlices: Array<{ queryScopeId: string; sliceId: string }>;
 } {
   return {

@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, clinicalRetrievalProtocols, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rm } from "node:fs/promises";
@@ -134,7 +135,7 @@ export interface ClinicalFhirSnapshotImportInput {
   providerDirectoryEntryId?: string;
   requestedScopes: string[];
   retrievalJobId: string;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   retrievalSlices: ClinicalFhirRetrievalSlice[];
   signal?: AbortSignal | null;
   sourceSystem: ClinicalSourceSystem;
@@ -151,7 +152,7 @@ export interface ClinicalFhirRetrievalCheckpointIdentity {
   providerDirectoryEntryId?: string;
   requestedScopes: string[];
   retrievalJobId: string;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   retrievalSlices: ClinicalFhirRetrievalSlice[];
   runId: string;
   sourceSystem: ClinicalSourceSystem;
@@ -245,7 +246,7 @@ const clinicalFhirRetrievalCheckpointIdentitySchema = z
       .min(1)
       .max(120)
       .regex(/^[A-Za-z0-9._-]+$/u),
-    retrievalProtocol: z.literal("query-slices-v2"),
+    retrievalProtocol: z.enum(clinicalRetrievalProtocols),
     retrievalSlices: clinicalFhirRetrievalSlicesSchema,
     runId: z
       .string()
@@ -773,6 +774,7 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   }));
   const manifest = clinicalRawManifestSchema.parse({
     ...manifestBase,
+    ...(input.retrievalProtocol === CLINICAL_RECEIPT_PROTOCOL ? { retrievalProtocol: input.retrievalProtocol } : {}),
     schemaVersion: "murph.clinical-raw-manifest.v3",
     ...(input.batch ? { batch: input.batch } : {}),
     resourceFiles,
@@ -827,6 +829,8 @@ async function readPreviousClinicalBatch(input: ClinicalFhirSnapshotImportInput)
   const manifestContent = await readFile(path.join(input.vaultRoot, clinicalRawPathSchema.parse(previous.manifestPath)), "utf8");
   if (createHash("sha256").update(manifestContent, "utf8").digest("hex") !== previous.sha256) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor digest is invalid."));
   const manifest = clinicalRawManifestSchema.parse(JSON.parse(manifestContent));
+  const protocol = ("retrievalProtocol" in manifest && manifest.retrievalProtocol) || "query-slices-v2";
+  if (protocol !== input.retrievalProtocol) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor protocol changed."));
   if (manifest.resourceFiles.length !== 1) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor page is invalid."));
   const relativePath = manifest.resourceFiles[0]!.relativePath;
   const content = await readFile(path.join(input.vaultRoot, path.posix.dirname(previous.manifestPath), relativePath), "utf8");

@@ -237,6 +237,20 @@ describe("parseHostedLinqProviderEvent", () => {
     expect(JSON.stringify(parsed?.payloadShapeJson)).not.toContain("private sent text");
   });
 
+  it.each(["message.sent", "message.delivered", "message.failed"] as const)(
+    "removes outbound text before %s is handed to persistence, diagnostics or retry",
+    eventType => {
+      const text = "Synthetic outbound content sentinel";
+      const event = buildGenericEvent({ eventType, data: {
+        direction: "outbound", id: "synthetic-message", chat_id: "synthetic-thread",
+        parts: [{ type: "text", value: text }], reason: text, error: { message: text },
+      } });
+      const parsed = parseHostedLinqProviderEvent({ event, rawBody: JSON.stringify(event) });
+      expect(parsed?.eventType).toBe(eventType);
+      expect(JSON.stringify(parsed)).not.toContain(text);
+    },
+  );
+
   it("parses delivered and failed events with shape metadata only", () => {
     const delivered = parseHostedLinqProviderEvent({
       event: buildGenericEvent({

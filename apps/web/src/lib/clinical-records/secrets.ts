@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
@@ -13,7 +14,7 @@ type ClinicalConnectionSecretField = "accessToken" | "patientId" | "patientBindi
 type ClinicalPageCursorIdentity = {
   queryFingerprint: string;
   queryScopeId: string;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   sliceId: string;
 };
 
@@ -117,11 +118,11 @@ function clinicalPageCursorBinding(input: {
   queryFingerprint: string;
   queryScopeId: string;
   resourceType: string;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   sliceId: string;
 }): string {
   if (
-    input.retrievalProtocol !== "query-slices-v2"
+    (input.retrievalProtocol !== "query-slices-v2" && input.retrievalProtocol !== CLINICAL_RECEIPT_PROTOCOL)
     || typeof input.queryScopeId !== "string"
     || typeof input.queryFingerprint !== "string"
     || typeof input.sliceId !== "string"
@@ -129,6 +130,7 @@ function clinicalPageCursorBinding(input: {
     throw new ContractValidationError("Clinical Records page cursor retrieval identity is incomplete.");
   }
   return createHash("sha256").update([
+    ...(input.retrievalProtocol === CLINICAL_RECEIPT_PROTOCOL ? [input.retrievalProtocol] : []),
     input.queryScopeId,
     input.resourceType,
     input.queryFingerprint,

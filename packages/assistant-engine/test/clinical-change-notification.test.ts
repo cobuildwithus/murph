@@ -15,8 +15,7 @@ describe('daily hospital notification integration', () => {
     try {
       await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
       const threadId = 'synthetic-private-thread'
-      const decision = mode === 'notice' ? { mode, directoryLabel: 'Example Hospital', threadId }
-        : mode === 'detail' ? { mode, threadId } : { mode }
+      const decision = mode === 'off' ? { mode } : { mode, threadId }
       const input = { decision, runId: 'synthetic-origin', occurredAt: new Date().toISOString(), vault }
       await queueClinicalChange(input)
       await queueClinicalChange(input)
@@ -25,7 +24,7 @@ describe('daily hospital notification integration', () => {
       expect(intents).toHaveLength(mode === 'notice' ? 1 : 0)
       expect(jobs).toHaveLength(mode === 'detail' ? 1 : 0)
       if (mode === 'notice') {
-        expect(intents[0]).toMatchObject({ message: 'New records came in from Example Hospital. Want me to go through them?',
+        expect(intents[0]).toMatchObject({ message: 'New records came in. Want me to go through them?',
           channel: 'linq', threadId, threadIsDirect: true, answeredMailboxItemIds: [],
           deliveryIdempotencyKey: 'clinical-change:v1:synthetic-origin:notice' })
       }

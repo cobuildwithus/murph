@@ -1,6 +1,6 @@
 # Phase B hospital records
 
-Status: active (daily notification readers in draft)
+Status: active (E1 merged, E2 activation on hold)
 Created: 2026-11-25
 Updated: 2026-11-25
 
@@ -14,7 +14,7 @@ Prove one asymmetric Epic patient app in the sandbox, ship the companion setting
 2. **PR B, daily access and settings.** Preserve an existing offline grant against an insufficient replacement under the member lock. Fence malformed or revoked grants and monitor due lag. Ship the Web-owned, revisioned message preference and companion v2 projection. Default to notice, require separate affirmative detail consent, cancel pending delivery on off, reset to off on consent withdrawal. The owner chose processor approvals (B7). Use versioned per-entity entries in the existing consent ledger and gate replacement start, persistence, daily admission and hospital transport. Check fixed runner destinations and hosted model selection against the recipient table. Resolve the processor inventory before attestation.
 3. **PR C, first iOS release.** Show actual grant, message switch and detail consent, plus one approval per named processor. Remove misleading additions counts from the display while keeping legacy fields. Ship independently of source deletion.
 4. **PR D, durable private receipts (parallel to A).** Core commits a replayable result with the canonical write, including both empty paths. Read it before filtering on retry. Record meaningful changes with stable enrichment identity and preserve receipts across restore. Missing legacy evidence stays silent. Receipts accumulate in one file per run without pruning. Each all-skipped batch costs a canonical write and one row. Define a retention rule before daily checks run at volume.
-5. **PR E, notification admission and delivery.** Only trust receipts for runs admitted after receipt writers are deployed everywhere. Replaying a batch committed by an older runtime can write an empty receipt that looks identical to a proven no-change result. After readers converge, publish one fenced mailbox pointer per eligible daily run. Bind to the captured credential epoch and preference revision. Plain notices use the ordinary outbox directly. Detail uses a scheduled turn with the private receipt pointer. Recheck current authority, pacing, quiet hours and direct iMessage transport at dispatch. Fixed notices require product access. Prove retry, revocation, empty imports and out-of-order enrichment.
+5. **PR E, notification admission and delivery.** Only trust receipts for runs pinned at admission to a receipt-required retrieval and enrichment protocol. Replaying a batch committed by an older runtime can write an empty receipt that looks identical to a proven no-change result. After readers converge, publish one fenced mailbox pointer per eligible daily run. Bind to the captured credential epoch and preference revision. Plain notices use the ordinary outbox directly. Detail uses a scheduled turn with the private receipt pointer. Recheck current authority, pacing, quiet hours and the frozen verified private route at dispatch. Fixed notices require product access. Prove retry, revocation, empty imports and out-of-order enrichment.
 6. **Later, B6 source erasure.** Ship a dormant bounded eraser, then pending-state readers, retryable maintenance and iOS deletion. Fence OAuth and writers, preserve independently supported data, prove a sanitized cold checkpoint and restore floor. Keep readers and restore enforcement after first admission. Whole-account deletion supports the separate all-data questionnaire.
 7. **Later, retire Basic.** Stop new Basic starts, drain sessions, inventory grants and leases, reconsent as needed, then remove credentials and readers.
 8. **Later, retire the browser connection UI** under Phase A PR 3 after companion adoption.
@@ -96,13 +96,13 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    the replacement-client ongoing grant,
    an accepted baseline under the current credential epoch, the current message
    revision and exact verified private route. Freeze these on the new run.
-   Keep admissions disabled until the chosen channel can send. Today a private
-   checkpoint advances coverage to `scheduled` even if the intent fails or
-   the job skips. Enabling admission earlier would consume the only occurrence.
-3. The owner must decide whether clinical texts may use the member's ordinary
-   Murph thread. Linq automatically selects iMessage, then RCS, then SMS and
-   deprecated its service preference. It offers no iMessage-only guarantee
-   for plain text. Keep clinical sends blocked pending this decision.
+   Keep admissions disabled until the chosen channel can send. A private
+   checkpoint leaves coverage at `published`. Activation must advance coverage
+   only on a real provider attempt and preserve a blocked or skipped occurrence.
+3. Send on the exact verified private thread frozen at admission. The owner
+   withdrew the iMessage-only requirement. Linq may choose iMessage, RCS or
+   SMS. Render the notice privately without a source name. The existing
+   explicit detail setting authorizes detail on that thread.
 4. Bind every outbound effect of a detail turn to the accepted run, current
    policy and single recipient before allowing generation. Ordinary cron
    replies mint ordinary keys today. No code mints clinical per-bubble keys
@@ -121,3 +121,53 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    `kind`. Retain compatible Web, Worker and runner readers, the pinned receipt
    protocol, egress checks and durable coverage through outstanding work and
    restorable snapshots. E1 alone admits no eligible runs.
+
+**Reader rollout (draft #5318).** The owner accepts signed outbound receipt
+text passing through Web memory on the ordinary webhook. Web verifies it,
+drops echoed message parts for every receipt and suppresses clinical provider
+prose before storage, logging, tracing or orchestration. Ordinary receipts
+retain sanitized provider diagnostics. Web accepts uncorrelated receipts and
+clears both reasons if a pending clinical dispatch matches the chat, or if
+the receipt omits the chat ID and any clinical dispatch is pending. The Web retry owner excludes
+clinical deliveries using the existing delivery template. A definite terminal
+failure consumes the attempted occurrence. This avoids fetching private text
+or generating a second message after a provider attempt.
+
+Web, the hosted runtime and the manually deployed Cloudflare port can read
+the receipt-required protocol. The run, page, document and outcome protocols
+must agree. The protocol travels in private checkpoints, batch manifests and
+enrichment jobs. Ordinary imports continue on v2. Publication remains on the
+run row. A private checkpoint, including one from an older runner, cannot
+advance coverage. The daily writer still has no path to pin or admit a
+notification. Deploy Web, then the hosted runtime, then Cloudflare manually
+from main. Keep all three compatible readers through outstanding work and
+restorable snapshots once the first pinned run exists.
+
+A synthetic restore opened the new on-disk state with the E1 checkpoint and
+enrichment readers from the previous head. Both rejected the pinned work.
+The current readers restored that checkpoint and applied the prepared job.
+The webhook-owner tests check echoed text against writes, traces, logs and
+the Temporal handoff. The PostgreSQL retry test checks the persisted clinical
+marker and zero provider reads or replacement sends after a terminal failure.
+
+**Activation change.** Before enabling the daily writer, implement locked
+baseline, grant, named approval, epoch, revision and route admission, the
+per-effect detail and private provider authority checks, model-free notice
+drain, coverage at the provider attempt and quiet-hours retry. Exercise all
+three settings against the real admission path. Roll back by stopping new
+admissions first and retaining those readers, authorization checks, retry
+exclusion and durable coverage through the restore horizon.
+
+Activation must also close these replay and deployment hazards.
+
+- Every detail bubble must carry a production-minted `clinical-change:`
+  idempotency key. Exercise those actual keys at the Web dispatch fence and
+  verify the resulting template excludes every bubble from terminal retry.
+- A restored wake can read `published` again. The notice key deduplicates its
+  intent, but the one-shot detail job disappears after execution
+  (`keepAfterRun: false`). Prove that replay after checkpoint and after job
+  removal cannot start a second detail turn for the same run.
+- The strict notice decision lost `directoryLabel`. Mixed versions reject
+  notice decisions in either direction. Keep the eligibility writer closed
+  until Web, hosted runtime and the manually deployed Cloudflare port all
+  support the decision shape from this reader rollout.
