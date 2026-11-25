@@ -43,6 +43,12 @@ export interface HostedClinicalEnrichmentControllerInput {
    */
   runOne(signal: AbortSignal, onExtractionStarted: () => void): Promise<HostedClinicalEnrichmentRunResult>;
   onError(error: unknown): void;
+  /**
+   * True while the runtime holds work, such as a finished page's deferred
+   * usage or apply receipt, that its next checkpoint must publish. That
+   * checkpoint would abort any extraction started now.
+   */
+  deferNextJobUntilCheckpoint?(): boolean;
 }
 
 /** Keeps provider work separate from the runtime's tracked canonical mutations. */
@@ -64,10 +70,14 @@ export function createHostedClinicalEnrichmentController(
   // extraction mean the work cannot progress here, so the durable successor's
   // pacing takes over instead of a checkpoint loop.
   let continuationsWithoutExtraction = 0;
+  // Startup kicks run even when restored work awaits a checkpoint; once a job
+  // has finished, its own checkpoint work holds the next one until then.
+  let jobFinishedSinceCheckpoint = false;
 
   const kick = (): void => {
     if (closed) return;
-    if (paused || active) {
+    if (paused || active
+      || (jobFinishedSinceCheckpoint && input.deferNextJobUntilCheckpoint?.() === true)) {
       kickRequested = true;
       return;
     }
@@ -90,6 +100,7 @@ export function createHostedClinicalEnrichmentController(
       (result) => {
         if (active !== owned) return;
         active = null;
+        jobFinishedSinceCheckpoint = true;
         // Cancellation leaves durable work pending even if runOne returns idle.
         kickRequested ||= result === "settled" || abortController.signal.aborted;
         if (!paused && !closed && kickRequested) kick();
@@ -118,6 +129,7 @@ export function createHostedClinicalEnrichmentController(
     const owned = active;
     if (owned) await owned.completion;
     windowDeadline = null;
+    jobFinishedSinceCheckpoint = false;
   };
 
   // A failed job stays active as the release barrier and never continues.

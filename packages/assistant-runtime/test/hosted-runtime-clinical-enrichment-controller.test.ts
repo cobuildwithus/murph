@@ -204,6 +204,52 @@ describe("clinical enrichment controller", () => {
     expect(runOne).toHaveBeenCalledTimes(3);
   });
 
+  it("holds the next page until the checkpoint its finished page requires", async () => {
+    let checkpointWorkPending = false;
+    const page = deferred<HostedClinicalEnrichmentRunResult>();
+    const runOne = vi.fn()
+      .mockImplementationOnce(() => page.promise)
+      .mockResolvedValue("idle");
+    const controller = createHostedClinicalEnrichmentController({
+      runOne, onError: vi.fn(), deferNextJobUntilCheckpoint: () => checkpointWorkPending,
+    });
+    controller.kick();
+    await flushMicrotasks();
+    // The finished page deferred its usage; its apply then kicks again.
+    checkpointWorkPending = true;
+    page.resolve("settled");
+    await flushMicrotasks();
+    controller.kick();
+    await flushMicrotasks();
+    expect(runOne).toHaveBeenCalledOnce();
+    await controller.pauseAndRequeue();
+    checkpointWorkPending = false;
+    expect(controller.continueAfterCheckpoint(false)).toBe(true);
+    await flushMicrotasks();
+    expect(runOne).toHaveBeenCalledTimes(2);
+    await controller.closeAndRequeue();
+  });
+
+  it("does not hold work when no checkpoint is coming or no job has finished yet", async () => {
+    let checkpointWorkPending = true;
+    const runOne = vi.fn()
+      .mockResolvedValueOnce("idle")
+      .mockResolvedValueOnce("settled")
+      .mockResolvedValue("idle");
+    const controller = createHostedClinicalEnrichmentController({
+      runOne, onError: vi.fn(), deferNextJobUntilCheckpoint: () => checkpointWorkPending,
+    });
+    // Work restored with the workspace does not hold the first job.
+    controller.kick();
+    await flushMicrotasks();
+    expect(runOne).toHaveBeenCalledOnce();
+    checkpointWorkPending = false;
+    controller.kick();
+    await flushMicrotasks();
+    expect(runOne).toHaveBeenCalledTimes(3);
+    await controller.closeAndRequeue();
+  });
+
   it("stops continuing after two checkpoints in a row that never reach extraction", async () => {
     const runOne = vi.fn().mockResolvedValue("idle");
     const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });

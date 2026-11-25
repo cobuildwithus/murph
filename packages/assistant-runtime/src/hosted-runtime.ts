@@ -5150,6 +5150,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onError(error) {
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
       },
+      // Either one voids the extraction window, so the next checkpoint is due.
+      deferNextJobUntilCheckpoint: () =>
+        pendingDurableCheckpointEffects.length > 0 || pendingCanonicalReceiptCount > 0,
     });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
       await Promise.all([

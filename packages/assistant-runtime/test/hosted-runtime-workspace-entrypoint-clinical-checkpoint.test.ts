@@ -304,6 +304,12 @@ test("keeps extracting later clinical pages after each page checkpoint in one in
       "page-2:done", "snapshot", "page-2:usage",
       "page-3:done", "snapshot", "page-3:usage",
     ]);
+    // No page pays for a provider call that its predecessor's snapshot aborts.
+    expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
+    const snapshots = events.flatMap((event, index) => event === "snapshot" ? [index] : []);
+    for (const page of [2, 3]) {
+      expect(events.indexOf(`page-${page}:start`), events.join(",")).toBeGreaterThan(snapshots[page - 2] ?? Infinity);
+    }
   } finally {
     pages.runOne.mockRestore();
     await removeTempRoot(vaultRoot);

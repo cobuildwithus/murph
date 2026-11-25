@@ -1352,7 +1352,8 @@ aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
 Active extraction may defer an idle checkpoint for one finite 125-second window,
 but cannot defer pending canonical receipts or durable effects.
-Each page's own proposal apply and deferred usage therefore checkpoint per page.
+Each page's own proposal apply and deferred usage therefore checkpoint per page,
+and the next page starts only after that checkpoint, never just to be aborted.
 After that checkpoint and its effect drain, an invocation whose only due work is
 requeued or due enrichment resumes the extractor and system work itself instead
 of returning to a restored successor, for at most ten minutes after the
