@@ -122,6 +122,8 @@ describe("Clinical Records retrieval control plane", () => {
   it("downloads linked Binary bytes with a run-bound ticket without altering raw pages or FHIR page counts", async () => {
     const harness = createHarness(["DocumentReference"]);
     harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    harness.state.run.connection.requiresProcessorApprovals = true;
+    mocks.hasClinicalProcessorApprovals.mockResolvedValue(true);
     harness.state.run.egressBytes = 40 * 1024 * 1024;
     harness.state.run.providerRequestCount = 600;
     const parent = { resourceType: "DocumentReference", id: "note-1", status: "current",
@@ -152,6 +154,10 @@ describe("Clinical Records retrieval control plane", () => {
     const blocked = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
       request: { runId: RUN_ID, generation: 1, ticket: "forged-ticket" } });
     expect(blocked).toEqual({ status: "unavailable", retryable: false, errorCode: "document-ticket-invalid" });
+    mocks.hasClinicalProcessorApprovals.mockResolvedValue(false);
+    const withdrawn = await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+      request: { runId: RUN_ID, generation: 1, ticket: descriptor.ticket } });
+    expect(withdrawn).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
