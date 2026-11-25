@@ -417,9 +417,7 @@ describe("Clinical Records connect page", () => {
     expect(JSON.stringify(mocks.requestHostedOnboardingJson.mock.calls[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Piedmont Healthcare");
 
-    const dailyCheckbox = rendered.container.querySelector('[role="checkbox"]');
-    assert.ok(dailyCheckbox instanceof rendered.window.HTMLElement);
-    await act(async () => { dailyCheckbox.click(); });
+    expect(rendered.container.querySelector('[role="checkbox"]')).toBeNull();
     await clickButton(rendered, "Continue to Piedmont Healthcare patient portal");
 
     await vi.waitFor(() => {
@@ -428,7 +426,6 @@ describe("Clinical Records connect page", () => {
         onSuccessfulResponseHeaders: expect.any(Function),
         payload: {
           claim,
-          keepUpdated: true,
           providerDirectoryEntryId: "epic-piedmont",
         },
         url: "/api/clinical-records/connect-intents/start",
@@ -831,7 +828,7 @@ describe("Clinical Records connect page", () => {
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
     await act(async () => { portalButtons()[0]!.click(); });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith(expect.objectContaining({
-      payload: { claim, keepUpdated: false, providerDirectoryEntryId: "epic-first" },
+      payload: { claim, providerDirectoryEntryId: "epic-first" },
     }));
     expect(rendered.assign).toHaveBeenCalledWith("https://epic.example.test/oauth2/authorize");
   });

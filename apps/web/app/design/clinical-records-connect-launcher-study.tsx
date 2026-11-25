@@ -41,7 +41,6 @@ const savedSource: ClinicalRecordConnectionContract = {
 };
 
 const searchPreview: ProviderSearchViewProps = {
-  keepUpdated: true, onKeepUpdatedChange: () => {},
   query: "Clinic", providers: [
     { id: "epic-320", brandName: "Cleveland Clinic", facilities: [{ city: "Cleveland", state: "OH", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
     { id: "epic-958", brandName: "Mayo Clinic", facilities: [{ city: "Rochester", state: "MN", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
@@ -88,7 +87,7 @@ export function ClinicalRecordsConnectLauncherStudy() {
         </div>
       </LinkPageStudyState>
       <LinkPageStudyState label="Search">
-        <ProviderSearchView {...searchPreview} query="" providers={[]} hasSearched={false} keepUpdated={false} />
+        <ProviderSearchView {...searchPreview} query="" providers={[]} hasSearched={false} />
       </LinkPageStudyState>
       <LinkPageStudyState label="Finding a provider">
         <ProviderSearchView {...searchPreview} providers={[]} hasSearched={false} searchPending />

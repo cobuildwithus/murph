@@ -73,7 +73,6 @@ const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
 const CLINICAL_RETRIEVAL_RUN_ID_PREFIX = "crr_";
 
 export async function startClinicalRecordConnection(input: {
-  keepUpdated?: boolean;
   claim: string;
   fetchImpl?: typeof fetch;
   providerDirectoryEntryId: string;
@@ -82,7 +81,7 @@ export async function startClinicalRecordConnection(input: {
   assertHostedOnboardingMutationOrigin(input.request);
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
   const { authorizationUrl, expiresAt } = await startAuthorization({
-    auth, claim: input.claim, keepUpdated: input.keepUpdated, fetchImpl: input.fetchImpl,
+    auth, claim: input.claim, fetchImpl: input.fetchImpl,
     providerDirectoryEntryId: input.providerDirectoryEntryId, appReturn: null, origin: new URL(input.request.url).origin,
   });
   return { authorizationUrl, expiresAt };
@@ -99,7 +98,7 @@ export async function startNativeAuthorization(input: {
 
 async function startAuthorization(input: {
   auth: HostedAppSession | HostedNativeMemberAuth; origin: string; appReturn: DeviceSyncAppConnectReturn | null;
-  claim: string | null; providerDirectoryEntryId: string; keepUpdated?: boolean; fetchImpl?: typeof fetch;
+  claim: string | null; providerDirectoryEntryId: string; fetchImpl?: typeof fetch;
 }) {
   const { auth } = input;
   const prisma = getPrisma();
@@ -110,8 +109,7 @@ async function startAuthorization(input: {
     providerDirectoryEntryId: provider.id,
   });
   const configuration = readEpicImportConfiguration(provider);
-  const persistent = input.keepUpdated && !configuration.hospitalApprovedImports
-    ? readEpicPersistentCredentials(provider.id) : null;
+  const persistent = configuration.hospitalApprovedImports ? null : readEpicPersistentCredentials(provider.id);
   const clientId = persistent?.clientId ?? configuration.clientId;
   const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
