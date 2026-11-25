@@ -14,25 +14,30 @@ import { isErrnoException } from "./types.ts";
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const sourceId = z.string().min(1).max(120);
-const unitSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("retrieval"), batch: z.number().int().nonnegative(), generation: z.number().int().positive().optional() }).strict(),
-  z.object({ kind: z.literal("enrichment"), batch: z.number().int().nonnegative(), jobId: digest, sourceId: digest, page: z.number().int().positive() }).strict(),
-]);
-const identitySchema = z.object({
-  connectionId: sourceId, runId: sourceId, unit: unitSchema, inputDigest: digest,
-}).strict();
-const receiptSchema = z.object({
-  schema: z.literal("murph.clinical-change-receipt.v1"),
-  identity: identitySchema,
-  changes: z.array(z.object({
-    action: z.enum(["created", "superseded", "retracted"]),
-    eventId: z.string().min(1),
-    revision: z.number().int().positive(),
-    externalRef: externalRefSchema,
-  }).strict()),
-}).strict();
+const schemaV1 = "murph.clinical-change-receipt.v1";
+function receiptSchemas(object: typeof z.object | typeof z.strictObject) {
+  const unit = z.discriminatedUnion("kind", [
+    object({ kind: z.literal("retrieval"), batch: z.number().int().nonnegative(), generation: z.number().int().positive().optional() }),
+    object({ kind: z.literal("enrichment"), batch: z.number().int().nonnegative(), jobId: digest, sourceId: digest, page: z.number().int().positive() }),
+  ]);
+  const identity = object({ connectionId: sourceId, runId: sourceId, unit, inputDigest: digest });
+  const receipt = object({
+    schema: z.literal(schemaV1), identity,
+    invalidatedFacets: z.array(object({ eventId: z.string().min(1), revision: z.number().int().positive() })).optional(),
+    changes: z.array(object({
+      action: z.enum(["created", "superseded", "retracted"]),
+      eventId: z.string().min(1),
+      revision: z.number().int().positive(),
+      externalRef: object(externalRefSchema.shape),
+    })),
+  });
+  return { receipt, identity };
+}
+const { receipt: receiptSchema, identity: identitySchema } = receiptSchemas(z.strictObject);
+const readSchema = receiptSchemas(z.object).receipt;
 
-export type ClinicalChangeReceipt = z.infer<typeof receiptSchema>;
+type StoredReceipt = z.infer<typeof receiptSchema>;
+export type ClinicalChangeReceipt = Omit<StoredReceipt, "invalidatedFacets">;
 export type ClinicalChangeReceiptIdentity = ClinicalChangeReceipt["identity"];
 export type ClinicalRecordChange = ClinicalChangeReceipt["changes"][number];
 
@@ -58,8 +63,14 @@ async function* readRun(vaultRoot: string, runRef: string, offset = 0) {
     for await (const line of createInterface({ input: stream, crlfDelay: Infinity })) {
       let receipt;
       try {
-        receipt = receiptSchema.parse(JSON.parse(line));
-      } catch {
+        const row: unknown = JSON.parse(line);
+        if (row && typeof row === "object" && "schema" in row && typeof row.schema === "string"
+          && row.schema !== schemaV1) {
+          throw new VaultError("CLINICAL_RECEIPT_UNSUPPORTED_VERSION", "This clinical receipt requires a compatible reader.");
+        }
+        receipt = readSchema.parse(row);
+      } catch (error) {
+        if (error instanceof VaultError) throw error;
         // Parser errors can contain private input. Only surface the error class.
         throw new VaultError("CLINICAL_RECEIPT_INVALID", "Invalid private clinical receipt.");
       }
@@ -67,7 +78,8 @@ async function* readRun(vaultRoot: string, runRef: string, offset = 0) {
         throw new VaultError("CLINICAL_RECEIPT_INVALID", "Invalid private clinical receipt.");
       }
       offset += Buffer.byteLength(line) + 1;
-      yield { receipt, offset };
+      const { invalidatedFacets, ...result } = receipt;
+      yield { receipt: result, invalidatedFacets, offset };
     }
   } finally {
     stream.destroy();
@@ -91,10 +103,15 @@ export function listClinicalChangeReceipts(input: { vaultRoot: string; runRef: s
 }
 
 export async function readClinicalChangeReceipt(vaultRoot: string, identity: ClinicalChangeReceiptIdentity) {
+  return (await inspectClinicalChangeReceipt(vaultRoot, identity)).receipt;
+}
+
+export async function inspectClinicalChangeReceipt(vaultRoot: string, identity: ClinicalChangeReceiptIdentity) {
   const expected = identitySchema.parse(identity);
   const runRef = clinicalChangeRunRef(expected.runId);
   return withCanonicalWriteLock(vaultRoot, async () => {
-    for await (const { receipt } of readRun(vaultRoot, runRef)) {
+    const invalidated = new Map<string, number>();
+    for await (const { receipt, invalidatedFacets } of readRun(vaultRoot, runRef)) {
       const stored = receipt.identity;
       const unit = stored.unit;
       const requested = expected.unit;
@@ -103,15 +120,20 @@ export async function readClinicalChangeReceipt(vaultRoot: string, identity: Cli
       if (stored.connectionId !== expected.connectionId || generationChanged) {
         throw receiptConflict();
       }
+      // Only the matching retrieval can account for this page's auxiliary
+      // tombstones. A later real withdrawal advances the deletion revision.
+      if (requested.kind === "enrichment" && unit.kind === "retrieval" && unit.batch === requested.batch) {
+        for (const facet of invalidatedFacets ?? []) invalidated.set(facet.eventId, facet.revision);
+      }
       const sameUnit = unit.kind === "retrieval" && requested.kind === "retrieval"
         ? unit.batch === requested.batch
         : isDeepStrictEqual(unit, requested);
       if (sameUnit) {
         if (stored.inputDigest !== expected.inputDigest) throw receiptConflict();
-        return receipt;
+        return { receipt, invalidated };
       }
     }
-    return null;
+    return { receipt: null, invalidated };
   });
 }
 
@@ -119,8 +141,11 @@ function receiptConflict() {
   return new VaultError("CLINICAL_RECEIPT_CONFLICT", "Clinical import identity or input digest changed.");
 }
 
-export async function stageClinicalChangeReceipt(batch: WriteBatch, identity: ClinicalChangeReceiptIdentity, changes: ClinicalRecordChange[]) {
-  const receipt = receiptSchema.parse({ schema: "murph.clinical-change-receipt.v1", identity, changes });
-  await batch.stageJsonlAppend(shardPath(clinicalChangeRunRef(identity.runId)), JSON.stringify(receipt) + "\n");
+export async function stageClinicalChangeReceipt(batch: WriteBatch, identity: ClinicalChangeReceiptIdentity,
+  changes: ClinicalRecordChange[], invalidatedFacets: NonNullable<StoredReceipt["invalidatedFacets"]> = []) {
+  const stored = receiptSchema.parse({ schema: schemaV1, identity, changes,
+    ...(invalidatedFacets.length ? { invalidatedFacets } : {}) });
+  await batch.stageJsonlAppend(shardPath(clinicalChangeRunRef(identity.runId)), JSON.stringify(stored) + "\n");
+  const { invalidatedFacets: _privateBookkeeping, ...receipt } = stored;
   return receipt;
 }

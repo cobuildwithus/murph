@@ -503,6 +503,11 @@ and frozen enrichment page. Source-only document markers, metadata-only revision
 and invalidated facets contribute no changes. Withdrawing a saved fact records
 its deletion revision. A kind replacement records one supersession at the new
 canonical ID and revision. A completed import with no changes has an empty array.
+Retrieval timestamps still order canonical revisions and fence stale proposals.
+Receipt comparison ignores the generated timestamp on a retrieval-dated source
+note. A retrieval row privately records the IDs and deletion revisions of facets
+it invalidates. Enrichment for that batch can therefore omit a recreated fact
+with equal clinical content, including an undated fact dated by its parent revision.
 
 The receipt binds the connection and run. Hosted retrieval also binds the
 generation, batch index and digest of immutable manifest and supplied extraction
@@ -512,11 +517,18 @@ retries return the original receipt even when overlap checks now exclude every
 proposal. A conflicting binding or digest rejects the import. Run and job
 checkpoints can advance or disappear independently.
 
-The vault ledger layout defines the private run shard and retention. Deploy Core
+Each run adds a private ledger file. Each all-skipped batch adds a canonical write
+and one row. The files accumulate without pruning. Define retention before daily
+checks run at volume. V1 readers ignore additive fields at every level. Replay
+stops on an unfamiliar schema version and requires a compatible reader before
+the batch can proceed. Deploy Core
 readers before enabling receipt-writing imports. Earlier runtimes ignore the
 additional shard and preserve it in encrypted workspace snapshots. They can
 continue importing without writing receipts. A receipt-aware reader treats
-missing history as unproved. During rollback, retain the shard and require
+missing history as unproved. If a previous runtime committed a batch, replay
+under a receipt writer can produce an empty receipt indistinguishable from a
+proven no-change result. Notifications may trust only runs admitted after receipt
+writers are deployed everywhere. During rollback, retain the shard and require
 receipt-capable runners wherever complete evidence is needed. App counts retain
 their existing wire contract. Web outcomes, orchestration and diagnostics carry
 no receipt contents.

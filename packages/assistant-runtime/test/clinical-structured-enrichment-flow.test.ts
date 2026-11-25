@@ -22,16 +22,16 @@ const output: ClinicalDocumentExtractionOutput = { status: "complete", records: 
     title: "Resting heart rate", measurements: [{ metric: "resting-heart-rate", value: 73, unit: "bpm" }] },
 }] };
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
-async function fixture(resources: unknown[] = [source(), deterministic]) {
+async function fixture(resources: unknown[] = [source(), deterministic], resourceType: "Observation" | "Condition" = "Observation") {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-structured-flow-")); roots.push(vaultRoot);
   await initializeVault({ vaultRoot, timezone: "UTC", createdAt: revision });
   const input: ClinicalFhirSnapshotImportInput = { vaultRoot, sourceSystem: "epic-fhir", connectionId: "synthetic-connection",
     retrievalJobId: "synthetic-import", fetchedAt: revision, retrievalProtocol: "query-slices-v2",
     fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"), patientIdHash: hashClinicalFhirPatientId("synthetic-patient"),
-    requestedScopes: ["patient/Observation.read"], grantedScopes: ["patient/Observation.read"],
-    retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole", resourceType: "Observation", coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
-    completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
-    pages: [{ queryScopeId: "observation", sliceId: "whole", resourceType: "Observation", content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: resources.map((resource) => ({ resource })) }) }] };
+    requestedScopes: [`patient/${resourceType}.read`], grantedScopes: [`patient/${resourceType}.read`],
+    retrievalSlices: [{ queryScopeId: resourceType.toLowerCase(), sliceId: "whole", resourceType, coverage: "whole-family", queryFingerprint: "a".repeat(64) }],
+    completedRetrievalSlices: [{ queryScopeId: resourceType.toLowerCase(), sliceId: "whole" }],
+    pages: [{ queryScopeId: resourceType.toLowerCase(), sliceId: "whole", resourceType, content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: resources.map((resource) => ({ resource })) }) }] };
   const result = await importClinicalFhirSnapshot(input);
   const { jobId } = await enqueueClinicalEnrichment({ vaultRoot, manifestPath: result.manifestPath, manifestSha256: result.manifestSha256, structuredSources: result.structuredEnrichmentSources });
   const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
@@ -220,6 +220,49 @@ it.each([null, "2020-03-12T12:00:00.000Z"])("persists structured source answers 
   expect(facts[0]!.attributes.noteType).toBe("clinical_fact");
   expect(facts[0]!.attributes.tags).toContain("clinical-fact-social-history");
   expect(facts[0]!.attributes.evidence).toEqual([expect.not.objectContaining({ page: expect.anything() })]);
+});
+
+it.each(["Condition", "Observation"] as const)("only reports the first of three identical retrievals and enrichments for a retrieval-dated %s", async (resourceType) => {
+  const answer = "Synthetic intake finding";
+  const resource = resourceType === "Condition"
+    ? { resourceType, id: "undated-condition", subject: source().subject, code: { text: answer }, onsetDateTime: date }
+    : { ...source(), effectiveDateTime: undefined, meta: undefined, valueString: answer };
+  const f = await fixture([resource], resourceType);
+  f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis: "unknown", excerpt: answer,
+    payload: { kind: "note", title: "Intake finding", occurredAt: revision, note: answer, clinicalFact: {
+      category: "social-history", label: "Intake", subject: "member", clinicalDate: null, statement: answer,
+    } },
+  }] });
+  let retrieval = f.result;
+  let jobId = f.jobId;
+  for (const day of [1, 2, 3]) {
+    if (day > 1) {
+      retrieval = await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: `daily-${day}`, fetchedAt: `2026-07-0${day}T12:00:00.000Z` });
+      ({ jobId } = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: retrieval.manifestPath,
+        manifestSha256: retrieval.manifestSha256, structuredSources: retrieval.structuredEnrichmentSources }));
+    }
+    expect(retrieval.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
+    if (day > 1) expect(retrieval.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+    await runOneHostedClinicalEnrichment(f.runtime);
+    const applied = await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, jobId });
+    expect(applied).toMatchObject({ counts: { created: 1 }, readback: { verifiedCount: 1 } });
+    expect(applied.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
+    await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId });
+  }
+});
+
+it("reports a corrected onset in a long retrieval-dated history note and fences older captures", async () => {
+  const condition = { resourceType: "Condition", id: "sectioned", subject: source().subject,
+    code: { text: "Synthetic finding" }, onsetDateTime: date, note: [{ text: "Detail ".repeat(1900) }] };
+  const f = await fixture([condition], "Condition");
+  const check = (day: number, onsetDateTime: string) => importClinicalFhirSnapshot({ ...f.input,
+    retrievalJobId: `sectioned-${day}`, fetchedAt: `2026-07-0${day}T12:00:00.000Z`,
+    pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset",
+      entry: [{ resource: { ...condition, onsetDateTime } }] }) }] });
+  expect(f.result.receipt.changes).toMatchObject([{ action: "created" }]);
+  expect((await check(3, date)).receipt.changes).toEqual([]);
+  expect(await check(2, revision)).toMatchObject({ receipt: { changes: [] }, canonical: { skippedExistingCount: 1 } });
+  expect((await check(4, revision)).receipt.changes).toMatchObject([{ action: "superseded" }]);
 });
 
 it("reimports an unchanged undated source across days and continues the enrichment queue", async () => {
