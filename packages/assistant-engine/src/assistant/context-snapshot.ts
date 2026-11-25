@@ -707,7 +707,7 @@ async function buildAssistantSnapshotCoverage(input: {
         canonicalEventCoverage.latestBloodPressureMeasurementDate,
       ),
     otherTestsLine: canonicalEventCoverage.latestOtherTestDate
-      ? `- Other test records, such as stool or microbiome kits, are present (latest ${canonicalEventCoverage.latestOtherTestDate}). For a named score or organism, read it with \`vault-cli diagnostic-test list --text "<name>" --format json\`.`
+      ? `- Test records outside the blood-test panels are present (latest ${canonicalEventCoverage.latestOtherTestDate}). For a named test or result, read it with \`vault-cli diagnostic-test list --text "<name>" --format json\`.`
       : null,
     conditionCount: conditions.length,
     goalCount: goals.length,

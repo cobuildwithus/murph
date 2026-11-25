@@ -112,9 +112,9 @@ stop, or escalate to care.
 - Update the habit regimen with the result, the decision, and the date. Keep it
   `active` only when the behavior continues; otherwise set `paused`,
   `completed`, or `stopped`, with `stoppedOn` when stopped.
-- Save the decision when the member makes it. Once they say the plan isn't
-  helping or doesn't fit, pause the regimen before you work out a new version
-  with them, so a review that trails off never leaves the old plan active.
+- Save each decision as soon as the member agrees to it, before working out
+  what comes next, so a review that trails off still leaves the regimen and its
+  reminders matching what was agreed.
 - Reconcile the series `habit:<regimen-id>` so no stale reminder survives: the
   ids that should continue for an adopted or modified plan, or an empty list for
   a pause, completion, or stop (`support-changes.md`).

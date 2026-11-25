@@ -263,7 +263,7 @@ describe('assistant context snapshot', () => {
         'Blood test records are present (latest 2026-05-31). For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.',
       )
       expect(prompt).toContain(
-        'Other test records, such as stool or microbiome kits, are present (latest 2026-05-25).',
+        'Test records outside the blood-test panels are present (latest 2026-05-25).',
       )
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active goals:')

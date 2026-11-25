@@ -58,9 +58,9 @@ Pregnancy, breastfeeding, kidney disease, blood thinners and other prescription 
 ## Keep one record per product
 
 When the member corrects or adds to something already saved (a dose, timing,
-label detail, start date or restart), update that record with
-`vault-cli supplement save --id <regimenId>`. Save a new record only for a
-different product. If a product was saved twice by mistake, move anything only
+label detail or start date), update that record with
+`vault-cli supplement save "<saved title>" --id <regimenId>`. Save a new record
+only for a different product or a new course after a stop. If a product was saved twice by mistake, move anything only
 the copy has onto the record you keep, then remove the copy with
 `vault-cli regimen delete <regimenId>`; a real stop keeps its record and stop
 date. For a past start given only as a month or season, use its first day and
