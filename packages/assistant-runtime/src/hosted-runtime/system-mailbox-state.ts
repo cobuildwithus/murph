@@ -251,6 +251,9 @@ export function resolveHostedSystemMailboxProgress(input: {
     if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
       continue;
     }
+    if (isHostedClinicalEnrichmentLocalMailboxItem(item)) {
+      continue;
+    }
 
     // A marked device item is a runtime-owned continuation until the existing
     // mailbox owner removes it. Its status transitions do not change ownership.
@@ -553,6 +556,18 @@ function isPendingHostedDeviceSyncDenseRawRetentionMailboxItem(
 ): boolean {
   return item.status === "pending"
     && isHostedDeviceSyncDenseRawRetentionMailboxItem(item);
+}
+
+/**
+ * Clinical enrichment is runtime-local work with its own wake. It never had a
+ * Web lane seq, so it must not hold back the Web system lane while it runs.
+ */
+function isHostedClinicalEnrichmentLocalMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.mailboxLaneSeq === null
+    && item.routeAction === "apply-clinical-enrichment"
+    && item.wake.kind === "clinical-records.enrichment-requested";
 }
 
 function isHostedDeviceSyncDenseRawRetentionMailboxItem(
