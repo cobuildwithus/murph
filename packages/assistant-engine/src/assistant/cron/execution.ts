@@ -3170,9 +3170,9 @@ abstract class AssistantCronGateSkipError extends VaultCliError {
 }
 
 async function assertClinicalCronTransport(job: AssistantCronJob, context: AssistantExecutionContext | null | undefined, signal: AbortSignal) {
-  if (!job.clinicalChange && !job.jobId.startsWith('cron_clinical_change_')) return
+  if (!job.clinicalChange) return
   const resolve = context?.hosted?.resolveScheduledLinqRoute
-  if (job.clinicalChange && job.target.channel === 'linq' && job.target.threadIsDirect && job.target.threadId && resolve) {
+  if (job.target.channel === 'linq' && job.target.threadIsDirect && job.target.threadId && resolve) {
     const authority = await resolve({
       homeRouteFallbackAllowed: false, idempotencyKey: `clinical-change:v1:${job.clinicalChange.runId}:detail`,
       signal, target: job.target.threadId, targetKind: 'thread',

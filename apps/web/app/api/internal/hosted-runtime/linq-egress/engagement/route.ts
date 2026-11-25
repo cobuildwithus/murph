@@ -313,7 +313,7 @@ export const POST = withJsonError(async (request: Request) => {
     if (clinicalKey) {
       const { clinicalEgressBlock } = await import("@/src/lib/clinical-records/notification");
       const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
-        route: finalAuthority.resolvedRoute, now: new Date() });
+        route: finalAuthority.resolvedRoute });
       return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
         deliveryPosture: null, ackReaction: null, progressUpdateSuppressed: false, providerDispatchClaimed: null };
     }

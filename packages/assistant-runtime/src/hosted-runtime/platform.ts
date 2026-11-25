@@ -375,7 +375,6 @@ export function parseHostedRuntimeAssistantResponseMedia(
 }
 
 export interface HostedRuntimeLinqSendRequest {
-  requiredService?: "iMessage";
   card?: AssistantResponseCard | null;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;

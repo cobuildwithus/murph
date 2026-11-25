@@ -3,16 +3,13 @@ import { createHash } from "node:crypto";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 import { readHostedMemberHomeLinqChatId } from "../hosted-onboarding/member-private-codecs";
-import type { ClinicalNotificationDecision } from "@murphai/hosted-execution/clinical-records";
-import { CLINICAL_TEXT_TRANSPORT_BLOCK } from "@murphai/hosted-execution/clinical-records-boundary";
+import { CLINICAL_TEXT_TRANSPORT_BLOCK, type ClinicalNotificationDecision } from "@murphai/hosted-execution/clinical-records";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/contracts";
-import { decideHostedGroupJoinOutreachSendWindow } from "../hosted-groups/group-join-outreach-window";
 import { createHostedLinqChatLookupKey } from "../hosted-onboarding/contact-privacy";
 import type { Prisma } from "@prisma/client";
 import { activeHostedPersonAccessWhere, hostedRuntimeMemberEligibleWhere } from "../hosted-onboarding/member-access";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { readHostedConsentStatus } from "../legal/consent";
-import { clinicalRecordsError } from "./errors";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES } from "./client-contracts";
 
 type RunPointer = { memberId: string; runId: string; generation: number };
@@ -86,24 +83,22 @@ export async function readClinicalNotificationDecision(input: RunPointer): Promi
 
 /** Scheduled preflight and every dispatch/retry enter the same signed egress owner. */
 export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
-  key: string; memberId: string; route: HostedExecutionResolvedLinqDeliveryRoute; now: Date;
+  key: string; memberId: string; route: HostedExecutionResolvedLinqDeliveryRoute;
 }) {
   const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):(notice|detail)(?::bubble:[1-9][0-9]*)?$/u.exec(input.key);
   if (!match || input.route.targetKind !== "thread" || !input.route.threadIsDirect) return "clinical_authority_unavailable";
   const authority = acceptedClinicalOccurrence(await readClinicalNotificationAuthority(tx, { memberId: input.memberId, runId: match[1]! }));
   if (!authority || authority.mode !== match[2]
     || createHostedLinqChatLookupKey(input.route.target) !== authority.chatLookupKey) return "clinical_authority_unavailable";
-  if (decideHostedGroupJoinOutreachSendWindow({ now: input.now, participantPhoneNumber: input.route.directRecipientPhoneNumber ?? "" }).kind !== "send_now") {
-    return "clinical_quiet_hours";
-  }
   return CLINICAL_TEXT_TRANSPORT_BLOCK;
 }
 
 /** Caller holds the member row lock. Proof, coverage and encrypted mailbox publication share its transaction. */
 export async function publishClinicalChangeTx(tx: Prisma.TransactionClient, input: RunPointer) {
   const authority = await readClinicalNotificationAuthority(tx, input);
-  if (!authority || ["published", "scheduled"].includes(authority.run.notificationCoverage ?? "")) return null;
+  if (!authority) return null;
   const { run } = authority;
+  if (run.notificationCoverage !== null && run.notificationCoverage !== "proved") return null;
   if (!run.completedAt) {
     if (run.notificationCoverage === null && CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === run.status)) {
       await tx.clinicalRecordRetrievalRun.update({ where: { id: input.runId }, data: { notificationCoverage: "proved" } });
@@ -115,8 +110,8 @@ export async function publishClinicalChangeTx(tx: Prisma.TransactionClient, inpu
     kind: "clinical-records.change-recorded", eventId: `clinical-change:v1:${input.runId}`, userId: input.memberId,
     occurredAt: run.completedAt.toISOString(), runId: input.runId, generation: input.generation,
   } });
-  if (appended.dedupeConflict) throw clinicalRecordsError({ code: "CLINICAL_RECORD_CHANGE_CONFLICT", httpStatus: 409,
-    message: "The clinical change occurrence conflicts with existing work." });
-  await tx.clinicalRecordRetrievalRun.update({ where: { id: input.runId }, data: { notificationCoverage: "published" } });
+  await tx.clinicalRecordRetrievalRun.update({ where: { id: input.runId },
+    data: { notificationCoverage: appended.dedupeConflict ? "suppressed" : "published" } });
+  if (appended.dedupeConflict) return null;
   return { id: appended.item.id, lane: appended.item.lane, laneSeq: appended.item.laneSeq, userId: input.memberId };
 }

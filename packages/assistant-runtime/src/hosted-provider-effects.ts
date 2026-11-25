@@ -158,7 +158,7 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
-  assertClinicalTextTransportAvailable(request.idempotencyKey, request.requiredService);
+  assertClinicalTextTransportAvailable(request.idempotencyKey);
   let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,

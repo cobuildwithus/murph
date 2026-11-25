@@ -3738,7 +3738,11 @@ Current product admission, delivery and native runtime safety rules remain.
 - A daily notification follows the originating run through terminal acceptance,
   later enrichment and queue cleanup. Under the member lock, its row can advance
   from empty to proved, published and scheduled. Terminal proof can publish
-  directly. Publication and encrypted mailbox append commit together. The
+  directly. A conflicting mailbox key suppresses the notification permanently
+  while the import commits its terminal outcome. A rejected enrichment proof
+  leaves later pages free to run. A transient callback failure keeps the
+  pointer on the next page, or retries the proof if the job has finished.
+  Publication and encrypted mailbox append commit together. The
   existing handoff sweep recovers an unimported pointer after signal loss.
   A private outbox intent or one-shot job uses a stable run identity and the
   existing workspace checkpoint precedes the scheduling acknowledgement. A

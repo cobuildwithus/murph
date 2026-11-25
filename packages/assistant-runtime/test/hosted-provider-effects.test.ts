@@ -22,16 +22,11 @@ import {
 describe("hosted provider effects", () => {
   it("stops strict clinical text before Linq can select a protocol or recover a thread", async () => {
     const fetchImplementation = vi.fn();
-    for (const request of [
-      { requiredService: "iMessage" as const },
-      { idempotencyKey: "clinical-change:v1:synthetic-run:bubble:2" },
-    ]) {
-      await expect(sendLinqMessage({ ...request, target: "synthetic-thread", message: "Synthetic test." },
-        { env: {}, fetchImplementation })).rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
-      await expect(sendHostedProviderLinqMessage({ ...request, message: "Synthetic test.", target: "synthetic-thread",
-        targetKind: "thread", threadIsDirect: true }, { env: {}, fetchImplementation }))
-        .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
-    }
+    const request = { idempotencyKey: "clinical-change:v1:synthetic-run:detail:bubble:2", message: "Synthetic test.", target: "synthetic-thread" };
+    await expect(sendLinqMessage(request, { env: {}, fetchImplementation }))
+      .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
+    await expect(sendHostedProviderLinqMessage({ ...request, targetKind: "thread", threadIsDirect: true }, { env: {}, fetchImplementation }))
+      .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 

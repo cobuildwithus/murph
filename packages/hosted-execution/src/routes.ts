@@ -183,7 +183,6 @@ export type HostedRuntimeLinqDeliveryPosture =
 export const HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES = [
   "automation_engagement_paused",
   "clinical_authority_unavailable",
-  "clinical_quiet_hours",
   "clinical_imessage_only_unavailable",
   "operator_disabled",
   "line_flagged",

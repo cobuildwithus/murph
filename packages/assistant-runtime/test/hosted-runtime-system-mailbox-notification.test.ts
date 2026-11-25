@@ -2359,6 +2359,40 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it.each([
+    { status: 403, more: true }, { status: 400, more: false }, { status: 503, more: true }, { status: 503, more: false },
+  ])("keeps enrichment independent of proof rejection ($status, more=$more)", async ({ status, more }) => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-proof-");
+    const changeRun = { runId: "synthetic-run", generation: 2 };
+    const item: HostedSystemMailboxPendingItem = {
+      attemptCount: 1, itemId: "synthetic-enrichment", lastAttemptAt: FIXED_NOW, lastErrorCode: null,
+      lastErrorMessage: null, mailboxDedupeKey: "synthetic-enrichment", mailboxLaneSeq: null,
+      nextAttemptAt: null, occurredAt: FIXED_NOW, requestId: null, routeAction: "apply-clinical-enrichment", status: "recording",
+      wake: { kind: "clinical-records.enrichment-requested", jobId: "a".repeat(64), eventId: "synthetic-enrichment",
+        userId: "synthetic-member", occurredAt: FIXED_NOW, changeRun },
+      postCheckpointRecord: { kind: "clinical-records.outcome-recorded", request: { kind: "change-receipt", ...changeRun },
+        ...(more ? { resumeEnrichmentAt: FIXED_NOW } : {}) },
+    };
+    const recordOutcome = vi.fn().mockRejectedValue(Object.assign(new Error("Synthetic refusal"), { status }));
+    const runtime = createRuntime({ clinicalRecordsPort: { recordOutcome, fetchPage: vi.fn(), readRun: vi.fn() } });
+    try {
+      await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({ pending: [item] }));
+      const [stored] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      if (!stored) throw new Error("Expected the stored enrichment checkpoint.");
+      const result = await recordHostedSystemMailboxItemAfterCheckpoint({ item: stored, runtime, vaultRoot: workspace.vaultRoot });
+      const { pending } = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(result).toMatchObject({ failed: !more && status >= 500 ? 1 : 0, recorded: 0 });
+      if (more) {
+        expect(pending).toMatchObject([{ status: "pending", nextAttemptAt: FIXED_NOW, postCheckpointRecord: null }]);
+        expect(pending[0]?.wake).toHaveProperty("jobId", "a".repeat(64));
+        if (status < 500) expect(pending[0]?.wake).not.toHaveProperty("changeRun");
+        else expect(pending[0]?.wake).toHaveProperty("changeRun", changeRun);
+      } else if (status < 500) expect(pending).toEqual([]);
+      else expect(pending).toMatchObject([{ status: "recording", postCheckpointRecord: item.postCheckpointRecord }]);
+      expect(recordOutcome).toHaveBeenCalledOnce();
+    } finally { await workspace.cleanup(); }
+  });
+
   it("aborts a stalled clinical outcome record and preserves it for retry", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const controller = new AbortController();

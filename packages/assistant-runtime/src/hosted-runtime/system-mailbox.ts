@@ -270,6 +270,7 @@ export type HostedSystemMailboxRuntime = Pick<
 > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
 
 interface HostedSystemMailboxPostCheckpointRecordResult {
+  retryChangeProof?: true;
   newerRevisionPending: boolean;
   nextWakeAt: string | null;
   recorded: number;
@@ -1205,7 +1206,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const resumed = await resumeWorkAfterCheckpoint(input, recordResult.recorded);
+    const resumed = await resumeWorkAfterCheckpoint(input, recordResult);
     if (resumed) return resumed;
     const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
       acceptedInCurrentAdmission:
@@ -1879,6 +1880,29 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
   return { newerRevisionPending: false, nextWakeAt: null, recorded: 1, stillDirty: false };
 }
 
+async function recordClinicalCheckpoint(
+  record: Extract<HostedSystemMailboxPostCheckpointRecord, { kind: "clinical-records.outcome-recorded" }>,
+  runtime: HostedSystemMailboxRuntime,
+  signal?: AbortSignal | null,
+): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
+  const result = { newerRevisionPending: false, nextWakeAt: null, stillDirty: false };
+  try {
+    const port = runtime.platform.clinicalRecordsPort;
+    if (!port) throw new Error("Hosted clinical records outcome checkpoint requires a configured clinical records port.");
+    if (signal) await port.recordOutcome(record.request, { signal });
+    else await port.recordOutcome(record.request);
+    return { ...result, recorded: 1 };
+  } catch (error) {
+    if (signal?.aborted || !("kind" in record.request) || record.request.kind !== "change-receipt") throw error;
+    const status = error instanceof Error && "status" in error ? error.status : null;
+    if (typeof status === "number" && status >= 400 && status < 500) return { ...result, recorded: 0 };
+    // Pending enrichment gets its own wake even while Web is down. The next page
+    // can attest the same durable shard. A finished job keeps ordinary retry.
+    if (record.resumeEnrichmentAt) return { ...result, recorded: 0, retryChangeProof: true };
+    throw error;
+  }
+}
+
 async function recordHostedSystemMailboxPostCheckpointRecordLegacy(input: {
   operatorHomeRoot: string | null;
   record: Exclude<HostedSystemMailboxPostCheckpointRecord, { kind: "game.recap-lore-checkpointed" }>;
@@ -1930,25 +1954,8 @@ async function recordHostedSystemMailboxPostCheckpointRecordLegacy(input: {
         stillDirty: false,
       };
     }
-    case "clinical-records.outcome-recorded": {
-      const port = input.runtime.platform.clinicalRecordsPort;
-      if (!port?.recordOutcome) {
-        throw new Error(
-          "Hosted clinical records outcome checkpoint requires a configured clinical records port.",
-        );
-      }
-      if (input.signal) {
-        await port.recordOutcome(input.record.request, { signal: input.signal });
-      } else {
-        await port.recordOutcome(input.record.request);
-      }
-      return {
-        newerRevisionPending: false,
-        nextWakeAt: null,
-        recorded: 1,
-        stillDirty: false,
-      };
-    }
+    case "clinical-records.outcome-recorded":
+      return recordClinicalCheckpoint(input.record, input.runtime, input.signal);
     case "member-action.outcome-recorded": {
       const port = input.runtime.platform.mailboxPort;
       if (!port?.recordMemberActionOutcome) {
@@ -2272,7 +2279,7 @@ async function completeSystemMailboxItemWithoutRecord(input: Parameters<typeof r
     };
 }
 
-async function resumeWorkAfterCheckpoint(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0], recorded: number) {
+async function resumeWorkAfterCheckpoint(input: Parameters<typeof recordHostedSystemMailboxItemAfterCheckpoint>[0], result: HostedSystemMailboxPostCheckpointRecordResult) {
   const record = input.item.postCheckpointRecord;
   const nextAttemptAt = record?.kind === "game.recap-lore-checkpointed" && record.resume
     ? new Date().toISOString()
@@ -2282,12 +2289,12 @@ async function resumeWorkAfterCheckpoint(input: Parameters<typeof recordHostedSy
   await updateHostedSystemMailboxState(input.vaultRoot, state => ({ ...state,
     pending: state.pending.map(item => {
       if (!hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)) return item;
-      // Web now holds this run's proof. Further pages only need their original job identity.
-      const wake = item.wake.kind === "clinical-records.enrichment-requested"
+      // Keep the pointer only while a later page can retry transient publication.
+      const wake = !result.retryChangeProof && item.wake.kind === "clinical-records.enrichment-requested"
         ? { ...item.wake, changeRun: undefined } : item.wake;
       return { ...item, wake, status: "pending" as const, postCheckpointRecord: null, nextAttemptAt,
         lastErrorCode: null, lastErrorMessage: null };
     }) }));
   const nextWake = await resolveHostedSystemMailboxNextWakeCandidate({ assistantExecutionBlocked: input.assistantExecutionBlocked, vaultRoot: input.vaultRoot });
-  return { failed: 0, nextWakeAt: nextWake.at, ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}), recorded };
+  return { failed: 0, nextWakeAt: nextWake.at, ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}), recorded: result.recorded };
 }

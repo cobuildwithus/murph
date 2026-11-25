@@ -51,40 +51,42 @@ for off. No model or provider was entered. PostgreSQL exercised a real accepted
 terminal, first late enrichment under a newer generation, lost handoff, durable
 coverage, and revision, route and credential changes. A private workspace replay
 rendered the generic notice and checkpointed the pointer. Real handset delivery
-and revocation during an actual model turn require the strict sender in E2.
+and revocation during an actual model turn await the owner's channel decision and E2 delivery proof.
 
 ### PR E2 · Admission and activation boundary
 
-1. Extend the existing protected post-deployment contract-migration lane with
-   a machine gate. Require the compatible Web production SHA, all serving
-   Worker versions and their port, and the exact receipt-capable runner image
-   digest. Use the runner release provider's completed native rollout and
-   drained-instance checks for every serving target. Refuse a pending rollout,
-   mixed traffic, missing evidence or a pre-floor rollback target. Only then
-   may the migration owner commit a pinned migration ID and checksum to
-   `_hosted_web_contract_migration`. A Web build, an environment flag or a
-   single successful callback supplies no fleet proof.
-2. Have Web read that exact committed marker under the daily admission lock.
-   Absence, mismatch or an unavailable marker keeps admission silent. Pin a
-   receipt-required retrieval protocol for eligible runs so an older Web or
-   runner cannot acquire their pages on rollback. Under the same lock prove
-   the replacement-client ongoing grant, an accepted baseline for the current
-   credential epoch, the live message revision and exact verified home route.
-   Persist the epoch, revision and route fingerprint only on that new run.
-   Establish baseline authority explicitly under each new authorization.
-   Never backfill old rows from connection dates or generation numbers.
-3. Before enabling successful text delivery, obtain and test an enforceable
-   strict-text transport. Retain the provider refusal and the pre-model skip
-   until the signed preflight and each outbound tool, retry and bubble are
-   bound to the run and its single recipient. Recheck AI allowance for detail
-   through ordinary scheduled execution. Prove an attempted alternate send,
-   withdrawal during generation and downgrade between accepted bubbles using
-   the strict sender. A service preference or capability lookup cannot clear
-   this gate. Complete the positive detail journey with synthetic vault data.
-4. Stop new admissions first on rollback. After the first eligible run, retain
-   compatible receipt writers, schema, Web/Worker/snapshot readers, settings
-   fences, recovery and egress guards until all outstanding work and restorable
-   checkpoints are covered. Prevent selecting an older serving writer while
-   the admission marker can authorize a new generation. Retain durable run
-   coverage across mailbox, outbox and cron cleanup. E1 alone writes no
-   eligible production runs and does not change the existing receipts floor.
+1. Pin a receipt-required retrieval protocol at admission on each eligible
+   run. Web must enforce that version on every page and retry, and bind each
+   enrichment job and restored checkpoint to it. Prove an older runner cannot
+   import a batch or apply enrichment for that run through a legacy path,
+   including after restore. This per-run fence suffices for receipt authority.
+   Remove the fleet-attested migration marker from the design. Deploy all
+   readers first so mixed fleets can make progress. Never backfill eligibility.
+2. Under the daily admission lock, prove the replacement-client ongoing grant,
+   an accepted baseline under the current credential epoch, the current message
+   revision and exact verified private route. Freeze these on the new run.
+   Keep admissions disabled until the chosen channel can send. Today a private
+   checkpoint advances coverage to `scheduled` even if the intent fails or
+   the job skips. Enabling admission earlier would consume the only occurrence.
+3. The owner must decide whether clinical texts may use the member's ordinary
+   Murph thread. Linq automatically selects iMessage, then RCS, then SMS and
+   deprecated its service preference. It offers no iMessage-only guarantee
+   for plain text. Keep clinical sends blocked pending this decision.
+4. Bind every outbound effect of a detail turn to the accepted run, current
+   policy and single recipient before allowing generation. Ordinary cron
+   replies mint ordinary keys today. No code mints clinical per-bubble keys
+   and those replies would bypass `clinicalEgressBlock`. Test revocation during
+   generation, between bubbles, on alternate tools and on retry. Preserve
+   the ordinary AI allowance rules. Demonstrate that the system-work path
+   drains the fixed notice's `deliveryIntentIds` through actual outbox egress.
+5. Defer an occurrence during quiet hours and persist its next safe wake.
+   Recheck authority at that wake before sending. If the verified number
+   is missing or its region has no supported window, hold silently until
+   route information changes. Do not poll an unresolvable region or consume
+   coverage for a quiet-hours deferral.
+6. Roll back admissions first. Old runners strictly reject `changeRun` in
+   persisted enrichment mailbox state and `clinicalChange` when parsing the
+   whole cron store. Old Web rejects the notification `purpose` and checkpoint
+   `kind`. Retain compatible Web, Worker and runner readers, the pinned receipt
+   protocol, egress checks and durable coverage through outstanding work and
+   restorable snapshots. E1 alone admits no eligible runs.

@@ -1,3 +1,4 @@
+import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -135,6 +136,21 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     } finally { await f.cleanup(); }
   });
 
+  it("commits the terminal import and suppresses a conflicting notification even after mailbox cleanup", async () => {
+    const f = await notificationFixture();
+    try {
+      await client.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: {
+        kind: "clinical-records.sync-requested", eventId: `clinical-change:v1:${f.pointer.runId}`,
+        userId: f.memberId, occurredAt: now.toISOString(), generation: 1, runId: "different-synthetic-run",
+      } }));
+      await f.terminal(true);
+      expect(await f.runs()).toMatchObject([{ status: "partial", completedAt: expect.any(Date), notificationCoverage: "suppressed" }]);
+      await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
   it("checks the exact recipient and current revision on successive detail bubbles", async () => {
     const f = await notificationFixture("detail");
     try {
@@ -142,7 +158,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       expect(await f.count()).toBe(1);
       const attempt = (bubble: number, thread = f.threadId) => client.$transaction(tx => clinicalEgressBlock(tx, {
         key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:${bubble}`, memberId: f.memberId,
-        now: new Date("2026-11-01T18:00:00Z"), route: { conversationThreadId: thread, target: thread,
+        route: { conversationThreadId: thread, target: thread,
           directRecipientPhoneNumber: "+12025550109", fromPhoneNumber: null, targetKind: "thread", threadIsDirect: true },
       }));
       expect(await attempt(1)).toBe("clinical_imessage_only_unavailable");

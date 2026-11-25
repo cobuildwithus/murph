@@ -69,7 +69,7 @@ const identifierSchema = z
   .min(1)
   .max(HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS)
   .regex(HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN);
-export { parseHostedClinicalCheckpointRequest, type HostedClinicalChangeProof } from "./clinical-records-boundary.ts";
+export { CLINICAL_TEXT_TRANSPORT_BLOCK, parseHostedClinicalCheckpointRequest, type HostedClinicalChangeProof } from "./clinical-records-boundary.ts";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const errorCodeSchema = z

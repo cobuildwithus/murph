@@ -553,8 +553,8 @@ additional shard and preserve it in encrypted workspace snapshots. They can
 continue importing without writing receipts. A receipt-aware reader treats
 missing history as unproved. If a previous runtime committed a batch, replay
 under a receipt writer can produce an empty receipt indistinguishable from a
-proven no-change result. Notifications may trust only runs admitted after receipt
-writers are deployed everywhere. During rollback, retain the shard and require
+proven no-change result. Notifications may trust only freshly admitted runs whose pinned protocol
+requires a receipt writer on every retrieval and enrichment path. During rollback, retain the shard and require
 receipt-capable runners wherever complete evidence is needed. App counts retain
 their existing wire contract. Web outcomes, orchestration and diagnostics carry
 no receipt contents.
@@ -564,8 +564,8 @@ no receipt contents.
 The notification readers are dormant. Every current run creation path leaves
 the notification fields empty. A future daily admission may freeze the current
 credential epoch, message revision and verified private home route only after an
-accepted baseline under the same authorization and proof of the compatible
-runner rollout. Initial imports, recovery of a missing baseline, member starts
+accepted baseline under the same authorization and a receipt-required
+protocol for the entire run. Initial imports, recovery of a missing baseline, member starts
 and legacy enrichment remain silent for their entire lifetime.
 
 A signed, write-fenced callback can attest a committed change for one run.

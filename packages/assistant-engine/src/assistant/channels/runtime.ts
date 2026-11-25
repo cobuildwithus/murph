@@ -710,8 +710,8 @@ function buildLinqAppCardDeliveryResult(
   }
 }
 
-export function assertClinicalTextTransportAvailable(idempotencyKey?: string | null, requiredService?: 'iMessage') {
-  if (requiredService === 'iMessage' || idempotencyKey?.startsWith('clinical-change:')) {
+export function assertClinicalTextTransportAvailable(idempotencyKey?: string | null) {
+  if (idempotencyKey?.startsWith('clinical-change:')) {
     throw new VaultCliError(CLINICAL_TEXT_TRANSPORT_BLOCK, 'Strict iMessage delivery is unavailable.', { retryable: false })
   }
 }
@@ -721,7 +721,6 @@ export async function sendLinqMessage(
     card?: AssistantResponseCard | null
     directRecipientPhoneNumber?: string | null
     fromPhoneNumber?: string | null
-    requiredService?: 'iMessage'
     idempotencyKey?: string | null
     media?: readonly AssistantResponseMedia[] | null
     message: string
@@ -742,7 +741,7 @@ export async function sendLinqMessage(
   providerThreadId: string | null
   target: string | null
 }> {
-  assertClinicalTextTransportAvailable(input.idempotencyKey, input.requiredService)
+  assertClinicalTextTransportAvailable(input.idempotencyKey)
   const env = dependencies.env ?? process.env
   const token = resolveLinqApiToken(env)
   if (!token) {
