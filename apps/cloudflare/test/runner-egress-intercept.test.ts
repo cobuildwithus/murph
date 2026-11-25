@@ -1,3 +1,7 @@
+import { clinicalRecordRecipients } from "@murphai/hosted-execution/clinical-records";
+import { HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS } from "@murphai/operator-config/hosted-assistant-config";
+import { resolveAssistantCodexModelProviderConfig } from "@murphai/operator-config/assistant/target-runtime";
+import { HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER } from "../src/hosted-env-policy.ts";
 import { createCloudflareHostedProviderFetch } from "../src/runtime-platform/provider-fetch.ts";
 import type { TestProviderContext } from "./postgres-owner-fixtures.ts";
 import { createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
@@ -447,6 +451,26 @@ afterEach(async () => {
 });
 
 describe("hostedRunnerIntercept", () => {
+  it("classifies each built-in recipient and names every hosted inference provider", () => {
+    expect(new Set(clinicalRecordRecipients.map(row => row.id)).size).toBe(clinicalRecordRecipients.length);
+    const routedHosts = new Set([
+      ...Object.keys(HOSTED_RUNNER_OUTBOUND_BY_HOST),
+      ...Object.values(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS),
+    ]);
+    expect(clinicalRecordRecipients.flatMap(row => [...row.hosts]).sort()).toEqual([...routedHosts].sort());
+
+    const { openAi, elevenLabs, gemini, mapbox, xai } = HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS;
+    expect(clinicalRecordRecipients.filter(row => row.kind === "named").flatMap(row => [...row.hosts]).sort())
+      .toEqual([openAi, elevenLabs, gemini, mapbox, xai].sort());
+    expect(HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS).toEqual([HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER]);
+    for (const provider of HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS) {
+      const config = resolveAssistantCodexModelProviderConfig(provider);
+      expect(clinicalRecordRecipients.find(row => row.id === provider)).toMatchObject({
+        kind: "named", hosts: [new URL(config!.baseUrl).hostname],
+      });
+    }
+  });
+
   it("maps default provider and internal hosts to Cloudflare per-host outbound handlers", () => {
     expect(hostedRunnerIntercept).toBe(handleHostedRunnerOpenInternetOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi])

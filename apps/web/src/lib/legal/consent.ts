@@ -464,11 +464,13 @@ export async function revokeHostedConsentScope(input: {
   });
 }
 
+type ProcessorScope = `clinical.processor.${string}`;
+
 /** Caller holds the member lock so consent and the feature's effects commit together. */
-export async function recordHostedConsentDecisionTx(input: {
+export async function recordHostedConsentDecisionTx(input: ({ scope: HostedConsentScope; acceptedDocumentVersions?: never; expectedDocumentVersions?: never }
+  | { scope: ProcessorScope; acceptedDocumentVersions: Record<string, string>; expectedDocumentVersions: Record<string, string> }) & {
   tx: Prisma.TransactionClient;
   memberId: string;
-  scope: HostedConsentScope;
   decision: "allow" | "deny";
   source: string;
   now: Date;
@@ -480,11 +482,13 @@ export async function recordHostedConsentDecisionTx(input: {
   const prior = grant ? null : await tx.hostedConsentEvent.findFirst({
     where: { memberId, scope }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { action: true },
   });
-  const allowed = grant?.status === "granted";
+  const expected = input.expectedDocumentVersions ?? buildCurrentHostedConsentDocumentVersions(input.scope);
+  if (input.acceptedDocumentVersions) validateExactVersions(input.acceptedDocumentVersions, expected, scope);
+  const allowed = matchesConsentDecision(grant, input.acceptedDocumentVersions);
   if (decision === "allow" ? allowed : (grant?.status === "revoked" || prior?.action === "declined" || prior?.action === "revoked")) return;
   const documentVersions = decision === "deny" && grant
     ? grant.documentVersionsJson as Prisma.InputJsonObject
-    : buildCurrentHostedConsentDocumentVersions(scope);
+    : expected;
   const event = await tx.hostedConsentEvent.create({ data: {
     id: generateHostedConsentEventId(), memberId, scope, source, createdAt: now,
     action: decision === "allow" ? "granted" : grant ? "revoked" : "declined",
@@ -774,14 +778,25 @@ function normalizeSubmittedDocumentVersionsForScope(input: {
   scope: HostedConsentScope;
 }): Record<string, string> {
   const expected = buildCurrentHostedConsentDocumentVersions(input.scope);
-  const unknownDocumentIds = Object.keys(input.documentVersions)
+  return validateExactVersions(input.documentVersions, expected, input.scope);
+}
+
+function matchesConsentDecision(grant: HostedConsentGrant | null, exactVersions?: Record<string, string>) {
+  if (grant?.status !== "granted") return false;
+  if (!exactVersions) return true;
+  const recorded = parseDocumentVersionsJson(grant.documentVersionsJson);
+  return Object.entries(exactVersions).every(([id, version]) => recorded[id] === version);
+}
+
+function validateExactVersions(submitted: Record<string, string>, expected: Record<string, string>, scope: HostedConsentScope | ProcessorScope) {
+  const unknownDocumentIds = Object.keys(submitted)
     .filter((documentId) => !Object.prototype.hasOwnProperty.call(expected, documentId));
 
   if (unknownDocumentIds.length > 0) {
     throw hostedOnboardingError({
       code: "CONSENT_DOCUMENT_VERSIONS_INVALID",
       details: {
-        scope: input.scope,
+        scope,
         unknownDocumentIds,
       },
       httpStatus: 400,
@@ -790,7 +805,7 @@ function normalizeSubmittedDocumentVersionsForScope(input: {
   }
 
   const missingOrStale = Object.entries(expected)
-    .filter(([documentId, expectedVersion]) => input.documentVersions[documentId] !== expectedVersion)
+    .filter(([documentId, expectedVersion]) => submitted[documentId] !== expectedVersion)
     .map(([documentId]) => documentId);
 
   if (missingOrStale.length > 0) {
@@ -798,7 +813,7 @@ function normalizeSubmittedDocumentVersionsForScope(input: {
       code: "CONSENT_DOCUMENT_VERSIONS_STALE",
       details: {
         missingOrStaleDocumentIds: missingOrStale,
-        scope: input.scope,
+        scope,
       },
       httpStatus: 409,
       message: "Refresh the current Murph legal documents before accepting consent.",

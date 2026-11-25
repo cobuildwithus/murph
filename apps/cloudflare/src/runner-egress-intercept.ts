@@ -131,7 +131,7 @@ const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE =
 
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
-const DEFAULT_TELEGRAM_FILE_BASE_URL = "https://api.telegram.org/file";
+const DEFAULT_TELEGRAM_FILE_BASE_URL = `${DEFAULT_TELEGRAM_API_BASE_URL}/file`;
 const HOSTED_DATA_API_RUNTIME_BASE_URL = "http://murph-data-api.worker";
 const HOSTED_DATA_API_ALLOWED_PATHS = new Set(HOSTED_RUNTIME_DATA_API_PATHS);
 const HOSTED_DATA_API_RUNTIME_HOST =
@@ -159,18 +159,18 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
   effectsPort: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort,
-  elevenLabs: "api.elevenlabs.io",
-  gemini: "generativelanguage.googleapis.com",
-  linq: "api.linqapp.com",
-  mapbox: "api.mapbox.com",
+  elevenLabs: new URL(DEFAULT_ELEVENLABS_API_BASE_URL).hostname,
+  gemini: new URL(DEFAULT_GEMINI_API_BASE_URL).hostname,
+  linq: new URL(DEFAULT_LINQ_API_BASE_URL).hostname,
+  mapbox: new URL(DEFAULT_MAPBOX_API_BASE_URL).hostname,
   mediaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore,
-  openAi: "api.openai.com",
+  openAi: new URL(DEFAULT_OPENAI_API_BASE_URL).hostname,
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
-  telegram: "api.telegram.org",
+  telegram: new URL(DEFAULT_TELEGRAM_API_BASE_URL).hostname,
   transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
-  xai: "api.x.ai",
+  xai: new URL(DEFAULT_XAI_API_BASE_URL).hostname,
 } as const;
 
 const OPENAI_EGRESS_POLICY = [

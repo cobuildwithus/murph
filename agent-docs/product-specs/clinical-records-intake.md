@@ -92,6 +92,49 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
 | POST `message-preference` | `{ mode }` | `{ messageMode }` |
+| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }] }` |
+| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | Same fresh processor list |
+
+On a start response requiring named approval, the app fetches the current list,
+displays one tick per company on a single screen and sends one decision per
+request. It retries start after the final approval. A missing route on an older server leaves the feature unavailable.
+Send the displayed version, including on withdrawal. A stale version returns
+409 `CONSENT_DOCUMENT_VERSIONS_STALE`. Either decision requires a current native
+bearer. Withdrawal remains available after product access lapses. Neither
+decision changes the medical-record message setting. Withdrawing health consent
+still turns that setting off and blocks further grants until reconsent.
+
+The asymmetric registration checks every current notice before SMART discovery,
+before callback token exchange and again under the member lock before saving the connection. Missing approvals
+return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
+governs daily admission and transport even after the start selector changes.
+Legacy profiles keep their current admission rules.
+
+For the replacement Epic registration, the sharing answer rests on three rules.
+
+1. **Named companies.** When Murph chooses a company that can read hospital information, the member approves that company before import. OpenAI reads records for enrichment, chat and scheduled turns. Hosted inference goes directly to OpenAI, including on a transport retry.
+2. **Member-directed destinations.** Connecting an app or connector, choosing a website or recipient, or requesting a call, email or export authorizes that destination. Delivery to the member’s own phone includes the detail text they enabled.
+3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally.
+
+The app shows all five named companies. Current grants let the connection and
+its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
+admission or hospital page/document request. Web closes a blocked open run as
+failed and preserves its daily grant. Re-approval permits the next due check.
+The companion source reports `reason: "processor_approval_required"` while
+approval pauses an import or daily checks. `updates` still reports the hospital
+grant. A transfer already in flight may finish.
+Records already imported stay in the vault and remain available to ordinary and
+scheduled turns. Member-directed actions continue to use their own authority.
+Hosting, encrypted storage and pointer-only workflows stay on the subprocessor list.
+
+The classification test covers the runner’s by-host intercept table and allowed model providers, but cannot see deployment secret allowlists or a tool that calls a new fixed origin through the open-internet path.
+Deploy the nullable profile column first. Keep the public selector active until
+all Web replicas enforce the same registry, then release the native approval
+screen and verify the company names and routes before selecting the replacement.
+Confirm that no earlier server admitted an unmarked replacement grant. Keep the
+decision and withdrawal routes after the first app grant and the profile-aware
+admission and transport readers after the first replacement connection. Converge
+new or revised notices on Web before enabling the corresponding runner route.
 
 The list, completion and removal responses include `messageMode` only while at
 least one connected source reports `updates: "daily"`. With only one-time
