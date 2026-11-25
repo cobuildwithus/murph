@@ -202,7 +202,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
 
   it("leaves an unstarted row due at an expired deadline for a later sweep", async () => {
     const f = await fixture();
-    expect(await runClinicalDailySyncSweep({ now, deadlineMs: Date.now() - 1 })).toEqual({ checked: 1, queued: 0, failed: 0 });
+    expect(await runClinicalDailySyncSweep({ now, deadlineMs: Date.now() - 1 })).toEqual({ checked: 0, queued: 0, failed: 0 });
     expect((await f.row()).nextSyncAt).toEqual(now);
     expect(await f.runs()).toHaveLength(0);
     expect(await f.mailbox()).toBe(0);

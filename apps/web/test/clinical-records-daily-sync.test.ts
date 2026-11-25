@@ -108,6 +108,21 @@ describe("rotating clinical refresh lease", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("releases the lease after an unwrap failure and retries with the saved grant", async () => {
+    const f = fixture();
+    const before = structuredClone(f.row);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600, token_type: "Bearer",
+    }));
+    const input = { connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl };
+    mocks.open.mockRejectedValueOnce(new Error("synthetic unwrap failure"));
+    await expect(renewClinicalAccess(input)).rejects.toMatchObject({ retryable: true, httpStatus: 503 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(f.row).toEqual(before);
+    await expect(renewClinicalAccess(input)).resolves.toBe("new-access");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("does not replay a token while another refresh owns the lease", async () => {
     const f = fixture(); f.row.refreshLeaseId = "other"; f.row.refreshLeaseExpiresAt = new Date(now.getTime() + 60_000);
     const fetchImpl = vi.fn<typeof fetch>();

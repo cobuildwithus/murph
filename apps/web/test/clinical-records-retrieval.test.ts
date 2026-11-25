@@ -358,14 +358,14 @@ describe("Clinical Records retrieval control plane", () => {
     ["run-configuration-invalid", "failed"], ["run-status-invalid", "failed"],
     ["member-processing-inactive", "failed"], ["authorization-required", "needs_reauth"],
     ["run-not-found", null], ["run-generation-stale", null], ["run-already-terminal", null], ["connection-inactive", null],
-  ] as const)("classifies descriptor read %s and commits only a current open failure", async (code, terminal) => {
+  ] as const)("classifies descriptor read %s and applies its lifecycle decision", async (code, terminal) => {
     const h = createHarness(["Observation"]);
     const { run } = h.state;
     const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
     switch (code) {
       case "credentials-unavailable": run.connection.accessTokenEncrypted = null; break;
       case "patient-context-unavailable": mocks.openClinicalConnectionSecret.mockResolvedValue("invalid context"); break;
-      case "run-configuration-invalid": run.retrievalPlanJson = null; break;
+      case "run-configuration-invalid": run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [] }; break;
       case "run-status-invalid": run.status = "invalid"; break;
       case "member-processing-inactive": mocks.readClinicalTransportAccess.mockResolvedValue(false); break;
       case "authorization-required": run.connection.status = "needs_reauth"; break;
@@ -385,19 +385,30 @@ describe("Clinical Records retrieval control plane", () => {
     } else expect(run).toEqual(before);
   });
 
-  it("retries a patient-context failure observed across replacement without touching the successor", async () => {
+  it.each(["protocol", "schema"])("retries descriptor and receipt on an unknown %s without changing the run", async kind => {
+    const { state } = createHarness(["Observation"]);
+    if (kind === "protocol") state.run.retrievalProtocol = "future-protocol";
+    else state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v2" };
+    const before = structuredClone(state.run);
+    const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
+    expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", errorCode: "run-format-unsupported", retryable: true });
+    await expect(recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: {
+      ...outcomeIdentity(), generation: 1, runId: RUN_ID, status: "completed", counts: outcomeCounts(),
+    } })).rejects.toMatchObject({ retryable: true, httpStatus: 503 });
+    expect(state.run).toEqual(before);
+  });
+
+  it.each(["tokenVersion", "retrievalGeneration"] as const)("retries a patient-context failure when only %s advances", async fence => {
     const h = createHarness(["Observation"]);
+    const expected = structuredClone(h.state.run);
+    expected.connection[fence]++;
     mocks.openClinicalConnectionSecret.mockImplementationOnce(async () => {
-      h.state.run.connection.retrievalGeneration = 2;
-      h.state.run.status = "canceled";
-      h.state.run.completedAt = new Date();
+      h.state.run.connection[fence]++;
       return null;
     });
     const pointer = { memberId: MEMBER_ID, generation: 1, runId: RUN_ID };
     expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", errorCode: "credentials-updated-retry", retryable: true });
-    expect(await readClinicalRetrievalRun(pointer)).toEqual({ status: "unavailable", errorCode: "run-generation-stale", retryable: false });
-    expect(h.runUpdateCalls).toEqual([]);
-    expect(h.state.run.connection).toMatchObject({ retrievalGeneration: 2, status: "active", accessTokenEncrypted: "encrypted-access-token" });
+    expect(h.state.run).toEqual(expected);
   });
 
   it("does not close a run when member access returns before the locked reread", async () => {
@@ -1645,6 +1656,7 @@ function createHarness(
       hook?.();
       const where = args.where ?? {};
       const connectionWhere = where.connection as {
+        tokenVersion?: number;
         retrievalGeneration?: number;
         status?: { in: string[] };
       } | undefined;
@@ -1652,6 +1664,7 @@ function createHarness(
         (where.completedAt === null && state.run.completedAt !== null)
         || (where.startedAt === null && state.run.startedAt !== null)
         || (typeof where.generation === "number" && where.generation !== state.run.generation)
+        || (connectionWhere?.tokenVersion !== undefined && connectionWhere.tokenVersion !== state.run.connection.tokenVersion)
         || !matchesNumberBound(state.run.egressBytes, where.egressBytes)
         || !matchesNumberBound(state.run.providerRequestCount, where.providerRequestCount)
         || (where.status && !(where.status as { in: string[] }).in.includes(state.run.status))
@@ -1821,7 +1834,7 @@ function updateRetrievalRequest(
 
 function buildRun(
   resourceTypes: string[],
-  retrievalProtocol: "query-slices-v2" | null,
+  retrievalProtocol: string | null,
 ) {
   return {
     completedAt: null as Date | null,

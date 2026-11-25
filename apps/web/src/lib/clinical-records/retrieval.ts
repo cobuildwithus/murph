@@ -539,6 +539,10 @@ export async function recordClinicalRetrievalOutcome(input: {
       },
     });
     if (!run || run.connection.retrievalGeneration !== run.generation) throw staleRunError();
+    if (hasUnsupportedRetrievalFormat(run)) throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_RETRIEVAL_FORMAT_UNSUPPORTED", httpStatus: 503, retryable: true,
+      message: "This server cannot read the stored retrieval format.",
+    });
     const rejection = validateOutcomeForRun(input.request, run);
     if (rejection) {
       if (!run.completedAt && ["active", "error"].includes(run.connection.status)) {
@@ -729,7 +733,7 @@ async function loadRunnableClinicalRun(input: RunPointer) {
 async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRetrievalTx): Promise<
   | { run: RunnableClinicalRun }
   | { retryable: false; unavailable: UnusableReason; terminalize: RunConnection }
-  | { retryable: false; unavailable: string; terminalize?: never }
+  | { retryable: boolean; unavailable: string; terminalize?: never }
 > {
   const active = await readClinicalTransportAccess({ memberId: input.memberId, prisma });
   const record = await prisma.clinicalRecordRetrievalRun.findFirst({
@@ -783,6 +787,7 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   const unusable = (unavailable: UnusableReason) => ({ retryable: false as const, unavailable, terminalize: record.connection });
   if (!active) return unusable("member-processing-inactive");
   if (record.connection.status === "needs_reauth") return unusable("authorization-required");
+  if (hasUnsupportedRetrievalFormat(record)) return { unavailable: "run-format-unsupported", retryable: true };
   if (!CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === record.status)) return unusable("run-status-invalid");
   if (!record.connection.accessTokenEncrypted || !record.connection.patientIdEncrypted) return unusable("credentials-unavailable");
   let requestedScopes: string[];
@@ -790,11 +795,6 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   let retrievalPlan: ClinicalFhirRetrievalPlan;
   let sourceSystem: ClinicalSourceSystem;
   try {
-    if (
-      record.retrievalProtocol !== "query-slices-v2"
-    ) {
-      throw new ContractValidationError("Stored Clinical Records retrieval protocol is unsupported.");
-    }
     requestedScopes = parseStoredStringArray(record.connection.requestedScopesJson, "requested scopes");
     grantedScopes = parseStoredStringArray(record.grantedScopesJson, "granted scopes");
     retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
@@ -1345,10 +1345,15 @@ function mapOutcomeStatus(status: HostedClinicalRecordsRecordOutcomeRequest["sta
   return status;
 }
 
+function hasUnsupportedRetrievalFormat(run: { retrievalProtocol: string | null; retrievalPlanJson: Prisma.JsonValue }) {
+  const plan = run.retrievalPlanJson;
+  return run.retrievalProtocol !== "query-slices-v2" || (plan !== null && typeof plan === "object"
+    && "schemaVersion" in plan && plan.schemaVersion !== clinicalFhirRetrievalPlanSchema.shape.schemaVersion.value);
+}
+
 function validateOutcomeForRun(request: HostedClinicalRecordsRecordOutcomeRequest, run: {
   pageCount: number;
   retrievalPlanJson: Prisma.JsonValue | null;
-  retrievalProtocol: string | null;
 }) {
   if (
     request.status !== "preempted" &&
@@ -1363,7 +1368,6 @@ function validateOutcomeForRun(request: HostedClinicalRecordsRecordOutcomeReques
     });
   }
 
-  if (run.retrievalProtocol !== "query-slices-v2") return outcomeConflictError();
   const plan = clinicalFhirRetrievalPlanSchema.safeParse(run.retrievalPlanJson);
   if (!plan.success) return outcomeConflictError();
   const expected = plan.data.slices.map((slice) => ({

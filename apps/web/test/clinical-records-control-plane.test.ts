@@ -793,7 +793,7 @@ describe("Clinical Records authorization persistence", () => {
   });
 
   it.each(["busy", "quiet", "settling", "grace-elapsed"] as const)(
-    "uses the same %s policy at start, callback preflight and locked persistence", async kind => {
+    "applies start and callback eligibility for a %s prior run", async kind => {
       const existing = existingConnection();
       const previous = existing.retrievalRuns[0]!;
       if (kind === "busy") previous.createdAt = new Date();
@@ -825,6 +825,21 @@ describe("Clinical Records authorization persistence", () => {
       });
       expect(h.retrievalRunCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ generation: 2, connectionId: existing.id }) });
     });
+
+  it("refuses replacement when the open run starts settling between callback preflight and persistence", async () => {
+    const open = existingConnection();
+    const settling = existingConnection("needs_reauth");
+    Object.assign(settling.retrievalRuns[0]!, { status: "needs_reauth", completedAt: new Date() });
+    const h = createHarness(open);
+    mocks.getPrisma.mockReturnValue(h.prisma);
+    h.connectionFindUnique.mockResolvedValueOnce(open).mockResolvedValueOnce(settling);
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS" });
+    expect(mocks.sealClinicalConnectionSecret).toHaveBeenCalled();
+    expect(h.tx.clinicalRecordRetrievalRun.updateMany).not.toHaveBeenCalled();
+    expect(h.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    expect(h.retrievalRunCreate).not.toHaveBeenCalled();
+    expect(mocks.appendClinicalRetrievalWakeTx).not.toHaveBeenCalled();
+  });
 
   it("maps the member-provider uniqueness race to the same bounded conflict", async () => {
     const harness = createHarness(null);

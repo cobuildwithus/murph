@@ -1,3 +1,4 @@
+import { abortAtHostedRecoveryDeadline } from "@/src/lib/hosted-orchestration/recovery-batch";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -136,15 +137,35 @@ describe("hosted device-sync scheduled wake sweep route", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it.each(["partial", "rejected"])("preserves the device response after %s clinical failure", async failure => {
-    const request = () => new Request("https://example.test/recovery", { method: "POST", body: "{}" });
-    const healthy = await route.POST(request());
-    if (failure === "partial") mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 1, queued: 0, failed: 1 });
-    else mocks.runClinicalDailySyncSweep.mockRejectedValue(new Error("synthetic failure"));
-    const response = await route.POST(request());
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(await healthy.json());
-    expect(mocks.runHostedDeviceSyncRecoverySweep).toHaveBeenCalledTimes(2);
+  it.each(["partial", "rejected", "deadline"])("returns the device sweep payload when the clinical sweep reports %s", async failure => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      const request = () => new Request("https://example.test/recovery", { method: "POST", body: "{}" });
+      const devices = {
+        dueReconcileSweeper: { dueConnections: 7, wakeAccepted: 5 },
+        preferenceHandoffSweeper: { candidateUsers: 4, handoffAccepted: 3 },
+      };
+      mocks.runHostedDeviceSyncRecoverySweep.mockResolvedValueOnce(devices);
+      if (failure === "partial") {
+        mocks.runClinicalDailySyncSweep.mockResolvedValue({ checked: 4, queued: 2, failed: 1 });
+      } else if (failure === "deadline") {
+        mocks.runClinicalDailySyncSweep.mockImplementation(({ deadlineMs }) => new Promise((_, reject) => {
+          abortAtHostedRecoveryDeadline(deadlineMs).addEventListener("abort", () => reject(new Error("synthetic timeout")));
+        }));
+      } else mocks.runClinicalDailySyncSweep.mockRejectedValue(new Error("synthetic failure"));
+      const pending = route.POST(request());
+      await vi.advanceTimersByTimeAsync(22_000);
+      const response = await pending;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(devices);
+      if (failure === "partial") {
+        expect(warn).toHaveBeenCalledExactlyOnceWith("CLINICAL_DAILY_ADMISSION_FAILED", { checked: 4, queued: 2, failed: 1 });
+      } else expect(warn).toHaveBeenCalledExactlyOnceWith("CLINICAL_DAILY_SWEEP_FAILED");
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("rejects signed callbacks with the wrong callback identity", async () => {

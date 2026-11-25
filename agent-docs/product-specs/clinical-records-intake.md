@@ -99,9 +99,15 @@ Each source carries its id, providerId, name, optional logoPath, state, nullable
 An open import offers `start_over`. The app uses last activity to decide when to show the action.
 Starting sign-in leaves the current import running. Successful same-patient authorization
 closes the previous open generation and creates its replacement in one transaction.
+When two start-overs prepare against the same credential epoch, only the first to commit replaces it.
+If a start-over commits first, a waiting daily admission skips the source. If daily admission
+commits first, the start-over can commit the next generation because daily admission preserves
+the credential epoch. It cancels the intervening daily run, and Web rejects that wake as stale.
 If access ends, the runtime can still publish counts for pages it already fetched.
 With no receipt, reconnect becomes available 30 minutes after authorization ended.
-Counts can arrive later if the generation is still current.
+Counts can arrive later if the generation is still current. A Web instance retries descriptor
+reads and receipts for an unfamiliar retrieval protocol or plan version. A malformed
+plan in the current format can close the run.
 
 Completion distinguishes connected, canceled, expired, sign_in_required, already_connected, different_person, not_enough_access, too_many_sources and failed. An expired proof returns `expired` before accessing the OAuth session. A valid-proof replay returns a null outcome with a fresh list. Auth and consent failures use the existing HTTP error codes.
 
@@ -540,7 +546,8 @@ Refresh payloads contain client ID, pinned token endpoint, scopes and refresh
 token, encrypted under the connection/member/token-version identity. A 60-second
 lease serializes rotation. Token exchange and crypto happen outside DB locks;
 persistence rechecks consent, member status, generation, credential epoch and
-lease ownership. Explicit 429/5xx responses can retry; an ambiguous exchange or
+lease ownership. A failure before sending the refresh request releases its lease for retry.
+Explicit 429/5xx responses can retry; an ambiguous exchange or
 abandoned lease requires reconnecting instead of replaying a possibly consumed
 token. A changed patient or narrowed grant also fails closed. Disconnect and
 consent withdrawal clear refresh material, leases and the next-check timestamp.

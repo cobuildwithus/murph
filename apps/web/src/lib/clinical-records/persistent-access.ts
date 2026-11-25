@@ -82,12 +82,18 @@ export async function renewClinicalAccess(input: {
       if (!token) throw authorizationRequired();
       return token;
     }
+    let exchangeAttempted = false;
     try {
       const value = await openClinicalConnectionSecret({ ...identity, field: "refreshToken", encrypted: current.refreshTokenEncrypted });
       const payload = refreshPayloadSchema.parse(JSON.parse(value ?? "null"));
       const credentials = readEpicPersistentCredentials(current.providerDirectoryEntryId);
-      if (!credentials || credentials.clientId !== payload.clientId) throw authorizationRequired();
-      const token = await refreshSmartAccessToken({ ...payload, clientSecret: credentials.clientSecret, fetchImpl: input.fetchImpl });
+      if (!credentials || credentials.clientId !== payload.clientId) throw new Error("Refresh client unavailable.");
+      const token = await refreshSmartAccessToken({ ...payload, clientSecret: credentials.clientSecret,
+        fetchImpl: (url, init) => {
+          exchangeAttempted = true;
+          return (input.fetchImpl ?? fetch)(url, init);
+        },
+      });
       if (token.patientId) {
         const binding = await openClinicalConnectionSecret({ ...identity, field: "patientBinding", encrypted: current.patientBindingEncrypted });
         if (binding !== hashClinicalFhirPatientId(token.patientId)) throw authorizationRequired();
@@ -112,12 +118,14 @@ export async function renewClinicalAccess(input: {
       return token.accessToken;
     } catch (error) {
       const retryable = isClinicalRecordsControlPlaneError(error) && error.code === "CLINICAL_RECORD_SMART_REFRESH_TEMPORARILY_UNAVAILABLE";
-      if (retryable) {
+      if (!exchangeAttempted || retryable) {
         await prisma.clinicalRecordConnection.updateMany({ where: {
           id: current.id, memberId: input.memberId, tokenVersion: current.tokenVersion,
           retrievalGeneration: input.generation, refreshLeaseId: leaseId,
         }, data: { refreshLeaseId: null, refreshLeaseExpiresAt: null } });
-        throw error;
+        if (retryable) throw error;
+        throw clinicalRecordsError({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", httpStatus: 503,
+          retryable: true, message: "Medical-record access could not be renewed yet." });
       }
       // Keep a possibly consumed token leased until retrieval atomically ends
       // both the connection and run through its generation-fenced reauth owner.

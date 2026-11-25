@@ -29,10 +29,12 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
     orderBy: [{ nextSyncAt: "asc" }, { id: "asc" }], take: 20,
     select: { id: true, memberId: true },
   });
+  let checked = 0;
   let queued = 0;
   let failed = 0;
   for (const candidate of candidates) {
     if (stop.aborted) break; // Unstarted rows stay due.
+    checked++;
     let retryMs = CLINICAL_DAILY_SYNC_MS;
     try {
       if (await admitClinicalDailySync({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now })) {
@@ -50,7 +52,7 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
       data: { nextSyncAt: new Date(now.getTime() + retryMs) },
     });
   }
-  return { checked: candidates.length, queued, failed };
+  return { checked, queued, failed };
 }
 
 export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date }): Promise<boolean> {
