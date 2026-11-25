@@ -12,7 +12,7 @@ import {
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
-import { HOSTED_ASSISTANT_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_6_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import * as clinicalEnrichmentState from "@murphai/vault-usecases/clinical-enrichment";
 
 import {
@@ -164,7 +164,7 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
           signal.throwIfAborted();
         },
         codexHome: input.codexHome, env: { ...input.env },
-        model: work.source.resource ? HOSTED_ASSISTANT_LUNA_MODEL : input.model, modelProvider: input.modelProvider,
+        model: work.source.resource ? HOSTED_ASSISTANT_GPT_6_LUNA_MODEL : input.model, modelProvider: input.modelProvider,
         ...(work.source.resource ? { reasoningEffort: "medium" as const } : {}),
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
         timeZone: work.timeZone,
