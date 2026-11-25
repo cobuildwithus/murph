@@ -179,11 +179,14 @@ describe("clinical document enrichment durable application", () => {
   it("reuses byte-identical extraction across documents while checking and applying each parent", async () => {
     const input = await fixture(true);
     await prepare(input);
-    await applyClinicalEnrichmentProposals(input);
+    const first = await applyClinicalEnrichmentProposals(input);
     // A separate parent carries identical bytes. Reuse the accepted proposals,
     // then run the ordinary parent/canonical checks without another model call.
     expect(await readNextClinicalEnrichment(input)).toEqual({ status: "apply", jobId: input.jobId });
     const result = await applyClinicalEnrichmentProposals(input);
+    expect(first.receipt.changes).toHaveLength(1);
+    expect(result.receipt.changes).toEqual([]);
+    expect(result.receipt.identity.unit).not.toEqual(first.receipt.identity.unit);
     expect(result.counts.existing).toBeGreaterThan(0);
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
   });
@@ -221,13 +224,19 @@ describe("clinical document enrichment durable application", () => {
     await prepare(input);
     const statePath = path.join(input.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${input.jobId}.json`);
     const accepted = await readFile(statePath, "utf8");
-    await applyClinicalEnrichmentProposals(input);
+    const original = await applyClinicalEnrichmentProposals(input);
     // Simulate a process loss after canonical publication but before its state receipt.
     await writeFile(statePath, accepted);
     const replay = await applyClinicalEnrichmentProposals(input);
+    expect(original.receipt.changes).toMatchObject([{ action: "created", eventId: original.readback.eventIds[0], revision: 1 }]);
+    expect(replay.receipt).toEqual(original.receipt);
     expect(replay.canonical).toBeNull();
     expect(replay.counts).toMatchObject({ created: 0, existing: 1 });
     expect(replay.readback.verifiedCount).toBe(1);
+    const changed = JSON.parse(accepted);
+    changed.prepared.outputs.measurements.records = [];
+    await writeFile(statePath, JSON.stringify(changed));
+    await expect(applyClinicalEnrichmentProposals(input)).rejects.toMatchObject({ code: "CLINICAL_RECEIPT_CONFLICT" });
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
   });
 

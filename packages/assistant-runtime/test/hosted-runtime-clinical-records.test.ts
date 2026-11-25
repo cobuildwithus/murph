@@ -60,6 +60,8 @@ describe("hosted clinical records maintenance", () => {
     const result = await run(createPort({ fetchPage: async () => ({ status: "page", body: bundle([retained, lab("structured")]), nextCursor: null }) }), importSnapshot);
     expect(result).toMatchObject({ status: "completed", counts: { createdCount: 2 } });
     const imported = await importSnapshot.mock.results[0]!.value;
+    expect(imported.receipt.identity).toMatchObject({ connectionId: RUN.connectionId, runId: RUN.runId,
+      unit: { kind: "retrieval", generation: RUN.generation, batch: 0 } });
     expect(imported.structuredEnrichmentSources).toHaveLength(1);
     expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([expect.objectContaining({
       routeAction: "apply-clinical-enrichment", wake: expect.objectContaining({ jobId: imported.manifestSha256 }),

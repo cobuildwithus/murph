@@ -1,3 +1,5 @@
+export { clinicalChangeRunRef, listClinicalChangeReceipts, readClinicalChangeReceipt,
+  type ClinicalChangeReceipt, type ClinicalChangeReceiptIdentity } from "./clinical-change-receipts.ts";
 export {
   BASELINE_EVENT_KINDS,
   BASELINE_SAMPLE_STREAMS,
