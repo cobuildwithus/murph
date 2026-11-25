@@ -6,6 +6,5 @@ import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboard
 export const POST = withClinicalJsonError(async (request: Request, context: { params: Promise<{ id: string }> }) => {
   const auth = await requireHostedMemberAuthFromBearerToken(request);
   await disconnectClinicalSource(auth, { connectionId: (await context.params).id });
-  const { sources } = await readCompanionSources(auth);
-  return clinicalJsonOk({ sources });
+  return clinicalJsonOk(await readCompanionSources(auth));
 });

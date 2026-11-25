@@ -43,7 +43,7 @@ describe("Clinical Records provider search route", () => {
   it("searches the native directory with a body-only query and a public result projection", async () => {
     const { POST } = await import("../app/api/clinical-records/companion/providers/search/route");
     const query = "Synthetic Ridge";
-    const request = new Request("https://app.example.test/api/clinical-records/companion/providers/search", {
+    const request = new Request("https://app.example.test/api/clinical-records/companion/providers/search?query=ignored", {
       method: "POST", body: JSON.stringify({ query }), headers: { "content-type": "application/json" },
     });
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -54,7 +54,10 @@ describe("Clinical Records provider search route", () => {
     expect(await (await POST(request)).json()).toEqual({ providers: [{ id: "epic-example", name: query, place: "Sample City, ZZ" }] });
     expect(mocks.bearer).toHaveBeenCalledWith(request);
     expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
-    expect(request.url).not.toContain(query);
+    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledExactlyOnceWith({ query });
+    const urlOnly = new Request(request.url, { method: "POST", body: "{}" });
+    expect((await POST(urlOnly)).status).toBe(400);
+    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledOnce();
     expect(JSON.stringify([...warning.mock.calls, ...error.mock.calls])).not.toContain(query);
   });
 

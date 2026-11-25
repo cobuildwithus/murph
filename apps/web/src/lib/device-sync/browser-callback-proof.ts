@@ -171,10 +171,6 @@ function readHostedDeviceSyncCallbackProofTokenError(
     return "CALLBACK_PROOF_MALFORMED";
   }
 
-  if (expiresAtMs <= nowMs) {
-    return "CALLBACK_PROOF_EXPIRED";
-  }
-
   const expectedAuthenticator = createHostedDeviceSyncCallbackProofAuthenticator(scope, {
     expiresAtMs,
     memberId: input.memberId,
@@ -183,7 +179,8 @@ function readHostedDeviceSyncCallbackProofTokenError(
     state,
   });
 
-  return safeEqual(authenticator, expectedAuthenticator) ? null : "CALLBACK_PROOF_MISMATCH";
+  if (!safeEqual(authenticator, expectedAuthenticator)) return "CALLBACK_PROOF_MISMATCH";
+  return expiresAtMs <= nowMs ? "CALLBACK_PROOF_EXPIRED" : null;
 }
 
 export function readHostedDeviceSyncCallbackState(url: URL): string | null {

@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createSmartState } from "@/src/lib/clinical-records/smart";
+import { GET as bridge } from "../app/api/device-sync/companion/connect-return/[app]/route";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -42,11 +44,29 @@ describe("Clinical Records OAuth callback", () => {
     expect(mocks.finishClinicalRecordAuthorization).not.toHaveBeenCalled();
   });
 
-  it("fails explicitly when an app authorization code exceeds the clinical limit", async () => {
+  it.each(["ios", "ios-dev"] as const)("routes a late %s return through the bridge after row cleanup", async app => {
+    const { state } = createSmartState(app);
+    const params = new URLSearchParams({ state, code: "sample-code" });
+    const response = await route.GET(new Request(`https://join.example.test/callback?${params}`));
+    expect(response.status).toBe(303);
+    const location = response.headers.get("location")!;
+    expect(new URL(location).pathname).toBe(`/api/device-sync/companion/connect-return/${app}`);
+    const handoff = await bridge(new Request(location), { params: Promise.resolve({ app }) });
+    const scheme = app === "ios" ? "ai.withmurph.app" : "ai.withmurph.app.dev";
+    expect(handoff.headers.get("location")).toBe(`${scheme}://connect-return?${params}`);
+    expect(mocks.readClinicalCallbackAppReturn).not.toHaveBeenCalled();
+    expect(mocks.finishClinicalRecordAuthorization).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "code=a&code=b", `code=${"x".repeat(8193)}`])("returns an unusable provider reply to the app", async fields => {
     mocks.readClinicalCallbackAppReturn.mockResolvedValueOnce("ios");
-    const response = await route.GET(new Request(`https://join.example.test/callback?state=crs_${"c".repeat(43)}&code=${"x".repeat(8193)}`));
-    expect(response.status).toBe(400);
-    expect(response.headers.has("location")).toBe(false);
+    const state = `crs_${"c".repeat(43)}`;
+    const response = await route.GET(new Request(`https://join.example.test/callback?state=${state}&${fields}`));
+    expect(response.status).toBe(303);
+    const location = response.headers.get("location")!;
+    expect(new URL(location).pathname).toBe("/api/device-sync/companion/connect-return/ios");
+    const handoff = await bridge(new Request(location), { params: Promise.resolve({ app: "ios" }) });
+    expect(handoff.headers.get("location")).toBe(`ai.withmurph.app://connect-return?state=${state}&error=invalid_response`);
     expect(mocks.finishClinicalRecordAuthorization).not.toHaveBeenCalled();
   });
 

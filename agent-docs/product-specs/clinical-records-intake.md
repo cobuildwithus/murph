@@ -89,14 +89,14 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | GET `sources` | — | `{ sources, canAdd }` |
 | POST `providers/search` | `{ query }` | `{ providers: [{ id, name, place, logoPath? }] }`, up to 20 |
 | POST `start` | `{ providerId, appReturn }` | `{ authorizationUrl, completionProof }` |
-| POST `complete` | `{ query, completionProof }` | `{ outcome, sources }` |
-| POST `sources/[id]/remove` | — | `{ sources }` |
+| POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd }` |
+| POST `sources/[id]/remove` | — | `{ sources, canAdd }` |
 
-Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. The callback routes from the stored app return to the iOS or iOS development bridge. The app submits the returned query string and its original proof.
+Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. App starts request one-time access and each gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 
 Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
 
-Completion distinguishes connected, canceled, expired, sign_in_required, already_connected, different_person, not_enough_access, too_many_sources and failed. A valid-proof replay returns a null outcome with a fresh list. Auth and consent failures use the existing HTTP error codes.
+Completion distinguishes connected, canceled, expired, sign_in_required, already_connected, different_person, not_enough_access, too_many_sources and failed. An expired proof returns `expired` before accessing the OAuth session. A valid-proof replay returns a null outcome with a fresh list. Auth and consent failures use the existing HTTP error codes.
 
 ## Browser member flow
 
@@ -565,7 +565,7 @@ connections. Normal vault export never exposes control-plane credentials.
 
 ## Deployment
 
-Apply the expand migration, then deploy the callback reader and scoped browser invalidation to every serving Web instance. Release the iOS caller after those readers converge. Once app-started rows exist, the dual reader is the Web rollback floor. Keep the expanded schema during rollback.
+Apply the expand migration, then deploy the callback reader and scoped browser invalidation to every serving Web instance. Release the iOS caller after those readers converge. Once app starts are enabled, the Web rollback floor includes the callback and bridge readers for tagged native states and earlier stored returns. Keep the expanded schema during rollback.
 
 Recheck the bounded production aggregate for retained connections, runs,
 requests and unconsumed OAuth sessions before removing old hosted readers.

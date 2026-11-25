@@ -88,7 +88,7 @@ describe("Clinical Records connection lifecycle", () => {
     const auth = { member: { id: "member-a" }, credential: "synthetic", sessionId: "session-a" };
     mocks.bearer.mockResolvedValue(auth);
     const response = await POST(new Request("https://app.example.test/"), { params: Promise.resolve({ id: "source-a" }) });
-    expect(await response.json()).toEqual({ sources: [] });
+    expect(await response.json()).toEqual({ sources: [], canAdd: true });
     expect(mocks.activeBearer).not.toHaveBeenCalled();
     expect(mocks.verifyNative).toHaveBeenCalledWith(auth, expect.anything());
     expect(mocks.connectionUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "source-a", memberId: "member-a" } }));

@@ -16,6 +16,5 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   const query = clinicalReturnQuery(new URLSearchParams(body.query));
   if (!query) throw new RequestInputError("Invalid clinical authorization return.");
   const outcome = await completeNativeAuthorization(auth, query, body.completionProof);
-  const { sources } = await readCompanionSources(auth);
-  return clinicalJsonOk({ outcome, sources });
+  return clinicalJsonOk({ outcome, ...await readCompanionSources(auth) });
 });

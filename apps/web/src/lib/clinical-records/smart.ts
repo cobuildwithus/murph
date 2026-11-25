@@ -1,3 +1,4 @@
+import type { DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 import { isClinicalReturnState } from "./return-query";
 import { createHash, randomBytes } from "node:crypto";
 
@@ -46,8 +47,9 @@ export function createSmartPkce(): {
   };
 }
 
-export function createSmartState(): { state: string; stateHash: string } {
-  const state = `crs_${randomBytes(32).toString("base64url")}`;
+export function createSmartState(appReturn: DeviceSyncAppConnectReturn | null = null): { state: string; stateHash: string } {
+  const nonce = randomBytes(32).toString("base64url");
+  const state = appReturn ? `crs_${appReturn}_${nonce}` : `crs_${nonce}`;
   return { state, stateHash: hashSmartState(state) };
 }
 

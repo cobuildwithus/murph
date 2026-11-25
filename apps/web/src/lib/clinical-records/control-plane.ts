@@ -129,7 +129,7 @@ async function startAuthorization(input: {
     const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
     const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
     const pkce = createSmartPkce();
-    const state = createSmartState();
+    const state = createSmartState(input.appReturn);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + OAUTH_SESSION_TTL_MS);
     const codeVerifierEncrypted = await sealClinicalOauthVerifier({
@@ -214,6 +214,7 @@ export async function completeNativeAuthorization(auth: HostedNativeMemberAuth, 
   const proofError = readHostedDeviceSyncAppCompletionProofError({
     memberId: auth.member.id, sessionId: auth.sessionId, provider: "clinical-records", state, completionProof,
   });
+  if (proofError === "CALLBACK_PROOF_EXPIRED") return "expired" as const;
   if (proofError) throw clinicalRecordsError({ code: "CALLBACK_PROOF_INVALID", httpStatus: 400, message: "Invalid completion proof." });
   try {
     await finishAuthorization({ auth, state, code: query.get("code"),

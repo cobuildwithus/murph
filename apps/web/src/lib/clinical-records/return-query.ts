@@ -2,7 +2,13 @@
 // Include the fixed SMART state, separators and optional leading question mark.
 export const CLINICAL_CODE_LIMIT = 8_192;
 export const CLINICAL_RETURN_QUERY_LIMIT = 9 * CLINICAL_CODE_LIMIT + 128;
-export const isClinicalReturnState = (value: string) => /^crs_[A-Za-z0-9_-]{43}$/u.test(value);
+const clinicalStatePattern = /^crs_(?:(ios|ios-dev)_)?[A-Za-z0-9_-]{43}$/u;
+export const isClinicalReturnState = (value: string) => clinicalStatePattern.test(value);
+
+export function clinicalStateAppReturn(state: string) {
+  const app = clinicalStatePattern.exec(state)?.[1];
+  return app === "ios" || app === "ios-dev" ? app : null;
+}
 
 export function clinicalReturnQuery(params: URLSearchParams): URLSearchParams | null {
   const state = params.get("state") ?? "";

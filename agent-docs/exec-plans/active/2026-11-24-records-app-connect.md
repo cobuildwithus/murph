@@ -16,7 +16,7 @@ Move hospital connections into the iOS app while preserving existing authorizati
 
 ## Decisions and risks
 
-Prior verification and architecture review accepted native sessions independent of browser claims, existing bearer capability revalidation after exchange, a bounded bridge, and neutral replay. The persist transaction owns capacity on creation and reactivation. Receipt counts describe the latest import and unavailable counts remain absent. Once native rows exist the dual reader and scoped browser invalidation are the rollback floor. Keep both provider client configurations.
+Prior verification and architecture review accepted native sessions independent of browser claims, existing bearer capability revalidation after exchange, a bounded bridge, and neutral replay. The persist transaction owns capacity on creation and reactivation. Receipt counts describe the latest import and unavailable counts remain absent. After native starts, the callback and bridge must recognize tagged native states for late returns and keep the stored-return fallback and scoped browser invalidation. Keep both provider client configurations.
 
 ## Verification
 
@@ -24,6 +24,8 @@ Run owner-level callback, control plane, source projection, removal and browser 
 
 ## PR 1 handoff
 
-The five bearer routes, mixed-version schema, read-only callback dispatch and shared exchange are implemented. Receipt projection and member-locked capacity checks ship with the reader. Focused Web checks passed (409 tests), including all status pairs and proof checks. The opt-in clinical PostgreSQL suites passed all 32 tests on a fresh migrated database. The retention concurrency suite passed all nine tests. Web typecheck passed. The changelog covers the source slot freed by disconnect. The app release, final review, lifecycle work and web retirement remain pending.
+The five bearer routes, mixed-version schema, read-only callback dispatch and shared exchange are implemented. Receipt projection and member-locked capacity checks ship with the reader. Focused Web checks passed (409 tests), including all status pairs and proof checks. The opt-in clinical PostgreSQL suites passed all 32 tests on a fresh migrated database. The retention concurrency suite passed all nine tests. Web typecheck passed. The changelog covers the source slot freed by disconnect. The app release, lifecycle work and web retirement remain pending.
 
 The full Web suite surfaced the predeploy guard’s required registration for the paired OAuth constraint. Registering the exact mixed-writer statement keeps altered and additional constraints blocked. All 91 production migration guard tests and Web typecheck passed after this change.
+
+Round 1 passed. Follow-up verification passed 490 focused Web tests, 42 gated PostgreSQL tests on a fresh migrated database, and Web typecheck. PostgreSQL observed two native persistence transactions contend for the last slot. One committed a source, retrieval run and wake. The other hit the limit, as did a later reactivation at capacity.
