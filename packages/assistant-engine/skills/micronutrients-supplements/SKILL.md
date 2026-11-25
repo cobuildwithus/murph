@@ -55,6 +55,17 @@ Pregnancy, breastfeeding, kidney disease, blood thinners and other prescription 
 - nerve symptoms, symptoms of severe anemia, suspected toxicity, high calcium or possible iron overload;
 - high-dose omega-3 with a blood thinner, and any interaction with a prescribed medicine.
 
+## Keep one record per product
+
+When the member corrects or adds to something already saved (a dose, timing,
+label detail or start date), update that record with
+`vault-cli supplement save "<saved title>" --id <regimenId>`. Save a new record
+only for a different product or a new course after a stop. If a product was saved twice by mistake, move anything only
+the copy has onto the record you keep, then remove the copy with
+`vault-cli regimen delete <regimenId>`; a real stop keeps its record and stop
+date. For a past start given only as a month or season, use its first day and
+note that the day is approximate.
+
 ## When the member accepts a change
 
 1. Once the exact product or ingredients, dose, timing, start date and safety context are settled, save it with `vault-cli supplement save`. Save the whole active ingredient panel with one `--ingredient` JSON object per ingredient and the label serving with `--serving-size`. Never reduce a multi-ingredient product to its headline ingredient. Do not also create a habit for the same supplement.

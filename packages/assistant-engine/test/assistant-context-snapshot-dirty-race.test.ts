@@ -118,5 +118,6 @@ function emptyAvailability() {
     latestBloodTestOccurredAt: null,
     latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
+    latestOtherTestOccurredAt: null,
   }
 }

@@ -11,6 +11,7 @@ import {
 } from '@murphai/contracts'
 import {
   appendBloodTest,
+  appendHistoryEvent,
   deleteEvent,
   deleteRegimen,
   initializeVault,
@@ -265,6 +266,9 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain(
         'Blood test records are present (latest 2026-05-31). For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.',
       )
+      expect(prompt).toContain(
+        'Test records outside the blood-test panels are present (latest 2026-05-25).',
+      )
       expect(prompt).toContain('Saved health context includes 1 goal.')
       expect(prompt).toContain('Active goals:')
       expect(prompt).toContain('11 p.m. sleep schedule ramp')
@@ -348,7 +352,7 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain('Recent plan (`recent-plan`')
       expect(prompt).toContain('Middle plan (`middle-plan`')
       expect(prompt).not.toContain('Oldest plan (`oldest-plan`')
-      expect(prompt).toContain('1 more active habit regimen omitted')
+      expect(prompt).toContain('; 1 more active habit regimen: Oldest plan.')
       expect(prompt.indexOf('Newest plan')).toBeLessThan(
         prompt.indexOf('Recent plan'),
       )
@@ -1232,6 +1236,15 @@ async function writeTestSnapshotSources(vaultRoot: string): Promise<void> {
     occurredAt: '2026-05-31T08:00:00.000Z',
     testName: 'latest_panel',
     title: 'Latest panel',
+    vaultRoot,
+  })
+  await appendHistoryEvent({
+    kind: 'test',
+    occurredAt: '2026-05-25T08:00:00.000Z',
+    specimenType: 'stool',
+    testCategory: 'microbiome',
+    testName: 'gut_kit',
+    title: 'Gut kit',
     vaultRoot,
   })
 }
