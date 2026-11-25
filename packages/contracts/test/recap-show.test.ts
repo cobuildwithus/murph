@@ -52,10 +52,10 @@ describe("recap presentation compatibility", () => {
     type Pages = GameRecapEnvelope["story"]["pages"];
     const draft = (pages: Pages) => gameRecapDraftSchema.safeParse({ story: { ...story, pages }, files: [] });
     const messages = (pages: Pages) => { const parsed = draft(pages); return parsed.success ? [] : parsed.error.issues.map(issue => issue.message); };
-    expect(draft([cover("x".repeat(24)), later("y".repeat(48))]).success).toBe(true);
-    expect(messages([cover("Mira never left the couch")])).toEqual([`The cover's title "Mira never left the couch" is 25 characters; keep it to 24, the week's story in a few words.`]);
+    expect(draft([cover("x".repeat(36)), later("y".repeat(48))]).success).toBe(true);
+    expect(messages([cover("Mira never left the couch, not even once")])).toEqual([`The cover's title "Mira never left the couch, not even once" is 40 characters; keep it to 36, the week's story in a few words.`]);
     expect(messages([cover("Day one", "Squats for Mira and stretches for Theo")])).toEqual(["The cover takes exactly one headline, its title; it has 2.",
-      `The cover's title "Squats for Mira and stretches for Theo" is 38 characters; keep it to 24, the week's story in a few words.`]);
+      `The cover's title "Squats for Mira and stretches for Theo" is 38 characters; keep it to 36, the week's story in a few words.`]);
     expect(messages([{ background: "night", blocks: [story.pages[0].blocks[1]] }])).toEqual(["The cover takes exactly one headline, its title; it has 0."]);
     expect(messages([cover("Theo hid"), later("y".repeat(49))])).toEqual([`The headline "${"y".repeat(49)}" on page 2 is 49 characters; keep it to 48.`]);
     // Web accepts with the same rules, and recaps written before them stay readable.

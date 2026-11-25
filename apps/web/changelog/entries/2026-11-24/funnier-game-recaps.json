@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 200,
+  "item": {
+    "id": "funnier-game-recaps",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Game recaps tell your week back funnier",
+    "summary": "Murph writes the recap as someone who was in the chat: your own words from the week, the jokes that landed on Murph, and a page for each moment instead of a page for each day.",
+    "details": "Big talk before day one counts when the week pays it off. A recap's title can run two lines.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5294]
+  }
+}
