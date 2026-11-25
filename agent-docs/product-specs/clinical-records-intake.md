@@ -358,9 +358,10 @@ vault-usecases atomically records each accepted page and the next unfinished
 cursor in one private, portable `.runtime/operations/clinical-records/**`
 checkpoint before yielding, and removes it after terminal import or rejection.
 The checkpoint is non-canonical; full snapshot validation still happens before
-any final raw page or manifest is persisted. One-time imports remain the default.
-Explicit daily-check consent requests `offline_access` only for a configured
-confidential client at a portal advertising offline permission. Unavailable or
+any final raw page or manifest is persisted. Every connection start requests
+`offline_access` where a confidential client is configured for the portal and
+the portal advertises offline permission; the member has no separate option,
+and chooses the access period on the portal's own consent screen. Unavailable or
 withheld persistent grants remain one-time imports. Expired one-time access
 requires reconnecting; persistent access uses the rotating-token lease below.
 Unqualified single laboratory reference ranges are retained when their numeric
@@ -558,8 +559,8 @@ canonical writes and readback still execute for each import. Cache contents do
 not assert that records were already applied. Document downloads and raw source
 retention still occur; this is a reduction in model work, not a zero-cost check.
 
-The records page reports the last and next check, offers explicit daily-check
-opt-in during connection, and links to account data/privacy controls. Disconnect
+The records page reports the last and next check and links to account
+data/privacy controls. Disconnect
 retains imported evidence. Deleting one hospital's complete historical evidence
 is not implemented; account deletion remains the existing full-erasure workflow.
 

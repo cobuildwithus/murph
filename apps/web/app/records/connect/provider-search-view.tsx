@@ -12,7 +12,6 @@ import {
 } from "@/src/components/link-page/link-page-shell";
 import { Avatar, AvatarFallback, AvatarImage } from "@/src/components/ui/avatar";
 import { Button } from "@/src/components/ui/button";
-import { Checkbox } from "@/src/components/ui/checkbox";
 import { Input } from "@/src/components/ui/input";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import providerLogos from "@/src/lib/clinical-records/provider-logos.json";
@@ -23,8 +22,6 @@ import { cn } from "@/src/lib/utils";
 const PROVIDER_ROW_CLASS = "rounded-[18px] bg-[#2A2622] px-4 py-3.5";
 
 export interface ProviderSearchViewProps {
-  keepUpdated?: boolean;
-  onKeepUpdatedChange?: (checked: boolean) => void;
   query: string;
   providers: readonly ClinicalProviderSearchResultContract[];
   hasSearched: boolean;
@@ -51,14 +48,6 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
 
   return (
     <LinkPageScreen
-      actions={props.onKeepUpdatedChange && !noMatches ? (
-        <DailyCheck
-          checked={props.keepUpdated ?? false}
-          id={`${inputId}-daily`}
-          locked={locked}
-          onCheckedChange={props.onKeepUpdatedChange}
-        />
-      ) : undefined}
       announceDetail={false}
       below={
         <div className="flex flex-col pt-[18px]" style={LINK_PAGE_NIGHT_TOKENS}>
@@ -203,36 +192,6 @@ function ProviderSearchResults({ atRest, noMatches, resultsId, statusId, view: p
         </p>
       ) : null}
     </>
-  );
-}
-
-function DailyCheck({ checked, id, locked, onCheckedChange }: {
-  checked: boolean;
-  id: string;
-  locked: boolean;
-  onCheckedChange: NonNullable<ProviderSearchViewProps["onKeepUpdatedChange"]>;
-}) {
-  return (
-        <label
-          className={cn(PROVIDER_ROW_CLASS, "flex w-full items-center gap-3")}
-          htmlFor={id}
-        >
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[17px] font-semibold leading-[22px]">
-              Check for new records daily
-            </span>
-            <span className="text-sm font-medium leading-[19px] text-[#FFFCF6]/60">
-              Where your portal supports ongoing access. You choose the access period at your portal and can disconnect in Murph anytime. Otherwise, this is a one-time import.
-            </span>
-          </span>
-          <Checkbox
-            checked={checked}
-            className="size-[26px] rounded-full border-[1.5px] border-[#FFFCF6]/35 data-checked:border-[#FFFCF6] data-checked:bg-[#FFFCF6] data-checked:text-[#2D3436] [&_svg]:size-4"
-            disabled={locked}
-            id={id}
-            onCheckedChange={onCheckedChange}
-          />
-        </label>
   );
 }
 

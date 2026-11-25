@@ -421,7 +421,41 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
   });
 
-  it("seals an explicitly requested offline grant with its confidential client binding", async () => {
+  it("asks for ongoing access whenever the provider has a confidential client, with no member option", async () => {
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [PROVIDER_ID]: { clientId: "persistent-client", clientSecret: "synthetic-secret" } }));
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await startClinicalRecordConnection({
+      claim: CONNECT_CLAIM,
+      providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request(
+        "https://join.example.test/api/clinical-records/connect-intents/start",
+        { headers: { origin: "https://join.example.test" }, method: "POST" },
+      ),
+    });
+
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ requestOfflineAccess: true }));
+    expect(harness.oauthSessionCreate.mock.calls[0]?.[0]?.data).toMatchObject({ clientId: "persistent-client" });
+  });
+
+  it("keeps a one-time import where the provider has no confidential client", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await startClinicalRecordConnection({
+      claim: CONNECT_CLAIM,
+      providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request(
+        "https://join.example.test/api/clinical-records/connect-intents/start",
+        { headers: { origin: "https://join.example.test" }, method: "POST" },
+      ),
+    });
+
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ requestOfflineAccess: false }));
+  });
+
+  it("seals an offline grant with its confidential client binding", async () => {
     vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [PROVIDER_ID]: { clientId: "persistent-client", clientSecret: "synthetic-secret" } }));
     const scopes = ["patient/Patient.rs", "patient/Observation.rs", "offline_access"];
     const harness = createHarness(null, { clientId: "persistent-client", requestedScopesJson: scopes });

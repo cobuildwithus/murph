@@ -95,7 +95,6 @@ export interface ClinicalRecordConnectStartResponseContract {
 }
 
 export interface ClinicalRecordConnectStartRequestContract {
-  keepUpdated?: boolean;
   claim: string;
   providerDirectoryEntryId: string;
 }
@@ -159,13 +158,11 @@ export function parseClinicalRecordConnectStartResponse(
 export function parseClinicalRecordConnectStartRequest(
   value: unknown,
 ): ClinicalRecordConnectStartRequestContract {
-  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"], ["keepUpdated"]);
-  if (record.keepUpdated !== undefined && typeof record.keepUpdated !== "boolean") throw invalidContract();
+  const record = requireExactRecord(value, ["claim", "providerDirectoryEntryId"]);
   const claim = requireString(record.claim, 40);
   if (!/^cr_[A-Za-z0-9_-]{32}$/u.test(claim)) throw invalidContract();
   return {
     claim,
-    ...(record.keepUpdated !== undefined ? { keepUpdated: record.keepUpdated } : {}),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
   };
 }

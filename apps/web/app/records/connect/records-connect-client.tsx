@@ -174,7 +174,6 @@ export function ProviderSearch({
   const [startError, setStartError] = useState<string | null>(null);
   const [intentUnavailable, setIntentUnavailable] = useState(false);
   const [query, setQuery] = useState("");
-  const [keepUpdated, setKeepUpdated] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -317,7 +316,6 @@ export function ProviderSearch({
         onSuccessfulResponseHeaders: markStartCommitted,
         payload: {
           claim: intentClaim,
-          keepUpdated,
           providerDirectoryEntryId: provider.id,
         },
         url: CLINICAL_RECORD_CONNECT_START_PATH,
@@ -370,8 +368,6 @@ export function ProviderSearch({
 
   return (
     <ProviderSearchView
-      keepUpdated={keepUpdated}
-      onKeepUpdatedChange={setKeepUpdated}
       query={query}
       providers={providers}
       hasSearched={hasSearched}

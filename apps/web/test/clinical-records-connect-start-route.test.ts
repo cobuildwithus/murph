@@ -43,7 +43,6 @@ describe("Clinical Records connect start route", () => {
     expect(request.url).not.toContain(claim);
     expect(mocks.startClinicalRecordConnection).toHaveBeenCalledWith({
       claim,
-      keepUpdated: false,
       providerDirectoryEntryId: "epic-example",
       request,
     });
