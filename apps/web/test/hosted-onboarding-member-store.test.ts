@@ -3754,6 +3754,8 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    clinicalRecordMessageMode: "notice",
+    clinicalRecordMessageRevision: 0,
     companionLastContactAt: null,
     companionAppPlatform: null,
     companionAppVersion: null,

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import pg from "pg";
@@ -16,6 +17,54 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("clinical state cleanup migrations", () => {
+  it("preserves historical health withdrawals and resets messages from legacy grant writers", async () => {
+    const client = new pg.Client({ connectionString: databaseUrl });
+    const schema = `"clinical_preference_${randomUUID()}"`;
+    await client.connect();
+    try {
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`SET search_path TO ${schema}`);
+      await client.query(`
+        CREATE TABLE hosted_member (id TEXT PRIMARY KEY);
+        CREATE TABLE hosted_consent_grant (member_id TEXT, scope TEXT, status TEXT);
+        CREATE TABLE hosted_consent_event (member_id TEXT, scope TEXT, action TEXT);
+        INSERT INTO hosted_member VALUES ('current'), ('withdrawn'), ('renewed');
+        INSERT INTO hosted_consent_grant VALUES
+          ('current', 'launch.health-data', 'granted'), ('withdrawn', 'launch.health-data', 'revoked'),
+          ('renewed', 'launch.health-data', 'granted');
+        INSERT INTO hosted_consent_event VALUES ('renewed', 'launch.health-data', 'revoked');
+      `);
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261125120000_clinical_record_message_mode/migration.sql", import.meta.url,
+      ), "utf8"));
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261125120100_clinical_record_message_withdrawals/migration.sql", import.meta.url,
+      ), "utf8"));
+      const rows = async () => (await client.query(`
+        SELECT id, clinical_record_message_mode AS mode, clinical_record_message_revision AS revision
+        FROM hosted_member ORDER BY id
+      `)).rows;
+      expect(await rows()).toEqual([
+        { id: "current", mode: "notice", revision: 0 }, { id: "renewed", mode: "off", revision: 1 },
+        { id: "withdrawn", mode: "off", revision: 1 },
+      ]);
+      await client.query("INSERT INTO hosted_member (id) VALUES ('new')");
+      await client.query("UPDATE hosted_consent_grant SET status = 'revoked' WHERE member_id = 'current'");
+      await client.query("UPDATE hosted_consent_grant SET status = 'granted' WHERE member_id = 'current'");
+      expect(await rows()).toEqual([
+        { id: "current", mode: "off", revision: 1 }, { id: "new", mode: "notice", revision: 0 },
+        { id: "renewed", mode: "off", revision: 1 }, { id: "withdrawn", mode: "off", revision: 1 },
+      ]);
+    } finally {
+      try {
+        await client.query("ROLLBACK");
+        await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
   it("allows old browser writers alongside closed native return bindings", async () => {
     const client = new pg.Client({ connectionString: databaseUrl });
     await client.connect();

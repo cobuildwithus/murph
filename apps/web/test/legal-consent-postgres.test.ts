@@ -180,6 +180,22 @@ describe.skipIf(!databaseUrl)("hosted consent PostgreSQL persistence", () => {
     });
   });
 
+  // CI builds this suite's database with db push, without the legacy withdrawal trigger.
+  it("switches clinical record texts off on withdrawal and keeps them off after reconsent", async () => {
+    await withFixture(async (f) => {
+      await accept(f);
+      const where = { id: f.memberId };
+      const select = { clinicalRecordMessageMode: true, clinicalRecordMessageRevision: true };
+      await f.writer.hostedMember.update({ where, data: { clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 4 } });
+      await withdrawHostedHealthDataConsent({ memberId: f.memberId, prisma: f.writer });
+      const expected = { clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 5 };
+      await expect(f.observer.hostedMember.findUniqueOrThrow({ where, select })).resolves.toEqual(expected);
+      await withdrawHostedHealthDataConsent({ memberId: f.memberId, prisma: f.writer });
+      await recordHostedLaunchRequiredConsent({ memberId: f.memberId, prisma: f.writer, scope: healthScope });
+      await expect(f.observer.hostedMember.findUniqueOrThrow({ where, select })).resolves.toEqual(expected);
+    });
+  });
+
   it("commits withdrawal authority and its event, preserves legal consent, and makes sequential retry a read", async () => {
     await withFixture(async (f) => {
       await accept(f, "launch.legal");

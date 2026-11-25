@@ -290,6 +290,11 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "ALTER COLUMN SET NOT NULL"]),
   ],
   [
+    "20261125120000_clinical_record_message_mode",
+    // Both new member columns have constant defaults for every existing writer.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20260922170000_hosted_sponsorship_topup_margin",
     // A strict expansion from the historical $5 grant to $4 or $5 grants.
     // Preserve old writers and frozen purchases before deploying the new catalog.

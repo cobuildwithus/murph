@@ -38,7 +38,10 @@ async function previousSchema(databaseUrl: URL) {
 }
 
 async function seed(client: pg.Client) {
-  await fixture.prisma!.hostedMember.createMany({ data: members.map(id => ({ id, billingStatus: "active" })) });
+  await client.query(
+    "INSERT INTO hosted_member(id, billing_status, updated_at) SELECT id, 'active', $2 FROM unnest($1::text[]) AS member(id)",
+    [[...members, "synthetic_migration_unseated"], at],
+  );
   for (const [seat, memberId] of members.entries()) {
     const name = await sealGameText({ table: "game_profile", field: "first_name", rowId: memberId, memberId }, seat === 0 ? "Alex" : "Sam");
     await client.query("INSERT INTO game_profile(member_id, first_name_encrypted, time_zone, updated_at) VALUES ($1,$2,'UTC',$3)", [memberId, name, at]);
@@ -85,10 +88,7 @@ describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", (
     try {
       await client.connect();
       await previousSchema(migratedUrl);
-      fixture.prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: migratedUrl.toString() }) });
       const label = await seed(client);
-      // Return only the id: the current client knows member columns this older schema does not have yet.
-      await fixture.prisma.hostedMember.create({ data: { id: "synthetic_migration_unseated", billingStatus: "active" }, select: { id: true } });
       await client.query("INSERT INTO game_profile(member_id, first_name_encrypted, time_zone, updated_at) VALUES ('synthetic_migration_unseated','unused','UTC',$1)", [at]);
       const sql = await readFile(new URL(`${migrationId}/migration.sql`, migrations), "utf8");
       for (const invalid of [
@@ -112,6 +112,7 @@ describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", (
       // Today's readers need the later, additive migrations too.
       const later = (await readdir(migrations, { withFileTypes: true })).filter(entry => entry.isDirectory() && entry.name > migrationId).map(entry => entry.name).sort();
       for (const directory of later) await client.query(await readFile(new URL(`${directory}/migration.sql`, migrations), "utf8"));
+      fixture.prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: migratedUrl.toString() }) });
       for (const id of ["live", "settled", "waiting"]) for (const viewer of members) expect(await readGame(id, viewer)).toEqual(before.get(`${id}:${viewer}`));
       await expect(client.query("UPDATE game SET max_players = 3 WHERE id = 'live'")).rejects.toMatchObject({ code: "23514" });
       await expect(client.query("UPDATE game_player SET member_id = NULL WHERE game_id = 'live' AND seat = 1")).rejects.toMatchObject({ code: "23514" });

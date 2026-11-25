@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-11-16
+Last verified: 2026-11-25
 
 ## Private weekly game images
 
@@ -957,6 +957,13 @@ Existing product admission, delivery and runtime safety rules still apply.
   provider egress.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - Native Clinical Records binds the member, native session and SMART state in the app completion proof. The callback reads only the stored return target. The stateless bridge forwards the validated state and bounded code or error. Both approval and denial verify the proof before consuming state. Native persistence rechecks the credential, session, product admission, consent and consumed authorization under the member lock. Search text stays in POST bodies.
+- Clinical record text preferences belong to the member. Web rechecks the native
+  session under the member lock. Enabling notices or details requires product
+  access and current launch consent. A lapsed member can opt out. An explicit
+  change from notice to detail records the new revision in a consent audit
+  event. Only the member setting authorizes detail. Withdrawing health consent
+  resets that setting and advances its revision in the grant transaction, even
+  from an older Web writer. Reconsent does not enable texts.
 - Web authenticates each Epic token request with the registration bound to the
   stored client ID and environment. A signed registration requires a matching
   RSA private key in the Web secret store and public key in its environment’s
