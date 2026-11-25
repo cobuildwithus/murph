@@ -23,7 +23,7 @@ Save only a plan or preference the member has accepted. Use the existing command
 
 ## How much tracking to ask for
 
-Read what Murph already has (conversation, saved context, food logs, training, schedule, budget, preferences) before asking for more. Then use the lightest level that answers the question:
+Read what Murph already has (conversation, saved context, food logs, training, schedule, budget, preferences, food lists saved from a test) before asking for more. Then use the lightest level that answers the question:
 
 1. No numbers: meal anchors, portions by eye, timing, hunger and fullness, energy in training.
 2. One or two targets, such as protein at each meal, a snack before training, or a hydration plan for a long session.

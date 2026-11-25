@@ -1,6 +1,7 @@
 import { classifyClinicalRun, closeClinicalRunTx, lifecycleRunSelect } from "./run-lifecycle";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
+import { assertClinicalProcessorAdmission } from "./processor-registry";
 
 import { isDeviceSyncAppConnectReturn, type DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
@@ -110,6 +111,7 @@ async function startAuthorization(input: {
   });
   const configuration = resolveEpicClient(provider);
   const { clientId } = configuration.auth;
+  if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, prisma);
   const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
     memberId: auth.member.id,
@@ -266,6 +268,7 @@ async function finishAuthorization(input: {
     throw providerConfigurationChangedError();
   }
   const configuration = resolveEpicClient(provider, { clientId: session.clientId, grant: "callback" });
+  if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = await openClinicalOauthVerifier({
     encrypted: session.codeVerifierEncrypted,
@@ -300,6 +303,7 @@ async function finishAuthorization(input: {
     requestedScopes,
     resourceTypes,
     hospitalApprovedImports: configuration.hospitalApprovedImports,
+    requiresProcessorApprovals: configuration.auth.method === "private_key_jwt",
     clientId: session.clientId,
     tokenEndpoint: session.tokenEndpoint,
     authorizationStartedAt: session.createdAt,
@@ -376,6 +380,7 @@ async function persistClinicalConnection(input: {
   clientId: string;
   tokenEndpoint: string;
   hospitalApprovedImports: boolean;
+  requiresProcessorApprovals: boolean;
   authorizationStartedAt: Date;
   nativeAuth: HostedNativeMemberAuth | null;
   stateHash: string;
@@ -457,6 +462,7 @@ async function persistClinicalConnection(input: {
     accessTokenExpiresAt: input.token.expiresInSeconds
       ? new Date(input.now.getTime() + input.token.expiresInSeconds * 1_000)
       : null,
+    requiresProcessorApprovals: input.requiresProcessorApprovals,
     connectedAt: input.now,
     disconnectedAt: null,
     displayName: input.provider.brandName,
@@ -574,7 +580,7 @@ async function persistClinicalConnection(input: {
 
 async function assertClinicalPersistenceAuthority(
   tx: Prisma.TransactionClient,
-  input: { memberId: string; nativeAuth: HostedNativeMemberAuth | null; stateHash: string },
+  input: { memberId: string; nativeAuth: HostedNativeMemberAuth | null; stateHash: string; requiresProcessorApprovals: boolean },
 ) {
   await lockHostedMemberRow(tx, input.memberId);
   if ((await readHostedMemberSuspensionAfterLockTx(tx, input.memberId)) !== "active") {
@@ -584,6 +590,7 @@ async function assertClinicalPersistenceAuthority(
       message: "This account cannot receive medical records.",
     });
   }
+  if (input.requiresProcessorApprovals) await assertClinicalProcessorAdmission(input.memberId, tx);
   if (input.nativeAuth) {
     await assertNativeClinicalAdmission(input.nativeAuth, tx);
     const authorization = await tx.clinicalRecordOauthSession.findUnique({

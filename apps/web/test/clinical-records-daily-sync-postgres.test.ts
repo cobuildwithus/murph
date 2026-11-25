@@ -4,10 +4,12 @@ import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
+import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
+import { sealClinicalConnectionFhirBaseUrl, sealClinicalConnectionSecret } from "@/src/lib/clinical-records/secrets";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { clinicalEgressBlock, clinicalNotificationRouteKey, readClinicalNotificationAuthority } from "@/src/lib/clinical-records/notification";
-import { recordClinicalChangeProof, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
+import { clinicalEgressBlock, clinicalNotificationRouteKey, readClinicalNotificationAuthority, readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
+import { fetchClinicalRetrievalPage, recordClinicalChangeProof, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
@@ -67,7 +69,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
 
-  async function notificationFixture(mode: "notice" | "detail" | "off" = "notice") {
+  async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", replacement = false) {
     const f = await fixture();
     const { memberId, connectionId } = f;
     const [baseline] = await client.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, take: 1 });
@@ -92,7 +94,14 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const baselinePointer = { memberId, runId: baseline!.id, generation: 1 };
     await recordClinicalChangeProof(baselinePointer);
     expect(await f.mailbox()).toBe(0);
-    await admitClinicalDailySync({ memberId, connectionId, now });
+    if (replacement) {
+      await client.clinicalRecordConnection.update({ where: { id: connectionId }, data: { requiresProcessorApprovals: true } });
+      await client.hostedConsentGrant.createMany({ data: clinicalProcessors.map(processor => ({
+        memberId, scope: clinicalProcessorScope(processor), status: "granted", grantedAt: now,
+        source: "synthetic", documentVersionsJson: { [processor.id]: processor.version },
+      })) });
+    }
+    expect(await admitClinicalDailySync({ memberId, connectionId, now })).toBe(true);
     const [run] = await f.runs();
     expect(run!.notificationTokenVersion).toBeNull();
     const pointer = { memberId, runId: run!.id, generation: run!.generation };
@@ -194,6 +203,108 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { status: "active", disconnectedAt: null, tokenVersion: 2 } });
       expect(await f.authority()).toBeNull();
     } finally { await f.cleanup(); }
+  });
+
+  it.each([true, false])("keeps a replacement run silent after withdrawal at terminal (receipt=%s)", async receipt => {
+    const f = await notificationFixture("notice", true);
+    try {
+      const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } };
+      expect((await f.authority())?.mode).toBe("notice");
+      await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+      await f.terminal(receipt);
+      expect(await f.runs()).toMatchObject([{ status: "partial", notificationCoverage: "suppressed" }]);
+      await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it.each(["granted", "revoked"] as const)("checks a late receipt with processor approval %s", async status => {
+    const f = await notificationFixture("notice", true);
+    try {
+      await f.terminal();
+      expect(await f.count()).toBe(0);
+      const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } };
+      await client.hostedConsentGrant.update({ where, data: { status } });
+      await recordClinicalChangeProof(f.pointer);
+      await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(status === "granted" ? 1 : 0);
+    } finally { await f.cleanup(); }
+  });
+
+  it("rechecks processor approval for already published detail work", async () => {
+    const f = await notificationFixture("detail", true);
+    try {
+      await f.terminal(true);
+      expect(await f.count()).toBe(1);
+      await client.hostedConsentGrant.update({
+        where: { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } },
+        data: { status: "revoked" },
+      });
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      expect(await client.$transaction(tx => clinicalEgressBlock(tx, {
+        memberId: f.memberId, key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:2`,
+        route: { conversationThreadId: f.threadId, target: f.threadId, targetKind: "thread", threadIsDirect: true,
+          fromPhoneNumber: null, directRecipientPhoneNumber: "+12025550109" },
+      }))).toBe("clinical_authority_unavailable");
+    } finally { await f.cleanup(); }
+  });
+
+  it("gates a replacement daily run and its transport at the current version of every processor", async () => {
+    const f = await fixture();
+    const pointer = { connectionId: f.connectionId, memberId: f.memberId, now };
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-test", userId: f.memberId });
+    const secret = { connectionId: f.connectionId, memberId: f.memberId, tokenVersion: 1, prisma: client };
+    const patientIdEncrypted = await sealClinicalConnectionSecret({ ...secret, field: "patientId", value: "synthetic-patient" });
+    const accessTokenEncrypted = await sealClinicalConnectionSecret({ ...secret, field: "accessToken", value: "synthetic-token" });
+    const fhirBaseUrlEncrypted = await sealClinicalConnectionFhirBaseUrl({ ...secret, value: "https://hospital.example.test/fhir" });
+    await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
+      requiresProcessorApprovals: true, requestedScopesJson: ["patient/DocumentReference.s"],
+      sourceSystem: "epic-fhir", patientIdEncrypted, accessTokenEncrypted, fhirBaseUrlEncrypted,
+      accessTokenExpiresAt: new Date(Date.now() + daily),
+    } });
+    for (const processor of clinicalProcessors) {
+      expect(await admitClinicalDailySync(pointer)).toBe(false);
+      await client.hostedConsentGrant.create({ data: { memberId: f.memberId, scope: clinicalProcessorScope(processor),
+        status: "granted", grantedAt: now, source: "synthetic", documentVersionsJson: { [processor.id]: processor.version } } });
+    }
+    const processor = clinicalProcessors[0]!;
+    const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(processor) } };
+    await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: "obsolete" } } });
+    expect(await admitClinicalDailySync(pointer)).toBe(false);
+    expect(await f.mailbox()).toBe(0);
+    await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: processor.version } } });
+    expect(await admitClinicalDailySync(pointer)).toBe(true);
+    expect(await f.mailbox()).toBe(1);
+    const [run] = await f.runs();
+    const read = () => readClinicalRetrievalRun({ memberId: f.memberId, runId: run!.id, generation: run!.generation });
+    const result = await read();
+    if (result.status !== "ready") throw new Error(result.errorCode);
+    const slice = result.run.retrievalSlices.find(slice => slice.resourceType === "DocumentReference")!;
+    const fetchImpl = vi.fn(async () => Response.json({ resourceType: "Bundle", entry: [] }, {
+      headers: { "content-type": "application/fhir+json" },
+    }));
+    const fetchPage = () => fetchClinicalRetrievalPage({ fetchImpl, memberId: f.memberId, request: {
+      runId: result.run.runId, generation: result.run.generation, retrievalProtocol: "query-slices-v2",
+      requestId: "synthetic-page", resourceType: slice.resourceType, cursor: null,
+      queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint, sliceId: slice.sliceId,
+    } });
+    expect((await fetchPage()).status).toBe("page");
+    await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+    expect(await read()).toMatchObject({ status: "unavailable", errorCode: "processor-admission-blocked" });
+    expect(await fetchPage()).toMatchObject({ status: "unavailable", errorCode: "run-already-terminal" });
+    expect(await f.runs()).toMatchObject([{ status: "failed", completedAt: expect.any(Date), lastErrorCode: "processor-admission-blocked" }]);
+    const paused = await f.row();
+    expect(paused.refreshTokenEncrypted).toBe("synthetic-refresh");
+    await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+    expect(await admitClinicalDailySync({ ...pointer, now: paused.nextSyncAt! })).toBe(true);
+    // A dropped wake can leave a queued run for the daily sweep to settle.
+    await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+    expect(await admitClinicalDailySync({ ...pointer, now: (await f.row()).nextSyncAt! })).toBe(false);
+    expect(await f.runs()).toHaveLength(2);
+    expect((await f.runs()).every(run => run.status === "failed" && run.lastErrorCode === "processor-admission-blocked")).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("commits the current run failure before returning a permanent outcome rejection", async () => {

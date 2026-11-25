@@ -1,5 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
+import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
 
@@ -102,6 +103,7 @@ interface ClinicalMailboxCheckpoint {
 interface RunnableClinicalRun {
   changeReceipts: boolean;
   connection: {
+    requiresProcessorApprovals: boolean | null;
     accessTokenEncrypted: string | null;
     accessTokenExpiresAt: Date | null;
     refreshTokenEncrypted: string | null;
@@ -276,6 +278,7 @@ export async function fetchClinicalRetrievalPage(input: {
         pageUrlHash,
       ].join("\n"));
   const claimed = await claimRetrievalPageRequest({
+    requiresProcessorApprovals: run.connection.requiresProcessorApprovals,
     firstStart: run.startedAt === null,
     connectionId: run.connection.id,
     generation: run.generation,
@@ -361,6 +364,7 @@ export async function fetchClinicalRetrievalDocument(input: {
     ticket.queryScopeId, ticket.sliceId, ticket.parentPageSha256, ticket.resourceType,
     ticket.resourceId, ticket.resourceVersion ?? "", String(ticket.attachmentIndex), url.href].join("\n"));
   const claimed = await claimRetrievalPageRequest({
+    requiresProcessorApprovals: run.connection.requiresProcessorApprovals,
     firstStart: run.startedAt === null, connectionId: run.connection.id,
     generation: run.generation, memberId: input.memberId, queryScopeId: ticket.queryScopeId,
     sliceId: ticket.sliceId, requestFingerprint, runId: run.id,
@@ -652,9 +656,11 @@ export async function recordClinicalRetrievalOutcome(input: {
 }
 
 function publishTerminalChangeProof(tx: ClinicalRetrievalTx, input: { memberId: string; request: HostedClinicalRecordsRecordOutcomeRequest },
-  run: { notificationTokenVersion: number | null; notificationCoverage: string | null }) {
-  if (run.notificationTokenVersion == null || !(input.request.hasChangeReceipt || run.notificationCoverage === "proved")) return null;
-  return publishClinicalChangeTx(tx, { memberId: input.memberId, runId: input.request.runId, generation: input.request.generation });
+  run: { notificationTokenVersion: number | null; notificationCoverage: string | null; connection: { requiresProcessorApprovals: boolean | null } }) {
+  if (run.notificationTokenVersion == null) return null;
+  const hasChangeReceipt = input.request.hasChangeReceipt === true || run.notificationCoverage === "proved";
+  if (!hasChangeReceipt && !run.connection.requiresProcessorApprovals) return null;
+  return publishClinicalChangeTx(tx, { memberId: input.memberId, runId: input.request.runId, generation: input.request.generation }, hasChangeReceipt);
 }
 
 /** A delayed enrichment belongs to the original accepted run, even after a later daily admission. */
@@ -740,7 +746,7 @@ export async function signalClinicalRetrievalWake(
 type RunPointer = { generation: number; memberId: string; runId: string };
 type RunConnection = Pick<RunnableClinicalRun["connection"], "id" | "refreshTokenEncrypted" | "tokenVersion">;
 type UnusableReason = "patient-context-unavailable" | "member-processing-inactive" | "run-configuration-invalid"
-  | "credentials-unavailable" | "run-status-invalid" | "authorization-required";
+  | "processor-admission-blocked" | "credentials-unavailable" | "run-status-invalid" | "authorization-required";
 
 async function loadRunnableClinicalRun(input: RunPointer) {
   const loaded = await inspectRunnableClinicalRun(input, getPrisma());
@@ -766,6 +772,7 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
     select: {
       connection: {
         select: {
+          requiresProcessorApprovals: true,
           accessTokenEncrypted: true,
           accessTokenExpiresAt: true,
           refreshTokenEncrypted: true,
@@ -814,6 +821,9 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   if (!["active", "error", "needs_reauth"].includes(record.connection.status)) return obsolete("connection-inactive");
   const unusable = (unavailable: UnusableReason) => ({ retryable: false as const, unavailable, terminalize: record.connection });
   if (!active) return unusable("member-processing-inactive");
+  if (record.connection.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, prisma)) {
+    return unusable("processor-admission-blocked");
+  }
   if (record.connection.status === "needs_reauth") return unusable("authorization-required");
   if (hasUnsupportedRetrievalFormat(record)) return { unavailable: "run-format-unsupported", retryable: true };
   if (!CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === record.status)) return unusable("run-status-invalid");
@@ -1114,6 +1124,7 @@ function hasSurroundingAsciiWhitespace(value: string): boolean {
 }
 
 async function claimRetrievalPageRequest(input: {
+  requiresProcessorApprovals: boolean | null;
   firstStart: boolean;
   reservationBytes?: number;
   connectionId: string;
@@ -1172,15 +1183,17 @@ async function claimRetrievalPageRequest(input: {
   try {
     return await prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.memberId);
-      if (!await readClinicalTransportAccess({ memberId: input.memberId, prisma: tx })) {
+      const active = await readClinicalTransportAccess({ memberId: input.memberId, prisma: tx });
+      if (!active || (input.requiresProcessorApprovals && !await hasClinicalProcessorApprovals(input.memberId, tx))) {
+        const errorCode = active ? "processor-admission-blocked" : "member-processing-inactive";
         const current = await tx.clinicalRecordRetrievalRun.findFirst({
           where: { id: input.runId, generation: input.generation, memberId: input.memberId }, include: { connection: true },
         });
         if (current && !current.completedAt && current.connection.retrievalGeneration === input.generation
           && ["active", "error"].includes(current.connection.status)) {
-          await endUnusableRunTx(tx, input, current.connection, "member-processing-inactive");
+          await endUnusableRunTx(tx, input, current.connection, errorCode);
         }
-        return { claimed: false, errorCode: "member-processing-inactive", retryable: false } as const;
+        return { claimed: false, errorCode, retryable: false } as const;
       }
       const reclaimed = await tx.clinicalRecordRetrievalRequest.updateMany({
         data: {
@@ -1344,9 +1357,8 @@ async function markClinicalConnectionNeedsReauth(input: {
   });
 }
 
-async function endUnusableRunTx(tx: ClinicalRetrievalTx, pointer: RunPointer, connection: RunConnection,
-  reason: UnusableReason | "outcome-count-mismatch" | "outcome-conflict") {
-  const now = new Date();
+export async function endUnusableRunTx(tx: ClinicalRetrievalTx, pointer: RunPointer, connection: RunConnection,
+  reason: UnusableReason | "outcome-count-mismatch" | "outcome-conflict", now = new Date()) {
   const reauth = reason === "authorization-required" || reason === "credentials-unavailable" || reason === "patient-context-unavailable";
   const closed = await closeClinicalRunTx(tx, pointer, reauth ? "needs_reauth" : "failed", reason, now, connection.tokenVersion);
   if (!closed) return false;

@@ -11,7 +11,7 @@ Answer first. Ask at most one question, at the end of the reply, and only when t
 
 ## Read first
 
-- Read what Murph has on the symptom and its timing, meal logs, recent diet changes, alcohol and caffeine, stress, sleep, cycle, medications and supplements, travel and illness.
+- Read what Murph has on the symptom and its timing, meal logs, recent diet changes, alcohol and caffeine, stress, sleep, cycle, medications and supplements, travel and illness, and any saved stool or microbiome test (`vault-cli diagnostic-test list --text stool`).
 - Look for a recent change that explains the symptom: a jump in fiber or protein, sugar alcohols, creatine, magnesium, iron or antibiotics.
 - When the ingredients or allergens of a specific product could change the plan, use `food-journal`'s label lookup. Do not infer them from the product name.
 

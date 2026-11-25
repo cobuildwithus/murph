@@ -58,9 +58,11 @@ declare module 'incur' {
       'device connect': { args: { provider: string }; options: { requestId?: string; baseUrl?: string; returnTo?: string; open?: boolean } }
       'device provider list': { args: {}; options: { requestId?: string; baseUrl?: string } }
       'diagnostic-test import-json': { args: {}; options: { requestId?: string; input: string } }
+      'diagnostic-test list': { args: {}; options: { requestId?: string; from?: string; to?: string; text?: string; limit: number } }
       'diagnostic-test payload-schema': { args: {}; options: {} }
       'diagnostic-test save': { args: { testName: string }; options: { requestId?: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; resultStatus?: "pending" | "normal" | "abnormal" | "mixed" | "unknown"; summary?: string; testCategory?: string; specimenType?: string; labName?: string; reportedAt?: string | string } }
       'diagnostic-test scaffold': { args: {}; options: { requestId?: string } }
+      'diagnostic-test show': { args: { id: string }; options: { requestId?: string } }
       'document delete': { args: { id: string }; options: { requestId?: string } }
       'document edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string | string; timeZone?: string; dayKey?: string; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute" } }
       'document import': { args: { file: string }; options: { requestId?: string; title?: string; occurredAt?: string | string | string; note?: string; source?: "manual" | "import" | "device" | "derived"; reuseExact: boolean } }

@@ -1,3 +1,4 @@
+export { clinicalRecordRecipients } from "./clinical-record-recipients.ts";
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
   clinicalFhirResourceTypeSchema,

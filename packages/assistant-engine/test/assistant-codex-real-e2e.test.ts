@@ -63,6 +63,8 @@ import {
   MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
+  BLOOD_TEST_CATEGORY,
+  BLOOD_TEST_SPECIMEN_TYPES,
   buildAutomationSupportSeriesTag,
   CALENDAR_LINK_URL_PREFIX,
   eventRecordSchema,
@@ -3781,6 +3783,134 @@ describeRealCodex('real Codex blood type provenance e2e', () => {
       expect(recallCommands.some(command => /^profile show\b|^blood-test (?:list|show)\b/u.test(command))).toBe(true)
       expect(recallCommands.some(command => /^profile set\b|^blood-test save\b/u.test(command))).toBe(false)
       expect(replies[3] ?? '').toMatch(/O[\s-]*(?:negative|neg|-|−)/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 1_200_000)
+})
+
+// Invented kit: every score, organism and food name is synthetic.
+const NON_BLOOD_KIT_SCORES = [
+  ['Fiber Pathways', 47], ['Gas Balance', 62], ['Butyrate Output', 38],
+  ['Lining Support', 71], ['Protein Fermentation', 55],
+] as const
+const NON_BLOOD_KIT_ORGANISMS = ['Examplea testensis', 'Placeholdia fictiva', 'Mockobacter inventus'] as const
+const NON_BLOOD_KIT_FOODS = ['glimmerberry', 'mistplum', 'fogcorn'] as const
+const NON_BLOOD_KIT_REPORT = [
+  'Got my home gut kit results back. Can you keep these with my health records?',
+  '',
+  'Synthetic Gut Kit, collected October 28, 2026',
+  '',
+  'Pathway scores (0-100):',
+  ...NON_BLOOD_KIT_SCORES.map(([name, score]) => `Synthetic ${name} ${score}`),
+  '',
+  'Organisms detected:',
+  ...NON_BLOOD_KIT_ORGANISMS,
+  '',
+  'Foods',
+  'Superfoods: glimmerberry, mistplum',
+  'Avoid: fogcorn',
+].join('\n')
+
+async function readSavedNonBloodKitTests(vaultRoot: string) {
+  return (await readVaultRawTolerant(vaultRoot)).events.filter(event => event.kind === 'test').map(event => {
+    const { results, specimenType, testCategory } = event.attributes
+    return {
+      testCategory: typeof testCategory === 'string' ? testCategory : null,
+      specimenType: typeof specimenType === 'string' ? specimenType : null,
+      rows: (Array.isArray(results) ? results : []).map(row => readRecord(row) ?? {}),
+    }
+  })
+}
+
+function readNonBloodKitRowText(row: Record<string, unknown>): string {
+  return [row.analyte, row.textValue].filter(value => typeof value === 'string').join(' ').toLowerCase()
+}
+
+/** Each name sits in a result row of its own, not in a row shared with a sibling. */
+function expectNonBloodKitOwnRows(rows: readonly Record<string, unknown>[], names: readonly string[]): void {
+  for (const name of names) {
+    const others = names.filter(other => other !== name).map(other => other.toLowerCase())
+    expect(rows.some(row => {
+      const text = readNonBloodKitRowText(row)
+      return text.includes(name.toLowerCase()) && !others.some(other => text.includes(other))
+    }), name).toBe(true)
+  }
+}
+
+describeRealCodex('real Codex non-blood test kit e2e', () => {
+  it('saves a pasted non-blood test kit through diagnostic-test and answers one score from a later diagnostic-test read', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-non-blood-kit-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await initializeVault({ vaultRoot, createdAt: '2026-11-04T23:00:00.000Z', timezone: 'America/New_York' })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      const readCommands = async () => (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const buildInstructions = async () => {
+        const instructions = await buildBloodTypeDeveloperInstructions(vaultRoot)
+        expect(instructions).toContain('`blood-test` for blood labs and `diagnostic-test` for other tests')
+        expect(instructions).toContain('read the same way with `vault-cli diagnostic-test list` and `show`')
+        return instructions
+      }
+      // Each turn is a new conversation, so the later question can only be answered from the vault.
+      const runTurn = (prompt: string, developerInstructions: string) => executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt, reasoningEffort: 'low', resumeSessionId: null,
+        sandbox: 'workspace-write', vaultRoot, workingDirectory: root,
+      })
+
+      const saved = await runTurn(NON_BLOOD_KIT_REPORT, await buildInstructions())
+      const saveCommands = await readCommands()
+      const tests = await readSavedNonBloodKitTests(vaultRoot)
+      process.stdout.write(`[non-blood-test-kit-e2e] ${JSON.stringify({
+        scenario: 'save', model: config.model, commands: saveCommands,
+        tests: tests.map(test => ({ testCategory: test.testCategory, specimenType: test.specimenType, rows: test.rows.length })),
+        reply: saved.finalMessage,
+      })}\n`)
+      const importCalls = saveCommands.filter(command => /^diagnostic-test import-json\b/u.test(command) && !isRecordedVaultHelpCommand(command))
+      expect(importCalls.length).toBeGreaterThanOrEqual(1)
+      expect(saveCommands.filter(command => /^blood-test\b/u.test(command)
+        && !/^blood-test (?:list|show|scaffold|payload-schema)\b/u.test(command)
+        && !isRecordedVaultHelpCommand(command))).toEqual([])
+      expect(tests.length).toBeGreaterThanOrEqual(1)
+      // One import per saved test, with room for a single retry.
+      expect(importCalls.length).toBeLessThanOrEqual(tests.length + 1)
+      for (const test of tests) {
+        expect(test.testCategory ?? test.specimenType).toEqual(expect.any(String))
+        expect(test.testCategory).not.toBe(BLOOD_TEST_CATEGORY)
+        expect(BLOOD_TEST_SPECIMEN_TYPES).not.toContain(test.specimenType)
+      }
+      const rows = tests.flatMap(test => test.rows)
+      for (const [name, score] of NON_BLOOD_KIT_SCORES) {
+        expect(rows.some(row => readNonBloodKitRowText(row).includes(name.toLowerCase()) && row.value === score), name).toBe(true)
+      }
+      expectNonBloodKitOwnRows(rows, NON_BLOOD_KIT_ORGANISMS)
+      expectNonBloodKitOwnRows(rows, NON_BLOOD_KIT_FOODS)
+      expect(saved.finalMessage).toMatch(/\b(?:saved|logged|recorded|added|kept|stored)\b/iu)
+      expect(saved.finalMessage).not.toMatch(/couldn.t|unable|failed|\berror\b/iu)
+
+      const recallInstructions = await buildInstructions()
+      const before = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const writesBefore = await listCanonicalWriteEvidence(vaultRoot)
+      const recalled = await runTurn('What was my Synthetic Butyrate Output score on the gut kit I sent you?', recallInstructions)
+      const recallCommands = (await readCommands()).slice(saveCommands.length)
+      const reply = recalled.finalMessage.trim()
+      process.stdout.write(`[non-blood-test-kit-e2e] ${JSON.stringify({ scenario: 'recall', model: config.model, commands: recallCommands, reply })}\n`)
+      const reads = recallCommands.filter(command => !isRecordedVaultHelpCommand(command))
+      expect(reads.some(command => /^diagnostic-test list\b.*\s--text[\s=]/u.test(command) || /^diagnostic-test show\b/u.test(command)))
+        .toBe(true)
+      expect(reads.filter(command => /\b(?:import-json|save|add|edit|delete|remove|upsert)\b/u.test(command))).toEqual([])
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(before)
+      expect(await listCanonicalWriteEvidence(vaultRoot)).toEqual(writesBefore)
+      expect(reply).toMatch(/\b38\b/u)
+      expect(reply).not.toMatch(/\b(?:47|62|71|55)\b/u)
     } finally {
       await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
     }

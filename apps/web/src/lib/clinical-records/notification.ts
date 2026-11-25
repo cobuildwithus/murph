@@ -11,6 +11,7 @@ import { activeHostedPersonAccessWhere, hostedRuntimeMemberEligibleWhere } from 
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { readHostedConsentStatus } from "../legal/consent";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES } from "./client-contracts";
+import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 type RunPointer = { memberId: string; runId: string; generation: number };
 
@@ -19,25 +20,36 @@ export function clinicalNotificationRouteKey(participantKey: string, lineKey: st
   return createHash("sha256").update(JSON.stringify([participantKey, lineKey, chatKey])).digest("hex");
 }
 
-export async function readClinicalNotificationAuthority(tx: Prisma.TransactionClient, input: Omit<RunPointer, "generation"> & { generation?: number }) {
+async function readClinicalNotificationRun(tx: Prisma.TransactionClient, input: Omit<RunPointer, "generation"> & { generation?: number }) {
   const run = await tx.clinicalRecordRetrievalRun.findFirst({
     where: { id: input.runId, memberId: input.memberId, generation: input.generation },
     select: {
       status: true, completedAt: true, notificationTokenVersion: true, notificationRouteKey: true,
       notificationSettingRevision: true, notificationCoverage: true,
-      connection: { select: { providerDirectoryEntryId: true, tokenVersion: true, status: true, disconnectedAt: true } },
+      connection: { select: { requiresProcessorApprovals: true, providerDirectoryEntryId: true, tokenVersion: true, status: true, disconnectedAt: true } },
     },
   });
   if (!run || run.notificationTokenVersion !== run.connection.tokenVersion || !run.notificationRouteKey
     || run.connection.status !== "active" || run.connection.disconnectedAt) return null;
-  const member = await readClinicalNotificationMember(tx, input.memberId);
+  const approved = !run.connection.requiresProcessorApprovals || await hasClinicalProcessorApprovals(input.memberId, tx);
+  return { run, approved };
+}
+
+export async function readClinicalNotificationAuthority(tx: Prisma.TransactionClient, input: Omit<RunPointer, "generation"> & { generation?: number }) {
+  const origin = await readClinicalNotificationRun(tx, input);
+  return origin?.approved ? readClinicalNotificationRecipient(tx, input.memberId, origin.run) : null;
+}
+
+async function readClinicalNotificationRecipient(tx: Prisma.TransactionClient, memberId: string,
+  run: NonNullable<Awaited<ReturnType<typeof readClinicalNotificationRun>>>["run"]) {
+  const member = await readClinicalNotificationMember(tx, memberId);
   if (!member || member.clinicalRecordMessageMode === "off" || member.clinicalRecordMessageRevision !== run.notificationSettingRevision) return null;
   const route = verifiedClinicalHomeRoute(member, run);
   if (!route?.linqChatLookupKey) return null;
   const chat = await tx.hostedLinqChatHealth.findUnique({ where: { linqChatLookupKey: route.linqChatLookupKey },
     select: { service: true, isGroup: true, phoneNumberLookupKey: true } });
   if (chat?.isGroup !== false || chat.service?.toLowerCase() !== "imessage" || chat.phoneNumberLookupKey !== route.linqRecipientPhoneLookupKey
-    || !(await readHostedConsentStatus({ memberId: input.memberId, prisma: tx })).launchGranted) return null;
+    || !(await readHostedConsentStatus({ memberId, prisma: tx })).launchGranted) return null;
   return { mode: member.clinicalRecordMessageMode, chatLookupKey: route.linqChatLookupKey, routing: route, run };
 }
 
@@ -94,11 +106,17 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
 }
 
 /** Caller holds the member row lock. Proof, coverage and encrypted mailbox publication share its transaction. */
-export async function publishClinicalChangeTx(tx: Prisma.TransactionClient, input: RunPointer) {
-  const authority = await readClinicalNotificationAuthority(tx, input);
-  if (!authority) return null;
-  const { run } = authority;
+export async function publishClinicalChangeTx(tx: Prisma.TransactionClient, input: RunPointer, hasChangeReceipt = true) {
+  const origin = await readClinicalNotificationRun(tx, input);
+  if (!origin) return null;
+  const { run, approved } = origin;
   if (run.notificationCoverage !== null && run.notificationCoverage !== "proved") return null;
+  if (!approved) {
+    // A later approval cannot replay this blocked run, even if enrichment proves a change later.
+    await tx.clinicalRecordRetrievalRun.update({ where: { id: input.runId }, data: { notificationCoverage: "suppressed" } });
+    return null;
+  }
+  if (!hasChangeReceipt || !await readClinicalNotificationRecipient(tx, input.memberId, run)) return null;
   if (!run.completedAt) {
     if (run.notificationCoverage === null && CLINICAL_RECORD_OPEN_RUN_STATUSES.some(status => status === run.status)) {
       await tx.clinicalRecordRetrievalRun.update({ where: { id: input.runId }, data: { notificationCoverage: "proved" } });
