@@ -43,7 +43,6 @@ describe('hosted automation model selection', () => {
   it.each([
     'gpt-6.2-sol',
     'gpt-6-luna',
-    'gpt-5.6-luna',
   ] as const)(
     'persists the declarative %s preference without freezing derived reasoning',
     (model) => {
@@ -72,14 +71,14 @@ describe('hosted automation model selection', () => {
   it('preserves explicit reasoning and supports reasoning-only overrides', () => {
     expect(
       readSaveRequest({
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         reasoningEffort: 'medium',
       }),
     ).toMatchObject({
       kind: 'automation',
       request: {
         assistantTargetOverride: {
-          model: 'gpt-5.6-luna',
+          model: 'gpt-6-luna',
           reasoningEffort: 'medium',
         },
       },
@@ -170,10 +169,10 @@ describe('hosted automation model selection', () => {
   })
 
   it.each([
-    { model: 'gpt-5.6-luna', modelProvider: 'venice' },
+    { model: 'gpt-6-luna', modelProvider: 'venice' },
     { model: 'not-a-product-model' },
     { model: 'gpt-5.6-terra' },
-    { model: 'gpt-5.6-luna', reasoningEffort: 'ultra' },
+    { model: 'gpt-6-luna', reasoningEffort: 'ultra' },
     {},
   ])('rejects unsupported hosted target override %j', (assistantTargetOverride) => {
     expect(readSaveRequest(assistantTargetOverride)).toMatchObject({
@@ -182,9 +181,9 @@ describe('hosted automation model selection', () => {
   })
 })
 
-it('rejects retired Sol in new automation saves and patches', () => {
-  expect(readSaveRequest({ model: 'gpt-5.6-sol' })).toMatchObject({ kind: 'invalid-automation-arguments' })
-  expect(readPatchRequest({ model: 'gpt-5.6-sol' })).toMatchObject({ kind: 'invalid-automation-arguments' })
-  expect(MURPH_AUTOMATION_TOOL.description).not.toContain('gpt-5.6-sol')
-  expect(JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema)).not.toContain('gpt-5.6-sol')
+it.each(['gpt-5.6-sol', 'gpt-5.6-luna'])('rejects retired %s in new automation saves and patches', (model) => {
+  expect(readSaveRequest({ model })).toMatchObject({ kind: 'invalid-automation-arguments' })
+  expect(readPatchRequest({ model })).toMatchObject({ kind: 'invalid-automation-arguments' })
+  expect(MURPH_AUTOMATION_TOOL.description).not.toContain(model)
+  expect(JSON.stringify(MURPH_AUTOMATION_TOOL.inputSchema)).not.toContain(model)
 })

@@ -1350,6 +1350,11 @@ confined read-only model leaves for labs, measurements and history and a shared
 source evidence. Foreground replies can proceed during extraction. The controller
 aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
+A page's clinical change receipt digest binds its frozen proposal, so the
+accepted job is committed through the canonical write log before that receipt.
+Restore replays both in order and finishes an applied page through its saved
+receipt without extracting it again; an operational record that a canonical
+receipt binds always takes this path.
 Active extraction may defer an idle checkpoint for one five-minute window,
 opened by the first extraction after a checkpoint; no single page defers it for
 more than 125 seconds. Finished pages' own deferred usage and canonical
@@ -1370,7 +1375,7 @@ Retained structured records use the same job after its attachments. The importer
 selects only source notes it successfully mapped; deterministic results and
 safety holds never enter this model lane. The host reattests the immutable page,
 patient binding, unique resource identity and live facet-free parent revision.
-One GPT-5.6 Luna turn at medium reasoning extracts all families for one resource,
+One GPT-6 Luna turn at medium reasoning extracts all families for one resource,
 with shell and dynamic tools disabled and the existing 120-second deadline.
 The provider receives selected clinical text, excluding identifier fields,
 patient routing references and revision metadata. Literal evidence and date
@@ -1811,8 +1816,8 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
-The standard runner catalog contains GPT-6.1 Terra, GPT-6.2 Sol, GPT-6 Luna
-and GPT-5.6 Luna. Codex 0.172.0 bundles the product models. The pinned
+The standard runner catalog contains GPT-6.1 Terra, GPT-6.2 Sol and GPT-6 Luna.
+Codex 0.172.0 bundles the product models. The pinned
 `apps/cloudflare/codex-model-catalog.6.2.json` supplies the official refreshed
 Sol and Astra entries. The image omits their experimental literature-search
 command so Codex generates the standalone `web.run` schema accepted by the
@@ -1820,7 +1825,7 @@ provider. Standard web search remains available. The image validates its exact m
 and Astra at 272K context for turn-level usage accounting. Terra retains 500K.
 Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the four-model
+expanded image-owned Astra catalog. Missing authority retains the three-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -2085,10 +2090,10 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   sourcing work retains GPT-6.2 Sol or the explicitly selected stronger model.
   Morning Journal uses its managed Luna pin. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
-  automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
-  GPT-6 Luna, and GPT-5.6 Terra becomes GPT-6.2 Sol. Stored GPT-5.6 Sol,
-  GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra selections resolve to the current
-  model in their family across conversations, profiles and scheduled work.
+  automation pins use a reviewed OpenAI replacement map: GPT-5.6 Terra becomes
+  GPT-6.2 Sol. Stored GPT-5.6 Sol, GPT-6 Sol, GPT-6.1 Sol, GPT-5.6 Luna and
+  GPT-6 Astra selections resolve to the current model in their family across
+  conversations, profiles and scheduled work, and new writes reject them.
   Explicit reasoning survives; an omitted pinned value uses the replacement model's
   default. This adds no deploy-time scan or state write;
   new runtime code activates replacements on the next execution. Future versions

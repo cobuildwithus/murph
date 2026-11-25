@@ -3,11 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { sendAssistantNotificationLocal } from '../src/assistant-service.js'
 import { runAssistantCronJobNow } from '../src/assistant/cron.ts'
 import { queueClinicalChange } from '../src/assistant/cron/clinical-change.ts'
 import { readAssistantCronStore } from '../src/assistant/cron/store.ts'
 import { listAssistantOutboxIntents, sendAssistantOutboxDispatchMessage } from '../src/assistant/outbox.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
+
+vi.mock('../src/assistant-service.js', () => ({ sendAssistantNotificationLocal: vi.fn() }))
 
 describe('daily hospital notification integration', () => {
   it.each(['notice', 'detail', 'off'] as const)('daily clinical notification journey %s', async mode => {
@@ -15,8 +18,7 @@ describe('daily hospital notification integration', () => {
     try {
       await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
       const threadId = 'synthetic-private-thread'
-      const decision = mode === 'notice' ? { mode, directoryLabel: 'Example Hospital', threadId }
-        : mode === 'detail' ? { mode, threadId } : { mode }
+      const decision = mode === 'off' ? { mode } : { mode, threadId }
       const input = { decision, runId: 'synthetic-origin', occurredAt: new Date().toISOString(), vault }
       await queueClinicalChange(input)
       await queueClinicalChange(input)
@@ -25,7 +27,7 @@ describe('daily hospital notification integration', () => {
       expect(intents).toHaveLength(mode === 'notice' ? 1 : 0)
       expect(jobs).toHaveLength(mode === 'detail' ? 1 : 0)
       if (mode === 'notice') {
-        expect(intents[0]).toMatchObject({ message: 'New records came in from Example Hospital. Want me to go through them?',
+        expect(intents[0]).toMatchObject({ message: 'New records came in. Want me to go through them?',
           channel: 'linq', threadId, threadIsDirect: true, answeredMailboxItemIds: [],
           deliveryIdempotencyKey: 'clinical-change:v1:synthetic-origin:notice' })
       }
@@ -40,6 +42,7 @@ describe('daily hospital notification integration', () => {
           homeRouteFallbackAllowed: false, idempotencyKey: 'clinical-change:v1:synthetic-origin:detail', target: threadId, targetKind: 'thread',
         }))
         expect(result.run).toMatchObject({ outcome: 'skipped_gate', reason: 'linq_health_preflight' })
+        expect(sendAssistantNotificationLocal).not.toHaveBeenCalled()
         expect(result.runErrorCode).toBe('ASSISTANT_LINQ_EGRESS_CLINICAL_IMESSAGE_ONLY_UNAVAILABLE')
         await expect(sendAssistantOutboxDispatchMessage({
           vault, channel: 'email', threadId: 'alternate-synthetic-thread', message: 'Synthetic message',

@@ -21,6 +21,7 @@ const emptyAvailability = {
   latestBloodTestOccurredAt: null,
   latestBodyMeasurementDayKey: null,
   latestBodyMeasurementOccurredAt: null,
+  latestOtherTestOccurredAt: null,
 };
 
 function observation(metric: string, revision: number, extra: Record<string, unknown> = {}) {

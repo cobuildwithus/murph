@@ -17,6 +17,8 @@ value belongs in a lab record, never only in memory or a note.
 | Other tests, such as stool, microbiome, urine or saliva | `vault-cli diagnostic-test import-json --input @<payload.json>` with `testCategory` and `specimenType` (`payload-schema` shows the payload) |
 | Vitals and body values | `vault-cli measurement add` |
 | Visits, assessments, plans, diagnoses, procedures, orders, imaging reports, test summaries | `vault-cli encounter scaffold`, then `vault-cli encounter import-json` |
+| A problem list or diagnosis in a clinical record | `vault-cli condition save` with the status the record gives; without one, a past injury or other short-lived problem is `--clinical-status resolved` and only an ongoing problem is `active` |
+| A relative's condition in a record | that relative's `vault-cli family` record, never a condition of the member's own; `family save --condition` replaces their list, so pass every condition |
 | A medicine or supplement they take now | `vault-cli regimen save` with its kind, status and dates |
 | A course of medicine that has ended | `vault-cli medication history add` |
 | One dose taken at a known time | `vault-cli event medication-intake add` |

@@ -115,10 +115,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         rawUsageJsonHash: null,
         reasoningTokens: 0,
         reportingUserId: null,
-        requestedModel: "gpt-5.6-luna",
+        requestedModel: "gpt-6-luna",
         routeId: null,
         schema: "murph.assistant-usage.v1",
-        servedModel: "gpt-5.6-luna",
+        servedModel: "gpt-6-luna",
         sessionId: turnId,
         surface: "hosted-web",
         tokenPricingBasis: "openai-priority",
@@ -150,9 +150,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
           where: { id: usageId },
         })).resolves.toMatchObject({
-          allowanceCostUsdMicros: 154n,
+          allowanceCostUsdMicros: 70n,
           allowancePricingSnapshotJson: {
-            standardCostUsdMicros: "77",
+            standardCostUsdMicros: "35",
             tokenPricingAdjustment: {
               denominator: "1",
               numerator: "2",
@@ -160,13 +160,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             tokenPricingBasis: "openai-priority",
           },
           allowancePricingVersion:
-            "openai-api-pricing-2026-08-27-gpt-5.6-openai-priority",
+            "openai-api-pricing-2026-09-22-gpt-6-sol-luna-openai-priority",
           tokenPricingBasis: "openai-priority",
         });
         await expect(prisma.hostedAiUsagePeriod.findMany({
           select: { spentUsdMicros: true },
           where: { memberId },
-        })).resolves.toEqual([{ spentUsdMicros: 154n }]);
+        })).resolves.toEqual([{ spentUsdMicros: 70n }]);
       } finally {
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();

@@ -73,8 +73,8 @@ if (enabled) {
   ) throw new Error("Terminal retry proof requires an explicitly selected local test database.");
 }
 
-async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>) {
-  const fixture = await seed();
+async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>, clinical = false) {
+  const fixture = await seed(clinical);
   try {
     await run(fixture);
   } finally {
@@ -89,7 +89,7 @@ async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => P
   }
 }
 
-async function seed() {
+async function seed(clinical = false) {
   provider.start.mockClear();
   provider.firstTurnSend.mockReset();
   provider.log.mockReset();
@@ -102,7 +102,7 @@ async function seed() {
   const chatId = `retry-chat-${nonce}`;
   const messageId = `retry-original-${nonce}`;
   const retryId = `retry-replacement-${nonce}`;
-  const idempotencyKey = `retry-intent-${nonce}`;
+  const idempotencyKey = clinical ? `clinical-change:v1:${nonce}:detail` : `retry-intent-${nonce}`;
   const phoneNumber = `+1555000${randomInt(1000, 9999)}`;
   const chatKey = createHostedLinqChatLookupKey(chatId)!;
   const lineKey = createHostedPhoneLookupKey(phoneNumber)!;
@@ -317,9 +317,9 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       const completion = completeHostedLinqInstantFirstTurn({
         ...input,
         generation: { attemptedAt: reservation.attemptedAt, kind: "reply", message, usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           // Same narrow accounting fixture as the first-turn unit tests.
-          response: { id: "resp_first_turn", model: "gpt-5.6-luna", service_tier: "default", usage: {
+          response: { id: "resp_first_turn", model: "gpt-6-luna", service_tier: "default", usage: {
             input_tokens: 90, input_tokens_details: { cached_tokens: 0 },
             output_tokens: 22, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 112,
           } } as OpenAiResponse,
@@ -575,6 +575,19 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect((await f.ingest(timingReceipt(f, { eventAt: f.at(50_000) }))).restoreOnboardingLink)
         .toMatchObject({ memberId: f.memberId });
     });
+  });
+
+  it("consumes a clinical terminal failure without fetching or resending text", async () => {
+    await withFixture(async f => {
+      await f.grantConsent();
+      await f.receipt();
+      await f.retry();
+      const delivery = await f.prisma.hostedLinqDelivery.findUniqueOrThrow({ where: { id: f.deliveryId } });
+      expect(delivery).toMatchObject({ status: "failed", template: "clinical_change" });
+      expect(provider.read).not.toHaveBeenCalled();
+      expect(provider.send).not.toHaveBeenCalled();
+      expect(provider.start).not.toHaveBeenCalled();
+    }, true);
   });
 
   it("resets original timing and catches up only replacement delivery evidence", async () => {

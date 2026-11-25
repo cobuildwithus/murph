@@ -35,6 +35,7 @@ import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProvi
 import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.ts";
 import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.ts";
 import {
+  deleteRegimen as deleteRegimenInternal,
   stopRegimen as stopRegimenInternal,
   upsertRegimen as upsertRegimenInternal,
 } from "./bank/regimens.ts";
@@ -727,6 +728,12 @@ export async function stopRegimen(
   input: Parameters<typeof stopRegimenInternal>[0],
 ): ReturnType<typeof stopRegimenInternal> {
   return withCanonicalInputWriteLock(input, stopRegimenInternal);
+}
+
+export async function deleteRegimen(
+  input: Parameters<typeof deleteRegimenInternal>[0],
+): ReturnType<typeof deleteRegimenInternal> {
+  return withCanonicalInputWriteLock(input, deleteRegimenInternal);
 }
 
 export async function upsertProtocol(

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
 } from "@murphai/hosted-execution/assistant-model";
@@ -236,7 +236,7 @@ describe("hosted assistant configuration tool port", () => {
         availableReasoningEfforts: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "high",
         solAvailable: false,
       };
@@ -271,20 +271,20 @@ describe("hosted assistant configuration tool port", () => {
     await expect(port.request({ action: "read" })).resolves.toMatchObject({
       action: "read",
       result: {
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "high",
       },
     });
     await expect(port.request({
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       reasoningEffort: "high",
     })).resolves.toMatchObject({
       action: "update",
       result: {
         appliesAt: "next_turn",
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "high",
         status: "updated",
       },
@@ -305,7 +305,7 @@ describe("hosted assistant configuration tool port", () => {
     await expect(requests[1]!.json()).resolves.toEqual({
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       reasoningEffort: "high",
     });
   });
@@ -319,7 +319,7 @@ describe("hosted assistant configuration tool port", () => {
           availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
           availableReasoningEfforts: ["none"],
           configurationAvailable: true,
-          model: HOSTED_ASSISTANT_LUNA_MODEL,
+          model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
           reasoningEffort: "none",
           solAvailable: false,
         },

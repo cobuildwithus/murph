@@ -459,9 +459,11 @@ describe("hostedRunnerIntercept", () => {
     ]);
     expect(clinicalRecordRecipients.flatMap(row => [...row.hosts]).sort()).toEqual([...routedHosts].sort());
 
-    const { openAi, elevenLabs, gemini, mapbox, xai } = HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS;
-    expect(clinicalRecordRecipients.filter(row => row.kind === "named").flatMap(row => [...row.hosts]).sort())
-      .toEqual([openAi, elevenLabs, gemini, mapbox, xai].sort());
+    const { openAi } = HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS;
+    expect(clinicalRecordRecipients.filter(row => row.kind === "named").flatMap(row => [...row.hosts]))
+      .toEqual([openAi]);
+    expect(clinicalRecordRecipients.filter(row => ["xai", "gemini", "elevenlabs", "mapbox"].includes(row.id))
+      .map(row => row.kind)).toEqual(Array(4).fill("member-directed"));
     expect(HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS).toEqual([HOSTED_RUNNER_REQUIRED_ASSISTANT_PROVIDER]);
     for (const provider of HOSTED_ASSISTANT_ALLOWED_PROVIDER_IDS) {
       const config = resolveAssistantCodexModelProviderConfig(provider);

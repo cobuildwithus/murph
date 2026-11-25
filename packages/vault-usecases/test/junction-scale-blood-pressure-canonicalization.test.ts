@@ -180,6 +180,7 @@ test('Junction composition and blood-pressure readings survive as canonical vaul
       latestBloodTestOccurredAt: null,
       latestBodyMeasurementDayKey: '2026-08-08',
       latestBodyMeasurementOccurredAt: '2026-08-08T12:00:00.000Z',
+      latestOtherTestOccurredAt: null,
     })
   } finally {
     await rm(parentRoot, {

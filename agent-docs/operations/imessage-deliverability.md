@@ -133,7 +133,7 @@ staggered hourly schedule; manual dispatch remains available for recovery. Every
 run first resolves the actual Vercel production deployment, verifies exact
 deployment identity and protected-main ancestry, then resets only that identity through the
 fixed-target production route. The recreated canary member uses its existing
-assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
+assistant-model preference to keep all runtime turns on GPT-6 Luna.
 
 The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn
@@ -423,21 +423,28 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 ## Daily hospital record texts
 
-Clinical notices are proactive. The signed Linq egress owner applies ordinary
-line health and the 90-day pause, then checks clinical authority for each
-attempt and sibling bubble. Only the frozen verified private home route can
-qualify. The reply path retains its ordinary behavior when the member responds.
+The production daily sweep creates silent imports. Its locked writer requires
+the deployed runner and port revisions before it can freeze a verified
+participant, assigned line and private chat for a new run. Web and the private
+runtime block all clinical sends at this head. After
+activation, clinical texts may go to the exact verified private Murph thread
+frozen at daily admission. The owner withdrew the iMessage-only requirement. Linq may
+select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
+requires the member’s existing explicit detail setting. Each attempt, including
+a retry or another bubble, must recheck the run, preference, named approvals,
+private recipient, proactive pause, line health and recipient-region window.
+A group, replacement thread or different channel cannot receive the text.
 
-There is no universal quiet-hours owner for proactive texts. Before activating
-clinical sends, E2 must defer to a safe recipient-region window and recheck
-authority at dispatch. The dormant reader never consumes a quiet-hours deferral.
-
-Linq selects iMessage, RCS or SMS automatically for plain text and deprecated
-the service preference. The shared provider boundary rejects clinical keys
-before network entry or thread recovery. The owner is deciding whether the
-member's ordinary Murph thread is acceptable for records texts.
-The clinical cron preflight skips generation while this restriction holds.
-See [Linq protocol selection](https://docs.linqapp.com/channel/imessage/guides/messaging/protocol-selection/).
+Linq can echo the sent text in a signed outbound receipt. Web verifies the body
+in memory and discards echoed text before persistence, logging, tracing or
+orchestration. Ordinary deliveries retain sanitized provider failure reasons
+for operations. Clinical deliveries discard both failure and provider reasons.
+Web accepts receipts with an unknown owner. It clears both reasons if a clinical
+dispatch is pending in the receipt’s chat, or in any chat when the receipt
+omits the chat ID. Otherwise it retains the sanitized reasons. Web's terminal
+retry excludes clinical deliveries by their opaque delivery template before
+fetching any message parts. A definite terminal failure consumes an attempted
+clinical occurrence. Admission remains closed through the reader rollout.
 
 ## Prompt and copy guidance
 

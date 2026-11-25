@@ -30,7 +30,6 @@ export interface CodexAppServerPreparedImageInput {
 }
 
 const CODEX_ORIGINAL_IMAGE_DETAIL_MODELS = new Set<string>([
-  'gpt-5.6-luna',
   'gpt-6.1-terra',
   'gpt-6.2-sol',
   'gpt-6-luna',

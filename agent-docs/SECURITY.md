@@ -933,16 +933,30 @@ Existing product admission, delivery and runtime safety rules still apply.
 - First-party login resolves canonical contact ownership before member creation and compares that exact snapshot under contact/member locks before committing. A contact claimed by another member or a disagreement among phone, verified email, Linq handle or Telegram owners fails closed; there is no automatic member transfer or scaffold deletion. Retryable product completion cannot rebind credentials. App Review operations may activate an existing, verified first-party account through canonical product owners; they may not create credentials, return fixed codes or bypass contact proof.
 
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
-- Daily clinical change proof crosses the signed, active-write-fenced run callback
-  as a run pointer and a policy result. The directory owns the public facility
-  label. Receipt entries and rendered text stay in the private runtime. Web
-  checks the accepted originating run, source status and credential epoch,
-  product access, health consent, preference revision, verified participant,
-  assigned line, direct home chat and observed iMessage service. The dispatch
-  owner repeats the check on each clinical key and rejects reply exemptions and
-  alternate targets. The current transport blocks every clinical send. A detail
-  job ends before model execution or access to another outbound tool. Opening
-  this gate requires enforcing the recipient on every effect of the turn.
+- Daily clinical change proof crosses the signed, active-write-fenced callback
+  as a run pointer and a policy result. Receipt entries and notice rendering
+  belong to the private runtime. The notification reader checks the originating run, credential
+  epoch, product access, health consent, named approvals, preference revision,
+  and the verified participant, assigned line and direct thread frozen at
+  admission. The route fingerprint includes the named approval notice versions.
+  The production sweep supplies no compatible reader evidence. Its runs carry
+  no notification authority, even after a full baseline import.
+  Web and the private runtime currently block every clinical dispatch.
+  The activation PR must enforce the agreed route before opening either gate.
+  The owner withdrew the iMessage-only requirement. Linq may
+  select iMessage, RCS or SMS. Notices omit the hospital name. The existing
+  explicit detail setting authorizes detail on that same thread. Each
+  outbound effect must use the current authority for its run and recipient.
+  Signed provider receipts can echo sent text, including clinical replies, through
+  Web memory. Web verifies and reduces each receipt to operational metadata
+  before persistence, logging, tracing or handoff. Ordinary diagnostics retain
+  sanitized provider wording. The clinical template suppresses both receipt
+  reasons before the event, line, delivery or alert is written. Web accepts receipts
+  with an unknown owner and clears both reasons when a pending clinical dispatch
+  could own the receipt (same chat, or any chat if the chat ID is absent). Web terminal retry excludes
+  the clinical delivery template before fetching provider content. A definite
+  terminal failure consumes an attempted occurrence. Private staging alone
+  leaves coverage open.
 
 - Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access tokens, resolves the provider base URL, follows same-base pagination, and returns bounded FHIR pages and ticket-authorized document bytes through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. Repeat authorization keeps the same member/provider source and encrypted patient binding, with at most twenty counted sources per member. Replacement checks the same patient binding and credential epoch under the member lock. Descriptor reads require active clinical transport access, and a signed, fenced read for an inactive member can only close its current run. Temporary patient context and access tokens are erased at terminal completion or disconnect; the binding remains encrypted with existing member/connection/epoch AAD. Acquisition and callback persistence recheck live consent under the shared member lock, and callback persistence rechecks suspension. Withdrawal schedules clinical cleanup before the runtime stop barrier; cleanup skips a renewed grant. A terminal `authorization-required` response clears access and keeps `needs_reauth`; a same-generation runtime may finalize saved counts without reactivating it.
 - Clinical document reads accept an encrypted, run/generation-bound ticket,
@@ -967,7 +981,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   query fingerprint; a cursor or claim from another scope or slice fails before
   provider egress.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
-- Clinical processor grants use one app-only consent scope per legal entity. The notice version must match the registry exactly. Keep these scopes outside generic legal acceptance and launch consent. Web checks replacement-profile starts and locked persistence, and reads the persisted profile during daily admission and page/document transport. Every named company must have a current grant before the next protected read. The shared recipient table also identifies member-directed routes and built-in helpers that receive no hospital content. The runner regression test checks fixed hosts and model selection against that table. Previously imported data remains available to vault-capable turns after withdrawal.
+- Clinical processor grants use one app-only consent scope per named processor. The notice version must match the registry exactly. Keep these scopes outside generic legal acceptance and launch consent. Web checks replacement-profile starts and locked persistence, and reads the persisted profile during daily admission and page/document transport. Every named company must have a current grant before the next protected read. OpenAI alone requires individual approval. The approval screen lists xAI for X search, Google for video questions, ElevenLabs for voice messages and Mapbox for places and directions together as member-directed services. Hosting and delivery are service providers. Scheduled detail turns retain the ordinary helper permissions. Each outbound message requires separate authority for the frozen private recipient. The runner regression test checks fixed hosts and model selection against that table. Previously imported data remains available to vault-capable turns after withdrawal.
 - Native Clinical Records binds the member, native session and SMART state in the app completion proof. The callback reads only the stored return target. The stateless bridge forwards the validated state and bounded code or error. Both approval and denial verify the proof before consuming state. Native persistence rechecks the credential, session, product admission, consent and consumed authorization under the member lock. Search text stays in POST bodies.
 - Clinical record text preferences belong to the member. Web rechecks the native
   session under the member lock. Enabling notices or details requires product

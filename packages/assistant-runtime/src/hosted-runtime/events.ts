@@ -170,7 +170,6 @@ async function executeClinicalChange(input: Parameters<typeof executeHostedMailb
   return { bootstrapResult: null, ...createNoopMailboxEffect({
     conversationMetrics: null, mailboxLane: "clinical-records", nextWakeAt: occurredAt,
     ...(queued.intentId ? { deliveryIntentIds: [queued.intentId] } : {}),
-    postCheckpointRecord: { kind: "clinical-records.outcome-recorded", request: { kind: "change-scheduled", generation, runId } },
   }) };
 }
 

@@ -92,14 +92,16 @@ The iOS app uses bearer authentication under `/api/clinical-records/companion`.
 | POST `complete` | `{ query, completionProof }` | `{ outcome, sources, canAdd, messageMode? }` |
 | POST `sources/[id]/remove` | — | `{ sources, canAdd, messageMode? }` |
 | POST `message-preference` | `{ mode }` | `{ messageMode }` |
-| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }] }` |
-| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | Same fresh processor list |
+| GET `processor-approvals` | — | `{ processors: [{ id, name, purpose, version, approved }], alsoUsed: [{ id, name, purpose }] }` |
+| POST `processor-approvals/[id]` | `{ version, approved: boolean }` | `{ processors: [{ id, name, purpose, version, approved }] }` |
 
 On a start response requiring named approval, the app fetches the current list,
-displays one tick per company on a single screen and sends one decision per
-request. It retries start after the final approval. A missing route on an older server leaves the feature unavailable.
+displays one tick per named company and sends one decision per request. It
+joins the names and purposes from `alsoUsed` in one sentence on that screen
+and retries start after the final approval. Older clients can ignore the extra
+field. A missing route on an older server leaves the feature unavailable.
 Send the displayed version, including on withdrawal. A stale version returns
-409 `CONSENT_DOCUMENT_VERSIONS_STALE`. Either decision requires a current native
+409 `CONSENT_DOCUMENT_VERSIONS_STALE`. A retired or unknown id returns 404 `CLINICAL_RECORD_PROCESSOR_NOT_FOUND`. Reads ignore its ledger scope. Either decision requires a current native
 bearer. Withdrawal remains available after product access lapses. Neither
 decision changes the medical-record message setting. Withdrawing health consent
 still turns that setting off and blocks further grants until reconsent.
@@ -110,14 +112,19 @@ return 403 `CLINICAL_RECORD_PROCESSOR_APPROVAL_REQUIRED`. The saved profile bit
 governs daily admission and transport even after the start selector changes.
 Legacy profiles keep their current admission rules.
 
-For the replacement Epic registration, the sharing answer rests on three rules.
+For the replacement registration, the owner attests that each member approves
+sharing with each entity individually. OpenAI alone requires that approval.
+It reads records to organize them and answer questions. Hosted inference goes
+directly to OpenAI, including retries. The four helpers receive what Murph
+sends when it uses those features, usually because the member asked. No code
+limits them to turns the member started; the owner accepts that for the
+attestation. The approval screen names xAI for X search,
+Google for questions about shared videos, ElevenLabs for voice messages and
+Mapbox for places and directions. Hosting and delivery are service providers.
+Connecting an app or choosing another recipient authorizes that destination.
+Workers AI transcribes audio attachments. Hospital documents are prepared locally.
 
-1. **Named companies.** When Murph chooses a company that can read hospital information, the member approves that company before import. OpenAI reads records for enrichment, chat and scheduled turns. Hosted inference goes directly to OpenAI, including on a transport retry.
-2. **Member-directed destinations.** Connecting an app or connector, choosing a website or recipient, or requesting a call, email or export authorizes that destination. Delivery to the member’s own phone includes the detail text they enabled.
-3. **Optional built-in helpers.** A helper that can receive record details from a turn gets its own tick. This includes xAI for search terms, Google Gemini for a video question, ElevenLabs for a voice script, and Mapbox for a place lookup. Workers AI transcription receives audio attachments. The hospital document path prepares text, PDFs and images locally.
-
-The app shows all five named companies. Current grants let the connection and
-its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
+A current OpenAI grant lets the connection and its daily reads proceed. A missing, withdrawn or outdated grant blocks the next
 admission or hospital page/document request. Web closes a blocked open run as
 failed and preserves its daily grant. Re-approval permits the next due check.
 The companion source reports `reason: "processor_approval_required"` while
@@ -604,30 +611,39 @@ no receipt contents.
 
 ### Daily record texts
 
-The notification readers are dormant. Every current run creation path leaves
-the notification fields empty. A future daily admission may freeze the current
-credential epoch, message revision and verified private home route only after an
-accepted baseline under the same authorization and a receipt-required
-protocol for the entire run. Initial imports, recovery of a missing baseline, member starts
-and legacy enrichment remain silent for their entire lifetime.
+The production daily sweep continues to create silent v2 retrievals. Web's
+daily admission requires compatible runner and Cloudflare port revisions before
+it can pin a new run. The production caller supplies neither revision during
+this rollout.
+
+Under the member lock, a replacement connection needs a persistent grant,
+current OpenAI approval and a complete whole-history import in its current
+credential epoch. A successful full catch-up can establish a missing baseline.
+The baseline import itself stays silent. With notices or details enabled, Web
+freezes the credential epoch, message revision, verified participant, assigned
+line, direct home chat and approved notice versions on the new receipt-required
+run. Member starts, off, legacy grants and older runs remain silent through late
+enrichment. Web never upgrades a run after creation.
 
 A signed, write-fenced callback can attest a committed change for one run.
 Web accepts its terminal outcome before publishing a pointer. A private
 enrichment page can supply the first proof before or after that outcome.
-The run row retains publication and scheduling coverage through queue cleanup.
+The run row retains publication through queue cleanup. Private scheduling leaves coverage open.
 Missing and empty evidence leave the member's conversation alone.
 
 In notice mode the private runtime writes one ordinary proactive outbox intent.
-It renders “New records came in from <source name>. Want me to go through them?”
-using the brand name from the server-owned provider directory entry recorded
-on the connection. An unavailable label becomes “your connected hospital”.
-The member can answer in the existing conversation. Detail mode schedules a
-one-shot job with the private run receipt reference. Off suppresses publication.
+It renders “New records came in. Want me to go through them?” locally.
+Off suppresses publication. Detail uses one scheduled turn with the private
+run receipt reference and the member’s explicit detail setting.
 
-Linq currently selects the transport for each plain-text send. Strict iMessage
-delivery is unavailable, so the host skips the detail job before opening tools
-and blocks notice dispatch. Registering a new hospital client alone cannot
-enable delivery.
+The owner withdrew the iMessage-only requirement. Notices and details may use
+the exact verified private thread frozen at admission, including when Linq
+selects RCS or SMS. No second consent step is required. A signed delivery
+receipt may carry the text through Web memory. Web verifies it and drops
+the text before persistence, logging, tracing or Temporal. Web excludes
+clinical deliveries from terminal retry before reading provider message parts.
+A definite terminal failure consumes an attempted occurrence. Daily admission
+remains disabled through the reader rollout.
 
 ### Bounded repeat import
 

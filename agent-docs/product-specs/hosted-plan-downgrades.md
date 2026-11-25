@@ -69,8 +69,9 @@ turn:
   and third-party tools remain subject to their own retention policies.
 - Personal runtimes default to GPT-6.1 Terra. Synthetic thread-container
   runtimes default to GPT-6.2 Sol without a subscription requirement.
-  The shared product catalog also includes GPT-6.2 Sol, GPT-6 Luna,
-  GPT-5.6 Luna, and GPT-6.2 Astra. In personal chats, Sol
+  The shared product catalog also includes GPT-6.2 Sol, GPT-6 Luna
+  and GPT-6.2 Astra. A saved GPT-5.6 Luna choice reads as GPT-6 Luna.
+  In personal chats, Sol
   requires an active paid personal or Family subscription. Groups are exempt.
   Astra remains private-only and requires paid Edge or Max access.
 - Settings shows eligible choices and the existing upgrade action where the

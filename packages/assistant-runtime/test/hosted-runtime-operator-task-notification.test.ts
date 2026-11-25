@@ -84,7 +84,7 @@ describe("hosted operator task notification", () => {
         ...EXECUTION_CONTEXT.hosted!,
         defaultTarget: {
           adapter: "codex-cli", approvalPolicy: "never", codexCommand: null,
-          model: "gpt-5.6-luna", modelProvider: memberProvider,
+          model: "gpt-6-luna", modelProvider: memberProvider,
           oss: false, profile: null, reasoningEffort: "low", sandbox: "danger-full-access",
         },
         usageRecorder: { recordUsage },

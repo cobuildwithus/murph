@@ -144,6 +144,7 @@ export {
   deleteFood,
   deleteProvider,
   deleteRecipe,
+  deleteRegimen,
   ensureJournalDay,
   importAssessmentResponse,
   importDeviceBatch,

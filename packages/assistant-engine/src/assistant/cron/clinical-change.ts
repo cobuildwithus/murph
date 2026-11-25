@@ -6,9 +6,7 @@ import { resolveAssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import { readAssistantCronStore, sortAssistantCronJobs, writeAssistantCronStore } from './store.js'
 
-/** A host decision supplies only a verified thread and a public directory label.
- * The Web run owns coverage. The private job/intent and its acknowledgement
- * are checkpointed together before Web can advance coverage to scheduled. */
+/** Stages one notice intent or detail job on the verified thread. Staging leaves Web coverage open. */
 export async function queueClinicalChange(input: {
   vault: string
   runId: string
@@ -20,12 +18,11 @@ export async function queueClinicalChange(input: {
   const receiptRef = clinicalChangeRunRef(input.runId)
   const deliveryKey = `clinical-change:v1:${input.runId}:${decision.mode}`
   if (decision.mode === 'notice') {
-    const source = decision.directoryLabel?.trim() || 'your connected hospital'
     const intent = await createAssistantOutboxIntent({
       vault, createdAt: input.occurredAt, channel: 'linq', threadId: decision.threadId, threadIsDirect: true,
       deliveryIdempotencyKey: deliveryKey, dedupeToken: deliveryKey, turnTrigger: 'automation-cron',
       turnId: `turn_clinical_${receiptRef}`, sessionId: `session_clinical_${receiptRef}`,
-      message: `New records came in from ${source}. Want me to go through them?`,
+      message: 'New records came in. Want me to go through them?',
     })
     return { intentId: intent.intentId }
   }

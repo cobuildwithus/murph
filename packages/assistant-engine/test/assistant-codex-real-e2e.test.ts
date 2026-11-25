@@ -88,6 +88,7 @@ import {
   initializeVault,
   listGoals,
   listAutomations,
+  listRegimens,
   listWorkoutFormats,
   patchAutomation,
   readEvent,
@@ -2869,6 +2870,34 @@ describeRealCodex('real Codex focused sleep-pattern projection e2e', () => {
 })
 
 describeRealCodex('real model canonical production journeys', () => {
+  it('deletes only the mistaken habit regimen', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    try {
+      fixture.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: process.env.MURPH_REAL_CODEX_COMMAND ?? 'codex', directory: fixture.root,
+      })
+      const habit = { vaultRoot: fixture.vault, kind: 'habit' as const, startedOn: '2026-03-12' }
+      const kept = await upsertRegimen({ ...habit, title: 'Paper folding' })
+      const mistaken = await upsertRegimen({ ...habit, title: 'Paper folding draft' })
+      const before = await readCanonicalAuditRecords(fixture.vault)
+
+      const { response } = await fixture.message(
+        'Please delete the habit entry called Paper folding draft. I saved it by accident. Keep Paper folding as it is.',
+      )
+
+      const writes = (await readCanonicalAuditRecords(fixture.vault)).slice(before.length)
+      expect(writes).toMatchObject([{ action: 'regimen_delete', targetIds: [mistaken.record.entity.regimenId] }])
+      expect((await listRegimens(fixture.vault)).map(record => record.entity)).toEqual([kept.record.entity])
+      expect(response).toMatch(/delet(?:ed|ion)|remov(?:ed|al)|erased|gone/iu)
+      expect(response).not.toMatch(/\byou(?:'ve| have)? (?:stopped|quit|gave up)\b/iu)
+      process.stdout.write(`[regimen-correction] ${JSON.stringify({ model: config.model, writes: writes.length, reply: response })}\n`)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 240_000)
+
   it('keeps conversational recall and current style across warm and cold instruction updates', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-thread-continuity-'))
@@ -3917,6 +3946,55 @@ describeRealCodex('real Codex non-blood test kit e2e', () => {
   }, 1_200_000)
 })
 
+describeRealCodex('real Codex supplement correction e2e', () => {
+  it('updates the saved supplement in place when the member corrects its start date', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-supplement-correction-e2e-'))
+    const vaultRoot = path.join(root, 'vault')
+    const binDirectory = path.join(root, 'bin')
+    const commandLogPath = path.join(root, 'commands.log')
+    try {
+      await initializeVault({ vaultRoot, createdAt: '2026-11-04T23:00:00.000Z', timezone: 'America/New_York' })
+      await materializeFocusedActivityProjectionCli({ binDirectory, commandLogPath, vaultRoot })
+      // Six active products, so the corrected one is the oldest and falls past the snapshot's detailed rows.
+      for (const [title, startedOn] of [
+        ['Tidewater Vitamin D3', '2026-10-20'], ['Tidewater Creatine', '2026-10-12'],
+        ['Ferngrove Electrolyte Mix', '2026-10-02'], ['Ferngrove Probiotic', '2026-09-28'],
+        ['Ashby Zinc', '2026-09-21'],
+      ] as const) {
+        await upsertRegimen({ vaultRoot, kind: 'supplement', status: 'active', title, startedOn })
+      }
+      const magnesium = await upsertRegimen({
+        vaultRoot, kind: 'supplement', status: 'active', title: 'Larkspur Magnesium Glycinate', startedOn: '2026-09-14',
+        brand: 'Larkspur', substance: 'magnesium glycinate', dose: 2, unit: 'capsules', schedule: '2 capsules at night',
+      })
+      const instructions = await buildBloodTypeDeveloperInstructions(vaultRoot)
+      expect(instructions).toContain('1 more active supplement regimen: Larkspur Magnesium Glycinate')
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: instructions,
+        env: config.env, fixtureBinDirectory: binDirectory, groupConversation: false,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'quick fix on my magnesium: i started it in early august, not mid september. still 2 caps before bed',
+        reasoningEffort: 'low', resumeSessionId: null,
+        sandbox: 'workspace-write', vaultRoot, workingDirectory: root,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8').catch(() => '')).split('\n').filter(Boolean)
+      const supplements = (await listRegimens(vaultRoot)).filter(record => record.entity.kind === 'supplement')
+      const corrected = supplements.find(record => record.entity.regimenId === magnesium.record.entity.regimenId)?.entity
+      process.stdout.write(`[supplement-correction-e2e] ${JSON.stringify({
+        model: config.model, commands, startedOn: corrected?.startedOn, count: supplements.length, reply: result.finalMessage,
+      })}\n`)
+      expect(supplements).toHaveLength(6)
+      expect(corrected).toMatchObject({ status: 'active', startedOn: '2026-08-01' })
+      expect(result.finalMessage).not.toMatch(/couldn.t|unable|failed|\berror\b/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([root, ...config.temporaryPaths])
+    }
+  }, 1_200_000)
+})
+
 describeRealCodex('real Codex approved vault-file continuity e2e', () => {
   it('confirms an approved vault-file delivery and starts a fresh export on a later request', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -4584,11 +4662,11 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6.1-terra' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     }
@@ -4654,7 +4732,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6-luna' as const,
       reasoningEffort: 'low' as const,
       solAvailable: paid || audience === 'group',
     }
@@ -4712,11 +4790,11 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-openai-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6.1-terra' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     }
@@ -4776,7 +4854,7 @@ describeRealCodex('real Codex default model restore e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-default-model-restore-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-luna'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6-luna'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -4902,7 +4980,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
           },
           prompt: [
             'Run one native collaboration child for this synthetic smoke check.',
-            'Call spawn_agent once with model gpt-5.6-luna and a small task that needs no tools.',
+            'Call spawn_agent once with model gpt-6-luna and a small task that needs no tools.',
             'Do not wait for the child; finish the parent response after launching it.',
           ].join(' '),
           reasoningEffort: 'low',
@@ -4921,7 +4999,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
           rawEvents: result.jsonEvents,
         })
         expect(parentUsage.servedModel).not.toBeNull()
-        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        expect(parentUsage.servedModel).not.toBe('gpt-6-luna')
         expect(parentUsage.usageExtractionSourcePath).toBe(
           'thread.tokenUsage.total.delta',
         )
@@ -4933,8 +5011,8 @@ describeRealCodex('real Codex child model selection e2e', () => {
           provider: 'codex-cli',
           providerRequestOutcome: 'succeeded',
           usage: {
-            requestedModel: 'gpt-5.6-luna',
-            servedModel: 'gpt-5.6-luna',
+            requestedModel: 'gpt-6-luna',
+            servedModel: 'gpt-6-luna',
             usageExtractionSourcePath:
               'subagent.turn.tokenUsage.total.delta',
           },
@@ -12694,7 +12772,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: savedModel === 'gpt-5.6-luna' ? savedModel : expectedModel },
+        assistantTargetOverride: { model: expectedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -12702,10 +12780,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         schedule: { kind: 'dailyLocal', localTime: '18:00' },
         slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
       })
-      if (savedModel !== 'gpt-5.6-luna') {
-        const storedFile = path.join(workingDirectory, saved.record.relativePath)
-        await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
-      }
+      const storedFile = path.join(workingDirectory, saved.record.relativePath)
+      await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
       const storedBeforeTurn = await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })
       // Prove the real canonical CLI is available before spending a live turn.
       const readback = await execFileAsync(path.join(binDirectory, 'vault-cli'), [

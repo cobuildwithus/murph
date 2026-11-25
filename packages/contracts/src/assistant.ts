@@ -487,6 +487,8 @@ export function normalizeStoredAssistantModel(model: string | null): string | nu
       return "gpt-6.2-sol";
     case "gpt-6-astra":
       return "gpt-6.2-astra";
+    case "gpt-5.6-luna":
+      return "gpt-6-luna";
     default:
       return model;
   }

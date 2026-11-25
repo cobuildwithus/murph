@@ -1,3 +1,4 @@
+import { CLINICAL_RECEIPT_PROTOCOL, clinicalRetrievalProtocols } from "@murphai/clinical-records/retrieval-limits";
 export { clinicalRecordRecipients } from "./clinical-record-recipients.ts";
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
@@ -114,7 +115,7 @@ export const clinicalNotificationRequestSchema = hostedClinicalRecordsReadRunReq
 
 export const clinicalNotificationDecisionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
-  z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256), directoryLabel: z.string().min(1).max(256).nullable() }).strict(),
+  z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256) }).strict(),
   z.object({ mode: z.literal("detail"), threadId: z.string().min(1).max(256) }).strict(),
 ]);
 export type ClinicalNotificationDecision = z.infer<typeof clinicalNotificationDecisionSchema>;
@@ -138,7 +139,7 @@ const hostedClinicalRecordsRunDescriptorBaseShape = {
 export const hostedClinicalRecordsRunDescriptorSchema = z.object({
   ...hostedClinicalRecordsRunDescriptorBaseShape,
   changeReceipts: z.literal(true).optional(),
-  retrievalProtocol: z.literal("query-slices-v2"),
+  retrievalProtocol: z.enum(clinicalRetrievalProtocols),
   retrievalSlices: clinicalFhirRetrievalSlicesSchema,
 }).strict();
 
@@ -167,7 +168,7 @@ export const hostedClinicalRecordsFetchPageRequestSchema = z.object({
   ...hostedClinicalRecordsFetchPageRequestBaseShape,
   queryFingerprint: sha256Schema,
   queryScopeId: clinicalFhirRetrievalSliceSchema.options[0].shape.queryScopeId,
-  retrievalProtocol: z.literal("query-slices-v2"),
+  retrievalProtocol: z.enum(clinicalRetrievalProtocols),
   sliceId: clinicalFhirRetrievalSliceSchema.options[0].shape.sliceId,
 }).strict();
 
@@ -183,6 +184,7 @@ export const hostedClinicalRecordsDocumentDescriptorSchema = z.object({
 export type HostedClinicalRecordsDocumentDescriptor = z.infer<typeof hostedClinicalRecordsDocumentDescriptorSchema>;
 
 export const hostedClinicalRecordsFetchDocumentRequestSchema = z.object({
+  retrievalProtocol: z.literal(CLINICAL_RECEIPT_PROTOCOL).optional(),
   runId: identifierSchema,
   generation: z.number().int().min(1),
   ticket: z.string().min(1).max(HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_TICKET_CHARS),

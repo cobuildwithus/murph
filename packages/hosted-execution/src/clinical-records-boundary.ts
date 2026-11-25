@@ -1,6 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
-  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
+  CLINICAL_FHIR_MAX_RETRIEVAL_SLICES, CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol,
 } from "@murphai/clinical-records/retrieval-limits";
 
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
@@ -62,7 +62,7 @@ export interface HostedClinicalRecordsRecordOutcomeRequest {
   counts: HostedClinicalRecordsOutcomeCounts;
   errorCode?: string;
   generation: number;
-  retrievalProtocol: "query-slices-v2";
+  retrievalProtocol: ClinicalRetrievalProtocol;
   retrievalSlices: HostedClinicalRecordsRetrievalSliceRef[];
   runId: string;
   status: "completed" | "failed" | "partial" | "preempted";
@@ -122,7 +122,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
   const retrievalSlices = Reflect.get(record, "retrievalSlices");
   if (
     (
-      retrievalProtocol !== "query-slices-v2"
+      (retrievalProtocol !== "query-slices-v2" && retrievalProtocol !== CLINICAL_RECEIPT_PROTOCOL)
       || !Array.isArray(retrievalSlices)
       || retrievalSlices.length < 1
       || retrievalSlices.length > CLINICAL_FHIR_MAX_RETRIEVAL_SLICES
@@ -152,7 +152,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
     },
     ...(errorCode === undefined ? {} : { errorCode: parseErrorCode(errorCode) }),
     generation: parsePositiveSafeInteger(Reflect.get(record, "generation")),
-    retrievalProtocol: "query-slices-v2",
+    retrievalProtocol,
     retrievalSlices: retrievalSlices.map(parseRetrievalSliceRef),
     runId: parseHostedClinicalRecordsIdentifier(Reflect.get(record, "runId")),
     status: parseOutcomeStatus(Reflect.get(record, "status")),

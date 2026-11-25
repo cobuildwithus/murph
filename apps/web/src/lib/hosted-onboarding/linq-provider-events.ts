@@ -693,6 +693,7 @@ function parseGenericHostedLinqProviderEvent(input: {
       ? "failed"
       : null;
 
+  const messageText = input.event.event_type === "phone_number.status_updated" ? [] : outboundReceiptText(data);
   return buildParsedProviderEvent({
     chatId,
     deliveryStatus,
@@ -710,7 +711,7 @@ function parseGenericHostedLinqProviderEvent(input: {
       servicePresent: service !== null,
     },
     failureCode,
-    failureReason,
+    failureReason: withoutEchoedText(failureReason, messageText),
     messageId,
     phoneNumber,
     phoneNumberRole,
@@ -719,7 +720,7 @@ function parseGenericHostedLinqProviderEvent(input: {
       ? parseProviderDate(readStringAtPath(data, ["delivered_at"]))
         ?? parseProviderDate(readStringAtPath(data, ["message", "delivered_at"]))
       : null,
-    providerReason,
+    providerReason: withoutEchoedText(providerReason, messageText),
     providerStatus,
     rawBody: input.rawBody,
     reactionCustomEmoji: null,
@@ -727,6 +728,25 @@ function parseGenericHostedLinqProviderEvent(input: {
     reactionType: null,
     service,
   });
+}
+
+// A provider diagnostic can quote a text part. Compare inside the verified
+// webhook boundary, before sanitizing or handing the reason to any owner.
+function outboundReceiptText(data: Record<string, unknown> | null): string[] {
+  const message = readRecord(data?.message);
+  const values = [data?.message, data?.text, data?.body, message?.text, message?.body];
+  for (const parts of [data?.parts, message?.parts]) {
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      const item = readRecord(part);
+      if (item?.type === "text") values.push(item.value, item.text);
+    }
+  }
+  return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function withoutEchoedText(reason: string | null, texts: string[]): string | null {
+  return reason && texts.some(text => reason.includes(text.trim())) ? null : reason;
 }
 
 function buildParsedProviderEvent(input: {

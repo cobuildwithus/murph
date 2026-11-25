@@ -71,7 +71,7 @@ describe.skipIf(!enabled)("lapsed personal credit on PostgreSQL", () => {
       inputTokens: 1_000_000, memberId, occurredAt: now.toISOString(), outputTokens: 0, provider: "openai", providerName: "OpenAI",
       providerRequestId: usageId, providerRequestOutcome: "succeeded", providerRequestOrdinal: 0,
       rawUsageJson: null, rawUsageJsonHash: null, reasoningTokens: 0, reportingUserId: null,
-      requestedModel: "gpt-5.6-luna", routeId: null, schema: "murph.assistant-usage.v1", servedModel: "gpt-5.6-luna",
+      requestedModel: "gpt-6-luna", routeId: null, schema: "murph.assistant-usage.v1", servedModel: "gpt-6-luna",
       sessionId: usageId, surface: "hosted-web", tokenPricingBasis: "standard", totalTokens: 1_000_000,
       triggerKind: "message", turnId, turnProfileJson: null, usageId,
       usageExtractionSourcePath: "openai.responses.usage", usageExtractionVersion: "openai-responses-v1" };

@@ -49,7 +49,7 @@ it("extracts once per retained record, preserves deterministic results and repla
   expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("settled");
   expect(f.executeExtraction).toHaveBeenCalledOnce();
   const request = f.executeExtraction.mock.calls[0]![0];
-  expect(request).toMatchObject({ family: "all", model: "gpt-5.6-luna", source: { resource: { resourceId: "unmapped" } } });
+  expect(request).toMatchObject({ family: "all", model: "gpt-6-luna", source: { resource: { resourceId: "unmapped" } } });
   expect(request.extractedText).toContain("Resting heart rate 73 bpm.");
   expect(request.extractedText).not.toContain('"id": "known"');
   expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("idle");
@@ -176,7 +176,7 @@ it("holds a changed raw page before any model call", async () => {
 it("keeps the configured OpenAI transport and selects Luna", async () => {
   const f = await fixture();
   await runOneHostedClinicalEnrichment({ ...f.runtime, modelProvider: "hosted-openai" });
-  expect(f.executeExtraction).toHaveBeenCalledWith(expect.objectContaining({ modelProvider: "hosted-openai", model: "gpt-5.6-luna", reasoningEffort: "medium" }));
+  expect(f.executeExtraction).toHaveBeenCalledWith(expect.objectContaining({ modelProvider: "hosted-openai", model: "gpt-6-luna", reasoningEffort: "medium" }));
 });
 
 it("clears a failed record's retry state when attestation holds it and continues to the next record", async () => {

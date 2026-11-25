@@ -2223,7 +2223,7 @@ or `decrypt_only` envelope references before retirement.
 Hosted assistant config:
 
 - `HOSTED_ASSISTANT_PROVIDER`; only `openai` is supported.
-- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-terra`, `gpt-6.2-sol`, `gpt-6-luna`, `gpt-6.2-astra`, `gpt-5.6-luna`. GPT-6.1 Terra is the managed OpenAI personal-chat default; Web selects GPT-6.2 Sol for all groups. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
+- `HOSTED_ASSISTANT_MODEL`; worker deploy preflight requires an explicit allowance-priced direct OpenAI model slug. Supported slugs include `gpt-6.1-terra`, `gpt-6.2-sol`, `gpt-6-luna`, `gpt-6.2-astra`. GPT-6.1 Terra is the managed OpenAI personal-chat default; Web selects GPT-6.2 Sol for all groups. Production deploys require `HOSTED_ASSISTANT_REASONING_EFFORT=low`.
 - `HOSTED_ASSISTANT_APPROVAL_POLICY`
 - `HOSTED_ASSISTANT_REASONING_EFFORT`
 - `HOSTED_ASSISTANT_SANDBOX`
