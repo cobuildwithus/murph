@@ -6443,6 +6443,35 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         return runtimeStateDirty;
       };
+      // Clinical continuation is the last post-checkpoint choice before the
+      // invocation finishes. Null loops back, exactly like a finish retry.
+      const continueClinicalEnrichmentOrFinishDirtyRuntimeInvocation = async (input: {
+        browserVaultRefresh: Parameters<typeof finishDirtyRuntimeInvocation>[0]["browserVaultRefresh"];
+        deferredBrowserVaultWakePrefetch: HostedMailboxPrefixPrefetch | null;
+        deferredDeviceSyncWake: HostedVaultShareOfferWake | null;
+        idleMaintenance: HostedIdleMaintenanceOutcome;
+        mailboxWakeNeedsReplacement: boolean;
+        mayRunPostCheckpointWork: () => boolean;
+        postCheckpointWorkSignal: AbortSignal;
+      }) => {
+        if (
+          !runtimeStateDirty
+          && input.mayRunPostCheckpointWork()
+          && !input.mailboxWakeNeedsReplacement
+          && !input.deferredBrowserVaultWakePrefetch
+          && !input.deferredDeviceSyncWake
+          && input.browserVaultRefresh?.status !== "deferred_runtime_wake"
+          && await continueClinicalEnrichmentAfterCheckpoint(input.idleMaintenance)
+        ) {
+          return null;
+        }
+        return await finishDirtyRuntimeInvocation({
+          browserVaultRefresh: input.browserVaultRefresh,
+          idleMaintenance: input.idleMaintenance,
+          mayRunPostCheckpointWork: input.mayRunPostCheckpointWork(),
+          postCheckpointWorkSignal: input.postCheckpointWorkSignal,
+        });
+      };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
@@ -8066,21 +8095,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           scheduleReplacementForRetainedMailboxWake();
         }
         await runOptionalPostCheckpointWork(() => runNextCheckpointedMailboxItem(postCheckpointWorkSignal));
-        if (
-          !runtimeStateDirty
-          && mayRunPostCheckpointWork()
-          && !mailboxWakeNeedsReplacement
-          && !deferredBrowserVaultWakePrefetch
-          && !deferredDeviceSyncWake
-          && browserVaultRefresh?.status !== "deferred_runtime_wake"
-          && await continueClinicalEnrichmentAfterCheckpoint(idleMaintenance)
-        ) {
-          continue;
-        }
-        const invocationResult = await finishDirtyRuntimeInvocation({
+        const invocationResult = await continueClinicalEnrichmentOrFinishDirtyRuntimeInvocation({
           browserVaultRefresh,
+          deferredBrowserVaultWakePrefetch,
+          deferredDeviceSyncWake,
           idleMaintenance,
-          mayRunPostCheckpointWork: mayRunPostCheckpointWork(),
+          mailboxWakeNeedsReplacement,
+          mayRunPostCheckpointWork,
           postCheckpointWorkSignal,
         });
         if (invocationResult === null) {
