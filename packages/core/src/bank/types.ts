@@ -544,6 +544,17 @@ export interface UpsertRegimenResult {
   record: RegimenStoredDocument;
 }
 
+export interface DeleteRegimenInput {
+  vaultRoot: string;
+  regimenId: string;
+}
+
+export interface DeleteRegimenResult {
+  regimenId: string;
+  relativePath: string;
+  deleted: true;
+}
+
 export interface ReadRegimenInput {
   vaultRoot: string;
   regimenId?: string;
