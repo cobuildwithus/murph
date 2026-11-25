@@ -20,9 +20,13 @@ const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 // Blood tests are `test` events; other kinds never project to a record.
 const BLOOD_TEST_EVENT_SOURCE = { eventKinds: ["test"] } as const;
 
-export interface BloodTestQueryRecord {
+/**
+ * One projected `test` event. Blood tests are the blood subset; diagnostic
+ * tests are every test event (stool, microbiome, urine, saliva and blood).
+ */
+export interface TestQueryRecord<TKind extends "blood_test" | "test"> {
   id: string;
-  kind: "blood_test";
+  kind: TKind;
   occurredAt: string;
   recordedAt: string | null;
   collectedAt: string | null;
@@ -40,6 +44,9 @@ export interface BloodTestQueryRecord {
   relativePath: string;
   data: Record<string, unknown>;
 }
+
+export type BloodTestQueryRecord = TestQueryRecord<"blood_test">;
+export type DiagnosticTestQueryRecord = TestQueryRecord<"test">;
 
 export interface BloodTestListOptions {
   status?: string | string[];
@@ -62,6 +69,20 @@ function isBloodTestData(data: Record<string, unknown>): boolean {
 function bloodTestRecordFromEventEntity(
   entity: CanonicalEntity,
 ): BloodTestQueryRecord | null {
+  const record = testRecordFromEventEntity(entity, "blood_test");
+  return record && isBloodTestData(record.data) ? record : null;
+}
+
+function diagnosticTestRecordFromEventEntity(
+  entity: CanonicalEntity,
+): DiagnosticTestQueryRecord | null {
+  return testRecordFromEventEntity(entity, "test");
+}
+
+function testRecordFromEventEntity<TKind extends "blood_test" | "test">(
+  entity: CanonicalEntity,
+  kind: TKind,
+): TestQueryRecord<TKind> | null {
   if (
     entity.family !== "event" ||
     entity.kind !== "test" ||
@@ -71,13 +92,13 @@ function bloodTestRecordFromEventEntity(
   }
 
   const data = asObject(entity.attributes);
-  if (!data || !isBloodTestData(data)) {
+  if (!data) {
     return null;
   }
 
   return {
     id: entity.entityId,
-    kind: "blood_test",
+    kind,
     occurredAt: entity.occurredAt,
     recordedAt: firstString(data, ["recordedAt"]),
     collectedAt: firstString(data, ["collectedAt"]),
@@ -140,14 +161,8 @@ export function compareBloodTests(
   return compareByOccurredAtDescThenId(left, right);
 }
 
-function isBloodTestRecord(
-  record: BloodTestQueryRecord | null,
-): record is BloodTestQueryRecord {
-  return record !== null;
-}
-
-function matchesBloodTestOptions(
-  record: BloodTestQueryRecord,
+function matchesTestOptions(
+  record: TestQueryRecord<"blood_test" | "test">,
   options: BloodTestListOptions,
 ): boolean {
   return (
@@ -170,40 +185,66 @@ function matchesBloodTestOptions(
   );
 }
 
-function selectProjectedBloodTests(
+function selectProjectedTests<TRecord extends TestQueryRecord<"blood_test" | "test">>(
   entities: readonly CanonicalEntity[],
+  toRecord: (entity: CanonicalEntity) => TRecord | null,
   options: BloodTestListOptions = {},
-): BloodTestQueryRecord[] {
+): TRecord[] {
   const records = entities
-    .map(bloodTestRecordFromEventEntity)
-    .filter(isBloodTestRecord)
+    .map(toRecord)
+    .filter((record): record is TRecord => record !== null)
     .filter((record) => matchesDateRange(record.occurredAt, options.from, options.to))
-    .filter((record) => matchesBloodTestOptions(record, options))
-    .sort(compareBloodTests);
+    .filter((record) => matchesTestOptions(record, options))
+    .sort(compareByOccurredAtDescThenId);
 
   return applyLimit(records, options.limit);
+}
+
+async function listProjectedTests<TRecord extends TestQueryRecord<"blood_test" | "test">>(
+  vaultRoot: string,
+  toRecord: (entity: CanonicalEntity) => TRecord | null,
+  options: BloodTestListOptions,
+): Promise<TRecord[]> {
+  const entities = await listCanonicalEventEntitiesRuntime(vaultRoot, {
+    from: options.from,
+    kinds: ["test"],
+    // The event reader is unlimited: classification and text matching must
+    // still precede the selector's final limit.
+    to: options.to,
+  });
+  return selectProjectedTests(entities, toRecord, options);
+}
+
+async function showProjectedTest<TRecord extends TestQueryRecord<"blood_test" | "test">>(
+  vaultRoot: string,
+  toRecord: (entity: CanonicalEntity) => TRecord | null,
+  lookup: string,
+): Promise<TRecord | null> {
+  const records = selectProjectedTests(
+    await readCanonicalEntityFamilySource(vaultRoot, "event", BLOOD_TEST_EVENT_SOURCE),
+    toRecord,
+  );
+  return (
+    records.find((record) =>
+      matchesLookup(lookup, record.id, record.title, record.testName, record.labPanelId),
+    ) ?? null
+  );
 }
 
 export async function listBloodTests(
   vaultRoot: string,
   options: BloodTestListOptions = {},
 ): Promise<BloodTestQueryRecord[]> {
-  const entities = await listCanonicalEventEntitiesRuntime(vaultRoot, {
-    from: options.from,
-    kinds: ["test"],
-    // The event reader is unlimited: classification and text matching must
-    // still precede the blood-test selector's final limit.
-    to: options.to,
-  });
-  return selectProjectedBloodTests(entities, options);
+  return listProjectedTests(vaultRoot, bloodTestRecordFromEventEntity, options);
 }
 
 export async function readBloodTest(
   vaultRoot: string,
   eventId: string,
 ): Promise<BloodTestQueryRecord | null> {
-  const records = selectProjectedBloodTests(
+  const records = selectProjectedTests(
     await readCanonicalEntityFamilySource(vaultRoot, "event", BLOOD_TEST_EVENT_SOURCE),
+    bloodTestRecordFromEventEntity,
   );
   return records.find((record) => record.id === eventId) ?? null;
 }
@@ -212,12 +253,20 @@ export async function showBloodTest(
   vaultRoot: string,
   lookup: string,
 ): Promise<BloodTestQueryRecord | null> {
-  const records = selectProjectedBloodTests(
-    await readCanonicalEntityFamilySource(vaultRoot, "event", BLOOD_TEST_EVENT_SOURCE),
-  );
-  return (
-    records.find((record) =>
-      matchesLookup(lookup, record.id, record.title, record.testName, record.labPanelId),
-    ) ?? null
-  );
+  return showProjectedTest(vaultRoot, bloodTestRecordFromEventEntity, lookup);
+}
+
+/** Every saved test, blood or not, with the same filters as blood tests. */
+export async function listDiagnosticTests(
+  vaultRoot: string,
+  options: BloodTestListOptions = {},
+): Promise<DiagnosticTestQueryRecord[]> {
+  return listProjectedTests(vaultRoot, diagnosticTestRecordFromEventEntity, options);
+}
+
+export async function showDiagnosticTest(
+  vaultRoot: string,
+  lookup: string,
+): Promise<DiagnosticTestQueryRecord | null> {
+  return showProjectedTest(vaultRoot, diagnosticTestRecordFromEventEntity, lookup);
 }

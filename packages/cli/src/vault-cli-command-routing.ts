@@ -10,7 +10,6 @@ const cliOnlyScopedRegistrars = {
   batch: async () => (await import('./commands/batch.js')).registerBatchCommands,
   'clinical-note': async () => (await import('./commands/clinical-imports.js')).registerClinicalNoteCommands,
   commons: async () => (await import('./commands/commons.js')).registerCommonsCommands,
-  'diagnostic-test': async () => (await import('./commands/clinical-imports.js')).registerDiagnosticTestCommands,
   encounter: async () => (await import('./commands/encounter.js')).registerEncounterCommands,
   exercise: async () => (await import('./commands/exercise.js')).registerExerciseCommands,
   habitat: async () => (await import('./commands/habitat.js')).registerHabitatCommands,
@@ -103,6 +102,17 @@ export async function registerScopedVaultCliCommand(input: {
         createScopedVaultServices(),
       ])
       registerConditionCommands(input.cli, services)
+      return
+    }
+    case 'diagnostic-test': {
+      const [
+        { registerDiagnosticTestCommands },
+        services,
+      ] = await Promise.all([
+        import('./commands/clinical-imports.js'),
+        createScopedVaultServices(),
+      ])
+      registerDiagnosticTestCommands(input.cli, services)
       return
     }
     case 'device': {

@@ -37,9 +37,10 @@ function createSliceCli() {
   registerSearchCommands(cli);
   registerClinicalNoteCommands(cli);
   registerAssertionCommands(cli);
-  registerDiagnosticTestCommands(cli);
+  const services = createDefaultVaultServices();
+  registerDiagnosticTestCommands(cli, services);
   registerSocialHistoryCommands(cli);
-  registerReadCommands(cli, createDefaultVaultServices());
+  registerReadCommands(cli, services);
 
   return cli;
 }
@@ -411,4 +412,46 @@ test("clinical-note import and show preserve typed answers and unknown dates acr
   assert.ok(JSON.stringify(found).includes(result.eventIds[0]!));
   const replay = requireData(await runSliceCli<ClinicalImportCliResult>(args));
   assert.deepEqual(replay.eventIds, []);
+});
+
+test("diagnostic-test list and show read non-blood tests with one matched row per test", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "diagnostic-test-read-cli-"));
+  cleanupPaths.push(vaultRoot);
+  await initializeVault({ vaultRoot, createdAt: "2026-02-01T12:00:00.000Z", timezone: "UTC" });
+  const kit = (id: string, occurredAt: string, score: number) => ({
+    source: "import", occurredAt, testName: "Synthetic gut kit", testCategory: "microbiome",
+    specimenType: "stool", resultStatus: "unknown",
+    externalRef: { system: "synthetic-kit", resourceType: "diagnostic-test", resourceId: id, facet: "scores" },
+    results: [
+      { analyte: "Synthetic Fiber Pathways", slug: "synthetic-fiber-pathways", value: score, unit: "score", note: "Pathway" },
+      { analyte: "Synthetic Calm Score", value: 70, unit: "score" },
+      { analyte: "Examplea testensis", textValue: "active", note: "Bacteria" },
+    ],
+  });
+  for (const [id, occurredAt, score] of [["kit-a", "2026-02-03T12:00:00.000Z", 41], ["kit-b", "2026-08-05T12:00:00.000Z", 57]] as const) {
+    const inputFile = path.join(vaultRoot, `${id}.json`);
+    await writeFile(inputFile, JSON.stringify(kit(id, occurredAt, score)));
+    requireData(await runSliceCli(["diagnostic-test", "import-json", "--input", `@${inputFile}`, "--vault", vaultRoot]));
+  }
+
+  type ListRow = { id: string; kind: string; data: Record<string, unknown> };
+  const trend = requireData(await runSliceCli<{ items: ListRow[] }>(
+    ["diagnostic-test", "list", "--text", "fiber pathways", "--vault", vaultRoot],
+  ));
+  assert.deepEqual(trend.items.map(row => row.data.matchedResult), [
+    { analyte: "Synthetic Fiber Pathways", value: 57, unit: "score" },
+    { analyte: "Synthetic Fiber Pathways", value: 41, unit: "score" },
+  ]);
+  assert.ok(trend.items.every(row => row.kind === "test" && !("results" in row.data)));
+  const organism = requireData(await runSliceCli<{ items: ListRow[] }>(
+    ["diagnostic-test", "list", "--text", "testensis", "--limit", "1", "--vault", vaultRoot],
+  ));
+  assert.deepEqual(organism.items[0]?.data.matchedResult, { analyte: "Examplea testensis", textValue: "active" });
+
+  const shown = requireData(await runSliceCli<{ entity: ListRow }>(
+    ["diagnostic-test", "show", trend.items[1]!.id, "--vault", vaultRoot],
+  ));
+  assert.equal((shown.entity.data.results as unknown[]).length, 3);
+  const missing = await runSliceCli(["diagnostic-test", "show", "no-such-test", "--vault", vaultRoot]);
+  assert.equal(missing.ok, false);
 });

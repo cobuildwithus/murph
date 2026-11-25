@@ -258,6 +258,7 @@ export interface HealthQueryShowServiceMethods {
   showAllergy(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showRegimen(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showBloodTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
+  showDiagnosticTest(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showImmunization(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showFamilyMember(input: EntityLookupInput): Promise<HealthEntityEnvelope>
   showGeneticVariant(input: EntityLookupInput): Promise<HealthEntityEnvelope>
@@ -270,6 +271,7 @@ export interface HealthQueryListServiceMethods {
   listAllergies(input: HealthListInput): Promise<HealthListEnvelope>
   listRegimens(input: HealthListInput): Promise<HealthListEnvelope>
   listBloodTests(input: HealthListInput): Promise<HealthListEnvelope>
+  listDiagnosticTests(input: HealthListInput): Promise<HealthListEnvelope>
   listImmunizations(input: HealthListInput): Promise<HealthListEnvelope>
   listFamilyMembers(input: HealthListInput): Promise<HealthListEnvelope>
   listGeneticVariants(input: HealthListInput): Promise<HealthListEnvelope>
