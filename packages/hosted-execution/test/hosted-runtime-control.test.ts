@@ -13,7 +13,7 @@ import {
 } from "../src/assistant-usage.ts";
 import {
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
-  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_MODEL_OVERRIDES,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
@@ -359,7 +359,8 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.2-sol-2026-07-08")).toBe("gpt-6.2-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6-sol-2026-07-08")).toBeNull();
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6-luna-2026-07-08")).toBe("gpt-6-luna");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-terra")).toBeNull();
@@ -374,22 +375,20 @@ describe("hosted runtime control contracts", () => {
       "gpt-6.1-terra",
       "gpt-6.2-sol",
       "gpt-6-luna",
-      HOSTED_ASSISTANT_LUNA_MODEL,
       "gpt-6.2-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
       "gpt-6.1-terra",
       "gpt-6.2-sol",
       "gpt-6-luna",
-      HOSTED_ASSISTANT_LUNA_MODEL,
       "gpt-6.2-astra",
     ]);
-    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_GPT_6_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_DEFAULT_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
-    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
-      .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_GPT_6_LUNA_MODEL))
+      .toBe(HOSTED_ASSISTANT_GPT_6_LUNA_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
       .toBe(HOSTED_ASSISTANT_SOL_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_DEFAULT_MODEL))
@@ -444,11 +443,11 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/not allowed/u);
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       reasoningEffort: "low",
     })).toEqual({
       action: "update",
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       reasoningEffort: "low",
     });
 
@@ -457,7 +456,7 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/requires a model or reasoning effort/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
     })).toThrow(/not allowed/u);
     expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "update",
@@ -2422,12 +2421,12 @@ describe("hosted runtime control contracts", () => {
     })).toThrow(/hostedAssistantSubagentModelOverridesAllowed/u);
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       hostedAssistantReasoningEffortOverride: "xhigh",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       hostedAssistantReasoningEffortOverride: "xhigh",
       workspace: null,
     });

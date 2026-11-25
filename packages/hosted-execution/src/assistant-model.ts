@@ -16,7 +16,6 @@ import {
   requireString,
 } from "./parsers/assertions.ts";
 
-export const HOSTED_ASSISTANT_LUNA_MODEL = "gpt-5.6-luna" as const;
 export const HOSTED_ASSISTANT_GPT_6_LUNA_MODEL = "gpt-6-luna" as const;
 export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-6.2-sol" as const;
 export const HOSTED_ASSISTANT_TERRA_MODEL = "gpt-6.1-terra" as const;
@@ -28,7 +27,6 @@ export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
   HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
-  HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_ASTRA_MODEL,
 ] as const;
 
@@ -43,7 +41,6 @@ const flexModelByPreference = {
   [HOSTED_ASSISTANT_ASTRA_MODEL]: HOSTED_FLEX_SOL_MODEL,
   [HOSTED_ASSISTANT_TERRA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
   [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
-  [HOSTED_ASSISTANT_LUNA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
 } as const satisfies Record<HostedAssistantProductModel, typeof HOSTED_FLEX_MODELS[number]>;
 
 export function resolveHostedFlexModel(model: string | null): typeof HOSTED_FLEX_MODELS[number] | null {

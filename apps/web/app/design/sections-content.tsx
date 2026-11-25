@@ -205,7 +205,7 @@ export function SectionsContent({
             >
               <ModelSettingsHoverPreview>
                 <HostedAssistantModelSettings
-                  availableModels={["gpt-6.1-terra", "gpt-6.2-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-6.2-astra"]}
+                  availableModels={["gpt-6.1-terra", "gpt-6.2-sol", "gpt-6-luna", "gpt-6.2-astra"]}
                   canUpgradeToEdge={false}
                   configurationAvailable
                   initialDormantSolPreference={false}

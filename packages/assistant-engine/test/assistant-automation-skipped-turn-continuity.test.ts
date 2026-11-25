@@ -67,7 +67,7 @@ describe('skipped automation continuity', () => {
     const lunaRoute = resolveAssistantExecutionPlan({
       defaults: null,
       override: {
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         reasoningEffort: 'high',
       },
       sessionTarget: solTarget,
@@ -77,7 +77,7 @@ describe('skipped automation continuity', () => {
       assistantTranscriptText: null,
       input: {
         assistantTargetOverride: {
-          model: 'gpt-5.6-luna',
+          model: 'gpt-6-luna',
         },
         prompt: 'Decide whether the scheduled reminder is still useful.',
         turnTrigger: 'automation-cron',

@@ -47,10 +47,10 @@ describe("hosted runtime assistant configuration tool", () => {
     });
     mocks.updateConfiguration.mockResolvedValue({
       ...buildSnapshot({
-        model: "gpt-5.6-luna",
+        model: "gpt-6-luna",
         reasoningEffort: "high",
       }),
-      hostedAssistantModelOverride: "gpt-5.6-luna",
+      hostedAssistantModelOverride: "gpt-6-luna",
       hostedAssistantReasoningEffortOverride: "high",
       updated: true,
     });
@@ -75,7 +75,7 @@ describe("hosted runtime assistant configuration tool", () => {
     const request = {
       action: "update" as const,
       assistantInputId: `ain_${"c".repeat(32)}`,
-      model: "gpt-5.6-luna" as const,
+      model: "gpt-6-luna" as const,
       reasoningEffort: "high" as const,
     };
     await expect(handleHostedRuntimeAssistantConfigurationTool({
@@ -85,7 +85,7 @@ describe("hosted runtime assistant configuration tool", () => {
       action: "update",
       result: {
         ...buildSnapshot({
-          model: "gpt-5.6-luna",
+          model: "gpt-6-luna",
           reasoningEffort: "high",
         }),
         appliesAt: "next_turn",
@@ -100,7 +100,7 @@ describe("hosted runtime assistant configuration tool", () => {
     });
     expect(mocks.updateConfiguration).toHaveBeenCalledWith({
       memberId: "member_123",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       prisma: { label: "tx" },
       reasoningEffort: "high",
     });
@@ -191,11 +191,11 @@ describe("hosted runtime assistant configuration tool", () => {
 
 function buildSnapshot(overrides: {
   dormantSolPreference?: boolean;
-  model?: "gpt-5.6-luna" | "gpt-6.2-sol";
+  model?: "gpt-6-luna" | "gpt-6.2-sol";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
   return {
-    availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"] as const,
+    availableModels: ["gpt-6-luna", "gpt-6.2-sol"] as const,
     availableReasoningEfforts: ["low", "medium", "high", "xhigh"] as const,
     configurationAvailable: true,
     dormantSolPreference: overrides.dormantSolPreference ?? false,

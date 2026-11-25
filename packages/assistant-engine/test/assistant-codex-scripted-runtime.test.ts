@@ -2314,7 +2314,7 @@ text(JSON.stringify(result));
     ).toContain('"status":"missing"')
   })
 
-  it.each(['gpt-5.6-luna', 'gpt-6.2-sol'])(
+  it.each(['gpt-6-luna', 'gpt-6.2-sol'])(
     'preserves original width for %s and bounds gallery widths through the real app server',
     { timeout: TURN_TIMEOUT_MS },
     async (model) => {
@@ -2963,8 +2963,8 @@ text(result.output);
   })
 
   it.each([
-    ['direct', 'gpt-5.6-luna', false],
-    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-luna', false],
+    ['group', 'gpt-6-luna', false],
     ['direct', 'gpt-6.2-astra', true],
   ] as const)(
     'carries a delayed V2 %s %s child completion into a later root turn without waiting',
@@ -4092,7 +4092,7 @@ text(result.output);
         functionCall: {
           arguments: {
             action: 'save',
-            assistantTargetOverride: { model: 'gpt-5.6-luna' },
+            assistantTargetOverride: { model: 'gpt-6-luna' },
             contextReferences: [{
               entityId: conditionId,
               entityKind: 'condition',
@@ -4233,7 +4233,7 @@ text(result.output);
     })
     expect(automationRequests).toEqual([{
       action: 'save',
-      assistantTargetOverride: { model: 'gpt-5.6-luna' },
+      assistantTargetOverride: { model: 'gpt-6-luna' },
       contextReferences: [{
         entityId: conditionId,
         entityKind: 'condition',
@@ -8382,7 +8382,6 @@ text(JSON.stringify(result));
       model: 'gpt-6-luna' | 'gpt-6.2-sol',
     ): HostedRuntimeAssistantConfigurationSnapshot => ({
       availableModels: [
-        'gpt-5.6-luna',
         'gpt-6-luna',
         'gpt-6.2-sol',
       ],
@@ -8514,7 +8513,7 @@ text(JSON.stringify(result));
 
   it.each([
     ['gpt-6.2-sol', 'gpt-6.1-sol'], ['gpt-6.2-astra', 'gpt-6.1-sol'],
-    ['gpt-6.1-terra', 'gpt-6.1-terra'], ['gpt-6-luna', 'gpt-6.1-terra'], ['gpt-5.6-luna', 'gpt-6.1-terra'],
+    ['gpt-6.1-terra', 'gpt-6.1-terra'], ['gpt-6-luna', 'gpt-6.1-terra'],
   ])('routes and prices Flex work for %s through real Codex on %s', {
     timeout: TURN_TIMEOUT_MS,
   }, async (model, flexModel) => {
@@ -9038,7 +9037,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     const second = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       prompt: 'Reply exactly RESUME_SECOND_OK.',
       reasoningEffort: 'high',
       resumeSessionId: first.sessionId,
@@ -9050,7 +9049,7 @@ text(JSON.stringify(result));
     expect(second.turnId).not.toBe(first.turnId)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       {
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         serviceTier: null,
       },
     ])

@@ -971,7 +971,7 @@ describe("hosted detached assistant ask controller", () => {
         },
         codexHome: "/hosted/codex-home",
         env: {},
-        model: "gpt-5.6-luna",
+        model: "gpt-6-luna",
         modelProvider: memberProvider,
         usageRecordPort: { async recordUsage(record) { records.push(record); return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true }; } },
         deferUsageUntilAfterDurableCheckpoint(effect) { deferred.push(effect); },

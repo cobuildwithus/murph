@@ -6,7 +6,6 @@ import {
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
-  HOSTED_ASSISTANT_LUNA_MODEL,
   isHostedAssistantProductModel,
   type HostedAssistantProductModel,
 } from "@murphai/hosted-execution/assistant-model";
@@ -345,8 +344,6 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
   if (model === HOSTED_ASSISTANT_TERRA_MODEL) return "Terra";
-  if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
-    return "Luna";
-  }
+  if (model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) return "Luna";
   return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Murph";
 }

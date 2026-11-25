@@ -124,7 +124,7 @@ Current product admission, delivery and native runtime safety rules remain.
   Murph's goal-proposal and acceptance replies must arrive in under forty
   seconds, and every other reply in under twenty seconds. The canary member's
   existing assistant-model
-  preference selects GPT-5.6 Luna for its runtime turns without changing the
+  preference selects GPT-6 Luna for its runtime turns without changing the
   model selected for ordinary members. That workflow remains the canary's
   latency owner: the Web reply-latency email monitor resolves the same configured
   identity through its canonical blind-index lookup and excludes its current

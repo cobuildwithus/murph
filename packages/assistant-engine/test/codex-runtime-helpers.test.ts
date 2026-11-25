@@ -401,12 +401,12 @@ describe('Codex assistant registry helpers', () => {
 
   it.each([
     {
-      requestedModel: 'gpt-5.6-luna',
+      requestedModel: 'gpt-6-luna',
       servedModel: 'gpt-6.2-sol',
     },
     {
       requestedModel: 'gpt-6.2-sol',
-      servedModel: 'gpt-5.6-luna',
+      servedModel: 'gpt-6-luna',
     },
   ])(
     'attributes canonical $requestedModel reroutes to served $servedModel',
@@ -482,7 +482,7 @@ describe('Codex assistant registry helpers', () => {
     const usage = extractExactCodexAssistantProviderUsage({
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
-        model: 'gpt-5.6-luna',
+        model: 'gpt-6-luna',
         modelProvider: 'openai',
         oss: false,
       }),
@@ -512,8 +512,8 @@ describe('Codex assistant registry helpers', () => {
     })
 
     expect(usage).toMatchObject({
-      requestedModel: 'gpt-5.6-luna',
-      servedModel: 'gpt-5.6-luna',
+      requestedModel: 'gpt-6-luna',
+      servedModel: 'gpt-6-luna',
     })
   })
 

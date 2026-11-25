@@ -12,6 +12,7 @@ describe('retired stored model compatibility', () => {
     ['gpt-6-sol', 'gpt-6.2-sol'],
     ['gpt-6.1-sol', 'gpt-6.2-sol'],
     ['gpt-6-astra', 'gpt-6.2-astra'],
+    ['gpt-5.6-luna', 'gpt-6-luna'],
   ])('normalizes a saved %s conversation while preserving reasoning', (savedModel, model) => {
     const result = parseAssistantSessionRecord({
       schema: 'murph.assistant-conversation.v2', conversationId: 'session_synthetic',
@@ -35,5 +36,6 @@ describe('retired stored model compatibility', () => {
     expect(parseHostedAssistantConfig(legacy).profiles[0]?.target).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'high' })
     expect(() => prepareHostedAssistantConfigForWrite(legacy)).toThrow('retired')
     expect(() => createAssistantModelTarget({ model: 'gpt-5.6-sol' })).toThrow('retired')
+    expect(() => createAssistantModelTarget({ model: 'gpt-5.6-luna' })).toThrow('use gpt-6-luna')
   })
 })

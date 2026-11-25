@@ -133,7 +133,7 @@ staggered hourly schedule; manual dispatch remains available for recovery. Every
 run first resolves the actual Vercel production deployment, verifies exact
 deployment identity and protected-main ancestry, then resets only that identity through the
 fixed-target production route. The recreated canary member uses its existing
-assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
+assistant-model preference to keep all runtime turns on GPT-6 Luna.
 
 The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn

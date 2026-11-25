@@ -93,7 +93,7 @@ describe('automation model continuity', () => {
       scheduledOccurrenceAt: '2026-09-23T15:00:00.000Z',
       turnTrigger: 'automation-cron',
     })
-    expect(envelope.assistantTargetOverride).toEqual({ model: storedModel === 'gpt-5.6-terra' || storedModel === 'gpt-5.6-luna' ? storedModel : model })
+    expect(envelope.assistantTargetOverride).toEqual({ model: storedModel === 'gpt-5.6-terra' ? storedModel : model })
     for (const modelProvider of ['openai', 'hosted-openai', 'hosted-chatgpt-openai', 'openai-local-test']) {
       const session = createGroupSession(requireTarget('gpt-6.2-sol', 'xhigh', modelProvider), null)
       for (const serviceTier of ['flex', null] as const) {
@@ -171,7 +171,7 @@ describe('automation model continuity', () => {
       createResumeState(solTarget, providerThreadId),
     )
     const turnInput = createAutomationInput({
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       reasoningEffort: 'high',
     })
     const lunaRoute = resolveAssistantTurnRoute(
@@ -240,7 +240,7 @@ describe('automation model continuity', () => {
       createResumeState(solTarget, 'provider-sol-thread'),
     )
     const turnInput = createAutomationInput({
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       reasoningEffort: 'high',
     })
     const lunaRoute = resolveAssistantTurnRoute(

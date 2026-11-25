@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   environment: {
-    linqFirstContactAdmissionModel: "gpt-5.6-luna",
+    linqFirstContactAdmissionModel: "gpt-6-luna",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
   releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx: vi.fn(),
@@ -226,7 +226,7 @@ function buildOpenAiResponse(input: {
   return new Response(JSON.stringify({
     created_at: 1_787_400_000,
     id: "resp_123",
-    model: "gpt-5.6-luna-2026-08-01",
+    model: "gpt-6-luna-2026-08-01",
     object: "response",
     output: [{
       content: [{
@@ -265,7 +265,7 @@ function buildUsageResponse(
     incomplete_details: null,
     instructions: null,
     metadata: null,
-    model: "gpt-5.6-luna-2026-08-01",
+    model: "gpt-6-luna-2026-08-01",
     object: "response",
     output: [],
     output_text: "",
@@ -302,7 +302,7 @@ describe("hosted Linq instant first turn", () => {
         parts: [{ type: "text", value: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }],
       } },
     });
-    mocks.environment.linqFirstContactAdmissionModel = "gpt-5.6-luna";
+    mocks.environment.linqFirstContactAdmissionModel = "gpt-6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
     mocks.releaseStaleHostedLinqInstantFirstTurnAndCheckConflictTx.mockResolvedValue(
       false,
