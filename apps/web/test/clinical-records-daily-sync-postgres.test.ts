@@ -195,9 +195,10 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await client.clinicalRecordRetrievalRun.update({ where: { id: f.pointer.runId }, data: { notificationSettingRevision: 3 } });
       await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: true } });
       expect(await f.authority()).toBeNull();
-      await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: false, service: "SMS" } });
-      expect(await f.authority()).toBeNull();
-      await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { service: "iMessage" } });
+      for (const service of ["SMS", "RCS", "iMessage"]) {
+        await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: false, service } });
+        expect((await f.authority())?.mode).toBe("notice");
+      }
       await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { status: "disconnected", disconnectedAt: now } });
       expect(await f.authority()).toBeNull();
       await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { status: "active", disconnectedAt: null, tokenVersion: 2 } });

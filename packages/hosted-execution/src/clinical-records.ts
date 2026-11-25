@@ -114,7 +114,7 @@ export const clinicalNotificationRequestSchema = hostedClinicalRecordsReadRunReq
 
 export const clinicalNotificationDecisionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
-  z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256), directoryLabel: z.string().min(1).max(256).nullable() }).strict(),
+  z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256) }).strict(),
   z.object({ mode: z.literal("detail"), threadId: z.string().min(1).max(256) }).strict(),
 ]);
 export type ClinicalNotificationDecision = z.infer<typeof clinicalNotificationDecisionSchema>;

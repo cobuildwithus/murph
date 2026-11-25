@@ -210,10 +210,10 @@ afterEach(() => {
 });
 
 describe("executeHostedMailboxEvent", () => {
-  it("renders the directory fallback privately and checkpoints a run pointer on replay", async () => {
+  it("renders the fixed notice privately and checkpoints a run pointer on replay", async () => {
     const workspace = await createHostedRuntimeWorkspace("clinical-pointer-");
     const runtime = createRuntime();
-    const readNotification = vi.fn().mockResolvedValue({ mode: "notice", directoryLabel: null, threadId: "synthetic-thread" });
+    const readNotification = vi.fn().mockResolvedValue({ mode: "notice", threadId: "synthetic-thread" });
     const wake = { kind: "clinical-records.change-recorded" as const, eventId: "synthetic-event",
       generation: 2, occurredAt: "2026-11-01T18:00:00.000Z", runId: "synthetic-run", userId: "synthetic-member" };
     try {
@@ -227,7 +227,7 @@ describe("executeHostedMailboxEvent", () => {
         request: { kind: "change-scheduled", generation: 2, runId: "synthetic-run" } });
       expect((await consume()).deliveryIntentIds).toEqual(first.deliveryIntentIds);
       expect(await listAssistantOutboxIntents(workspace.vaultRoot)).toMatchObject([{
-        message: "New records came in from your connected hospital. Want me to go through them?",
+        message: "New records came in. Want me to go through them?",
       }]);
       expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
       expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();

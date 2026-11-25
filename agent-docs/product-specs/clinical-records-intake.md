@@ -618,16 +618,14 @@ The run row retains publication and scheduling coverage through queue cleanup.
 Missing and empty evidence leave the member's conversation alone.
 
 In notice mode the private runtime writes one ordinary proactive outbox intent.
-It renders “New records came in from <source name>. Want me to go through them?”
-using the brand name from the server-owned provider directory entry recorded
-on the connection. An unavailable label becomes “your connected hospital”.
-The member can answer in the existing conversation. Detail mode schedules a
-one-shot job with the private run receipt reference. Off suppresses publication.
+It renders “New records came in. Want me to go through them?” locally.
+Off suppresses publication. Detail uses one scheduled turn with the private
+run receipt reference and the member’s explicit detail setting.
 
-Linq currently selects the transport for each plain-text send. Strict iMessage
-delivery is unavailable, so the host skips the detail job before opening tools
-and blocks notice dispatch. Registering a new hospital client alone cannot
-enable delivery.
+The owner withdrew the iMessage-only requirement. Notices and details may use
+the exact verified private thread frozen at admission, including when Linq
+selects RCS or SMS. No second consent step is required. Admission remains
+disabled pending the delivery and privacy proofs in the Phase B execution plan.
 
 ### Bounded repeat import
 

@@ -423,21 +423,18 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 ## Daily hospital record texts
 
-Clinical notices are proactive. The signed Linq egress owner applies ordinary
-line health and the 90-day pause, then checks clinical authority for each
-attempt and sibling bubble. Only the frozen verified private home route can
-qualify. The reply path retains its ordinary behavior when the member responds.
+Clinical texts may go to the exact verified private Murph thread frozen at
+daily admission. The owner withdrew the iMessage-only requirement. Linq may
+select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
+requires the member’s existing explicit detail setting. Each attempt, including
+a retry or another bubble, must recheck the run, preference, named approvals,
+private recipient, proactive pause, line health and recipient-region window.
+A group, replacement thread or different channel cannot receive the text.
 
-There is no universal quiet-hours owner for proactive texts. Before activating
-clinical sends, E2 must defer to a safe recipient-region window and recheck
-authority at dispatch. The dormant reader never consumes a quiet-hours deferral.
-
-Linq selects iMessage, RCS or SMS automatically for plain text and deprecated
-the service preference. The shared provider boundary rejects clinical keys
-before network entry or thread recovery. The owner is deciding whether the
-member's ordinary Murph thread is acceptable for records texts.
-The clinical cron preflight skips generation while this restriction holds.
-See [Linq protocol selection](https://docs.linqapp.com/channel/imessage/guides/messaging/protocol-selection/).
+Admission and dispatch remain disabled. Linq can echo outbound text to the Web
+receipt endpoint. The Web terminal-failure retry also fetches message parts from
+Linq and reconstructs the send. Resolve both content boundaries before enabling
+clinical texts. [Linq webhook payloads and retention](https://docs.linqapp.com/channel/imessage/guides/platform/zero-day-retention/)
 
 ## Prompt and copy guidance
 

@@ -26,7 +26,7 @@ async function readClinicalNotificationRun(tx: Prisma.TransactionClient, input: 
     select: {
       status: true, completedAt: true, notificationTokenVersion: true, notificationRouteKey: true,
       notificationSettingRevision: true, notificationCoverage: true,
-      connection: { select: { requiresProcessorApprovals: true, providerDirectoryEntryId: true, tokenVersion: true, status: true, disconnectedAt: true } },
+      connection: { select: { requiresProcessorApprovals: true, tokenVersion: true, status: true, disconnectedAt: true } },
     },
   });
   if (!run || run.notificationTokenVersion !== run.connection.tokenVersion || !run.notificationRouteKey
@@ -47,8 +47,8 @@ async function readClinicalNotificationRecipient(tx: Prisma.TransactionClient, m
   const route = verifiedClinicalHomeRoute(member, run);
   if (!route?.linqChatLookupKey) return null;
   const chat = await tx.hostedLinqChatHealth.findUnique({ where: { linqChatLookupKey: route.linqChatLookupKey },
-    select: { service: true, isGroup: true, phoneNumberLookupKey: true } });
-  if (chat?.isGroup !== false || chat.service?.toLowerCase() !== "imessage" || chat.phoneNumberLookupKey !== route.linqRecipientPhoneLookupKey
+    select: { isGroup: true, phoneNumberLookupKey: true } });
+  if (chat?.isGroup !== false || chat.phoneNumberLookupKey !== route.linqRecipientPhoneLookupKey
     || !(await readHostedConsentStatus({ memberId, prisma: tx })).launchGranted) return null;
   return { mode: member.clinicalRecordMessageMode, chatLookupKey: route.linqChatLookupKey, routing: route, run };
 }
@@ -87,10 +87,7 @@ export async function readClinicalNotificationDecision(input: RunPointer): Promi
   if (!authority || authority.run.notificationCoverage !== "published") return { mode: "off" };
   const threadId = await readHostedMemberHomeLinqChatId(authority.routing, prisma);
   if (!threadId || createHostedLinqChatLookupKey(threadId) !== authority.chatLookupKey) return { mode: "off" };
-  if (authority.mode === "detail") return { mode: "detail", threadId };
-  const { resolveClinicalProviderDirectoryEntry } = await import("./provider-directory-store");
-  const label = resolveClinicalProviderDirectoryEntry(authority.run.connection.providerDirectoryEntryId)?.brandName;
-  return { mode: "notice", threadId, directoryLabel: label && label.length <= 256 ? label : null };
+  return { mode: authority.mode, threadId };
 }
 
 /** Scheduled preflight and every dispatch/retry enter the same signed egress owner. */
