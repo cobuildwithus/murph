@@ -1717,7 +1717,12 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     })
   })
 
-  it('classifies usage-limit turn failures from structured error notifications end to end', async () => {
+  it.each([
+    'usageLimitExceeded',
+    'apiKeySpendLimitExceeded',
+    'projectSpendLimitExceeded',
+    'organizationSpendLimitExceeded',
+  ])('classifies %s as a provider usage limit across notifications', async (codexErrorInfo) => {
     // Proves the lastEventErrorInfo threading: the structured codexErrorInfo
     // arrives on an `error` notification, then the turn fails via a separate
     // turn/completed event that carries no structured info of its own. The
@@ -1765,7 +1770,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
           method: 'error',
           params: {
             error: {
-              codexErrorInfo: 'usageLimitExceeded',
+              codexErrorInfo,
               message: 'You have reached your monthly cap.',
             },
             threadId: 'thread-structured-usage',
@@ -1795,7 +1800,7 @@ describe('assistant codex runtime', () => {it('handles current Codex v2 turn-tag
     ).rejects.toMatchObject({
       code: 'ASSISTANT_CODEX_USAGE_LIMIT',
       context: {
-        codexErrorInfo: 'usageLimitExceeded',
+        codexErrorInfo,
         codexErrorInfoPresent: true,
         codexFailureStage: 'turn_failed',
         codexThreadIdPresent: true,

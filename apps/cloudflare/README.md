@@ -1400,9 +1400,10 @@ image recipe; no manual binary installation or separate release service is neede
 
 The default runner catalog includes Terra, Sol and the supported Luna models.
 Web selects the expanded `.astra` catalog for an eligible managed OpenAI
-workspace. Codex 0.169.0 bundles the Terra and Luna entries. The runner
-merges the pinned OpenAI launch entries for GPT-6.2 Sol and Astra, enables
-mixed Code Mode and Flex for all models, and validates both catalogs at build time.
+workspace. Codex 0.172.0 bundles the product models. The runner keeps the
+pinned 6.2 launch entries to preserve hosted attachment support, including
+audio on Sol. Both catalogs use mixed Code Mode. Scheduled Flex work uses
+a separate catalog. The image validates all three at build time.
 Hosted Sol and Astra keep their 272,000-token context limit for turn-level
 usage accounting.
 

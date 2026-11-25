@@ -1,8 +1,8 @@
 diff --git a/codex-rs/codex-api/src/endpoint/responses_websocket.rs b/codex-rs/codex-api/src/endpoint/responses_websocket.rs
-index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215256cc4d6 100644
+index af2786b6593c03da536d8335c6c305adadba4224..eff9c789530de4806a5c91d5b31bfd1174811d1f 100644
 --- a/codex-rs/codex-api/src/endpoint/responses_websocket.rs
 +++ b/codex-rs/codex-api/src/endpoint/responses_websocket.rs
-@@ -183,6 +183,13 @@ const SESSION_ID_CLIENT_METADATA_KEY: &str = "session_id";
+@@ -235,6 +235,13 @@ const SESSION_ID_CLIENT_METADATA_KEY: &str = "session_id";
  const THREAD_ID_CLIENT_METADATA_KEY: &str = "thread_id";
  const TURN_ID_CLIENT_METADATA_KEY: &str = "turn_id";
  const WS_STREAM_REQUEST_START_MS_CLIENT_METADATA_KEY: &str = "x-codex-ws-stream-request-start-ms";
@@ -16,7 +16,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
  
  struct ResponsesWebsocketTimingLogContext {
      model: String,
-@@ -201,6 +208,7 @@ pub struct ResponsesWebsocketConnection {
+@@ -253,6 +260,7 @@ pub struct ResponsesWebsocketConnection {
      stream: Arc<Mutex<Option<WsStream>>>,
      // TODO (pakrym): is this the right place for timeout?
      idle_timeout: Duration,
@@ -24,7 +24,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
      server_reasoning_included: bool,
      server_model: Option<String>,
      telemetry: Option<Arc<dyn WebsocketTelemetry>>,
-@@ -211,6 +219,7 @@ impl std::fmt::Debug for ResponsesWebsocketConnection {
+@@ -263,6 +271,7 @@ impl std::fmt::Debug for ResponsesWebsocketConnection {
          f.debug_struct("ResponsesWebsocketConnection")
              .field("stream", &"<ws-stream>")
              .field("idle_timeout", &self.idle_timeout)
@@ -32,7 +32,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
              .field("server_reasoning_included", &self.server_reasoning_included)
              .field("server_model", &self.server_model)
              .field("telemetry", &self.telemetry.as_ref().map(|_| "<telemetry>"))
-@@ -230,6 +239,7 @@ impl ResponsesWebsocketConnection {
+@@ -282,6 +291,7 @@ impl ResponsesWebsocketConnection {
          Self {
              stream: Arc::new(Mutex::new(Some(stream))),
              idle_timeout,
@@ -40,7 +40,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
              server_reasoning_included,
              server_model,
              telemetry,
-@@ -262,6 +272,7 @@ impl ResponsesWebsocketConnection {
+@@ -326,6 +336,7 @@ impl ResponsesWebsocketConnection {
          let (tx_interrupt, rx_interrupt) = oneshot::channel();
          let stream = Arc::clone(&self.stream);
          let idle_timeout = self.idle_timeout;
@@ -48,7 +48,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
          let server_reasoning_included = self.server_reasoning_included;
          let server_model = self.server_model.clone();
          let telemetry = self.telemetry.clone();
-@@ -353,6 +364,7 @@ impl ResponsesWebsocketConnection {
+@@ -423,6 +434,7 @@ impl ResponsesWebsocketConnection {
                          tx_event.clone(),
                          request_text,
                          idle_timeout,
@@ -56,17 +56,17 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
                          telemetry,
                          turn_state.as_deref(),
                          &timing_log_context,
-@@ -774,6 +786,7 @@ async fn run_websocket_response_stream(
+@@ -861,6 +873,7 @@ async fn run_websocket_response_stream(
      tx_event: mpsc::Sender<std::result::Result<ResponseEvent, ApiError>>,
-     request_text: String,
+     request_text: WsRequestText,
      idle_timeout: Duration,
 +    acknowledgement_timeout: Duration,
      telemetry: Option<Arc<dyn WebsocketTelemetry>>,
      turn_state: Option<&OnceLock<String>>,
      timing_log_context: &ResponsesWebsocketTimingLogContext,
-@@ -803,11 +816,20 @@ async fn run_websocket_response_stream(
-     let mut interruption = None;
+@@ -891,11 +904,20 @@ async fn run_websocket_response_stream(
      let mut response_id = None;
+     let mut received_text = false;
      let mut awaiting_interrupt_ack = false;
 +    // The acknowledgement bound applies only while it is stricter than the idle timeout.
 +    let mut pending_acknowledgement_timeout =
@@ -87,7 +87,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
              }
              request = &mut interrupt_request, if response_id.is_some() => {
                  interruption = Some(request);
-@@ -844,6 +866,7 @@ async fn run_websocket_response_stream(
+@@ -938,6 +960,7 @@ async fn run_websocket_response_stream(
                  return Err(err);
              }
          };
@@ -95,7 +95,7 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
  
          match message {
              Message::Text(text) => {
-@@ -1454,3 +1477,7 @@ mod tests {
+@@ -1646,3 +1669,7 @@ mod tests {
          );
      }
  }
@@ -105,10 +105,10 @@ index ce32a374c18702c242c88fe4976b1cb67b2d1577..dc2889624b37c24c56ed2f7c26d30215
 +mod acknowledgement_tests;
 diff --git a/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs b/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..00696f9581b15b695ad276af32d8b8a141125d0b
+index 0000000000000000000000000000000000000000..9638d3f758582301d892c16b1d5044cdb0296672
 --- /dev/null
 +++ b/codex-rs/codex-api/src/endpoint/responses_websocket_acknowledgement_tests.rs
-@@ -0,0 +1,322 @@
+@@ -0,0 +1,325 @@
 +use super::*;
 +use crate::common::ResponseCreateWsRequest;
 +use codex_http_client::OutboundProxyPolicy::ReqwestDefault;
@@ -194,6 +194,7 @@ index 0000000000000000000000000000000000000000..00696f9581b15b695ad276af32d8b8a1
 +        model: "gpt-test",
 +        previous_response_id: None,
 +        input: &[],
++        tool_results: Vec::new(),
 +        tools: None,
 +        tool_choice: "auto",
 +        parallel_tool_calls: false,
@@ -204,10 +205,12 @@ index 0000000000000000000000000000000000000000..00696f9581b15b695ad276af32d8b8a1
 +        include: &[],
 +        service_tier: None,
 +        prompt_cache_key: None,
++        prompt_cache_options: None,
 +        text: None,
 +        generate: None,
 +        client_metadata: None,
 +        access_programs: None,
++        request_country: &codex_protocol::RequestCountry::UNKNOWN,
 +    })
 +}
 +
@@ -432,10 +435,10 @@ index 0000000000000000000000000000000000000000..00696f9581b15b695ad276af32d8b8a1
 +    .expect("cancellation and socket reuse finish");
 +}
 diff --git a/codex-rs/core/tests/suite/client_websockets.rs b/codex-rs/core/tests/suite/client_websockets.rs
-index c48ae764020676c93c8eb6e5d283d273a4b22143..599e53f1f7f27ccfdec36085bfe25be6fc8e3a4b 100755
+index e8d7df41edd4a3dcea8d53c7f097ecc2fce30726..18ac5516fb86b2196a41076b82fabd240d2e3e4a 100755
 --- a/codex-rs/core/tests/suite/client_websockets.rs
 +++ b/codex-rs/core/tests/suite/client_websockets.rs
-@@ -2633,6 +2633,79 @@ async fn responses_websocket_v2_surfaces_terminal_error_without_close_handshake(
+@@ -2810,6 +2810,79 @@ async fn responses_websocket_v2_surfaces_terminal_error_without_close_handshake(
      server.shutdown().await;
  }
  

@@ -2545,11 +2545,11 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.169.0-runtime1`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.172.0-runtime1`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
-The base Dockerfile builds the CLI from checksum-pinned Codex 0.169.0 source
+The base Dockerfile builds the CLI from checksum-pinned Codex 0.172.0 source
 with `patches/codex-websocket-ack.patch` and
 `patches/codex-prompt-cache-retention.patch`, preserving the matching release's Code Mode
 host and sandbox resources. The WebSocket patch adds a 15-second first-frame
@@ -2567,8 +2567,8 @@ the npm helper checksum aligned. The permission-sandbox lane verifies the image'
 websocket fallback, provider conformance and sandbox boundaries. Cold builds need
 the existing trusted BuildKit cache; application-only changes reuse compilation.
 
-Codex CLI 0.169.0 bundles Terra and Luna. The runner adds the two official
-GPT-6.2 launch entries from its pinned catalog supplement. Missing product
+Codex CLI 0.172.0 bundles the product models. The runner uses the pinned
+GPT-6.2 launch entries to preserve hosted attachment support. Missing product
 models fail the image build.
 Codex 0.158 broadens `httpConnectionFailed` to include unexpected HTTP statuses.
 Murph keeps permanent HTTP rejections terminal while preserving recovery for

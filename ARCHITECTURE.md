@@ -1800,7 +1800,7 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
 The standard runner catalog contains GPT-6.1 Terra, GPT-6.2 Sol, GPT-6 Luna
-and GPT-5.6 Luna. Codex 0.169.0 bundles Terra and Luna. The pinned
+and GPT-5.6 Luna. Codex 0.172.0 bundles the product models. The pinned
 `apps/cloudflare/codex-model-catalog.6.2.json` supplies the official refreshed
 Sol and Astra entries. The image omits their experimental literature-search
 command so Codex generates the standalone `web.run` schema accepted by the
@@ -3114,7 +3114,7 @@ voice-input admission route, native media attachment, invocation call retention,
 or public Live provider forwarding. Historical voice mailbox and usage records
 retain their existing readers; pending voice delivery fails terminally without
 provider entry or a fallback to another channel. Messaging voice memos remain
-supported. Codex uses the pinned 0.169.0 release with `patches/codex-websocket-ack.patch`
+supported. Codex uses the pinned 0.172.0 release with `patches/codex-websocket-ack.patch`
 for a 15-second first-frame WebSocket acknowledgement bound. Later frames
 retain the native stream idle timeout. The separate
 `patches/codex-prompt-cache-retention.patch` opts conversation reply turns into

@@ -75,11 +75,14 @@ const SAFE_FAILURE_CONTEXT_KEYS = new Set([
 
 // Keep external kind strings bounded to the classifications used here.
 const SAFE_CODEX_ERROR_INFO_KINDS = new Set([
+  'apiKeySpendLimitExceeded',
   'flexUnavailable',
   'httpConnectionFailed',
   'internalServerError',
   'modelNotFound',
+  'organizationSpendLimitExceeded',
   'policyCapacityUnavailable',
+  'projectSpendLimitExceeded',
   'responseStreamConnectionFailed',
   'responseStreamDisconnected',
   'responseTooManyFailedAttempts',
