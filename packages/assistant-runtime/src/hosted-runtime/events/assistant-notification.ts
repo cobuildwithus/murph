@@ -965,8 +965,9 @@ function buildAssistantNotificationInput(
 
 function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
   if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
+    // A show is written once a game, off the reply path: medium reasoning finds more of the week's jokes than low.
     notificationInput.serviceTier = "flex";
-    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_SOL_MODEL,
+    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_SOL_MODEL, reasoningEffort: "medium",
       modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
   }
 }

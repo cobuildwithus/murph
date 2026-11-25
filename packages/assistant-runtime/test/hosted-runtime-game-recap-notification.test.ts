@@ -45,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("hosted game recap notification", () => {
-  it("uses Sol only for the trusted pair-show capability", async () => {
+  it("uses Sol on flex at medium reasoning only for the trusted pair-show capability", async () => {
     for (const show of [false, true]) {
       const wake = recapWake();
       if (wake.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap policy");
@@ -55,6 +55,7 @@ describe("hosted game recap notification", () => {
         groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
       const input = mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput;
       expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.2-sol" : undefined);
+      expect(input.assistantTargetOverride?.reasoningEffort).toBe(show ? "medium" : undefined);
       expect(input.serviceTier ?? null).toBe(show ? "flex" : null);
       expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
     }

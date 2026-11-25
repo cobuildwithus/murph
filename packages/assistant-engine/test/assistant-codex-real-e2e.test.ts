@@ -49472,7 +49472,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       await mkdir(path.join(vault, 'games'), { recursive: true })
       await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nTheir first game together.\n')
       const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
-        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'medium', sandbox: 'workspace-write' })
       if (!target) throw new Error('Expected real Codex target.')
       await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
         deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
@@ -49499,14 +49499,124 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     expect(providers.saved).toHaveLength(1)
     expect(headlines[0]).toHaveLength(1)
     const title = headlines[0]![0]!
-    expect(title.length, title).toBeLessThanOrEqual(24)
+    expect(title.length, title).toBeLessThanOrEqual(36)
     // The week's story, never its rules: no counts, tasks, schedule or matchup.
     expect(title).not.toMatch(/\d|\b(?:rope|miles?|minutes?|daily|every day|each day|a day|versus|vs)\b/iu)
-    for (const [index, lines] of headlines.entries()) for (const line of lines) expect(line.length, `page ${index + 1}: ${line}`).toBeLessThanOrEqual(index ? 48 : 24)
+    for (const [index, lines] of headlines.entries()) for (const line of lines) expect(line.length, `page ${index + 1}: ${line}`).toBeLessThanOrEqual(index ? 48 : 36)
     // The instructions get the titles right the first time: no write is turned back over a headline.
     expect(rejections.filter(output => /cover|headline/iu.test(output))).toEqual([])
   }, 900_000)
 
+  // A fictional week with a boast on setup night that the week answers, a nickname the loser gave
+  // Murph after a reminder, and a doubt the clock disproves. Production writes a show at medium
+  // reasoning on flex Sol, as Murph telling the week back from inside the chat: the boast is played
+  // back, Murph speaks for himself, and the pages follow moments rather than a day-by-day log.
+  // It prints the whole show so the jokes can be read.
+  it('pair recap show plays a setup boast back and talks as Murph, not as a calendar', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-boast-'))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-recap-boast-catalog-'))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    config.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot, includeFlexCatalog: true })
+    const served: { model: string | null; serviceTier: string | null }[] = []
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async (input) => {
+      served.push({ model: input.model ?? null, serviceTier: input.serviceTier ?? null })
+      return nativeExecute(input)
+    })
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts')
+    const gameId = 'synthetic-movie-night', eventId = `game-recap:${gameId}`, pairFingerprint = '99887766554433221100ffeeddccbbaa'
+    const players = [{ memberId: 'synthetic-rosa', name: 'Rosa' }, { memberId: 'synthetic-dev', name: 'Dev' }]
+    const tasks = { Rosa: 'A 20 minute run, with a photo', Dev: '50 squats, with a photo' }
+    const friday = Date.now() - ((new Date().getUTCDay() + 1) % 7 + 1) * 86_400_000
+    const dates = Array.from({ length: 6 }, (_, day) => new Date(friday - (5 - day) * 86_400_000).toISOString().slice(0, 10))
+    const offset = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')!.value.replace('GMT', '')
+    // Day -1 is the Sunday the game was set up; days 0 to 4 are Monday to Friday.
+    const at = (day: number, time: string) => `${dates[day + 1]}T${time}:00${offset(dates[day + 1]!)}`
+    const posts: [string, number, string][] = [
+      ['Rosa', 0, '06:10'], ['Dev', 0, '22:30'], ['Rosa', 1, '06:05'], ['Rosa', 2, '06:12'],
+      ['Rosa', 3, '06:08'], ['Dev', 3, '21:40'], ['Rosa', 4, '06:15'], ['Dev', 4, '19:30'],
+    ]
+    const entries = posts.map(([playerName, day]) => ({ entryId: `synthetic-${playerName.toLowerCase()}-${day}`, playerName, kind: 'photo', text: null, visibleToBoth: true }))
+    const chat: [number, string, string, string][] = [
+      [-1, '21:00', 'Murph', 'You’re set: five days from Monday. Rosa runs 20 minutes, Dev does 50 squats, a photo each day. The winner picks the next three movies.'],
+      [-1, '21:02', 'Dev', 'easy. i dont miss. ask anyone'], [-1, '21:03', 'Rosa', 'ive seen you miss a bus'], [-1, '21:04', 'Dev', 'that bus left early'],
+      [0, '22:31', 'Dev', 'told you'],
+      [1, '20:00', 'Murph', 'Dev, have you done today’s 50 squats?'], [1, '20:02', 'Dev', 'on it'],
+      [2, '09:00', 'Murph', 'Dev, no squats yesterday. “i dont miss” is having a rough week.'],
+      [2, '09:05', 'Dev', 'who asked you, calculator'], [2, '09:06', 'Murph', 'noted.'],
+      [2, '20:00', 'Murph', 'Dev, have you done today’s 50 squats?'], [2, '23:50', 'Dev', 'doing them now'],
+      [3, '18:10', 'Dev', 'rosa did you even run today'], [3, '18:11', 'Rosa', 'check the app dev'],
+      [4, '20:00', 'Murph', 'Rosa is done for today. Dev, you have until midnight.'],
+    ]
+    const talk = ['are we still on for tacos', 'yes 7', 'my sister is in town this weekend', 'bring her', 'the wifi is down again', 'restart the router',
+      'did you see the score last night', 'only the end', 'i left my charger at your place', 'its on the counter']
+    const banter: [number, string, string, string][] = Array.from({ length: 5 * 6 }, (_, index) => {
+      const minutes = 11 * 60 + (index % 6) * 50
+      return [Math.floor(index / 6), `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, index % 2 ? 'Dev' : 'Rosa',
+        index % 3 ? ['lol', 'ok', 'haha', 'nice', 'true'][index % 5]! : talk[(index / 3) % talk.length]!]
+    })
+    const providers = await createRecapShowLiveProviders({
+      game: { id: gameId, recapShow: true, players: players.map(player => ({ ...player, task: tasks[player.name as keyof typeof tasks] })), lengthDays: 5,
+        schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets', item: 'Picking the next three movies' }], score: [{ name: 'Rosa', score: 5 }, { name: 'Dev', score: 3 }],
+        days: dates.slice(1).map((date, day) => ({ dayNumber: day + 1, dates: { Rosa: date, Dev: date }, posts: Object.fromEntries(players.map(({ name }) => {
+          const post = posts.find(([who, postDay]) => who === name && postDay === day)
+          return [name, post ? { entryId: `synthetic-${name.toLowerCase()}-${day}`, postedAt: { local: at(day, post[2]), timeZone: 'America/Denver', instant: new Date(at(day, post[2])).toISOString() },
+            kind: 'photo', text: null, data: null } : 'missed']
+        })) })) },
+      players, entries, result: [{ ...players[0]!, score: 5 }, { ...players[1]!, score: 3 }], startedAt: new Date(at(0, '00:00')).toISOString(),
+      chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+        .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
+    })
+    const events: unknown[] = []
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(path.join(vault, 'games'), { recursive: true })
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nTheir first game together.\n')
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'medium', sandbox: 'workspace-write' })
+      if (!target) throw new Error('Expected real Codex target.')
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        serviceTier: 'flex',
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: config.env.OPENAI_API_KEY ?? 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      })
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([vault, catalogRoot, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+    const story = providers.saved[0]
+    const rejections = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && action.tool === 'write_recap' && !action.success ? [action.output.slice(0, 400)] : [])
+    process.stdout.write(`[recap boast show] ${JSON.stringify({ served, rejections, story: story && { treatment: story.treatment, pages: story.pages,
+      superlatives: story.superlatives, song: story.song && { title: story.song.title, lyrics: story.song.lyrics }, chatLine: story.chatLine } })}\n`)
+    expect(served.length).toBeGreaterThan(0)
+    expect(served.every(turn => turn.serviceTier === 'flex' && turn.model === 'gpt-6.1-sol'), JSON.stringify(served)).toBe(true)
+    expect(providers.saved).toHaveLength(1)
+    expect(rejections).toEqual([])
+    const headlines = story!.pages.map(page => page.blocks.flatMap(block => block.kind === 'headline' ? [block.text ?? ''] : []))
+    expect(headlines[0]).toHaveLength(1)
+    for (const [index, lines] of headlines.entries()) for (const line of lines) expect(line.length, `page ${index + 1}: ${line}`).toBeLessThanOrEqual(index ? 48 : 36)
+    const words = story!.pages.flatMap(page => page.blocks.flatMap(block => [block.text ?? '', block.quote?.text ?? ''])).concat(story!.chatLine)
+    // The boast from setup night comes back, in either of its halves.
+    expect(words.join('\n'), 'the boast is played back').toMatch(/\b(?:do?n['’]?t miss|ask anyone)\b/iu)
+    // Murph tells it as someone who was there.
+    expect(headlines.flat().some(line => /\b(?:I|I['’]m|I['’]d|me|my)\b/u.test(line)), 'Murph speaks for himself').toBe(true)
+    // Pages follow moments: at most one headline reads as a log of who posted or missed which day.
+    const log = /^(?:Rosa|Dev|Both|Neither)\b[^.]*\b(?:posted|missed|did|finished|ran|came back)\b[^.]*\b(?:Monday|Tuesday|Wednesday|Thursday|Friday)\b/iu
+    const calendar = headlines.flat().filter(line => log.test(line))
+    expect(calendar.length, JSON.stringify(calendar)).toBeLessThanOrEqual(1)
+  }, 900_000)
 })
 
 describeRealCodex('real Codex game bootstrap e2e', () => {

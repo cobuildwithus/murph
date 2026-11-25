@@ -366,8 +366,17 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("Leave the prize off it");
   // The app sets one cover title huge over the picture; a title that restates the game reads as rules, not a story.
   expect(show).toContain("Page 1 is the cover: exactly one headline, the show's title");
-  expect(show).toContain("the turn the week hinged on, in 24 characters at most. It is the punchline, never the premise");
-  expect(show).toContain("a real sentence of 48 characters at most");
+  expect(show).toContain("in 36 characters at most; two lines is fine. It is the setup the last page pays off");
+  expect(show).toContain("the way you'd text it but with capital letters, 48 characters at most");
+  // Murph tells the week as someone who was in the chat, and the words carry the jokes.
+  expect(show).toContain("so you're a character in this story, not its narrator");
+  expect(show).toContain("Every other page is one joke with its turn last.");
+  expect(show).toContain("one page for each moment worth telling rather than one for each day");
+  expect(show).toContain("a boast before day one that the week answers is the show");
+  expect(show).toContain("What they said to or about you as someone in the chat");
+  expect(show).toContain("check each claim in the chat against the clock on the posts");
+  expect(show).not.toContain("The words on the pages stay plain");
+  expect(show).not.toContain("The setup is a headline");
   expect(show).not.toContain("a short headline title");
   expect(show).toContain("Leo asked Ava to prove her abs on Thursday");
   expect(show).toContain("read $MURPH_ASSISTANT_SKILLS_ROOT/groupchat-comedy/SKILL.md");

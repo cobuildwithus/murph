@@ -93,7 +93,7 @@ export const recapShowStorySchema = gameRecapWriterSchema.extend({
 });
 /** A new show's cover carries one title the app sets large, and every other headline reads at a glance.
  * Stored shows keep whatever they were written with. */
-export const RECAP_COVER_TITLE_MAX = 24;
+export const RECAP_COVER_TITLE_MAX = 36;
 export const RECAP_HEADLINE_MAX = 48;
 const newShowPagesSchema = recapShowStorySchema.shape.pages.superRefine((pages, context) => {
   pages.forEach((page, index) => {
