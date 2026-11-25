@@ -14,18 +14,20 @@ const scope = "game-progress";
 const aad = (target: ProgressSealTarget) => ({ purpose: scope, table: target.table, rowId: target.rowId, field: target.field });
 
 /** The JSON is ours: authenticate it, then decode without a second schema parse. */
-export async function openProgressMany<T>(entries: readonly (ProgressSealTarget & { value: string })[], retainFailureInScopedCache = false): Promise<T[]> {
-  const values = await openHostedUserSecureBoxStrings({ lane, retainFailureInScopedCache,
+export async function openProgressMany<T>(entries: readonly (ProgressSealTarget & { value: string })[], retainFailureInScopedCache = false, signal?: AbortSignal): Promise<T[]> {
+  signal?.throwIfAborted();
+  const values = await openHostedUserSecureBoxStrings({ lane, retainFailureInScopedCache, signal,
     entries: entries.map(target => ({ aad: aad(target), scope, userId: target.memberId, value: target.value })),
   });
+  signal?.throwIfAborted();
   return values.map(value => {
     if (value === null) throw new Error("Missing sealed Progress content.");
     return JSON.parse(value) as T;
   });
 }
 
-export async function openProgress<T>(target: ProgressSealTarget, value: string): Promise<T> {
-  const [opened] = await openProgressMany<T>([{ ...target, value }]);
+export async function openProgress<T>(target: ProgressSealTarget, value: string, signal?: AbortSignal): Promise<T> {
+  const [opened] = await openProgressMany<T>([{ ...target, value }], false, signal);
   return opened;
 }
 

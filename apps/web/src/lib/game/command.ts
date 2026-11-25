@@ -241,11 +241,12 @@ function oneLineWords(value: unknown): string {
 }
 
 function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
-  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined) {
+  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined && input.everyoneJoined === undefined) {
     reject("INVALID_REQUEST", "Choose a profile field to update.");
   }
   return {
     type: "setProfile",
+    ...optional(input.everyoneJoined, value => ({ everyoneJoined: flag(value, "everyoneJoined") })),
     ...optional(input.notForMe, value => {
       if (!Array.isArray(value)) reject("INVALID_REQUEST", "notForMe must be a list of activities.");
       const activities = value.map(item => oneOf(item, "notForMe", GAME_ACTIVITIES));

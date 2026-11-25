@@ -15,10 +15,11 @@ import { friendCohortIds, readFriendCohort } from "./friend-cohort";
 import { friendMeasure, readFriendGameSeries, type FriendGameSeries } from "./friend-games";
 import { readFriendHealthSeries } from "./friend-health";
 import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sharing";
-import { friendChallenge, friendPasses, friendRangeStart, friendsView, type FriendSeries } from "./friends";
+import { friendChallenge, friendDaily, friendPasses, friendRangeStart, friendsView, type FriendSeries } from "./friends";
 import { settleAwards } from "./awards";
-import type { Candidate, DayAmount } from "./registry";
+import type { Candidate } from "./registry";
 import { scheduleInference } from "./series";
+import { friendExerciseIds, friendPills } from "./friend-pills";
 
 export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal, units: ClientUnits, timing = new ProgressReadTiming()) {
   try {
@@ -32,7 +33,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const today = toLocalDayKey(new Date(), cohort.timeZone);
     const { players, period } = exerciseScope(cohort.people, query, today, health);
     const gameMemberIds = players.map(person => person.memberId);
-    const gameRead = timing.measure("gameSeries", () => readFriendGameSeries(gameMemberIds, timing, { viewer: memberId, period }));
+    const gameRead = timing.measure("gameSeries", () => readFriendGameSeries(gameMemberIds, timing, { viewer: memberId, period }, signal));
     const roomRead = readFriendsHealth(auth, cohort, query, signal, timing);
     // Drain both branches in the request scope, then inspect errors in their original order.
     await Promise.all([gameRead, roomRead].map(read => read.catch(() => undefined)));
@@ -45,6 +46,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     }
     // Recheck once after the private reads. A departure or block must remove the friend before rendering.
     const current = await timing.measure("cohort", () => friendCohortIds(memberId, db));
+    const profile = await timing.measure("profile", () => db.gameProfile.findUnique({ where: { memberId }, select: { everyoneJoinedAt: true } }));
     const currentIds = new Set(current.ids);
     people = people.filter(person => currentIds.has(person.memberId));
     const visibleIds = gameMemberIds.filter(id => currentIds.has(id));
@@ -52,6 +54,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
     assertSelectedFriend(query.with, visibleIds);
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
+    signal.throwIfAborted();
     if (people.length > 1 && !health && !games.windowed && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
       after(async () => {
         try {
@@ -65,9 +68,11 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     scheduleFriendInference(auth, visiblePending);
     const shareAudience = sharingPreview(people, series.rooms.filter(room => currentIds.has(room.otherMemberId)), query.measure);
     return await timing.measure("render", () => friendsView({ people, measure, pills, query, units, today,
+      everyoneJoined: profile?.everyoneJoinedAt != null,
       shareAudience, departureNotice: cohort.departure?.nameEncrypted === current.departure?.nameEncrypted ? cohort.departureNotice : null,
       challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) }));
   } catch (error) {
+    signal.throwIfAborted();
     if (isHostedOnboardingError(error)) throw error;
     throw hostedOnboardingError({ code: "PROGRESS_FRIENDS_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Friends progress is temporarily unavailable." });
@@ -139,22 +144,6 @@ function scheduleFriendInference(auth: HostedNativeMemberAuth, pending: FriendGa
   });
 }
 
-function friendExerciseIds(games: FriendGameSeries, memberId: string, ids: string[]): string[] {
-  const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
-  const shared = new Set(ids.filter(id => id !== memberId).flatMap(id => (games.amounts.get(id) ?? []).map(day => day.measureId)));
-  return [...mine].filter(id => ids.length === 1 || shared.has(id) || games.pending.length > 0);
-}
-
-/** Pending classifications must not remove the member's known exercise pills. */
-function friendPills(games: FriendGameSeries, memberId: string, ids: string[], selected: string): Friends["pills"] {
-  const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
-  if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.pending.length) throw gameNotFound();
-  const exercises = games.windowed ? [...mine] : friendExerciseIds(games, memberId, ids);
-  return [...exercises.map(id => games.measures.get(id)!),
-    { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
-    .map(({ id, label, icon }) => ({ id, label, icon }));
-}
-
 function sharingPreview(people: FriendSeries[], rooms: FriendRoom[], measure: string): Friends["shareAudience"] {
   if (measure !== "steps" && measure !== "sleep" || !rooms.some(room => !room.shared.includes(measure as "steps" | "sleep"))) return [];
   return sharingAudience(people, rooms);
@@ -183,13 +172,6 @@ export async function setProgressFriendSharing(auth: HostedNativeMemberAuth, bod
     throw hostedOnboardingError({ code: "PROGRESS_SHARING_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Sharing is temporarily unavailable." });
   }
-}
-
-/** Several games on one date contribute once to that date's aggregate point. */
-export function friendDaily(amounts: readonly DayAmount[], measureId: string): NonNullable<FriendSeries["daily"]> {
-  const daily = new Map<string, number>();
-  for (const point of amounts) if (point.measureId === measureId) daily.set(point.date, (daily.get(point.date) ?? 0) + point.amount);
-  return [...daily].sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => ({ date, amount }));
 }
 
 function audienceChanged() {

@@ -34,12 +34,17 @@ export async function sealGameText(target: GameSealTarget, value: string | null 
 
 export async function openGameTexts(
   entries: ReadonlyArray<GameSealTarget & { value: string | null | undefined }>,
+  signal?: AbortSignal,
 ): Promise<Array<string | null>> {
+  signal?.throwIfAborted();
   if (entries.length === 0) return [];
-  return openHostedUserSecureBoxStrings({
+  const values = await openHostedUserSecureBoxStrings({
     entries: entries.map((entry) => ({ aad: aad(entry), scope: SCOPE, userId: entry.memberId, value: entry.value })),
     lane: LANE,
+    signal,
   });
+  signal?.throwIfAborted();
+  return values;
 }
 
 /** A photo is sealed under its uploader's key and bound to its own content key. */

@@ -10,6 +10,10 @@ export class ProgressReadTiming {
     awards: 0, profile: 0, pictures: 0, states: 0, scoring: 0, journeys: 0, art: 0, render: 0 };
   readonly counts = { games: 0, entries: 0, friends: 0, boards: 0 };
   private pill = "all";
+  private scope: "friends" | "everyone" | null = null;
+
+  selectScope(scope: "friends" | "everyone") { this.scope = scope; }
+  get selectedScope() { return this.scope; }
 
   selectPill(measure: string) {
     const [name, unit] = measure.split(".");
@@ -33,7 +37,7 @@ export function withProgressReadTiming(route: Route, handler: (request: Request,
     const started = performance.now(), timing = new ProgressReadTiming();
     try { return await runWithHostedDomainRootUnwrapCache(() => handler(request, timing)); }
     finally {
-      console.info(JSON.stringify({ event: "game.progress.read.timing", route, pill: timing.selectedPill,
+      console.info(JSON.stringify({ event: "game.progress.read.timing", route, pill: timing.selectedPill, scope: timing.selectedScope,
         totalMs: Math.round(performance.now() - started), phaseMs: timing.phaseMs, counts: timing.counts }));
     }
   };

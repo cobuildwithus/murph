@@ -174,7 +174,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome; leaveOutcome?: GameLeaveOutcome;
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; joined?: boolean; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome; leaveOutcome?: GameLeaveOutcome;
     /** Set only when a day correction changed a finished game's outcome: the one line that says so. */
     chatLine?: string }
   | { ok: false; error: GameError; status: number };
@@ -295,7 +295,7 @@ export async function runGameCommand(input: {
     moderateGameCommand(command);
     await requireUploadedMedia(actor, command);
     if (command.type === "setProfile") {
-      return { game: null, ok: true, profile: await setProfile({ actor, beforeMutationTx: input.beforeMutationTx }, command) };
+      return { game: null, ok: true, ...await setProfile({ actor, beforeMutationTx: input.beforeMutationTx }, command) };
     }
     if (command.type === "setReminders") {
       return { game: null, ok: true, reminders: await saveGameReminders(input, command) };
@@ -744,7 +744,7 @@ function gameTarget(game: Pick<Game, "id" | "wordsOwnerMemberId">, field: string
   return { field, memberId: game.wordsOwnerMemberId, rowId: game.id, table: "game" };
 }
 
-async function setProfile(context: CommandContext, command: Extract<GameCommand, { type: "setProfile" }>): Promise<GameProfileView> {
+async function setProfile(context: CommandContext, command: Extract<GameCommand, { type: "setProfile" }>): Promise<{ profile?: GameProfileView; joined?: boolean }> {
   const { actor } = context;
   const target: GameSealTarget = { field: "first_name", memberId: actor, rowId: actor, table: "game_profile" };
   const firstNameEncrypted = command.firstName === undefined ? undefined : await seal(target, command.firstName);
@@ -757,18 +757,31 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   const prisma = getPrisma();
   const previous = command.firstName === undefined ? null
     : await prisma.gameProfile.findUnique({ where: { memberId: actor }, select: { firstNameEncrypted: true } });
+  const hasProfileFields = Object.keys(data).length > 0;
   // Partial updates never read then rewrite unrelated fields. RETURNING also
   // makes the response describe this write, not a later concurrent update.
-  const profile = await commandTransaction(context, async tx => {
-    return firstNameEncrypted !== undefined && command.timeZone !== undefined
-      ? tx.gameProfile.upsert({
+  const { profile, membership } = await commandTransaction(context, async tx => {
+    const profile = !hasProfileFields ? undefined : firstNameEncrypted !== undefined && command.timeZone !== undefined
+      ? await tx.gameProfile.upsert({
         create: { ...data, firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
         update: data,
         where: { memberId: actor },
       })
       : (await tx.gameProfile.updateManyAndReturn({ data, where: { memberId: actor } }))[0];
+    if (hasProfileFields && !profile) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+    if (command.everyoneJoined === undefined) return { profile, membership: {} };
+    // COALESCE under the UPDATE row lock preserves the first join even for concurrent retries.
+    const [membership] = await tx.$queryRaw<Array<{ joined: boolean }>>`
+      UPDATE game_profile
+      SET everyone_joined_at = CASE WHEN ${command.everyoneJoined} THEN COALESCE(everyone_joined_at, CURRENT_TIMESTAMP) ELSE NULL END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE member_id = ${actor}
+      RETURNING everyone_joined_at IS NOT NULL AS joined`;
+    if (!membership) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+    return { profile, membership };
   });
-  if (!profile) return reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
+  // A membership-only acknowledgement has no private-name dependency after the commit.
+  if (!profile) return membership;
   const [firstName] = await openGameTexts([{ ...target, value: profile.firstNameEncrypted }]);
   const memoryName = memoryDisplayNameSchema.safeParse(command.firstName);
   if (memoryName.success) {
@@ -791,13 +804,13 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
       // Game profiles also serve free invitees. Vault refusal never undoes a save.
     }
   }
-  return {
+  return { ...membership, profile: {
     notForMe: profile.notForMe,
     avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     firstName: firstName ?? "",
     memberId: actor,
     timeZone: profile.timeZone,
-  };
+  } };
 }
 
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string | { gameId: string; composer?: { murphPhoneNumber: string } }> {
@@ -3856,7 +3869,8 @@ async function inviteAlreadyIn(row: GameRow, viewerId: string, blocks: GameBlock
 
 /**
  * The uploader can see their photos. The current canonical profile photo is
- * also visible to shared game participants, including addressed rematches.
+ * also visible to shared game participants, including addressed rematches,
+ * and between unsuspended members who currently belong to Everyone.
  * Other uploads require a visible entry (post-to-unlock, everything after
  * settle); private contact photos never acquire access from their label.
  */
@@ -3906,7 +3920,13 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
           AND NOT EXISTS (SELECT 1 FROM game_report report
             WHERE report.reporter_member_id = ${memberId} AND report.about = 'player'
               AND report.reported_member_id = requested.owner)
-          AND EXISTS (
+          AND ((${gameOnSql()} AND profile.everyone_joined_at IS NOT NULL AND EXISTS (
+            SELECT 1 FROM game_profile everyone_viewer
+            JOIN hosted_member viewer_member ON viewer_member.id = everyone_viewer.member_id
+            JOIN hosted_member subject_member ON subject_member.id = profile.member_id
+            WHERE everyone_viewer.member_id = ${memberId} AND everyone_viewer.everyone_joined_at IS NOT NULL
+              AND viewer_member.suspended_at IS NULL AND subject_member.suspended_at IS NULL
+          )) OR EXISTS (
             SELECT 1 FROM game
             WHERE ${gameOnSql()} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
               AND NOT EXISTS (SELECT 1 FROM game_player departed
@@ -3917,7 +3937,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
               AND (EXISTS (SELECT 1 FROM game_player player
                 WHERE player.game_id = game.id AND player.member_id = requested.owner)
                 OR (game.status = 'invited' AND EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id = requested.owner)))
-          )
+          ))
       ) OR EXISTS (
         SELECT 1 FROM game_entry entry
         JOIN game ON game.id = entry.game_id

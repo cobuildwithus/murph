@@ -64,11 +64,12 @@ async function friendGameIds(memberIds: string[], scope?: FriendScope) {
   `);
 }
 
-async function friendInputPage(gameIds: string[], memberIds: string[], scope?: FriendScope) {
+async function friendInputPage(gameIds: string[], memberIds: string[], scope?: FriendScope, signal?: AbortSignal) {
   const db = getPrisma();
   const games = await db.game.findMany({ where: { id: { in: gameIds } },
     select: { id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
       players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } } } });
+  signal?.throwIfAborted();
   const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
     memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }],
     AND: scope?.period ? periodEntries(games, scope.viewer, scope.period) : undefined },
@@ -77,11 +78,13 @@ async function friendInputPage(gameIds: string[], memberIds: string[], scope?: F
   return { games, entries };
 }
 
-async function friendInputs(memberIds: string[], scope?: FriendScope) {
+async function friendInputs(memberIds: string[], scope?: FriendScope, signal?: AbortSignal) {
   const ids = await friendGameIds(memberIds, scope);
+  signal?.throwIfAborted();
   const result: Awaited<ReturnType<typeof friendInputPage>> = { games: [], entries: [] };
   for (let start = 0; start < ids.length; start += GAME_PAGE) {
-    const page = await friendInputPage(ids.slice(start, start + GAME_PAGE).map(row => row.id), memberIds, scope);
+    const page = await friendInputPage(ids.slice(start, start + GAME_PAGE).map(row => row.id), memberIds, scope, signal);
+    signal?.throwIfAborted();
     result.games.push(...page.games);
     result.entries.push(...page.entries);
   }
@@ -89,10 +92,11 @@ async function friendInputs(memberIds: string[], scope?: FriendScope) {
 }
 
 /** D7: load each current friend's own posts, including games the viewer never joined. */
-export async function readFriendGameSeries(memberIds: string[], timing = new ProgressReadTiming(), scope?: FriendScope): Promise<FriendGameSeries> {
+export async function readFriendGameSeries(memberIds: string[], timing = new ProgressReadTiming(), scope?: FriendScope, signal?: AbortSignal): Promise<FriendGameSeries> {
+  signal?.throwIfAborted();
   return runWithHostedDomainRootUnwrapCache(async () => {
     const db = getPrisma();
-    const { games, entries, windowed } = await friendInputs(memberIds, scope);
+    const { games, entries, windowed } = await friendInputs(memberIds, scope, signal);
     timing.counts.games = games.length;
     timing.counts.entries = entries.length;
     const typedEntries = entries.filter(entry => entry.kind === "reps" || entry.kind === "route");
@@ -101,7 +105,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
         rowId: game.id, field: "terms_words", value: game.termsWordsEncrypted })),
       ...typedEntries.map(entry => ({ memberId: entry.memberId, table: "game_entry" as const,
         rowId: entry.id, field: "payload", value: entry.payloadEncrypted })),
-    ]);
+    ], signal);
     const gameData = new Map(games.map((game, index) => [game.id,
       { game, terms: parseStoredTerms(game.terms), words: parseTermWords(plain[index]!) }]));
     const payloads = new Map(typedEntries.map((entry, index) => [entry.id, plain[games.length + index]]));
@@ -120,7 +124,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
     const rows = await db.gameProgressTaskMeasure.findMany({ where: { memberId: { in: memberIds }, lookup: { in: [...tasks.keys()] } },
       take: tasks.size, select: { memberId: true, lookup: true, measureEncrypted: true } });
     const opened = await openProgressMany<InferredMeasure>(rows.map(row => ({ memberId: row.memberId,
-      table: "game_progress_task_measure", rowId: row.lookup, field: "measure", value: row.measureEncrypted })));
+      table: "game_progress_task_measure", rowId: row.lookup, field: "measure", value: row.measureEncrypted })), false, signal);
     const cached = new Map(rows.map((row, index) => [row.lookup, opened[index]]));
     const stateLookups = new Map<string, string>();
     for (const item of prepared) {
@@ -132,7 +136,7 @@ export async function readFriendGameSeries(memberIds: string[], timing = new Pro
     const stateRows = await db.gameProgressMeasure.findMany({ where: { memberId: { in: memberIds }, lookup: { in: [...stateLookups.keys()] } },
       take: stateLookups.size, select: { memberId: true, lookup: true, stateEncrypted: true } });
     const openedStates = await openProgressMany<MeasureState>(stateRows.map(row => ({ memberId: row.memberId,
-      table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })));
+      table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })), false, signal);
     const states = new Map<string, Map<string, MeasureState>>();
     stateRows.forEach((row, index) => {
       const own = states.get(row.memberId) ?? new Map<string, MeasureState>();

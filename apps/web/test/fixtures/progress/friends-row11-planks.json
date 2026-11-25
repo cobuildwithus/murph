@@ -3,12 +3,14 @@
     {
       "id": "planks.seconds",
       "label": "Planks",
-      "icon": "planks"
+      "icon": "planks",
+      "everyone": true
     },
     {
       "id": "h0123456789ab.days",
       "label": "Lights out",
-      "icon": "sleep"
+      "icon": "sleep",
+      "everyone": false
     }
   ],
   "pill": "planks.seconds",
@@ -261,5 +263,7 @@
   "shareAudience": [],
   "departureNotice": null,
   "incomplete": false,
-  "challenge": null
+  "challenge": null,
+  "scope": "friends",
+  "everyoneJoined": false
 }

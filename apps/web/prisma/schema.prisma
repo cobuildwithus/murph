@@ -2868,6 +2868,8 @@ model GameProfile {
   chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
   chatPhotoOffer Json? @map("chat_photo_offer")
   photoKey           String?            @map("photo_key")
+  /// Opt-in to the Everyone exercise board; leaving clears it, rejoining starts again.
+  everyoneJoinedAt   DateTime?          @map("everyone_joined_at") @db.Timestamptz(6)
   memberId           String             @id @map("member_id")
   firstNameEncrypted String             @map("first_name_encrypted")
   timeZone           String             @map("time_zone")

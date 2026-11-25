@@ -132,8 +132,9 @@ const friendRow = z.discriminatedUnion("private", [
   friend.extend({ private: z.literal(false), rank: z.number().nullable(), total: amount.nullable() }),
 ]);
 export const friendsSchema = z.object({
+  scope: z.enum(["friends", "everyone"]), everyoneJoined: z.boolean(),
   incomplete: z.boolean(),
-  pills: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string() })), pill: z.string(), range: z.enum(["week", "month", "all"]),
+  pills: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string(), everyone: z.boolean() })), pill: z.string(), range: z.enum(["week", "month", "all"]),
   rows: z.array(friendRow),
   /** Every ranked person; private people have no line or gap. */
   chart: z.array(z.object({ memberId: z.string(), points: z.array(point) })),
@@ -169,7 +170,9 @@ const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).mi
 export type SetSharingBody = z.infer<typeof sharing>;
 const seen = z.strictObject({ momentIds: z.array(text) });
 export type SeenBody = z.infer<typeof seen>;
-const friendsQuery = z.object({ measure: text, range: z.enum(["week", "month", "all"]).default("month"), with: text.optional() });
+const friendsQuery = z.object({ measure: text, range: z.enum(["week", "month", "all"]).default("month"),
+  with: text.optional(), scope: z.enum(["friends", "everyone"]).optional() })
+  .refine(query => query.scope !== "everyone" || query.range === "month" && query.with === undefined);
 export type FriendsQuery = z.infer<typeof friendsQuery>;
 const goalsQuery = z.object({ measure: text, q: text.optional(), find: z.literal("1").optional() })
   .refine(query => query.find === undefined || query.q !== undefined);
