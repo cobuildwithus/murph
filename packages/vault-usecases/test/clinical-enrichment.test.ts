@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { clinicalRawManifestSchema, externalRefForFhir, hashClinicalFhirPatientId, type ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
-import { importEventBatch, initializeVault } from "@murphai/core";
+import { applyHostedCanonicalWriteReceipt, importEventBatch, initializeVault, withHostedCanonicalWritePort, type HostedCanonicalWritePersistenceInput } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -66,6 +66,82 @@ async function prepare(input: Awaited<ReturnType<typeof fixture>>, options: { pa
   expect(work?.status).toBe("extract");
   await persistClinicalEnrichmentProposals({ ...input, sourceSha256: input.sha256, page: options.page ?? 1, totalPages: options.totalPages ?? 1, outputs: options.outputs ?? { labs: empty, measurements: { status: "complete", records: [{ dateBasis: "document", dateEvidence: occurredAt, payload: measurement() }] }, history: empty } });
 }
+
+// Hosted durability: canonical writes reach the receipt log at once, while the
+// rest of the vault reaches storage only with the next workspace snapshot.
+async function captureCanonicalWrites<T>(run: () => Promise<T>) {
+  const writes: HostedCanonicalWritePersistenceInput[] = [];
+  const result = await withHostedCanonicalWritePort({ async persistCanonicalWrite(write) { writes.push(write); } }, run);
+  return { result, writes };
+}
+async function snapshotVault(vaultRoot: string) {
+  const snapshot = await mkdtemp(path.join(tmpdir(), "murph-clinical-enrichment-snapshot-"));
+  roots.push(snapshot);
+  await cp(vaultRoot, snapshot, { recursive: true });
+  return snapshot;
+}
+async function replayCanonicalWrites(vaultRoot: string, writes: readonly HostedCanonicalWritePersistenceInput[]) {
+  for (const write of writes) {
+    const payloads = new Map(write.payloads.map((payload) => [payload.sha256, payload.bytes]));
+    await applyHostedCanonicalWriteReceipt({ vaultRoot, receipt: write.receipt, readPayload: async (ref) => payloads.get(ref.sha256) ?? null });
+  }
+}
+const measurementsPage = (time: string) => ({ labs: empty, history: empty, measurements: { status: "complete" as const, records: [{ dateBasis: "document" as const, dateEvidence: occurredAt, payload: measurement(time) }] } });
+const pageTimes = ["2020-03-12T08:00:00.000Z", "2020-03-12T09:00:00.000Z", "2020-03-12T10:00:00.000Z"];
+
+describe("clinical document enrichment crash recovery", () => {
+  it("restores applied pages from the canonical write log without extracting them again", async () => {
+    const input = await fixture();
+    const snapshot = await snapshotVault(input.vaultRoot);
+    const { result: applied, writes } = await captureCanonicalWrites(async () => {
+      const results = [];
+      for (const [index, time] of pageTimes.entries()) {
+        await prepare(input, { page: index + 1, totalPages: pageTimes.length, outputs: measurementsPage(time) });
+        results.push(await applyClinicalEnrichmentProposals(input));
+      }
+      return results;
+    });
+    // The container dies before its next snapshot; restore replays the log.
+    const restored = { ...input, vaultRoot: snapshot };
+    await replayCanonicalWrites(snapshot, writes);
+    expect(await readNextClinicalEnrichment(restored)).toEqual({ status: "apply", jobId: input.jobId });
+    const replay = await applyClinicalEnrichmentProposals(restored);
+    expect(replay.receipt).toEqual(applied.at(-1)?.receipt);
+    expect(replay.canonical).toBeNull();
+    // The replayed page's fact already exists, so it counts as existing, not created.
+    expect((await readClinicalEnrichmentStatus(restored)).counts).toMatchObject({ pages: 3, created: 2, existing: 1 });
+    expect(await readNextClinicalEnrichment(restored)).not.toMatchObject({ status: "extract" });
+    expect(await listCanonicalEntities(snapshot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(3);
+    const jobFile = path.join(snapshot, ".runtime/operations/clinical-records/enrichment", `${input.jobId}.json`);
+    expect((await stat(jobFile)).mode & 0o077, "Replayed clinical job state stays owner-only").toBe(0);
+  });
+
+  it("commits the accepted job before the receipt that binds it, including held pages", async () => {
+    const input = await fixture();
+    await prepare(input);
+    await importEventBatch({ vaultRoot: input.vaultRoot, apply: true, decisions: [{ action: "retract", externalRef: { ...parentExternalRef, version: "2026-07-11T12:00:00.000Z" }, reason: "Synthetic parent withdrawal", retractFacetPrefixes: ["document-extraction"] }] });
+    const { writes } = await captureCanonicalWrites(() => applyClinicalEnrichmentProposals(input));
+    const targets = writes.flatMap((write) => write.receipt.actions.map((action) => action.targetRelativePath));
+    const jobWrite = targets.indexOf(`.runtime/operations/clinical-records/enrichment/${input.jobId}.json`);
+    const receiptWrite = targets.findIndex((target) => target.startsWith("ledger/clinical-change-receipts/"));
+    expect(jobWrite).toBeGreaterThanOrEqual(0);
+    expect(jobWrite).toBeLessThan(receiptWrite);
+  });
+
+  it("keeps a second replay of the same log idempotent", async () => {
+    const input = await fixture();
+    const { writes } = await captureCanonicalWrites(async () => {
+      await prepare(input);
+      return applyClinicalEnrichmentProposals(input);
+    });
+    const finished = await readClinicalEnrichmentStatus(input);
+    await replayCanonicalWrites(input.vaultRoot, writes);
+    expect(await readNextClinicalEnrichment(input)).toEqual({ status: "apply", jobId: input.jobId });
+    expect((await applyClinicalEnrichmentProposals(input)).canonical).toBeNull();
+    expect((await readClinicalEnrichmentStatus(input)).counts.pages).toBe(finished.counts.pages);
+    expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
+  });
+});
 
 describe("clinical document enrichment durable application", () => {
   it("refuses restored prepared work whose protocol no longer matches its manifest", async () => {
