@@ -146,7 +146,7 @@ in the health-consent revocation transaction. Keep the withdrawal bridge while
 older Web versions can serve traffic or be restored. Once clients use the setting,
 retain a Web version that serves the preference route and honors existing opt-outs.
 
-Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifest. Each app start gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
+Search text travels in the JSON body. Place is the first matching facility’s city and state, or an empty string. Logos use the static hashed PNG manifests: the square mark when the provider has one, otherwise the wide wordmark. Each app start gets an independent ten-minute SMART session. New app states identify the iOS or iOS development bridge so the callback can return there after session cleanup. Older states use the stored app return. An unusable provider reply carries a bounded error back to the app. The app submits the returned query string and its original proof.
 
 Each source carries its id, providerId, name, optional logoPath, state, nullable reason, nullable lastImport, connectedAt, nullable lastCheckedAt and lastActivityAt, updates and actions. Open runs report the newest request update or the run creation time. Receipt metrics report creations and available lab counts. Retractions and supersessions also count as changes for the ready state. Daily updates require an actual persistent grant. Source removal preserves imported records and frees capacity. The member lock serializes the 20-source limit for new and reactivated sources.
 
@@ -268,6 +268,12 @@ MyChart's public organization directory and documented official-site overrides.
 `provider-logos.json` maps IDs to content-hashed assets. No hospital search is
 sent to a branding service. Unknown or failed images show initials. SVG input
 is restricted to the exact reviewed official asset hash.
+
+The app shows logos in a square tile. `provider-logos-square.json` maps the
+providers that have a 144-pixel square mark to content-hashed PNGs in the same
+folder, with provenance in `sources-square.json`. The companion routes prefer
+it and fall back to the wide PNG; the web pages keep the wide wordmarks. The
+square set is produced offline and the refresh script does not rewrite it.
 
 Refresh the artifact from the repository root with:
 
