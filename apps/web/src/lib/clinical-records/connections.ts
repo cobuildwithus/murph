@@ -1,5 +1,8 @@
 import "server-only";
 
+import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
+import type { HostedAppSession } from "../hosted-onboarding/app-session";
+import { canRepeatImport } from "./source-state";
 import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
 
 import { Prisma } from "@prisma/client";
@@ -11,6 +14,7 @@ import { requireHostedAppSessionFromRequest } from "../hosted-onboarding/app-ses
 import { getPrisma } from "../prisma";
 import {
   CLINICAL_RECORD_CONNECTION_STATUSES,
+  CLINICAL_RECORD_OPEN_RUN_STATUSES,
   CLINICAL_RECORD_RUN_STATUSES,
   type ClinicalRecordConnectionContract,
 } from "./client-contracts";
@@ -57,10 +61,7 @@ export async function listClinicalRecordConnectionsForMember(
   return connections.map((connection) => {
     const latestRun = connection.retrievalRuns[0] ?? null;
     return {
-      canImport: Boolean(
-        latestRun?.completedAt &&
-          (latestRun.status !== "needs_reauth" || latestRun.outcomeCountsJson !== null),
-      ),
+      canImport: canRepeatImport(latestRun ?? undefined),
       connectedAt: connection.connectedAt.toISOString(),
       connectionId: connection.id,
       displayName: connection.displayName,
@@ -97,9 +98,16 @@ export async function disconnectClinicalRecordConnection(input: {
 }): Promise<{ connectionId: string; status: "disconnected" }> {
   assertHostedOnboardingMutationOrigin(input.request);
   const auth = await requireHostedAppSessionFromRequest(input.request);
+  return disconnectClinicalSource(auth, input);
+}
+
+export async function disconnectClinicalSource(auth: HostedAppSession | HostedNativeMemberAuth, input: {
+  connectionId: string; now?: Date;
+}) {
   const now = input.now ?? new Date();
   return getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, auth.member.id);
+    if ("credential" in auth) await assertHostedNativeMemberAuthCurrentTx(auth, tx);
     const connection = await tx.clinicalRecordConnection.findFirst({
       select: { providerDirectoryEntryId: true },
       where: { id: input.connectionId, memberId: auth.member.id },
@@ -132,7 +140,7 @@ export async function disconnectClinicalRecordConnection(input: {
         connectionId: input.connectionId,
         memberId: auth.member.id,
         OR: [
-          { completedAt: null, status: { in: ["queued", "retrieving"] } },
+          { completedAt: null, status: { in: [...CLINICAL_RECORD_OPEN_RUN_STATUSES] } },
           { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
         ],
       },

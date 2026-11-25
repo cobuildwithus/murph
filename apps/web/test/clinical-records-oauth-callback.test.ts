@@ -3,11 +3,13 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 
 const mocks = vi.hoisted(() => ({
+  readClinicalCallbackAppReturn: vi.fn(),
   finishClinicalRecordAuthorization: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
 }));
 
 vi.mock("@/src/lib/clinical-records/control-plane", () => ({
+  readClinicalCallbackAppReturn: mocks.readClinicalCallbackAppReturn,
   finishClinicalRecordAuthorization: mocks.finishClinicalRecordAuthorization,
 }));
 vi.mock("@/src/lib/hosted-web/public-url", () => ({
@@ -25,6 +27,27 @@ describe("Clinical Records OAuth callback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://join.example.test");
+  });
+
+  it.each(["code", "error"])("forwards only the bounded %s and state to the stored app", async field => {
+    mocks.readClinicalCallbackAppReturn.mockResolvedValueOnce("ios-dev");
+    const state = `crs_${"c".repeat(43)}`;
+    const value = field === "error" ? "access_denied" : "+".repeat(8192);
+    const params = new URLSearchParams({ state, code: "ignored-on-denial", [field]: value, detail: "unused" });
+    const response = await route.GET(new Request(`https://join.example.test/callback?${params}`));
+    expect(response.status).toBe(303);
+    const url = new URL(response.headers.get("location")!);
+    expect(url.pathname).toBe("/api/device-sync/companion/connect-return/ios-dev");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ state, [field]: value });
+    expect(mocks.finishClinicalRecordAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("fails explicitly when an app authorization code exceeds the clinical limit", async () => {
+    mocks.readClinicalCallbackAppReturn.mockResolvedValueOnce("ios");
+    const response = await route.GET(new Request(`https://join.example.test/callback?state=crs_${"c".repeat(43)}&code=${"x".repeat(8193)}`));
+    expect(response.status).toBe(400);
+    expect(response.headers.has("location")).toBe(false);
+    expect(mocks.finishClinicalRecordAuthorization).not.toHaveBeenCalled();
   });
 
   it("redirects a provider denial with only secret-safe diagnostic fields", async () => {

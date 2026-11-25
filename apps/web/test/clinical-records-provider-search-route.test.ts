@@ -1,11 +1,13 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  bearer: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   searchClinicalProviderDirectory: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.bearer }));
 vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
   searchClinicalProviderDirectory: mocks.searchClinicalProviderDirectory,
 }));
@@ -36,6 +38,24 @@ describe("Clinical Records provider search route", () => {
       directoryVersion: "test-v1",
       providers: [],
     });
+  });
+
+  it("searches the native directory with a body-only query and a public result projection", async () => {
+    const { POST } = await import("../app/api/clinical-records/companion/providers/search/route");
+    const query = "Synthetic Ridge";
+    const request = new Request("https://app.example.test/api/clinical-records/companion/providers/search", {
+      method: "POST", body: JSON.stringify({ query }), headers: { "content-type": "application/json" },
+    });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.searchClinicalProviderDirectory.mockReturnValue({ providers: [{
+      id: "epic-example", brandName: "Synthetic Ridge", facilities: [{ city: "Sample City", state: "ZZ" }],
+    }] });
+    expect(await (await POST(request)).json()).toEqual({ providers: [{ id: "epic-example", name: query, place: "Sample City, ZZ" }] });
+    expect(mocks.bearer).toHaveBeenCalledWith(request);
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
+    expect(request.url).not.toContain(query);
+    expect(JSON.stringify([...warning.mock.calls, ...error.mock.calls])).not.toContain(query);
   });
 
   it("accepts only the bounded provider search selectors", async () => {

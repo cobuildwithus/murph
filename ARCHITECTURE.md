@@ -1265,6 +1265,8 @@ The behavior and deploy contract live in
 
 ## Hosted Clinical Records
 
+Web shares SMART discovery, exchange and member-locked persistence between browser intents and bearer-authenticated companion routes. A nullable app return on the OAuth row selects callback transport. Web owns the companion source projection and capacity decision. The product contract lives in `agent-docs/product-specs/clinical-records-intake.md`.
+
 Clinical enrichment reads and writes only `extraction-v4` under
 `.runtime/operations/clinical-records/enrichment/`. Ordinary idle checkpoint
 maintenance removes other `extraction-v*` directories within its existing

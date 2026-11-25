@@ -1,3 +1,4 @@
+import { HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS } from "../device-sync/browser-callback-proof";
 import { expireHostedLinqGroupRiskBatch } from "../hosted-routing/linq-group-risk-ledger";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -850,11 +851,14 @@ export async function deleteExpiredClinicalRecordOauthSessions(input: {
   now: Date;
   prisma: Pick<PrismaClient, "$executeRaw">;
 }): Promise<number> {
+  // Keep native callback routing and replay evidence through the proof's lifetime.
+  const proofCutoff = new Date(input.now.getTime() - HOSTED_DEVICE_SYNC_CALLBACK_PROOF_MAX_AGE_SECONDS * 1000);
   return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
     WITH doomed AS MATERIALIZED (
       SELECT oauth_session."state_hash"
       FROM "clinical_record_oauth_session" AS oauth_session
       WHERE oauth_session."expires_at" <= ${input.now}
+        AND (oauth_session."app_return" IS NULL OR oauth_session."created_at" <= ${proofCutoff})
         AND (
           oauth_session."consumed_at" IS NULL
           OR NOT EXISTS (

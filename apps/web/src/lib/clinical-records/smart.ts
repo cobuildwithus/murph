@@ -1,3 +1,4 @@
+import { isClinicalReturnState } from "./return-query";
 import { createHash, randomBytes } from "node:crypto";
 
 import { normalizeClinicalFhirPatientId } from "@murphai/clinical-records";
@@ -51,7 +52,7 @@ export function createSmartState(): { state: string; stateHash: string } {
 }
 
 export function normalizeSmartStateHash(state: string): string | null {
-  return /^crs_[A-Za-z0-9_-]{43}$/u.test(state) ? hashSmartState(state) : null;
+  return isClinicalReturnState(state) ? hashSmartState(state) : null;
 }
 
 export async function discoverSmartConfiguration(input: {

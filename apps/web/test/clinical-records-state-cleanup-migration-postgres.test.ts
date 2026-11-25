@@ -16,6 +16,31 @@ if (enabled) {
 }
 
 describe.skipIf(!enabled)("clinical state cleanup migrations", () => {
+  it("allows old browser writers alongside closed native return bindings", async () => {
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("CREATE TEMP TABLE clinical_record_oauth_session (connect_intent_claim_hash TEXT NOT NULL)");
+      const browserInsert = "INSERT INTO clinical_record_oauth_session (connect_intent_claim_hash) VALUES ('synthetic-claim')";
+      await client.query(browserInsert);
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261124120000_clinical_native_return/migration.sql", import.meta.url,
+      ), "utf8"));
+      await client.query(browserInsert);
+      await client.query("INSERT INTO clinical_record_oauth_session (app_return) VALUES ('ios'), ('ios-dev')");
+      expect((await client.query("SELECT 1 FROM clinical_record_oauth_session WHERE app_return IS NULL")).rowCount).toBe(2);
+      for (const pair of [[null, null], ["claim", "ios"], [null, "other"]]) {
+        await client.query("SAVEPOINT invalid_pair");
+        await expect(client.query("INSERT INTO clinical_record_oauth_session VALUES ($1, $2)", pair)).rejects.toMatchObject({ code: "23514" });
+        await client.query("ROLLBACK TO SAVEPOINT invalid_pair");
+      }
+    } finally {
+      await client.query("ROLLBACK");
+      await client.end();
+    }
+  });
+
   it("normalizes historical phases and preserves receipts through old and new writers", async () => {
     const client = new pg.Client({ connectionString: databaseUrl });
     await client.connect();

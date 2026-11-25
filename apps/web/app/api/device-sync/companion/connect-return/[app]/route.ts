@@ -1,3 +1,4 @@
+import { clinicalReturnQuery, CLINICAL_RETURN_QUERY_LIMIT, isClinicalReturnState } from "@/src/lib/clinical-records/return-query";
 import { isDeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 
 // Where a provider sends the person after a sign-in the Murph app started.
@@ -21,13 +22,17 @@ export async function GET(
     return new Response(null, { headers: { "Cache-Control": "no-store" }, status: 404 });
   }
 
-  const query = new URL(request.url).search;
+  const url = new URL(request.url);
+  let query = url.search.length <= APP_CONNECT_RETURN_QUERY_MAX_LENGTH ? url.search : "";
+  if (isClinicalReturnState(url.searchParams.get("state") ?? "")) {
+    const params = url.search.length <= CLINICAL_RETURN_QUERY_LIMIT && clinicalReturnQuery(url.searchParams);
+    if (!params) return new Response(null, { status: 400, headers: { "Cache-Control": "no-store" } });
+    query = `?${params}`;
+  }
   return new Response(null, {
     headers: {
       "Cache-Control": "no-store",
-      Location: query.length > 1 && query.length <= APP_CONNECT_RETURN_QUERY_MAX_LENGTH
-        ? `${APP_CONNECT_RETURN_URLS[app]}${query}`
-        : APP_CONNECT_RETURN_URLS[app],
+      Location: `${APP_CONNECT_RETURN_URLS[app]}${query}`,
       "Referrer-Policy": "no-referrer",
     },
     status: 302,

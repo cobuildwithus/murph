@@ -657,6 +657,17 @@ describe.skipIf(!runPostgresProof)(
           now: retentionNow,
           prisma: cleanup,
         })).resolves.toBe(1);
+
+        // At public expiry the dual callback still routes an app denial or replay.
+        await cleanup.clinicalRecordOauthSession.create({ data: {
+          stateHash, memberId, appReturn: "ios", createdAt: new Date(expiresAt.getTime() - 600_000),
+          expiresAt, consumedAt: expiresAt, codeVerifierEncrypted: "sealed", clientId: "sample-client",
+          providerDirectoryEntryId: "sample-portal", webSessionId: "sample-session", fhirBaseHash: "sample-hash",
+          redirectUri: "https://app.example.test/callback", tokenEndpoint: "https://portal.example.test/token",
+          requestedScopesJson: [],
+        } });
+        await expect(deleteExpiredClinicalRecordOauthSessions({ now: expiresAt, prisma: cleanup })).resolves.toBe(0);
+        await expect(deleteExpiredClinicalRecordOauthSessions({ now: retentionNow, prisma: cleanup })).resolves.toBe(1);
       } finally {
         await cleanup.hostedMember.deleteMany({ where: { id: memberId } });
       }

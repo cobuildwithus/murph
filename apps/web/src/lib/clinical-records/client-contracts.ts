@@ -11,15 +11,16 @@ export const CLINICAL_RECORD_CONNECTION_STATUSES = [
 export type ClinicalRecordConnectionStatus =
   (typeof CLINICAL_RECORD_CONNECTION_STATUSES)[number];
 
-export const CLINICAL_RECORD_RUN_STATUSES = [
-  "queued",
-  "retrieving",
+export const CLINICAL_RECORD_OPEN_RUN_STATUSES = ["queued", "retrieving"] as const;
+export const CLINICAL_RECORD_TERMINAL_RUN_STATUSES = [
   "complete",
   "partial",
   "needs_reauth",
   "failed",
   "canceled",
 ] as const;
+
+export const CLINICAL_RECORD_RUN_STATUSES = [...CLINICAL_RECORD_OPEN_RUN_STATUSES, ...CLINICAL_RECORD_TERMINAL_RUN_STATUSES] as const;
 
 export type ClinicalRecordRunStatus = (typeof CLINICAL_RECORD_RUN_STATUSES)[number];
 

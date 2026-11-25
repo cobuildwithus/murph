@@ -1,6 +1,13 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
+import { isDeviceSyncAppConnectReturn, type DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
+import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import { buildHostedDeviceSyncAppCompletionProof, readHostedDeviceSyncAppCompletionProofError } from "../device-sync/browser-callback-proof";
+import { isClinicalRecordsControlPlaneError } from "./errors";
+import { CLINICAL_CODE_LIMIT } from "./return-query";
+import { hasImportCapacity, countedSourceFilter, canRepeatImport } from "./source-state";
 import { prepareClinicalPersistentAccess } from "./persistent-access";
 
 import { readEpicImportConfiguration, readEpicPersistentCredentials } from "./epic-import-config";
@@ -73,6 +80,27 @@ export async function startClinicalRecordConnection(input: {
 }): Promise<{ authorizationUrl: string; expiresAt: string }> {
   assertHostedOnboardingMutationOrigin(input.request);
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
+  const { authorizationUrl, expiresAt } = await startAuthorization({
+    auth, claim: input.claim, keepUpdated: input.keepUpdated, fetchImpl: input.fetchImpl,
+    providerDirectoryEntryId: input.providerDirectoryEntryId, appReturn: null, origin: new URL(input.request.url).origin,
+  });
+  return { authorizationUrl, expiresAt };
+}
+
+export async function startNativeAuthorization(input: {
+  auth: HostedNativeMemberAuth; appReturn: DeviceSyncAppConnectReturn; providerDirectoryEntryId: string; origin: string;
+}) {
+  const { authorizationUrl, state, createdAt } = await startAuthorization({ ...input, claim: null });
+  return { authorizationUrl, completionProof: buildHostedDeviceSyncAppCompletionProof({
+    memberId: input.auth.member.id, sessionId: input.auth.sessionId, provider: "clinical-records", state, now: createdAt,
+  }) };
+}
+
+async function startAuthorization(input: {
+  auth: HostedAppSession | HostedNativeMemberAuth; origin: string; appReturn: DeviceSyncAppConnectReturn | null;
+  claim: string | null; providerDirectoryEntryId: string; keepUpdated?: boolean; fetchImpl?: typeof fetch;
+}) {
+  const { auth } = input;
   const prisma = getPrisma();
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma });
   const provider = requireProviderEntry(input.providerDirectoryEntryId);
@@ -84,7 +112,7 @@ export async function startClinicalRecordConnection(input: {
   const persistent = input.keepUpdated && !configuration.hospitalApprovedImports
     ? readEpicPersistentCredentials(provider.id) : null;
   const clientId = persistent?.clientId ?? configuration.clientId;
-  const intent = await claimClinicalRecordConnectIntentForStart({
+  const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
     claim: input.claim,
     memberId: auth.member.id,
     providerDirectoryEntryId: provider.id,
@@ -98,7 +126,7 @@ export async function startClinicalRecordConnection(input: {
       requestedBaseScopes: provider.requestedBaseScopes,
       resourceTypes: configuration.resourceTypes,
     });
-    const publicBaseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
+    const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
     const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
     const pkce = createSmartPkce();
     const state = createSmartState();
@@ -110,23 +138,31 @@ export async function startClinicalRecordConnection(input: {
       value: pkce.verifier,
     });
 
-    await prisma.clinicalRecordOauthSession.create({
-      data: {
-        clientId,
-        codeVerifierEncrypted,
-        connectIntentClaimHash: intent.claimHash,
-        createdAt: now,
-        expiresAt,
-        fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
-        memberId: auth.member.id,
-        providerDirectoryEntryId: provider.id,
-        redirectUri,
-        requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
-        stateHash: state.stateHash,
-        tokenEndpoint: smart.tokenEndpoint,
-        webSessionId: auth.sessionId,
-      },
-    });
+    const data = {
+      clientId,
+      codeVerifierEncrypted,
+      appReturn: input.appReturn,
+      connectIntentClaimHash: intent?.claimHash ?? null,
+      createdAt: now,
+      expiresAt,
+      fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+      memberId: auth.member.id,
+      providerDirectoryEntryId: provider.id,
+      redirectUri,
+      requestedScopesJson: toClinicalJsonArray(smart.requestedScopes),
+      stateHash: state.stateHash,
+      tokenEndpoint: smart.tokenEndpoint,
+      webSessionId: auth.sessionId,
+    };
+    if ("credential" in auth) {
+      await prisma.$transaction(async tx => {
+        await lockHostedMemberRow(tx, auth.member.id);
+        await assertNativeClinicalAdmission(auth, tx);
+        await tx.clinicalRecordOauthSession.create({ data });
+      });
+    } else {
+      await prisma.clinicalRecordOauthSession.create({ data });
+    }
 
     return {
       authorizationUrl: buildSmartAuthorizationUrl({
@@ -139,9 +175,11 @@ export async function startClinicalRecordConnection(input: {
         state: state.state,
       }),
       expiresAt: expiresAt.toISOString(),
+      state: state.state,
+      createdAt: now,
     };
   } catch (error) {
-    await releaseClinicalRecordConnectIntentStart({
+    if (intent) await releaseClinicalRecordConnectIntentStart({
       claimHash: intent.claimHash,
       memberId: auth.member.id,
     });
@@ -158,11 +196,57 @@ export async function finishClinicalRecordAuthorization(input: {
   state: string;
 }): Promise<{ connectionId: string; retrievalRunId: string }> {
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
+  return finishAuthorization({ auth, code: input.code, state: input.state, providerDenied: input.providerDenied,
+    providerError: input.providerError, fetchImpl: input.fetchImpl });
+}
+
+export async function readClinicalCallbackAppReturn(state: string) {
+  const stateHash = normalizeSmartStateHash(state);
+  if (!stateHash) return null;
+  const session = await getPrisma().clinicalRecordOauthSession.findUnique({ where: { stateHash }, select: { appReturn: true } });
+  if (session?.appReturn == null) return null;
+  if (!isDeviceSyncAppConnectReturn(session.appReturn)) throw invalidOauthStateError();
+  return session.appReturn;
+}
+
+export async function completeNativeAuthorization(auth: HostedNativeMemberAuth, query: URLSearchParams, completionProof: string) {
+  const state = query.get("state") ?? "";
+  const proofError = readHostedDeviceSyncAppCompletionProofError({
+    memberId: auth.member.id, sessionId: auth.sessionId, provider: "clinical-records", state, completionProof,
+  });
+  if (proofError) throw clinicalRecordsError({ code: "CALLBACK_PROOF_INVALID", httpStatus: 400, message: "Invalid completion proof." });
+  try {
+    await finishAuthorization({ auth, state, code: query.get("code"),
+      providerDenied: query.get("error") === "access_denied", providerError: query.has("error") });
+    return "connected" as const;
+  } catch (error) {
+    if (!isClinicalRecordsControlPlaneError(error)) throw error;
+    switch (error.code) {
+      case "CLINICAL_RECORD_OAUTH_STATE_REPLAYED": return null;
+      case "CLINICAL_RECORD_AUTHORIZATION_FAILED": return query.get("error") === "login_required" ? "sign_in_required" as const : "failed" as const;
+      case "CLINICAL_RECORD_AUTHORIZATION_DECLINED": return "canceled" as const;
+      case "CLINICAL_RECORD_OAUTH_STATE_MISSING": return "expired" as const;
+      case "CLINICAL_RECORD_OAUTH_STATE_EXPIRED": return "expired" as const;
+      case "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS": return "already_connected" as const;
+      case "CLINICAL_RECORD_PATIENT_BINDING_CHANGED": return "different_person" as const;
+      case "CLINICAL_RECORD_SMART_SCOPES_INSUFFICIENT": return "not_enough_access" as const;
+      case "CLINICAL_RECORD_SMART_REAUTH_REQUIRED": return "sign_in_required" as const;
+      case "CLINICAL_RECORD_SOURCE_LIMIT_REACHED": return "too_many_sources" as const;
+      default: return "failed" as const;
+    }
+  }
+}
+
+async function finishAuthorization(input: {
+  auth: HostedAppSession | HostedNativeMemberAuth; code: string | null; state: string;
+  providerDenied: boolean; providerError: boolean; fetchImpl?: typeof fetch;
+}) {
+  const { auth } = input;
   const session = await consumeClinicalOauthSession({ auth, state: input.state });
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma: getPrisma() });
 
   if (input.providerDenied || input.providerError || !input.code) {
-    await completeClinicalRecordConnectIntent({
+    if (session.connectIntentClaimHash) await completeClinicalRecordConnectIntent({
       claimHash: session.connectIntentClaimHash,
       memberId: auth.member.id,
       now: new Date(),
@@ -211,6 +295,8 @@ export async function finishClinicalRecordAuthorization(input: {
     });
   }
   const persisted = await runWithHostedDomainRootUnwrapCache(() => persistClinicalConnection({
+    nativeAuth: "credential" in auth ? auth : null,
+    stateHash: session.stateHash,
     connectIntentClaimHash: session.connectIntentClaimHash,
     fhirBaseHash: session.fhirBaseHash,
     memberId: auth.member.id,
@@ -232,7 +318,7 @@ export async function finishClinicalRecordAuthorization(input: {
 }
 
 async function consumeClinicalOauthSession(input: {
-  auth: HostedAppSession;
+  auth: HostedAppSession | HostedNativeMemberAuth;
   now?: Date;
   state: string;
 }) {
@@ -251,23 +337,29 @@ async function consumeClinicalOauthSession(input: {
       FOR UPDATE OF oauth_session
     `;
     const session = await tx.clinicalRecordOauthSession.findUnique({ where: { stateHash } });
-    if (!session) throw invalidOauthStateError();
+    if (!session) {
+      if ("credential" in input.auth) throw clinicalRecordsError({
+        code: "CLINICAL_RECORD_OAUTH_STATE_MISSING", httpStatus: 410, message: "The authorization session is no longer available.",
+      });
+      throw invalidOauthStateError();
+    }
     if (
-      session.memberId !== input.auth.member.id
+      (session.appReturn != null) !== ("credential" in input.auth)
+      || session.memberId !== input.auth.member.id
       || session.webSessionId !== input.auth.sessionId
     ) throw invalidOauthStateError();
+    if (session.consumedAt && (session.appReturn != null || session.expiresAt > now)) {
+      throw clinicalRecordsError({
+        code: "CLINICAL_RECORD_OAUTH_STATE_REPLAYED",
+        httpStatus: 409,
+        message: "The provider authorization callback was already handled.",
+      });
+    }
     if (session.expiresAt.getTime() <= now.getTime()) {
       throw clinicalRecordsError({
         code: "CLINICAL_RECORD_OAUTH_STATE_EXPIRED",
         httpStatus: 410,
         message: "The provider authorization session expired.",
-      });
-    }
-    if (session.consumedAt) {
-      throw clinicalRecordsError({
-        code: "CLINICAL_RECORD_OAUTH_STATE_REPLAYED",
-        httpStatus: 409,
-        message: "The provider authorization callback was already handled.",
       });
     }
     const consumed = await tx.clinicalRecordOauthSession.updateMany({
@@ -290,7 +382,9 @@ async function persistClinicalConnection(input: {
   tokenEndpoint: string;
   hospitalApprovedImports: boolean;
   authorizationStartedAt: Date;
-  connectIntentClaimHash: string;
+  nativeAuth: HostedNativeMemberAuth | null;
+  stateHash: string;
+  connectIntentClaimHash: string | null;
   fhirBaseHash: string;
   memberId: string;
   now: Date;
@@ -421,15 +515,7 @@ async function persistClinicalConnection(input: {
   };
   try {
     persisted = await prisma.$transaction(async (tx) => {
-      await lockHostedMemberRow(tx, input.memberId);
-      if ((await readHostedMemberSuspensionAfterLockTx(tx, input.memberId)) !== "active") {
-        throw clinicalRecordsError({
-          code: "CLINICAL_RECORD_MEMBER_UNAVAILABLE",
-          httpStatus: 409,
-          message: "This account cannot receive medical records.",
-        });
-      }
-      await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
+      await assertClinicalPersistenceAuthority(tx, input);
       const current = await assertClinicalRecordConnectionAvailable(
         { memberId: input.memberId, providerDirectoryEntryId: input.provider.id },
         tx,
@@ -441,29 +527,31 @@ async function persistClinicalConnection(input: {
         (current?.disconnectedAt && current.disconnectedAt >= input.authorizationStartedAt)
       )
         throw connectionAlreadyExistsError();
+      if (!current || current.status === "disconnected") {
+        const sources = await tx.clinicalRecordConnection.findMany({
+          where: countedSourceFilter(input.memberId),
+          select: { id: true },
+          take: CLINICAL_RECORD_MAX_SOURCES,
+        });
+        if (!hasImportCapacity(sources.length))
+          throw clinicalRecordsError({
+            code: "CLINICAL_RECORD_SOURCE_LIMIT_REACHED",
+            httpStatus: 409,
+            message: "The medical record source limit has been reached.",
+          });
+      }
       if (current) {
         await tx.clinicalRecordConnection.update({
           where: { id: current.id },
           data: connectionData,
         });
       } else {
-        const sources = await tx.clinicalRecordConnection.findMany({
-          where: { memberId: input.memberId },
-          select: { id: true },
-          take: CLINICAL_RECORD_MAX_SOURCES,
-        });
-        if (sources.length >= CLINICAL_RECORD_MAX_SOURCES)
-          throw clinicalRecordsError({
-            code: "CLINICAL_RECORD_SOURCE_LIMIT_REACHED",
-            httpStatus: 409,
-            message: "The medical record source limit has been reached.",
-          });
         await tx.clinicalRecordConnection.create({ data: connectionData });
       }
       await tx.clinicalRecordRetrievalRun.create({
         data: retrievalRunData,
       });
-      await completeClinicalRecordConnectIntent(
+      if (input.connectIntentClaimHash) await completeClinicalRecordConnectIntent(
         {
           claimHash: input.connectIntentClaimHash,
           memberId: input.memberId,
@@ -487,6 +575,35 @@ async function persistClinicalConnection(input: {
   return persisted;
 }
 
+async function assertClinicalPersistenceAuthority(
+  tx: Prisma.TransactionClient,
+  input: { memberId: string; nativeAuth: HostedNativeMemberAuth | null; stateHash: string },
+) {
+  await lockHostedMemberRow(tx, input.memberId);
+  if ((await readHostedMemberSuspensionAfterLockTx(tx, input.memberId)) !== "active") {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_MEMBER_UNAVAILABLE",
+      httpStatus: 409,
+      message: "This account cannot receive medical records.",
+    });
+  }
+  if (input.nativeAuth) {
+    await assertNativeClinicalAdmission(input.nativeAuth, tx);
+    const authorization = await tx.clinicalRecordOauthSession.findUnique({
+      where: { stateHash: input.stateHash }, select: { consumedAt: true },
+    });
+    if (!authorization?.consumedAt) throw invalidOauthStateError();
+  } else {
+    await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: tx });
+  }
+}
+
+async function assertNativeClinicalAdmission(auth: HostedNativeMemberAuth, tx: Prisma.TransactionClient) {
+  await assertHostedNativeMemberAuthCurrentTx(auth, tx);
+  await assertActiveHostedMemberAccessAllowed({ memberId: auth.member.id, prisma: tx });
+  await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma: tx });
+}
+
 function isUniqueConstraintError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
 }
@@ -505,6 +622,7 @@ async function assertClinicalRecordConnectionAvailable(
       retrievalGeneration: true,
       patientBindingEncrypted: true,
       fhirBaseHash: true,
+      status: true,
       disconnectedAt: true,
       retrievalRuns: {
         orderBy: { generation: "desc" },
@@ -516,7 +634,7 @@ async function assertClinicalRecordConnectionAvailable(
   });
   if (existing) {
     const run = existing.retrievalRuns[0];
-    if (!run?.completedAt || (run.status === "needs_reauth" && run.outcomeCountsJson === null))
+    if (!canRepeatImport(run))
       throw connectionAlreadyExistsError();
 
   }
@@ -537,7 +655,7 @@ function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
 
 function normalizeAuthorizationCode(value: string): string {
   const code = value.trim();
-  if (!code || code.length > 8_192) {
+  if (!code || code.length > CLINICAL_CODE_LIMIT) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_AUTHORIZATION_CODE_INVALID",
       httpStatus: 400,

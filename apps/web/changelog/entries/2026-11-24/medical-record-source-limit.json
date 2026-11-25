@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-24",
+  "order": 100,
+  "item": {
+    "id": "medical-record-source-limit",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Disconnecting a patient portal frees a spot",
+    "summary": "You can disconnect a portal to make room for another when you reach the 20-source medical records limit.",
+    "details": "Records you already imported stay in your vault.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": []
+  }
+}

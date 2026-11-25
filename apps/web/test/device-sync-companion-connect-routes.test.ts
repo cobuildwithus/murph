@@ -325,6 +325,15 @@ describe("return bridge", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
+  it("preserves an encoded full-size clinical code and fails closed above the clinical limit", async () => {
+    const state = `crs_${"d".repeat(43)}`;
+    const code = "+".repeat(8192);
+    const query = new URLSearchParams({ state, code });
+    const response = await get("ios", `?${query}&extra=omit`);
+    expect(response.headers.get("location")).toBe(`ai.withmurph.app://connect-return?${query}`);
+    expect((await get("ios", `?${query}x`)).status).toBe(400);
+  });
+
   it("still returns to the app with no state, and drops a query past its bound", async () => {
     expect((await get("ios")).headers.get("location")).toBe("ai.withmurph.app://connect-return");
     expect((await get("ios", `?x=${"y".repeat(2_048)}`)).headers.get("location")).toBe("ai.withmurph.app://connect-return");
