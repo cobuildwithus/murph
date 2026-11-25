@@ -72,7 +72,9 @@ The live ownership split is:
   follow-up passes do not themselves resume Ask.
   Detached Ask stays paused through checkpoint-only effect drain and return.
   Its admission paths remain gated by background abort and owner handoff.
-  Clinical enrichment retains its existing foreground-pass resume boundary.
+  Clinical enrichment retains its existing foreground-pass resume boundary,
+  and also continues after a checkpoint when it is the only due work, within
+  the ten-minute bound in `ARCHITECTURE.md` § Hosted Clinical Records.
   Shutdown and owner handoff still abort and requeue the exact child. Other
   active-child deadlines and save-before-effect ordering still apply. This lets
   background runs reach ordinary container cleanup, including its 60-second

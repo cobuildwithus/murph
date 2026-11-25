@@ -4,7 +4,18 @@ import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import {
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
+  type HostedSystemMailboxState,
 } from "./system-mailbox-state.ts";
+
+export function isHostedClinicalEnrichmentWakeItem(item: HostedSystemMailboxPendingItem): boolean {
+  return item.routeAction === "apply-clinical-enrichment";
+}
+
+/** A due pointer is the durable successor this invocation would otherwise restore for. */
+export function hasDueHostedClinicalEnrichmentWake(state: HostedSystemMailboxState, nowMs: number): boolean {
+  return state.pending.some((item) => isHostedClinicalEnrichmentWakeItem(item)
+    && item.status === "pending" && Date.parse(item.nextAttemptAt ?? item.occurredAt) <= nowMs);
+}
 
 function enrichmentItemId(jobId: string): string {
   if (!/^[a-f0-9]{64}$/u.test(jobId)) {

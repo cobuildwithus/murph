@@ -1352,9 +1352,15 @@ aborts and joins its exact owned children before snapshots, workspace release,
 fence loss or shutdown; cancellation leaves durable work available to retry.
 Active extraction may defer an idle checkpoint for one finite 125-second window,
 but cannot defer pending canonical receipts or durable effects.
-Checkpoint-only return paths keep extraction paused for the durable successor.
-If this invocation instead accepts another foreground pass after checkpointing,
-it resumes its paused extractor unless shutdown or owner handoff has started.
+Each page's own proposal apply and deferred usage therefore checkpoint per page.
+After that checkpoint and its effect drain, an invocation whose only due work is
+requeued or due enrichment resumes the extractor and system work itself instead
+of returning to a restored successor, for at most ten minutes after the
+controller starts. Shutdown, owner handoff, abort, mailbox budget exhaustion or
+any other due wake keeps the checkpoint-only return, with extraction paused for
+the durable successor. If this invocation instead accepts another foreground
+pass after checkpointing, it resumes its paused extractor unless shutdown or
+owner handoff has started.
 
 Retained structured records use the same job after its attachments. The importer
 selects only source notes it successfully mapped; deterministic results and

@@ -23,11 +23,17 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
   const extractionStarted = createDeferred<void>();
   const successorAt = new Date(Date.now() + 600_000).toISOString();
   const actualRunOne = clinicalEnrichment.runOneHostedClinicalEnrichment;
-  const readNextClinicalEnrichment = vi.fn(async () => ({
-    status: "extract" as const, jobId: "a".repeat(64), page: 2, timeZone: "UTC",
-    source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
-    documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
-  }));
+  let queueReads = 0;
+  const readNextClinicalEnrichment = vi.fn(async () => {
+    queueReads += 1;
+    events.push("queue:read");
+    // The restarted reader finds an empty queue, so one snapshot ends the run.
+    return queueReads > 1 ? null : {
+      status: "extract" as const, jobId: "a".repeat(64), page: 2, timeZone: "UTC",
+      source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
+      documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
+    };
+  });
   const runOne = vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment")
     .mockImplementation((input) => actualRunOne({
       ...input,
@@ -101,8 +107,10 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
       },
     ), 15_000, () => events.join(","));
     expect(durableEffect).toHaveBeenCalledOnce();
-    expect(readNextClinicalEnrichment).toHaveBeenCalledOnce();
+    expect(readNextClinicalEnrichment).toHaveBeenCalledTimes(2);
     expect(events.indexOf("extraction:joined")).toBeLessThan(events.indexOf("durable-effect"));
+    // The same invocation restarts the page only after the effect has run.
+    expect(events.indexOf("durable-effect")).toBeLessThan(events.lastIndexOf("queue:read"));
     expect(checkpointRequests).toHaveLength(1);
     expect(result).toMatchObject({ status: "scheduled", nextWakeAt: successorAt });
   } finally {
@@ -197,6 +205,128 @@ test("resumes clinical work when fresh input continues the invocation after a ch
     expect(durableEffect).toHaveBeenCalledOnce();
   } finally {
     runOne.mockRestore();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+// Each synthetic page leaves deferred usage like production. Provider pages
+// outlast a checkpoint, so a page finishes only after its predecessor's
+// usage, which runs after the snapshot that made the predecessor durable.
+function mockClinicalPages(events: string[], totalPages: number, onUsage?: (page: number) => void) {
+  let completedPages = 0;
+  let extracting = false;
+  const usageRecorded = Array.from({ length: totalPages + 1 }, () => createDeferred<void>());
+  usageRecorded[0]?.resolve();
+  const runOne = vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment")
+    .mockImplementation(async (input) => {
+      if (input.abortSignal.aborted || completedPages === totalPages) return "idle";
+      const page = completedPages + 1;
+      input.onStateMutation();
+      input.onExtractionStarted?.();
+      extracting = true;
+      events.push(`page-${page}:start`);
+      const aborted = await new Promise<boolean>((resolve) => {
+        input.abortSignal.addEventListener("abort", () => resolve(true), { once: true });
+        void usageRecorded[page - 1]?.promise.then(() => resolve(input.abortSignal.aborted));
+      });
+      extracting = false;
+      if (aborted) {
+        events.push(`page-${page}:requeued`);
+        return "idle";
+      }
+      completedPages = page;
+      events.push(`page-${page}:done`);
+      input.deferUsageUntilAfterDurableCheckpoint?.(async () => {
+        events.push(`page-${page}:usage`);
+        usageRecorded[page]?.resolve();
+        onUsage?.(page);
+      });
+      input.onStateMutation();
+      return "settled";
+    });
+  return { runOne, completedPages: () => completedPages, extracting: () => extracting };
+}
+
+async function runClinicalPagesInvocation(input: {
+  attemptId: string;
+  events: string[];
+  extracting(): boolean;
+  shutdownSignal?: AbortSignal;
+  vaultRoot: string;
+}) {
+  return await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
+    createWorkspaceRuntimeJobInput({ request: { attemptId: input.attemptId, leaseGeneration: "7" } }),
+    {
+      vaultRoot: input.vaultRoot,
+      runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+      ...(input.shutdownSignal ? { shutdownSignal: input.shutdownSignal } : {}),
+      async createCheckpointSnapshot() {
+        expect(input.extracting(), input.events.join(",")).toBe(false);
+        input.events.push("snapshot");
+        return { snapshotRef: createSnapshotFixtureRef({ hash: "c".repeat(64), size: 512 }) };
+      },
+      async importItem() { return { status: "imported" }; },
+      async runAssistantPhase() { return { progressed: false, nextWakeAt: null, nextWakeReason: null }; },
+      platform: createPlatform({
+        mailboxPort: createMailboxPort({ events: input.events, items: [] }),
+        workspacePort: createWorkspacePort({
+          events: input.events, checkpointRequests: [], workspace: createWorkspaceState({ version: "0" }),
+          checkpointWorkspace(request) {
+            return createWorkspaceState({
+              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+              snapshotRef: request.snapshotRef,
+              nextWakeAt: request.nextWakeAt ?? null,
+              nextWakeReason: request.nextWakeReason ?? null,
+            });
+          },
+        }),
+      }),
+    },
+  ), 15_000, () => input.events.join(","));
+}
+
+const pageProgress = (events: readonly string[]) =>
+  events.filter((event) => event === "snapshot" || /^page-\d+:(done|usage)$/u.test(event));
+
+test("keeps extracting later clinical pages after each page checkpoint in one invocation", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-pages-"));
+  const events: string[] = [];
+  const pages = mockClinicalPages(events, 3);
+  try {
+    await initializeVault({ vaultRoot, createdAt: TEST_NOW });
+    await runClinicalPagesInvocation({
+      attemptId: "attempt_synthetic_clinical_pages", events, extracting: pages.extracting, vaultRoot,
+    });
+    expect(pages.completedPages(), events.join(",")).toBe(3);
+    // Usage stays behind the snapshot that made its page durable.
+    expect(pageProgress(events)).toEqual([
+      "page-1:done", "snapshot", "page-1:usage",
+      "page-2:done", "snapshot", "page-2:usage",
+      "page-3:done", "snapshot", "page-3:usage",
+    ]);
+  } finally {
+    pages.runOne.mockRestore();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+test("leaves later clinical pages to the durable successor once shutdown starts", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-pages-shutdown-"));
+  const events: string[] = [];
+  const shutdown = new AbortController();
+  const pages = mockClinicalPages(events, 3, () => {
+    shutdown.abort(new DOMException("Synthetic container SIGTERM.", "AbortError"));
+  });
+  try {
+    await initializeVault({ vaultRoot, createdAt: TEST_NOW });
+    await runClinicalPagesInvocation({
+      attemptId: "attempt_synthetic_clinical_pages_shutdown", events, extracting: pages.extracting,
+      shutdownSignal: shutdown.signal, vaultRoot,
+    });
+    expect(pages.completedPages(), events.join(",")).toBe(1);
+    expect(pageProgress(events)).toEqual(["page-1:done", "snapshot", "page-1:usage"]);
+  } finally {
+    pages.runOne.mockRestore();
     await removeTempRoot(vaultRoot);
   }
 });
