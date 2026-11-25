@@ -1,4 +1,5 @@
 import "server-only";
+import { freezeClinicalDailyNotification, type ClinicalDailyNoticeReaders } from "./notification";
 import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { randomBytes } from "node:crypto";
@@ -56,7 +57,10 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
   return { checked, queued, failed };
 }
 
-export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date }): Promise<boolean> {
+export async function admitClinicalDailySync(input: {
+  abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date;
+  noticeReaders?: ClinicalDailyNoticeReaders;
+}): Promise<boolean> {
   if (!await readClinicalTransportAccess({ memberId: input.memberId })) return false;
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
@@ -108,10 +112,11 @@ export async function admitClinicalDailySync(input: { abortSignal?: AbortSignal;
       await tx.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
         retrievalGeneration: generation, status: "active", nextSyncAt: new Date(input.now.getTime() + CLINICAL_DAILY_SYNC_MS),
       } });
+      const notification = await freezeClinicalDailyNotification(tx, connection, grantedScopesJson, input.noticeReaders);
       await tx.clinicalRecordRetrievalRun.create({ data: {
         id: runId, memberId: input.memberId, connectionId: connection.id, generation,
         createdAt: input.now, status: "queued", retrievalProtocol: "query-slices-v2", retrievalPlanJson,
-        grantedScopesJson,
+        grantedScopesJson, ...notification,
       } });
       return appendClinicalRetrievalWakeTx({ generation, memberId: input.memberId, occurredAt: input.now, runId, tx });
     }, HOSTED_RECOVERY_TRANSACTION_OPTIONS);

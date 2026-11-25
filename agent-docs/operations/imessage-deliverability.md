@@ -423,7 +423,10 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 ## Daily hospital record texts
 
-Web and the private runtime block all clinical sends at this head. After
+The production daily sweep creates silent imports. Its locked writer requires
+the deployed runner and port revisions before it can freeze a verified
+participant, assigned line and private chat for a new run. Web and the private
+runtime block all clinical sends at this head. After
 activation, clinical texts may go to the exact verified private Murph thread
 frozen at daily admission. The owner withdrew the iMessage-only requirement. Linq may
 select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail

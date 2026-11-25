@@ -548,8 +548,9 @@ export async function recordClinicalRetrievalOutcome(input: {
     });
     if (!run || run.connection.retrievalGeneration !== run.generation) throw staleRunError();
     assertOutcomeProtocol(input.request.retrievalProtocol, run);
-    const rejection = validateOutcomeForRun(input.request, run);
-    if (rejection) {
+    const validation = validateOutcomeForRun(input.request, run);
+    if ("rejection" in validation) {
+      const rejection = validation.rejection;
       if (!run.completedAt && ["active", "error"].includes(run.connection.status)) {
         await endUnusableRunTx(tx, { ...input.request, memberId: input.memberId }, run.connection,
           rejection.code === "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH" ? "outcome-count-mismatch" : "outcome-conflict");
@@ -605,19 +606,9 @@ export async function recordClinicalRetrievalOutcome(input: {
         message: "The Clinical Records retrieval outcome conflicts with the completed run.",
       });
     }
-    const connectionData = input.request.status === "failed"
-      ? {
-          lastErrorCode: input.request.errorCode ?? "retrieval-failed",
-          status: "error",
-        }
-      : {
-          lastErrorCode: input.request.errorCode ?? null,
-          lastSyncCompletedAt: now,
-          status: "active",
-        };
     const updatedConnection = await tx.clinicalRecordConnection.updateMany({
       data: {
-        ...connectionData,
+        ...connectionAfterClinicalOutcome(input.request, run.connection, validation.plan, now),
         lastCheckedAt: now,
         ...clinicalCredentialsAfterCheck(Boolean(run.connection.refreshTokenEncrypted), now),
       },
@@ -650,6 +641,18 @@ export async function recordClinicalRetrievalOutcome(input: {
   });
   if (rejection) throw rejection;
   if (notification) await signalClinicalRetrievalWake(notification);
+}
+
+function connectionAfterClinicalOutcome(request: HostedClinicalRecordsRecordOutcomeRequest,
+  connection: Pick<RunnableClinicalRun["connection"], "refreshTokenEncrypted" | "requiresProcessorApprovals" | "tokenVersion">,
+  plan: ClinicalFhirRetrievalPlan, now: Date) {
+  if (request.status === "failed") return { lastErrorCode: request.errorCode ?? "retrieval-failed", status: "error" };
+  // The validated terminal outcome matches the frozen slices and Web's page count.
+  // An empty whole-history import qualifies, including when both page counts are zero.
+  const acceptedBaseline = request.status === "completed" && connection.requiresProcessorApprovals && connection.refreshTokenEncrypted
+    && plan.slices.every(slice => slice.coverage === "whole-family");
+  return { lastErrorCode: request.errorCode ?? null, lastSyncCompletedAt: now, status: "active",
+    ...(acceptedBaseline ? { baselineTokenVersion: connection.tokenVersion } : {}) };
 }
 
 function publishTerminalChangeProof(tx: ClinicalRetrievalTx, input: { memberId: string; request: HostedClinicalRecordsRecordOutcomeRequest },
@@ -1406,30 +1409,30 @@ function assertOutcomeProtocol(protocol: ClinicalRetrievalProtocol, run: { retri
 function validateOutcomeForRun(request: HostedClinicalRecordsRecordOutcomeRequest, run: {
   pageCount: number;
   retrievalPlanJson: Prisma.JsonValue | null;
-}) {
+}): { plan: ClinicalFhirRetrievalPlan } | { rejection: ReturnType<typeof clinicalRecordsError> } {
   if (
     request.status !== "preempted" &&
     (request.counts.fetchedPageCount > run.pageCount ||
       (request.status === "completed" &&
         request.counts.fetchedPageCount !== run.pageCount))
   ) {
-    return clinicalRecordsError({
+    return { rejection: clinicalRecordsError({
       code: "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH",
       httpStatus: 409,
       message: "The Clinical Records retrieval page count does not match the control plane.",
-    });
+    }) };
   }
 
   const plan = clinicalFhirRetrievalPlanSchema.safeParse(run.retrievalPlanJson);
-  if (!plan.success) return outcomeConflictError();
+  if (!plan.success) return { rejection: outcomeConflictError() };
   const expected = plan.data.slices.map((slice) => ({
     queryScopeId: slice.queryScopeId,
     sliceId: slice.sliceId,
   }));
   if (JSON.stringify(request.retrievalSlices) !== JSON.stringify(expected)) {
-    return outcomeConflictError();
+    return { rejection: outcomeConflictError() };
   }
-  return null;
+  return { plan: plan.data };
 }
 
 function outcomeConflictError() {

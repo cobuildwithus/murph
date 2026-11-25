@@ -180,3 +180,64 @@ Activation must also close these replay and deployment hazards.
   notice decisions in either direction. Keep the eligibility writer closed
   until Web, hosted runtime and the manually deployed Cloudflare port all
   support the decision shape from this reader rollout.
+
+**Activation split, locked Web writer.** The first draft ends at run creation
+and pointer publication. The production sweep supplies no reader revisions.
+It can establish a baseline but cannot create an eligible run, publish a
+notification or spend an occurrence. The nullable connection column records
+the credential epoch on an accepted complete, whole-history outcome. A new
+epoch needs its own baseline. Under the member lock, the daily writer requires
+the ongoing replacement grant, current named approvals, matching baseline and
+reader revisions, enabled preference and verified direct route. It pins the
+receipt protocol in the same insert as the epoch, revision and fingerprint of
+the approved notice versions and route. Old runs receive no updates. Roll out
+the additive migration before Web. This half has no public changelog entry.
+
+The gated local PostgreSQL suites and production migration guard passed
+249 tests across six files. They exercise all three modes through the daily
+writer, late enrichment after a second daily admission, recovery on a full
+catch-up and the silent production sweep. Web retrieval passed 96 tests,
+and the callback and sweep routes passed 24. The deterministic private
+staging suite passed its three cases. The live assistant selector has no
+registered daily notice, detail or off journey at this head.
+
+Follow-up verification accepts a zero-page whole-history baseline only after
+Web validates the terminal outcome against the frozen slices and its page count.
+A real replacement SMART callback increments the credential epoch. The next
+daily run stays silent until the new epoch has a baseline. If a member changes
+the setting or withdraws approval after eligibility is checked, PostgreSQL
+serializes the change behind the run insert. The decision reader then refuses
+the frozen pin. The mocked admission suite now preserves real consent exports
+and runs all 13 tests.
+
+**Second draft, delivery and production activation.** Complete the following
+in the same head before supplying reader evidence to the production writer.
+
+1. Have the admitting side verify authenticated compatibility evidence for
+   the actual serving runner and independently deployed port for this sweep.
+   Bind it to the serving release, including mixed releases and rollback.
+   An old or missing reader must leave the new run on v2. A previous run's
+   receipt, an environment flag or a revision supplied by the browser cannot
+   attest the current release.
+2. In Web's Linq dispatch transaction and provider-attempt reconciliation,
+   recheck the accepted run, current grants, preference, verified route,
+   proactive pause and line health. Cover only an actual provider attempt.
+   Preserve blocked work and exclude definite terminal failures from retry.
+3. At private detail generation, outbox staging and every alternate message
+   effect, bind the single recipient and run. Mint clinical keys for the
+   leading zero-indexed bubbles and the final bubble. Prove those exact keys
+   at Web's dispatch fence. Recheck after generation, between bubbles and on
+   retry. Preserve ordinary AI allowances and helpers. Prevent a restored
+   wake from scheduling a second turn after job removal.
+4. Carry the fixed notice intent from system work through the ordinary outbox
+   drain and dispatch without a model. Persist the next supported regional
+   window for quiet-hours deferral. Hold missing or unsupported numbers for
+   route changes without polling. Recheck at the wake. Open both private
+   transport gates and Web dispatch only with these checks in place.
+5. Prove actual sends, suppression, deferral, blocked recovery, definite
+   failure, alternate-recipient rejection and restore in the activation suite.
+   Run the synthetic live journeys and publish the member changelog when the
+   feature can ship. Deploy Web readers, hosted runtime and the Cloudflare port
+   manually from main, then enable admissions. Roll back admissions first.
+   After a pinned run exists, retain compatible readers, egress checks, retry
+   exclusion and coverage through outstanding work and restorable snapshots.

@@ -3737,7 +3737,7 @@ Current product admission, delivery and native runtime safety rules remain.
 - App-started clinical authorizations have independent OAuth rows. Browser intent replacement targets only browser rows. Completion consumes before exchange, so a proven replay returns the current source list with a neutral outcome. Retention keeps the native row through the 15-minute completion proof lifetime. New app states identify their bridge even after retention deletes the row. The dual callback reader and scoped invalidation are the rollback floor after native writes begin.
 - A daily notification follows the originating run through terminal acceptance,
   later enrichment and queue cleanup. Under the member lock, its row can advance
-  from empty to proved, published and scheduled. Terminal proof can publish
+  from empty to proved and published. Private scheduling leaves coverage at published. Terminal proof can publish
   directly. A conflicting mailbox key suppresses the notification permanently
   while the import commits its terminal outcome. A rejected enrichment proof
   leaves later pages free to run. A transient callback failure keeps the
@@ -3748,6 +3748,11 @@ Current product admission, delivery and native runtime safety rules remain.
   existing workspace checkpoint precedes the scheduling acknowledgement. A
   successor daily generation leaves the earlier run eligible for its own late
   proof. Reauthorization changes the credential epoch and invalidates it.
+  Only a newly accepted complete outcome for all whole-history slices records
+  a replacement ongoing grant's baseline epoch. Failed, partial, windowed and
+  replayed outcomes cannot establish it. The expandable column starts empty.
+  The production daily sweep omits reader revisions and leaves every run on v2.
+  A mixed deployment can continue ordinary retrieval without publishing a text.
 
 - Clinical Records retrieval is generation-fenced and page-idempotent. A
   server-derived run/page fingerprint deduplicates caller request ids without
