@@ -8,7 +8,6 @@ const OPENAI_CACHE_DIAGNOSTIC_MODEL_KINDS = new Set([
   "gpt-6.1-terra",
   "gpt-6.2-sol",
   "gpt-6-luna",
-  "gpt-5.6-luna",
   "gpt-6.2-astra",
   "o3",
   "o3-mini",

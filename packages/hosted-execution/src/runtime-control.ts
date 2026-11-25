@@ -220,7 +220,6 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-6.2-sol",
   "gpt-6-luna",
   "gpt-6.2-astra",
-  "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
@@ -228,7 +227,7 @@ export type HostedAiUsageAllowancePricedModel =
 
 // Retired usage remains ingestible during rollout and replay. Never use this
 // accounting-only type as an execution or deployment allowlist.
-const retiredUsageModels = ["gpt-5.6-sol", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"] as const;
+const retiredUsageModels = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"] as const;
 export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | (typeof retiredUsageModels)[number];
 
 export function normalizeHostedAiUsageLedgerModelId(value: string): HostedAiUsageLedgerModel | null {

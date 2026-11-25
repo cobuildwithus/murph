@@ -128,7 +128,7 @@ describe('assistant codex image helpers', () => {
   })
 
   it.each([
-    ['gpt-5.6-luna', 'openai'],
+    ['gpt-6-luna', 'openai'],
     ['gpt-6.2-sol', 'hosted-openai'],
     ['gpt-6.2-sol', 'hosted-chatgpt-openai'],
     ['gpt-6.2-astra', 'hosted-openai'],

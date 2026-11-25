@@ -11,7 +11,6 @@ const hostedRunnerProductModelSlugs = [
   "gpt-6.2-sol",
   "gpt-6-luna",
   "gpt-6.2-astra",
-  "gpt-5.6-luna",
 ] as const;
 
 function createDeployEnvironment() {
@@ -125,7 +124,7 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-luna", "gpt-6.2-sol",
+      "gpt-6.1-terra", "gpt-6-luna", "gpt-6.2-sol",
     ]);
     expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6.2-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
@@ -138,10 +137,7 @@ describe("hosted runner container image contract", () => {
     }
     expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-sol");
     expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-terra");
-    expect(readCodexModel(patchedCatalog, "gpt-5.6-luna")).toMatchObject({
-      description: "Fast, cost-efficient agentic coding model.",
-      display_name: "GPT-5.6-Luna",
-    });
+    expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-luna");
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {
       models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6.2-astra"),
@@ -227,7 +223,7 @@ describe("hosted runner container image contract", () => {
       });
     }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol"]);
+      .toEqual(["gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol"]);
   });
 
   it("keeps rendered container builds app-local with SSH disabled", () => {

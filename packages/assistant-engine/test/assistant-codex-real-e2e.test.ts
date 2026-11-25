@@ -4584,11 +4584,11 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6.1-terra' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     }
@@ -4654,7 +4654,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6-luna' as const,
       reasoningEffort: 'low' as const,
       solAvailable: paid || audience === 'group',
     }
@@ -4712,11 +4712,11 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-openai-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6.2-sol', 'gpt-6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: 'gpt-5.6-luna' as const,
+      model: 'gpt-6.1-terra' as const,
       reasoningEffort: 'low' as const,
       solAvailable: true,
     }
@@ -4776,7 +4776,7 @@ describeRealCodex('real Codex default model restore e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-default-model-restore-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', 'gpt-5.6-luna'],
+      availableModels: ['gpt-6.1-terra', 'gpt-6-luna'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -4902,7 +4902,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
           },
           prompt: [
             'Run one native collaboration child for this synthetic smoke check.',
-            'Call spawn_agent once with model gpt-5.6-luna and a small task that needs no tools.',
+            'Call spawn_agent once with model gpt-6-luna and a small task that needs no tools.',
             'Do not wait for the child; finish the parent response after launching it.',
           ].join(' '),
           reasoningEffort: 'low',
@@ -4921,7 +4921,7 @@ describeRealCodex('real Codex child model selection e2e', () => {
           rawEvents: result.jsonEvents,
         })
         expect(parentUsage.servedModel).not.toBeNull()
-        expect(parentUsage.servedModel).not.toBe('gpt-5.6-luna')
+        expect(parentUsage.servedModel).not.toBe('gpt-6-luna')
         expect(parentUsage.usageExtractionSourcePath).toBe(
           'thread.tokenUsage.total.delta',
         )
@@ -4933,8 +4933,8 @@ describeRealCodex('real Codex child model selection e2e', () => {
           provider: 'codex-cli',
           providerRequestOutcome: 'succeeded',
           usage: {
-            requestedModel: 'gpt-5.6-luna',
-            servedModel: 'gpt-5.6-luna',
+            requestedModel: 'gpt-6-luna',
+            servedModel: 'gpt-6-luna',
             usageExtractionSourcePath:
               'subagent.turn.tokenUsage.total.delta',
           },
@@ -12694,7 +12694,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: savedModel === 'gpt-5.6-luna' ? savedModel : expectedModel },
+        assistantTargetOverride: { model: expectedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -12702,10 +12702,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         schedule: { kind: 'dailyLocal', localTime: '18:00' },
         slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
       })
-      if (savedModel !== 'gpt-5.6-luna') {
-        const storedFile = path.join(workingDirectory, saved.record.relativePath)
-        await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
-      }
+      const storedFile = path.join(workingDirectory, saved.record.relativePath)
+      await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
       const storedBeforeTurn = await showAutomation({ automationId: saved.record.automationId, vaultRoot: workingDirectory })
       // Prove the real canonical CLI is available before spending a live turn.
       const readback = await execFileAsync(path.join(binDirectory, 'vault-cli'), [

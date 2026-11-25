@@ -540,7 +540,7 @@ describe('assistant codex runtime', () => {
   it.each([
     {
       expectedImageDetail: 'original',
-      model: 'gpt-5.6-luna',
+      model: 'gpt-6-luna',
       modelProvider: 'openai',
       providerRequestOrdinal: 0,
     },

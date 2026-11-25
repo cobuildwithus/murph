@@ -100,7 +100,7 @@ describe('onboarding first personal read', () => {
       }).assistantTargetOverride,
     )
     for (const selected of [
-      { model: 'gpt-5.6-luna', modelProvider: 'openai' },
+      { model: 'gpt-6-luna', modelProvider: 'openai' },
       { model: 'gpt-6.2-sol', modelProvider: 'openai' },
       { model: 'gpt-6.2-sol', modelProvider: 'openai' },
     ]) {

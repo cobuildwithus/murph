@@ -624,6 +624,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   outputUsdMicrosPerMillionTokens: 20_000_000n,
 } as const;
 
+// Historical ledger pricing only, like GPT-5.6 Sol above.
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 20_000n,
   cacheWriteUsdMicrosPerMillionTokens: 250_000n,

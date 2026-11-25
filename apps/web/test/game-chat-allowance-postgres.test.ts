@@ -65,19 +65,19 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
       const initial = await prisma.hostedAiUsagePeriod.findMany({ where: { memberId: { in: [primary, alternate] } } });
       expect(initial).toHaveLength(1);
       expect(initial[0].memberId).toBe(primary);
-      expect(initial[0].spentUsdMicros).toBe(154n);
+      expect(initial[0].spentUsdMicros).toBe(70n);
       await expect(readHostedAiUsageGate({ memberId: alternate, now, prisma })).resolves.toMatchObject({
-        allowed: true, spentUsdMicros: 154n, remainingUsdMicros: 7_499_846n,
+        allowed: true, spentUsdMicros: 70n, remainingUsdMicros: 7_499_930n,
       });
       await prisma.hostedAiUsagePeriod.update({ where: { memberId_periodStart: {
         memberId: primary, periodStart: initial[0].periodStart,
-      } }, data: { spentUsdMicros: 7_499_923n } });
+      } }, data: { spentUsdMicros: 7_499_965n } });
       records[0] = usage(primary, now);
       records[1] = usage(alternate, now);
       await Promise.all([record(0), record(1)]);
       for (const memberId of [primary, alternate]) {
         await expect(readHostedAiUsageGate({ memberId, now, prisma })).resolves.toMatchObject({
-          allowed: false, reason: "ai_usage_limit_exceeded", spentUsdMicros: 7_500_077n, remainingUsdMicros: 0n,
+          allowed: false, reason: "ai_usage_limit_exceeded", spentUsdMicros: 7_500_035n, remainingUsdMicros: 0n,
         });
       }
       await prisma.game.update({ where: { id: gameId }, data: { status: "settled", settledAt: new Date(now.getTime() - 8 * 86_400_000), chatContainerMemberId: null } });
@@ -90,9 +90,9 @@ describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
       const period = await prisma.hostedAiUsagePeriod.findUniqueOrThrow({ where: { memberId_periodStart: {
         memberId: primary, periodStart: initial[0].periodStart,
       } } });
-      expect(period.spentUsdMicros).toBe(7_500_154n);
+      expect(period.spentUsdMicros).toBe(7_500_070n);
       await expect(prisma.hostedAiUsage.findUniqueOrThrow({ where: { id: records[1].usageId } })).resolves.toMatchObject({
-        memberId: alternate, allowanceBeneficiaryMemberId: primary, allowanceCostUsdMicros: 77n,
+        memberId: alternate, allowanceBeneficiaryMemberId: primary, allowanceCostUsdMicros: 35n,
       });
       // Ordinary room sponsorship is still independent on the next invocation.
       await prisma.hostedMember.update({ where: { id: first }, data: { billingStatus: "active" } });
@@ -118,7 +118,7 @@ function usage(memberId: string, now: Date): AssistantUsageRecord {
   return {
     schema: "murph.assistant-usage.v1", usageId: `${turnId}.attempt-1`, memberId,
     turnId, sessionId: turnId, attemptCount: 1, occurredAt: now.toISOString(), provider: "openai",
-    providerName: "OpenAI", requestedModel: "gpt-5.6-luna", servedModel: "gpt-5.6-luna",
+    providerName: "OpenAI", requestedModel: "gpt-6-luna", servedModel: "gpt-6-luna",
     providerRequestId: null, providerRequestOrdinal: 0, providerRequestOutcome: "succeeded",
     routeId: null, rawUsageJson: null, rawUsageJsonHash: null, turnProfileJson: null,
     usageExtractionVersion: "openai-responses-v1", usageExtractionSourcePath: "openai.responses.usage",

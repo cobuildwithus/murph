@@ -2,7 +2,7 @@ import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -225,7 +225,7 @@ describe("assistant configuration tool", () => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
-        arguments: { action: "update", model: HOSTED_ASSISTANT_LUNA_MODEL },
+        arguments: { action: "update", model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL },
         namespace: "murph",
         tool: "assistant_configuration",
       },
@@ -260,7 +260,7 @@ describe("assistant configuration tool", () => {
       params: {
         arguments: {
           action: "update",
-          model: HOSTED_ASSISTANT_LUNA_MODEL,
+          model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
           reasoningEffort: "medium",
         },
         namespace: "murph",
@@ -271,7 +271,7 @@ describe("assistant configuration tool", () => {
       kind: "assistant-configuration",
       request: {
         action: "update",
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "medium",
       },
     });
@@ -281,7 +281,7 @@ describe("assistant configuration tool", () => {
 
     const updatedSaved = {
       ...createSavedConfiguration({
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "medium",
       }),
       appliesAt: "next_turn" as const,
@@ -312,7 +312,7 @@ describe("assistant configuration tool", () => {
     expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"a".repeat(32)}`,
-      model: HOSTED_ASSISTANT_LUNA_MODEL,
+      model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       reasoningEffort: "medium",
     });
     expect(readToolPayload(result)).toEqual({
@@ -463,7 +463,7 @@ describe("assistant configuration tool", () => {
     }
     const updatedSaved = {
       ...createSavedConfiguration({
-        model: HOSTED_ASSISTANT_LUNA_MODEL,
+        model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
         reasoningEffort: "medium",
       }),
       appliesAt: "next_turn" as const,
@@ -591,7 +591,7 @@ describe("assistant configuration tool", () => {
 });
 
 function createSavedConfiguration(input: {
-  model: typeof HOSTED_ASSISTANT_LUNA_MODEL
+  model: typeof HOSTED_ASSISTANT_GPT_6_LUNA_MODEL
     | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
     | typeof HOSTED_ASSISTANT_SOL_MODEL;
   reasoningEffort: "low" | "medium" | "high" | "xhigh";
@@ -608,7 +608,7 @@ function createSavedConfiguration(input: {
 }
 
 function createGroupSavedConfiguration(
-  model: typeof HOSTED_ASSISTANT_LUNA_MODEL
+  model: typeof HOSTED_ASSISTANT_GPT_6_LUNA_MODEL
     | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
     | typeof HOSTED_ASSISTANT_SOL_MODEL,
 ) {

@@ -2029,7 +2029,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
         kind: "reply",
         message: "What should I call you, and how old are you?",
-        usage: { requestedModel: "gpt-5.6-luna", response: {} },
+        usage: { requestedModel: "gpt-6-luna", response: {} },
       });
       mocks.completeHostedLinqInstantFirstTurn.mockImplementationOnce(async (input) => ({
         kind: "accepted",
@@ -7509,7 +7509,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "Hey! What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     mocks.completeHostedLinqInstantFirstTurn.mockResolvedValueOnce({
       kind: "accepted",
@@ -7905,7 +7905,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "Hey! What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     mocks.completeHostedLinqInstantFirstTurn.mockRejectedValueOnce(
       hostedOnboardingError({
@@ -8401,7 +8401,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
@@ -8600,7 +8600,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     const invite = {
       channel: "linq",
@@ -8849,7 +8849,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     mocks.abandonHostedLinqInstantFirstTurn
       .mockRejectedValueOnce(new Error("Synthetic settlement rollback."))
@@ -10594,7 +10594,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
       kind: "reply",
       message: "What would you like help with?",
-      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      usage: { requestedModel: "gpt-6-luna", response: {} },
     });
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",

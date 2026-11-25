@@ -35,7 +35,7 @@ describe("hosted assistant configuration tool route", () => {
     mocks.handleTool.mockResolvedValue({
       action: "read",
       result: {
-        availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"],
+        availableModels: ["gpt-6-luna", "gpt-6.2-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         model: "gpt-6.2-sol",
@@ -84,7 +84,7 @@ describe("hosted assistant configuration tool route", () => {
     const body = {
       action: "update",
       assistantInputId: `ain_${"c".repeat(32)}`,
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoningEffort: "medium",
     };
 
@@ -108,10 +108,10 @@ describe("hosted assistant configuration tool route", () => {
     const body = {
       action: "update",
       approval: {},
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoningEffort: "medium",
       target: {
-        model: "gpt-5.6-luna",
+        model: "gpt-6-luna",
         reasoningEffort: "medium",
       },
     };

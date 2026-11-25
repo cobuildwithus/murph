@@ -935,7 +935,7 @@ function createPlatform(input: {
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"],
+        availableModels: ["gpt-6-luna", "gpt-6.2-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,

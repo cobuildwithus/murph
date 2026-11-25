@@ -9,7 +9,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
-  HOSTED_ASSISTANT_LUNA_MODEL,
+  HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantModelOverride,
@@ -245,9 +245,9 @@ describe("hosted runner container identity", () => {
 
   it.each([
     {
-      expectedModel: HOSTED_ASSISTANT_LUNA_MODEL,
+      expectedModel: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       fleetModel: HOSTED_ASSISTANT_DEFAULT_MODEL,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_LUNA_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
       name: "applies the saved Luna choice",
     },
     {
@@ -258,7 +258,7 @@ describe("hosted runner container identity", () => {
     },
     {
       expectedModel: HOSTED_ASSISTANT_SOL_MODEL,
-      fleetModel: "gpt-5.6-luna",
+      fleetModel: "gpt-6-luna",
       hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       name: "applies the saved Sol choice independently of the platform default",
     },

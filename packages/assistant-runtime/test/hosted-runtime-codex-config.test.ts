@@ -2987,7 +2987,7 @@ function enableCodexNativeMemoryForRegression(
       "[memories]",
       "use_memories = true",
       "generate_memories = true",
-      'extract_model = "gpt-5.6-luna"',
+      'extract_model = "gpt-6-luna"',
       'consolidation_model = "gpt-6.2-sol"',
       "disable_on_external_context = false",
       `min_rollout_idle_hours = ${options.minRolloutIdleHours ?? 1}`,

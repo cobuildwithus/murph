@@ -4,6 +4,8 @@ import {
   parseHostedAssistantModelOverride,
   parseHostedRuntimeAssistantConfigurationControlRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,
+  parseStoredHostedAssistantModelOverride,
+  resolveHostedFlexModel,
 } from "../src/assistant-model.ts";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
@@ -15,7 +17,6 @@ import {
 describe("retired model compatibility", () => {
   it("excludes retired Sol from selection and deployment but prices historical evidence", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).not.toContain("gpt-5.6-sol");
-    expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toContain("gpt-5.6-luna");
     expect(HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS).not.toContain("gpt-5.6-sol");
     expect(parseHostedAssistantModelOverride("gpt-5.6-sol")).toBeNull();
     for (const model of ["gpt-5.6-sol", "openai/gpt-5.6-sol-2026-07-08"]) {
@@ -26,6 +27,28 @@ describe("retired model compatibility", () => {
     expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
       action: "update", assistantInputId: `ain_${"a".repeat(32)}`, model: "gpt-5.6-sol",
     })).toThrow("not supported");
+  });
+
+  it("reads a stored GPT-5.6 Luna choice as GPT-6 Luna and prices its historical usage", () => {
+    expect(HOSTED_ASSISTANT_PRODUCT_MODELS).not.toContain("gpt-5.6-luna");
+    expect(HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS).not.toContain("gpt-5.6-luna");
+    expect(parseHostedAssistantModelOverride("gpt-5.6-luna")).toBeNull();
+    expect(parseStoredHostedAssistantModelOverride("gpt-5.6-luna")).toBe("gpt-6-luna");
+    expect(resolveHostedFlexModel("gpt-5.6-luna")).toBeNull();
+    for (const model of ["gpt-5.6-luna", "openai/gpt-5.6-luna-2026-07-08"]) {
+      expect(normalizeHostedAiUsageAllowancePricedModelId(model)).toBeNull();
+      expect(normalizeHostedAiUsageLedgerModelId(model)).toBe("gpt-5.6-luna");
+      expect(resolveHostedAiUsageTokenPricingBasis({ model, providerName: "hosted-openai", serviceTier: "flex" })).toBe("openai-flex");
+    }
+    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
+      action: "update", assistantInputId: `ain_${"b".repeat(32)}`, model: "gpt-5.6-luna",
+    })).toThrow("not supported");
+    const response = parseHostedRuntimeAssistantConfigurationToolResponse({ action: "read", result: {
+      availableModels: ["gpt-6-luna", "gpt-5.6-luna", "gpt-6.2-sol"], availableReasoningEfforts: ["low"],
+      configurationAvailable: true, dormantSolPreference: false, model: "gpt-5.6-luna", reasoningEffort: "low", solAvailable: true,
+    } });
+    expect(response.result.availableModels).toEqual(["gpt-6-luna", "gpt-6.2-sol"]);
+    expect(response.result.model).toBe("gpt-6-luna");
   });
 
   it("maps legacy Web choices once per family and preserves reasoning", () => {

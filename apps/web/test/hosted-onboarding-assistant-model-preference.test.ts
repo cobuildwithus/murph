@@ -276,7 +276,7 @@ describe("hosted member assistant model preference", () => {
     });
   });
 
-  it("resolves Luna and explicit reasoning as next-turn runtime overrides", async () => {
+  it("resolves a stored GPT-5.6 Luna choice as GPT-6 Luna with explicit reasoning", async () => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: "gpt-5.6-luna",
       assistantReasoningEffortPreference: "high",
@@ -290,15 +290,14 @@ describe("hosted member assistant model preference", () => {
         "gpt-6.1-terra",
         "gpt-6.2-sol",
         "gpt-6-luna",
-        "gpt-5.6-luna",
         "gpt-6.2-astra",
       ],
       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
       configurationAvailable: true,
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-5.6-luna",
+      hostedAssistantModelOverride: "gpt-6-luna",
       hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoningEffort: "high",
       solAvailable: true,
     });
@@ -321,7 +320,6 @@ describe("hosted member assistant model preference", () => {
         "gpt-6.1-terra",
         "gpt-6.2-sol",
         "gpt-6-luna",
-        "gpt-5.6-luna",
       ],
       availableReasoningEfforts: ["low"],
       configurationAvailable: true,
@@ -649,19 +647,19 @@ describe("hosted member assistant model preference", () => {
 
     await expect(updateHostedMemberAssistantConfigurationTx({
       memberId: "member_edge",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       prisma: tx,
       reasoningEffort: "high",
     })).resolves.toMatchObject({
-      hostedAssistantModelOverride: "gpt-5.6-luna",
+      hostedAssistantModelOverride: "gpt-6-luna",
       hostedAssistantReasoningEffortOverride: "high",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       reasoningEffort: "high",
       updated: true,
     });
     expect(mocks.updateHostedMember).toHaveBeenCalledWith({
       data: {
-        assistantModelPreference: "gpt-5.6-luna",
+        assistantModelPreference: "gpt-6-luna",
         assistantReasoningEffortPreference: "high",
       },
       where: {

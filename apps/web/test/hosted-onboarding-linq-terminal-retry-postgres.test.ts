@@ -317,9 +317,9 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       const completion = completeHostedLinqInstantFirstTurn({
         ...input,
         generation: { attemptedAt: reservation.attemptedAt, kind: "reply", message, usage: {
-          requestedModel: "gpt-5.6-luna",
+          requestedModel: "gpt-6-luna",
           // Same narrow accounting fixture as the first-turn unit tests.
-          response: { id: "resp_first_turn", model: "gpt-5.6-luna", service_tier: "default", usage: {
+          response: { id: "resp_first_turn", model: "gpt-6-luna", service_tier: "default", usage: {
             input_tokens: 90, input_tokens_details: { cached_tokens: 0 },
             output_tokens: 22, output_tokens_details: { reasoning_tokens: 0 }, total_tokens: 112,
           } } as OpenAiResponse,
