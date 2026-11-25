@@ -1,6 +1,6 @@
 # Phase B hospital records
 
-Status: active (PR A in this draft)
+Status: active (daily notification readers in draft)
 Created: 2026-11-25
 Updated: 2026-11-25
 
@@ -33,7 +33,6 @@ PR A runs focused SMART, control-plane and daily-sync/renewal tests, Web typeche
 
 The three focused suites passed 87 tests. Web typecheck and lint exited 0. Complexity reported zero hotspots above 20. A synthetic provider and browser exercised the proof entry point through its HTTPS loopback listener, both rolling refreshes and both patient reads. Omitting a successor failed at refresh, and changing the patient failed at read. Live sandbox discovery advertised the required capabilities. The interactive Epic grant, hosted key visibility, rotation and revocation remain deployment acceptance checks. The plan stays active across the remaining Phase B PRs.
 
-
 ### B7 named approvals
 
 The app reads and changes one current company decision through the companion
@@ -61,3 +60,64 @@ The synthetic PostgreSQL test admitted a daily run with five current grants,
 fetched a hospital page, withdrew one grant and observed no further hospital
 request. Separate callback tests cover a withdrawal while SMART is open. Adding
 a synthetic unknown runner host failed the classification test as intended.
+
+### PR E1 · Dormant daily notification consumers
+
+Deploy the nullable run columns first. Deploy the Web readers, Worker port and
+hosted workspace readers before any admission writer. All creation paths in E1
+leave the fences NULL. Old Web and old runners keep the original descriptor,
+outcome and mailbox shapes. E1 can consume a synthetic eligible run through
+private outbox or one-shot scheduling. The production plain-text provider
+cannot promise iMessage-only delivery. The host blocks provider dispatch and
+skips detail generation before exposing tools. Ordinary outbox preflight and
+scheduled preflight both present the run key to the signed Linq engagement
+owner with home-route fallback disabled. Local and hosted provider entry
+reject a clinical text even if an older host returns an ordinary allowed route.
+
+Local synthetic journeys queued one notice intent, one detail job, and no work
+for off. No model or provider was entered. PostgreSQL exercised a real accepted
+terminal, first late enrichment under a newer generation, lost handoff, durable
+coverage, and revision, route and credential changes. A private workspace replay
+rendered the generic notice and checkpointed the pointer. Real handset delivery
+and revocation during an actual model turn await the owner's channel decision and E2 delivery proof.
+
+Replacement-profile notifications use B7’s current named approvals at proof, scheduling and egress. A terminal run that lost approval keeps its import outcome and suppresses the occurrence, including proofs received after reapproval. The companion app continues to show the approval requirement alongside the saved message setting.
+
+### PR E2 · Admission and activation boundary
+
+1. Pin a receipt-required retrieval protocol at admission on each eligible
+   run. Web must enforce that version on every page and retry, and bind each
+   enrichment job and restored checkpoint to it. Prove an older runner cannot
+   import a batch or apply enrichment for that run through a legacy path,
+   including after restore. This per-run fence suffices for receipt authority.
+   Remove the fleet-attested migration marker from the design. Deploy all
+   readers first so mixed fleets can make progress. Never backfill eligibility.
+2. Under the daily admission lock, prove current named processor approvals,
+   the replacement-client ongoing grant,
+   an accepted baseline under the current credential epoch, the current message
+   revision and exact verified private route. Freeze these on the new run.
+   Keep admissions disabled until the chosen channel can send. Today a private
+   checkpoint advances coverage to `scheduled` even if the intent fails or
+   the job skips. Enabling admission earlier would consume the only occurrence.
+3. The owner must decide whether clinical texts may use the member's ordinary
+   Murph thread. Linq automatically selects iMessage, then RCS, then SMS and
+   deprecated its service preference. It offers no iMessage-only guarantee
+   for plain text. Keep clinical sends blocked pending this decision.
+4. Bind every outbound effect of a detail turn to the accepted run, current
+   policy and single recipient before allowing generation. Ordinary cron
+   replies mint ordinary keys today. No code mints clinical per-bubble keys
+   and those replies would bypass `clinicalEgressBlock`. Test revocation during
+   generation, between bubbles, on alternate tools and on retry. Preserve
+   the ordinary AI allowance rules. Demonstrate that the system-work path
+   drains the fixed notice's `deliveryIntentIds` through actual outbox egress.
+5. Defer an occurrence during quiet hours and persist its next safe wake.
+   Recheck authority at that wake before sending. If the verified number
+   is missing or its region has no supported window, hold silently until
+   route information changes. Do not poll an unresolvable region or consume
+   coverage for a quiet-hours deferral.
+6. Roll back admissions first. Old runners strictly reject `changeRun` in
+   persisted enrichment mailbox state and `clinicalChange` when parsing the
+   whole cron store. Old Web rejects the notification `purpose` and checkpoint
+   `kind`. Retain compatible Web, Worker and runner readers, the pinned receipt
+   protocol, egress checks and durable coverage through outstanding work and
+   restorable snapshots. E1 alone admits no eligible runs.

@@ -84,6 +84,9 @@ export async function executeHostedMailboxEvent(input: {
     };
   }
 
+  if (input.wake.kind === "clinical-records.change-recorded") {
+    return executeClinicalChange(input, input.wake);
+  }
   if (input.wake.kind === "clinical-records.enrichment-requested") {
     const { executeHostedClinicalEnrichmentWake } = await import("./events/clinical-enrichment.ts");
     const outcome = await executeHostedClinicalEnrichmentWake({
@@ -154,8 +157,25 @@ export async function executeHostedMailboxEvent(input: {
   };
 }
 
+async function executeClinicalChange(input: Parameters<typeof executeHostedMailboxEvent>[0],
+  wake: Extract<HostedExecutionWake, { kind: "clinical-records.change-recorded" }>): Promise<HostedMailboxExecutionMetrics> {
+  const { generation, runId, occurredAt } = wake;
+  const port = input.runtime.platform.clinicalRecordsPort;
+  if (!port?.readNotification) throw new Error("Clinical notification policy reader is unavailable.");
+  const decision = await port.readNotification({ generation, runId }, { signal: input.signal });
+  const { queueClinicalChange } = await import("@murphai/assistant-engine/assistant-cron");
+  const queued = await queueClinicalChange({ decision, occurredAt, runId, vault: input.vaultRoot });
+  if (!queued) return { bootstrapResult: null,
+    ...createNoopMailboxEffect({ conversationMetrics: null, mailboxLane: "clinical-records" }) };
+  return { bootstrapResult: null, ...createNoopMailboxEffect({
+    conversationMetrics: null, mailboxLane: "clinical-records", nextWakeAt: occurredAt,
+    ...(queued.intentId ? { deliveryIntentIds: [queued.intentId] } : {}),
+    postCheckpointRecord: { kind: "clinical-records.outcome-recorded", request: { kind: "change-scheduled", generation, runId } },
+  }) };
+}
+
 async function handleHostedMailboxEvent(input: {
-  wake: Exclude<HostedExecutionWake, { kind: "clinical-records.enrichment-requested" }>;
+  wake: Exclude<HostedExecutionWake, { kind: "clinical-records.enrichment-requested" | "clinical-records.change-recorded" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;
@@ -202,7 +222,7 @@ async function handleHostedMailboxEvent(input: {
 }
 
 async function executeHostedSystemWake(input: {
-  wake: Exclude<HostedExecutionSystemWake, { kind: "clinical-records.enrichment-requested" }>;
+  wake: Exclude<HostedExecutionSystemWake, { kind: "clinical-records.enrichment-requested" | "clinical-records.change-recorded" }>;
   executionContext: AssistantExecutionContext;
   forceQueueOnlyAssistantNotification: boolean;
   operatorHomeRoot: string | null;

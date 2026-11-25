@@ -1,3 +1,4 @@
+import { sendLinqMessage } from "@murphai/assistant-engine/assistant-channel-runtime";
 import { renderAssistantResponseCardText } from "@murphai/operator-config/assistant-response-cards";
 import assert from "node:assert/strict";
 
@@ -19,6 +20,16 @@ import {
 } from "../src/hosted-runtime/provider-fetch.ts";
 
 describe("hosted provider effects", () => {
+  it("stops strict clinical text before Linq can select a protocol or recover a thread", async () => {
+    const fetchImplementation = vi.fn();
+    const request = { idempotencyKey: "clinical-change:v1:synthetic-run:detail:bubble:2", message: "Synthetic test.", target: "synthetic-thread" };
+    await expect(sendLinqMessage(request, { env: {}, fetchImplementation }))
+      .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
+    await expect(sendHostedProviderLinqMessage({ ...request, targetKind: "thread", threadIsDirect: true }, { env: {}, fetchImplementation }))
+      .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

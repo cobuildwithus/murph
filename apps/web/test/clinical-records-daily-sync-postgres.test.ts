@@ -1,3 +1,5 @@
+import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
+import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
@@ -5,7 +7,9 @@ import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
 import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
 import { sealClinicalConnectionFhirBaseUrl, sealClinicalConnectionSecret } from "@/src/lib/clinical-records/secrets";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
-import { fetchClinicalRetrievalPage, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
+import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { clinicalEgressBlock, clinicalNotificationRouteKey, readClinicalNotificationAuthority, readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
+import { fetchClinicalRetrievalPage, recordClinicalChangeProof, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
@@ -65,6 +69,188 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
 
+  async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", replacement = false) {
+    const f = await fixture();
+    const { memberId, connectionId } = f;
+    const [baseline] = await client.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, take: 1 });
+    const threadId = `chat-${memberId}`;
+    const chat = createHostedLinqChatLookupKey(threadId)!;
+    const participant = `participant-${memberId}`;
+    const line = `line-${memberId}`;
+    await client.hostedMember.update({ where: { id: memberId }, data: {
+      clinicalRecordMessageMode: mode,
+      identity: { create: { phoneNumberVerifiedAt: now, phoneLookupKey: participant } },
+      routing: { create: { linqChatLookupKey: chat, linqParticipantContactKind: "phone",
+        linqParticipantContactLookupKey: participant, linqRecipientPhoneLookupKey: line } },
+    } });
+    await client.hostedLinqChatHealth.create({ data: {
+      linqChatLookupKey: chat, providerUpdatedAt: now, providerObservedAt: now, providerStatus: "healthy", service: "iMessage", isGroup: false,
+      line: { create: { phoneNumberLookupKey: line, phoneNumberHint: "synthetic" } },
+    } });
+    const cleanup = async () => {
+      await client.hostedLinqChatHealth.delete({ where: { linqChatLookupKey: chat } });
+      await client.hostedLinqLine.delete({ where: { phoneNumberLookupKey: line } });
+    };
+    const baselinePointer = { memberId, runId: baseline!.id, generation: 1 };
+    await recordClinicalChangeProof(baselinePointer);
+    expect(await f.mailbox()).toBe(0);
+    if (replacement) {
+      await client.clinicalRecordConnection.update({ where: { id: connectionId }, data: { requiresProcessorApprovals: true } });
+      await client.hostedConsentGrant.createMany({ data: clinicalProcessors.map(processor => ({
+        memberId, scope: clinicalProcessorScope(processor), status: "granted", grantedAt: now,
+        source: "synthetic", documentVersionsJson: { [processor.id]: processor.version },
+      })) });
+    }
+    expect(await admitClinicalDailySync({ memberId, connectionId, now })).toBe(true);
+    const [run] = await f.runs();
+    expect(run!.notificationTokenVersion).toBeNull();
+    const pointer = { memberId, runId: run!.id, generation: run!.generation };
+    // Only this fixture simulates the future admission writer.
+    await client.clinicalRecordRetrievalRun.update({ where: { id: pointer.runId }, data: {
+      notificationTokenVersion: 1, notificationSettingRevision: 0, notificationRouteKey: clinicalNotificationRouteKey(participant, line, chat),
+    } });
+    const count = () => client.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.change-recorded" } });
+    const terminal = async (proof = false) => {
+      const plan = clinicalFhirRetrievalPlanSchema.parse(run!.retrievalPlanJson);
+      await recordClinicalRetrievalOutcome({ memberId, request: { generation: pointer.generation, runId: pointer.runId,
+        status: "partial", retrievalProtocol: "query-slices-v2",
+        retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+        counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
+          rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+        ...(proof ? { hasChangeReceipt: true } : {}),
+      } });
+    };
+    const authority = () => client.$transaction(tx => readClinicalNotificationAuthority(tx, pointer));
+    return { ...f, pointer, threadId, chat, count, cleanup, terminal, authority };
+  }
+
+  it.each(["notice", "detail", "off"] as const)("converges early and late proof on the originating run in %s mode", async mode => {
+    const f = await notificationFixture(mode);
+    try {
+      if (mode === "notice") await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+      await f.terminal();
+      await f.terminal();
+      expect(await f.count()).toBe(mode === "notice" ? 1 : 0);
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
+        retrievalGeneration: { increment: 1 }, refreshTokenEncrypted: "synthetic-rolling-successor",
+      } });
+      await Promise.all([recordClinicalChangeProof(f.pointer), recordClinicalChangeProof(f.pointer)]);
+      expect((await f.authority())?.mode ?? "off").toBe(mode);
+      expect(await f.count()).toBe(mode === "off" ? 0 : 1);
+      await recordClinicalChangeProof({ ...f.pointer, kind: "change-scheduled" });
+      await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it("commits the terminal import and suppresses a conflicting notification even after mailbox cleanup", async () => {
+    const f = await notificationFixture();
+    try {
+      await client.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: {
+        kind: "clinical-records.sync-requested", eventId: `clinical-change:v1:${f.pointer.runId}`,
+        userId: f.memberId, occurredAt: now.toISOString(), generation: 1, runId: "different-synthetic-run",
+      } }));
+      await f.terminal(true);
+      expect(await f.runs()).toMatchObject([{ status: "partial", completedAt: expect.any(Date), notificationCoverage: "suppressed" }]);
+      await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it("checks the exact recipient and current revision on successive detail bubbles", async () => {
+    const f = await notificationFixture("detail");
+    try {
+      await f.terminal(true);
+      expect(await f.count()).toBe(1);
+      const attempt = (bubble: number, thread = f.threadId) => client.$transaction(tx => clinicalEgressBlock(tx, {
+        key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:${bubble}`, memberId: f.memberId,
+        route: { conversationThreadId: thread, target: thread,
+          directRecipientPhoneNumber: "+12025550109", fromPhoneNumber: null, targetKind: "thread", threadIsDirect: true },
+      }));
+      expect(await attempt(1)).toBe("clinical_imessage_only_unavailable");
+      expect(await attempt(1, "alternate-synthetic-thread")).toBe("clinical_authority_unavailable");
+      await client.hostedMember.update({ where: { id: f.memberId },
+        data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: { increment: 1 } } });
+      expect(await attempt(2)).toBe("clinical_authority_unavailable");
+    } finally { await f.cleanup(); }
+  });
+
+  it("rechecks the setting, epoch, connection and private route for every attempt", async () => {
+    const f = await notificationFixture("detail");
+    try {
+      await f.terminal();
+      expect((await f.authority())?.mode).toBe("detail");
+      const member = { id: f.memberId };
+      await client.hostedMember.update({ where: member, data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 1 } });
+      expect(await f.authority()).toBeNull();
+      await client.hostedMember.update({ where: member, data: { clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 } });
+      await recordClinicalChangeProof(f.pointer);
+      await client.hostedMember.update({ where: member, data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 3 } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+      // Fresh independent route/epoch checks use a matching synthetic revision.
+      await client.clinicalRecordRetrievalRun.update({ where: { id: f.pointer.runId }, data: { notificationSettingRevision: 3 } });
+      await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: true } });
+      expect(await f.authority()).toBeNull();
+      await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: false, service: "SMS" } });
+      expect(await f.authority()).toBeNull();
+      await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { service: "iMessage" } });
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { status: "disconnected", disconnectedAt: now } });
+      expect(await f.authority()).toBeNull();
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { status: "active", disconnectedAt: null, tokenVersion: 2 } });
+      expect(await f.authority()).toBeNull();
+    } finally { await f.cleanup(); }
+  });
+
+  it.each([true, false])("keeps a replacement run silent after withdrawal at terminal (receipt=%s)", async receipt => {
+    const f = await notificationFixture("notice", true);
+    try {
+      const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } };
+      expect((await f.authority())?.mode).toBe("notice");
+      await client.hostedConsentGrant.update({ where, data: { status: "revoked" } });
+      await f.terminal(receipt);
+      expect(await f.runs()).toMatchObject([{ status: "partial", notificationCoverage: "suppressed" }]);
+      await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it.each(["granted", "revoked"] as const)("checks a late receipt with processor approval %s", async status => {
+    const f = await notificationFixture("notice", true);
+    try {
+      await f.terminal();
+      expect(await f.count()).toBe(0);
+      const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } };
+      await client.hostedConsentGrant.update({ where, data: { status } });
+      await recordClinicalChangeProof(f.pointer);
+      await client.hostedConsentGrant.update({ where, data: { status: "granted" } });
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(status === "granted" ? 1 : 0);
+    } finally { await f.cleanup(); }
+  });
+
+  it("rechecks processor approval for already published detail work", async () => {
+    const f = await notificationFixture("detail", true);
+    try {
+      await f.terminal(true);
+      expect(await f.count()).toBe(1);
+      await client.hostedConsentGrant.update({
+        where: { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } },
+        data: { status: "revoked" },
+      });
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      expect(await client.$transaction(tx => clinicalEgressBlock(tx, {
+        memberId: f.memberId, key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:2`,
+        route: { conversationThreadId: f.threadId, target: f.threadId, targetKind: "thread", threadIsDirect: true,
+          fromPhoneNumber: null, directRecipientPhoneNumber: "+12025550109" },
+      }))).toBe("clinical_authority_unavailable");
+    } finally { await f.cleanup(); }
+  });
+
   it("gates a replacement daily run and its transport at the current version of every processor", async () => {
     const f = await fixture();
     const pointer = { connectionId: f.connectionId, memberId: f.memberId, now };
@@ -87,6 +273,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(processor) } };
     await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: "obsolete" } } });
     expect(await admitClinicalDailySync(pointer)).toBe(false);
+    expect(await f.mailbox()).toBe(0);
     await client.hostedConsentGrant.update({ where, data: { documentVersionsJson: { [processor.id]: processor.version } } });
     expect(await admitClinicalDailySync(pointer)).toBe(true);
     expect(await f.mailbox()).toBe(1);
@@ -269,6 +456,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
 });
 
 const LOCAL_CRYPTO_ENV_KEYS = [
+  "HOSTED_CONTACT_PRIVACY_KEYS", "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
   "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
   "HOSTED_CRYPTO_ENV",
@@ -295,6 +483,8 @@ function configureLocalCryptoForTest(): () => void {
     publicKeyEncoding: { format: "jwk" },
   });
   Object.assign(process.env, {
+    HOSTED_CONTACT_PRIVACY_KEYS: `v1:${Buffer.alloc(32, 7).toString("base64")}`,
+    HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "scheduled-wake-test-key",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK:
       JSON.stringify(automationKey.publicKey),

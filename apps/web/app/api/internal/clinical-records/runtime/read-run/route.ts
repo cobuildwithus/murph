@@ -1,7 +1,9 @@
 import {
   hostedClinicalRecordsReadRunRequestSchema,
+  clinicalNotificationRequestSchema,
 } from "@murphai/hosted-execution/clinical-records";
 
+import { readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
 import { readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { withClinicalJsonError } from "@/src/lib/clinical-records/http";
@@ -22,6 +24,11 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   });
   // The read owner checks active person access and consent before returning a descriptor.
   const body = await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
+  if (body.purpose === "notification") {
+    const parsed = clinicalNotificationRequestSchema.safeParse(body);
+    if (!parsed.success) throw invalidRequestError();
+    return Response.json(await readClinicalNotificationDecision({ ...parsed.data, memberId }), { headers: { "Cache-Control": "no-store" } });
+  }
   const parsed = hostedClinicalRecordsReadRunRequestSchema.safeParse(body);
   if (!parsed.success) throw invalidRequestError();
   const result = await readClinicalRetrievalRun({

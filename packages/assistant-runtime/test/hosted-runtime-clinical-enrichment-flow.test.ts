@@ -56,8 +56,9 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
       : { code: { text: "Synthetic lab report" }, ...(!parent.omitClinicalDate ? { effectiveDateTime: OCCURRED_AT } : {}), presentedForm: [{ contentType: document.mediaType, url: "Binary/synthetic-lab-document" }] }),
   };
   const content = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource }] });
+  const retrievalJobId = `synthetic-retrieval-${digest(now).slice(0, 12)}`;
   const imported = await importClinicalFhirSnapshot({
-    vaultRoot, connectionId: "synthetic-connection", retrievalJobId: `synthetic-retrieval-${digest(now).slice(0, 12)}`,
+    vaultRoot, connectionId: "synthetic-connection", retrievalJobId,
     retrievalProtocol: "query-slices-v2", sourceSystem: "epic-fhir", fetchedAt,
     fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
     patientIdHash: hashClinicalFhirPatientId("synthetic-patient"),
@@ -73,7 +74,7 @@ async function importSource(vaultRoot: string, parent: { resourceType: "Document
   const parentExternalRef = externalRefForFhir({ fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
     patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), sourceSystem: "epic-fhir",
     resourceType: parent.resourceType, resourceId: resource.id, version: now });
-  return { ...job, fetchedAt, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
+  return { ...job, fetchedAt, retrievalJobId, manifestPath: imported.manifestPath, manifestSha256: imported.manifestSha256, parentExternalRef, rawRef: path.posix.join(path.posix.dirname(imported.manifestPath), `attachments/${sha256}.bin`), sha256 };
 }
 
 describe("clinical enrichment import-to-query flow", () => {
@@ -363,6 +364,10 @@ describe("clinical enrichment import-to-query flow", () => {
 
       // The actual mailbox handler performs the separate canonical write once foreground yields.
       expect(await prepareHostedSystemMailboxItemForCheckpoint(selection)).toMatchObject({ status: "preempted" });
+      // A replay after the private write recovers proof against the original run shard.
+      const changeRun = { runId: job.retrievalJobId, generation: 2 };
+      expect(await executeHostedClinicalEnrichmentWake({ vaultRoot, wake: { ...queued.wake, changeRun } }))
+        .toMatchObject({ postCheckpointRecord: { request: { kind: "change-receipt", ...changeRun } } });
       const tests = await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 });
       expect(tests).toHaveLength(1);
       expect(tests[0]?.attributes).toMatchObject({

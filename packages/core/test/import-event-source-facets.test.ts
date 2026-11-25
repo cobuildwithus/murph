@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { clinicalChangeRunRef, listClinicalChangeReceipts, importEventBatch, initializeVault, listHistoryEvents, findEventByExternalRef } from "../src/index.ts";
+import { hasClinicalRunChanges, clinicalChangeRunRef, listClinicalChangeReceipts, importEventBatch, initializeVault, listHistoryEvents, findEventByExternalRef } from "../src/index.ts";
 
 const roots: string[] = [];
 const v1 = "2026-07-01T12:00:00Z";
@@ -32,12 +32,16 @@ describe("explicit imported source facet lifecycle", () => {
       importEventBatch({ vaultRoot, apply: true, decisions, receiptIdentity: identity(batch) });
     const group = { vaultRoot, runRef: clinicalChangeRunRef(origin.runId) };
     expect(await listClinicalChangeReceipts(group)).toEqual({ receipts: [], nextCursor: null });
+    expect(await hasClinicalRunChanges(vaultRoot, origin.runId)).toBe(false);
     const marker = await imports(0, [withdraw()]);
     expect(marker).toMatchObject({ retractedCount: 1, receipt: { changes: [] } });
+    expect(await hasClinicalRunChanges(vaultRoot, origin.runId)).toBe(false);
     const replay = await imports(0, []);
     expect(replay.receipt).toEqual(marker.receipt);
     const fact = { action: "upsert", payload: payload(v1, undefined, "fact-b") };
     const created = await imports(1, [fact]);
+    expect(await hasClinicalRunChanges(vaultRoot, origin.runId)).toBe(true);
+    expect(await hasClinicalRunChanges(vaultRoot, "other-run")).toBe(false);
     const eventId = created.eventIds[0];
     expect(created.receipt?.changes).toEqual([{ action: "created", eventId, revision: 1, externalRef: fact.payload.externalRef }]);
     const skipped = await imports(2, [fact]);

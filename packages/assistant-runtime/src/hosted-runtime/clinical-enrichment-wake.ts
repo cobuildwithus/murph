@@ -29,10 +29,12 @@ export async function admitHostedClinicalEnrichmentWake(input: {
   vaultRoot: string;
   userId: string;
   jobId: string;
+  changeRun?: HostedExecutionClinicalEnrichmentRequestedWake["changeRun"];
   occurredAt: string;
 }): Promise<{ admitted: boolean; nextWakeAt: string }> {
   const itemId = enrichmentItemId(input.jobId);
   const wake: HostedExecutionClinicalEnrichmentRequestedWake = {
+    ...(input.changeRun ? { changeRun: input.changeRun } : {}),
     eventId: itemId,
     jobId: input.jobId,
     kind: "clinical-records.enrichment-requested",

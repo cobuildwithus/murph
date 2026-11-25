@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   fetchClinicalRetrievalDocument: vi.fn(),
   readClinicalRetrievalRun: vi.fn(),
   recordClinicalRetrievalOutcome: vi.fn(),
+  recordClinicalChangeProof: vi.fn(),
+  readClinicalNotificationDecision: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
@@ -19,6 +21,11 @@ vi.mock("@/src/lib/clinical-records/retrieval", () => ({
   fetchClinicalRetrievalDocument: mocks.fetchClinicalRetrievalDocument,
   readClinicalRetrievalRun: mocks.readClinicalRetrievalRun,
   recordClinicalRetrievalOutcome: mocks.recordClinicalRetrievalOutcome,
+  recordClinicalChangeProof: mocks.recordClinicalChangeProof,
+}));
+
+vi.mock("@/src/lib/clinical-records/notification", () => ({
+  readClinicalNotificationDecision: mocks.readClinicalNotificationDecision,
 }));
 
 vi.mock("@/src/lib/clinical-records/connect-intents", () => ({
@@ -116,8 +123,25 @@ describe("Clinical Records internal runtime routes", () => {
     expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
   });
 
+  it("binds notification decisions and late proof to the signed member and opaque pointer", async () => {
+    const pointer = { runId: "synthetic-origin", generation: 2 };
+    const headers = runtimeWriteFenceHeaders();
+    const readPath = "/api/internal/clinical-records/runtime/read-run";
+    const proofPath = "/api/internal/clinical-records/runtime/record-outcome";
+    const policy = { purpose: "notification", ...pointer };
+    const proof = { kind: "change-receipt", ...pointer };
+    mocks.readClinicalNotificationDecision.mockResolvedValue({ mode: "off" });
+    expect((await readRunRoute.POST(jsonRequest(readPath, policy))).status).toBe(401);
+    expect((await recordOutcomeRoute.POST(jsonRequest(proofPath, { ...proof, text: "synthetic" }, headers))).status).toBe(400);
+    expect(mocks.recordClinicalChangeProof).not.toHaveBeenCalled();
+    expect(await (await readRunRoute.POST(jsonRequest(readPath, policy, headers))).json()).toEqual({ mode: "off" });
+    expect((await recordOutcomeRoute.POST(jsonRequest(proofPath, proof, headers))).status).toBe(200);
+    expect(mocks.recordClinicalChangeProof).toHaveBeenCalledWith({ memberId: "member_clinical_1", ...proof });
+    expect(mocks.readClinicalNotificationDecision).toHaveBeenCalledWith({ memberId: "member_clinical_1", ...policy });
+  });
+
   it("reports unexpected parser faults as server failures", async () => {
-    const parser = vi.spyOn(requestParsers, "parseHostedClinicalRecordsRecordOutcomeRequest")
+    const parser = vi.spyOn(requestParsers, "parseHostedClinicalCheckpointRequest")
       .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
     try {
       const response = await recordOutcomeRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {}, runtimeWriteFenceHeaders()));

@@ -930,6 +930,7 @@ describe("Clinical Records authorization persistence", () => {
         data: { status: "canceled", completedAt: expect.any(Date), lastErrorCode: "superseded" },
       });
       expect(h.retrievalRunCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ generation: 2, connectionId: existing.id }) });
+      expect(h.retrievalRunCreate).not.toHaveBeenCalledWith({ data: expect.objectContaining({ notificationTokenVersion: expect.any(Number) }) });
     });
 
   it("refuses replacement when the open run starts settling between callback preflight and persistence", async () => {

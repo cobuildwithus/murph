@@ -421,6 +421,24 @@ that same function identity so the existing typing claim can transfer without
 another provider start. An explicitly absent invocation provider overrides the
 bridge's original provider; standalone imports retain their supplied provider.
 
+## Daily hospital record texts
+
+Clinical notices are proactive. The signed Linq egress owner applies ordinary
+line health and the 90-day pause, then checks clinical authority for each
+attempt and sibling bubble. Only the frozen verified private home route can
+qualify. The reply path retains its ordinary behavior when the member responds.
+
+There is no universal quiet-hours owner for proactive texts. Before activating
+clinical sends, E2 must defer to a safe recipient-region window and recheck
+authority at dispatch. The dormant reader never consumes a quiet-hours deferral.
+
+Linq selects iMessage, RCS or SMS automatically for plain text and deprecated
+the service preference. The shared provider boundary rejects clinical keys
+before network entry or thread recovery. The owner is deciding whether the
+member's ordinary Murph thread is acceptable for records texts.
+The clinical cron preflight skips generation while this restriction holds.
+See [Linq protocol selection](https://docs.linqapp.com/channel/imessage/guides/messaging/protocol-selection/).
+
 ## Prompt and copy guidance
 
 Preferred shape:

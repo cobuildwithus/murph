@@ -4,6 +4,7 @@ import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
 
+import { publishClinicalChangeTx } from "./notification";
 import { closeClinicalRunTx } from "./run-lifecycle";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES, CLINICAL_RECORD_TERMINAL_RUN_STATUSES } from "./client-contracts";
 import { epicImportQueryEnabled } from "./epic-import-config";
@@ -100,6 +101,7 @@ interface ClinicalMailboxCheckpoint {
 }
 
 interface RunnableClinicalRun {
+  changeReceipts: boolean;
   connection: {
     requiresProcessorApprovals: boolean | null;
     accessTokenEncrypted: string | null;
@@ -176,6 +178,7 @@ export async function readClinicalRetrievalRun(input: {
     patientIdHash,
     providerDirectoryEntryId: run.connection.providerDirectoryEntryId,
     requestedScopes,
+    ...(run.changeReceipts ? { changeReceipts: true as const } : {}),
     retrievalJobId: run.id,
     runId: run.id,
     sourceSystem: run.connection.sourceSystem,
@@ -532,6 +535,7 @@ export async function recordClinicalRetrievalOutcome(input: {
   request: HostedClinicalRecordsRecordOutcomeRequest;
 }): Promise<void> {
   const now = new Date();
+  let notification: ClinicalMailboxCheckpoint | null = null;
   const rejection = await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     const run = await tx.clinicalRecordRetrievalRun.findFirst({
@@ -645,8 +649,32 @@ export async function recordClinicalRetrievalOutcome(input: {
       },
     });
     if (updatedRun.count !== 1) throw staleRunError();
+    notification = await publishTerminalChangeProof(tx, input, run);
   });
   if (rejection) throw rejection;
+  if (notification) await signalClinicalRetrievalWake(notification);
+}
+
+function publishTerminalChangeProof(tx: ClinicalRetrievalTx, input: { memberId: string; request: HostedClinicalRecordsRecordOutcomeRequest },
+  run: { notificationTokenVersion: number | null; notificationCoverage: string | null; connection: { requiresProcessorApprovals: boolean | null } }) {
+  if (run.notificationTokenVersion == null) return null;
+  const hasChangeReceipt = input.request.hasChangeReceipt === true || run.notificationCoverage === "proved";
+  if (!hasChangeReceipt && !run.connection.requiresProcessorApprovals) return null;
+  return publishClinicalChangeTx(tx, { memberId: input.memberId, runId: input.request.runId, generation: input.request.generation }, hasChangeReceipt);
+}
+
+/** A delayed enrichment belongs to the original accepted run, even after a later daily admission. */
+export async function recordClinicalChangeProof(input: RunPointer & { kind?: "change-receipt" | "change-scheduled" }): Promise<void> {
+  const notification = await getPrisma().$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    if (input.kind === "change-scheduled") {
+      await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: input.runId, memberId: input.memberId,
+        generation: input.generation, notificationCoverage: "published" }, data: { notificationCoverage: "scheduled" } });
+      return null;
+    }
+    return publishClinicalChangeTx(tx, input);
+  });
+  if (notification) await signalClinicalRetrievalWake(notification);
 }
 
 export async function appendClinicalRetrievalWakeTx(input: {
@@ -761,6 +789,8 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
         },
       },
       completedAt: true,
+      notificationTokenVersion: true,
+      notificationSettingRevision: true,
       startedAt: true,
       createdAt: true,
       egressBytes: true,
@@ -812,6 +842,7 @@ async function inspectRunnableClinicalRun(input: RunPointer, prisma: ClinicalRet
   }
   return {
     run: {
+      changeReceipts: record.notificationTokenVersion === record.connection.tokenVersion && Number.isInteger(record.notificationSettingRevision),
       connection: { ...record.connection, sourceSystem },
       createdAt: record.createdAt,
       startedAt: record.startedAt,

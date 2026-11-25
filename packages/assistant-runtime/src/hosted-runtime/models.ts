@@ -16,6 +16,7 @@ import type {
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   HostedClinicalRecordsRecordOutcomeRequest,
+  HostedClinicalChangeProof,
 } from "@murphai/hosted-execution/clinical-records";
 import type { MemberActionOutcomeV1 } from "@murphai/contracts";
 import type {
@@ -162,8 +163,9 @@ export type HostedSystemMailboxPostCheckpointRecord =
   | { kind: "game.recap-lore-checkpointed"; gameId: string; eventId: string; generationIds: string[]; resume: boolean; nextWakeAt?: null }
   | {
       kind: "clinical-records.outcome-recorded";
+      resumeEnrichmentAt?: string;
       nextWakeAt?: null;
-      request: HostedClinicalRecordsRecordOutcomeRequest;
+      request: HostedClinicalRecordsRecordOutcomeRequest | HostedClinicalChangeProof;
     }
   | (HostedDeviceSyncDirtyProcessedPostCheckpointRecord & {
       kind: "device-sync.dirty-processed";

@@ -1,3 +1,4 @@
+import { hasClinicalRunChanges } from "@murphai/core";
 import { createHash } from "node:crypto";
 import type {
   HostedExecutionClinicalRecordsSyncRequestedWake,
@@ -247,6 +248,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
         vaultRoot: input.vaultRoot,
         userId: input.wake.userId,
         jobId,
+        ...clinicalChangeRun(readResponse, input.wake),
         occurredAt: input.wake.occurredAt,
       });
     }
@@ -473,6 +475,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       ? "partial"
       : "completed";
   const outcome = {
+    ...await terminalClinicalProof(readResponse, checkpoint, input),
     counts,
     ...(checkpoint.authorizationRequired
       ? { errorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE }
@@ -487,6 +490,17 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
     status,
   } satisfies HostedClinicalRecordsRecordOutcomeRequest;
   return { counts, outcome, status };
+}
+
+function clinicalChangeRun(response: ReturnType<typeof parseHostedClinicalRecordsReadRunResponse>, wake: HostedExecutionClinicalRecordsSyncRequestedWake) {
+  return response.status === "ready" && response.run.changeReceipts
+    ? { changeRun: { runId: wake.runId, generation: wake.generation } } : {};
+}
+
+async function terminalClinicalProof(response: ReturnType<typeof parseHostedClinicalRecordsReadRunResponse>,
+  checkpoint: ClinicalFhirRetrievalCheckpoint, input: { vaultRoot: string; wake: HostedExecutionClinicalRecordsSyncRequestedWake }) {
+  if (!clinicalChangeRun(response, input.wake).changeRun || checkpoint.authorizationRequired) return {};
+  return await hasClinicalRunChanges(input.vaultRoot, input.wake.runId) ? { hasChangeReceipt: true as const } : {};
 }
 
 async function loadClinicalRecordsVaultModule(): Promise<ClinicalRecordsVaultModule> {

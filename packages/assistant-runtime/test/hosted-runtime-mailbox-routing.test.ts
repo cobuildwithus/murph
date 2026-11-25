@@ -19,7 +19,7 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 describe("hosted mailbox routing", () => {
   test("preserves default system routes and expands only for blocked assistant execution", () => {
     const defaultRoutes = [
-      "apply-member-channels-update", "apply-runtime-control-request", "dispatch-assistant-notification",
+      "apply-member-channels-update", "apply-runtime-control-request", "consume-clinical-change", "dispatch-assistant-notification",
       "import-group-journal-fact", "import-reported-daily-metric", "run-device-sync-wake",
     ];
     assert.deepEqual(getHostedSystemMailboxModelFreeRouteActions().sort(), defaultRoutes);
@@ -80,6 +80,7 @@ describe("hosted mailbox routing", () => {
         kind: "clinical-records.sync-requested",
         lane: "system",
       },
+      { action: "consume-clinical-change", kind: "clinical-records.change-recorded", lane: "system" },
       {
         action: "apply-clinical-enrichment",
         kind: "clinical-records.enrichment-requested",

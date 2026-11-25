@@ -87,6 +87,16 @@ async function* readRun(vaultRoot: string, runRef: string, offset = 0) {
   }
 }
 
+/** Read privately under the canonical lock. Missing and empty shards provide no proof. */
+export function hasClinicalRunChanges(vaultRoot: string, runId: string): Promise<boolean> {
+  return withCanonicalWriteLock(vaultRoot, async () => {
+    for await (const { receipt } of readRun(vaultRoot, clinicalChangeRunRef(runId))) {
+      if (receipt.changes.length > 0) return true;
+    }
+    return false;
+  });
+}
+
 export function listClinicalChangeReceipts(input: { vaultRoot: string; runRef: string; cursor?: number; limit?: number }) {
   const limit = z.number().int().min(1).max(32).parse(input.limit ?? 8);
   const cursor = z.number().int().nonnegative().parse(input.cursor ?? 0);

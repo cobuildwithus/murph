@@ -104,6 +104,18 @@ export function createHostedWebClinicalRecordsPort(input: {
 
       return parseHostedClinicalRecordsFetchPageResponse(payload);
     },
+    async readNotification(request, options) {
+      const { clinicalNotificationDecisionSchema, clinicalNotificationRequestSchema } =
+        await import("@murphai/hosted-execution/clinical-records");
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: clinicalNotificationRequestSchema.parse({ ...request, purpose: "notification" }),
+        boundUserId: input.boundUserId, description: "Hosted clinical notification policy", fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.clinicalRecordsReadRun,
+        sensitiveResponseBody: { maxBytes: HOSTED_CLINICAL_RECORDS_METADATA_RESPONSE_MAX_BYTES },
+        signal: options?.signal ?? null, timeoutMs: input.timeoutMs, transport: input.transport,
+      });
+      return clinicalNotificationDecisionSchema.parse(payload);
+    },
     async readRun(request, options) {
       const {
         parseHostedClinicalRecordsReadRunRequest,
@@ -129,9 +141,9 @@ export function createHostedWebClinicalRecordsPort(input: {
     async recordOutcome(request, options) {
       const {
         parseHostedClinicalRecordsRecordOutcomeResponse,
-        parseHostedClinicalRecordsRecordOutcomeRequest,
+        parseHostedClinicalCheckpointRequest,
       } = await import("@murphai/hosted-execution/clinical-records");
-      const parsedRequest = parseHostedClinicalRecordsRecordOutcomeRequest(request);
+      const parsedRequest = parseHostedClinicalCheckpointRequest(request);
       const payload = await fetchHostedWebControlPlaneJson({
         body: parsedRequest,
         boundUserId: input.boundUserId,
