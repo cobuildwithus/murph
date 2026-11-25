@@ -17,8 +17,10 @@ export {
 } from "./supplements.ts";
 export {
   listBloodTests,
+  listDiagnosticTests,
   readBloodTest,
   showBloodTest,
+  showDiagnosticTest,
 } from "./blood-tests.ts";
 export {
   readCurrentBloodType,
@@ -62,6 +64,7 @@ export type {
 export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
+  DiagnosticTestQueryRecord,
 } from "./blood-tests.ts";
 export type { CurrentBloodTypeRecord } from "./blood-type.ts";
 export type {

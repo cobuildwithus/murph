@@ -11,7 +11,7 @@ import * as core from "@murphai/core";
 import { QUERY_PROJECTION_SECTION_RELATIVE_PATHS } from "@murphai/runtime-state/node";
 import { timeCliDispatch, withCliTiming } from "@murphai/runtime-state/node/cli-timing";
 import type { CliTiming } from "@murphai/runtime-state/cli-timing";
-import { getQueryProjectionStatus, listBloodTests, listCanonicalEntities, showBloodTest } from "../src/index.ts";
+import { getQueryProjectionStatus, listBloodTests, listCanonicalEntities, listDiagnosticTests, showBloodTest, showDiagnosticTest } from "../src/index.ts";
 import * as source from "../src/vault-source.ts";
 
 const roots: string[] = [];
@@ -84,6 +84,19 @@ test("blood lists classify/filter before limit, preserve aliases, dates, orderin
     // Compare the next stale read against this last committed entity generation.
     database = await readFile(path.join(root, QUERY_PROJECTION_SECTION_RELATIVE_PATHS.entities));
   }
+});
+
+test("diagnostic lists read every test event with the blood-test filters, ordering and lookup", async () => {
+  const { root } = await fixture();
+  const all = await listDiagnosticTests(root);
+  assert.deepEqual(all.map(row => row.id), ["evt_urine", "evt_other_blood", "evt_target_a", "evt_target_b", "evt_older"]);
+  assert.ok(all.every(row => row.kind === "test"));
+  assert.deepEqual((await listDiagnosticTests(root, { text: "urine" })).map(row => row.id), ["evt_urine"]);
+  assert.deepEqual((await listDiagnosticTests(root, { from: "2026-03-05", limit: 1 })).map(row => row.id), ["evt_urine"]);
+  assert.equal((await showDiagnosticTest(root, "evt_urine"))?.specimenType, "urine");
+  assert.equal((await showDiagnosticTest(root, "synthetic-alias"))?.id, "evt_target_b");
+  assert.equal(await showBloodTest(root, "evt_urine"), null);
+  assert.equal((await listBloodTests(root, { text: "urine" })).length, 0);
 });
 
 test("blood lists isolate unrelated families but reject malformed selected events without publication", async () => {

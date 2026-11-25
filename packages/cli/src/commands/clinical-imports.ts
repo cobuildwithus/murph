@@ -7,7 +7,7 @@ import {
   eventSourceSchema,
   isStrictIsoDate,
 } from '@murphai/contracts'
-import { withBaseOptions } from '@murphai/operator-config/command-helpers'
+import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -39,9 +39,22 @@ import {
   socialHistoryImportPayloadSchema,
   vitalsImportPayloadSchema,
   vitalsSavePayloadSchema,
+  healthListResultSchema,
+  healthShowResultSchema,
+  type VaultServices,
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  commonDateRangeOptionDescriptions,
+  commonListLimitOptionSchema,
+  createCommonListCommand,
+  registerFactoryCommand,
+} from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 import {
   registerPayloadSchemaCommand,
 } from './payload-schema-command.js'
@@ -308,7 +321,7 @@ export function registerVitalsCommands(cli: Cli.Cli) {
   cli.command(vitals)
 }
 
-export function registerDiagnosticTestCommands(cli: Cli.Cli) {
+export function registerDiagnosticTestCommands(cli: Cli.Cli, services: VaultServices) {
   const diagnosticTest = Cli.create('diagnostic-test', {
     description: 'Generic diagnostic test facade over canonical test events.',
   })
@@ -383,6 +396,46 @@ export function registerDiagnosticTestCommands(cli: Cli.Cli) {
       })
     },
   })
+
+  diagnosticTest.command('show', {
+    description: 'Show one saved test with every result row.',
+    args: z.object({
+      id: z.string().min(1).describe('Canonical evt_* id, title, test name, or lab panel id.'),
+    }),
+    options: withBaseOptions(),
+    output: healthShowResultSchema,
+    async run({ args, options }) {
+      return projectRecordShowResult(await services.query.showDiagnosticTest({
+        id: args.id,
+        requestId: requestIdFromOptions(options),
+        vault: options.vault,
+      }))
+    },
+  })
+
+  registerFactoryCommand(
+    diagnosticTest,
+    createCommonListCommand({
+      description:
+        'List saved tests of every kind (stool, microbiome, urine, saliva and blood), newest first.',
+      hint:
+        'With --text, each row adds data.matchedResult when exactly one result row matches. Use show for the full test.',
+      options: {
+        from: { description: commonDateRangeOptionDescriptions.from, name: 'from' },
+        limit: commonListLimitOptionSchema,
+        text: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Optional case-insensitive text filter across test labels and result rows.'),
+        to: { description: commonDateRangeOptionDescriptions.to, name: 'to' },
+      },
+      output: healthListResultSchema,
+      async run(input) {
+        return projectRecordListResult(await services.query.listDiagnosticTests(input))
+      },
+    }),
+  )
 
   registerPayloadSchemaCommand(diagnosticTest, {
     command: 'diagnostic-test import-json',
