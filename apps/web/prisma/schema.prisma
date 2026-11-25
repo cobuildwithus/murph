@@ -330,6 +330,8 @@ model ClinicalRecordConnection {
   status                   String                           @default("active")
   /// True identifies the replacement Epic profile. Both historical NULL and explicit false use legacy admission.
   requiresProcessorApprovals Boolean?                       @map("requires_processor_approvals")
+  /// Credential epoch of the last accepted complete baseline for replacement ongoing access.
+  baselineTokenVersion     Int?                             @map("baseline_token_version")
   patientBindingEncrypted  String?                          @map("patient_binding_encrypted")
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")

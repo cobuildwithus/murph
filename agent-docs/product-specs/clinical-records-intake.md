@@ -611,12 +611,19 @@ no receipt contents.
 
 ### Daily record texts
 
-The notification readers are dormant. Every current run creation path leaves
-the notification fields empty. A future daily admission may freeze the current
-credential epoch, message revision and verified private home route only after an
-accepted baseline under the same authorization and a receipt-required
-protocol for the entire run. Initial imports, recovery of a missing baseline, member starts
-and legacy enrichment remain silent for their entire lifetime.
+The production daily sweep continues to create silent v2 retrievals. Web's
+daily admission requires compatible runner and Cloudflare port revisions before
+it can pin a new run. The production caller supplies neither revision during
+this rollout.
+
+Under the member lock, a replacement connection needs a persistent grant,
+current OpenAI approval and a complete whole-history import in its current
+credential epoch. A successful full catch-up can establish a missing baseline.
+The baseline import itself stays silent. With notices or details enabled, Web
+freezes the credential epoch, message revision, verified participant, assigned
+line, direct home chat and approved notice versions on the new receipt-required
+run. Member starts, off, legacy grants and older runs remain silent through late
+enrichment. Web never upgrades a run after creation.
 
 A signed, write-fenced callback can attest a committed change for one run.
 Web accepts its terminal outcome before publishing a pointer. A private

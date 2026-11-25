@@ -7,8 +7,9 @@ import { getPrisma, createPrismaClient } from "@/src/lib/prisma";
 import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-records/processor-registry";
 import { sealClinicalConnectionFhirBaseUrl, sealClinicalConnectionSecret } from "@/src/lib/clinical-records/secrets";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
+import { buildHostedMemberIdentityPrivateColumns, buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
-import { clinicalEgressBlock, clinicalNotificationRouteKey, readClinicalNotificationAuthority, readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
+import { clinicalEgressBlock, readClinicalNotificationAuthority, readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
 import { fetchClinicalRetrievalPage, recordClinicalChangeProof, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
@@ -27,6 +28,9 @@ if (enabled) {
 const now = new Date("2026-11-01T12:00:00Z");
 const daily = 24 * 60 * 60_000;
 const retry = 14 * 60_000;
+const currentReaders = { runner: 1, cloudflarePort: 1 };
+const emptyCounts = { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
+  rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 };
 
 describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   let client: PrismaClient;
@@ -39,7 +43,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   });
   afterAll(async () => { await client.$disconnect(); restoreCrypto(); });
 
-  async function fixture({ consent = true, access = true } = {}) {
+  async function fixture({ consent = true, access = true, openBaseline = false, replacement = false } = {}) {
     const memberId = `clinical-budget-${randomUUID()}`;
     const connectionId = `crc-${randomUUID()}`;
     members.push(memberId);
@@ -51,8 +55,9 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     await client.clinicalRecordConnection.create({ data: {
       id: connectionId, memberId, providerDirectoryEntryId: "synthetic-epic", sourceSystem: "epic", displayName: "Synthetic hospital",
       fhirBaseUrlEncrypted: "synthetic-sealed", fhirBaseHash: "synthetic-hash", requestedScopesJson: [], connectedAt: now,
-      refreshTokenEncrypted: "synthetic-refresh", patientIdEncrypted: "synthetic-patient", retrievalGeneration: 1, nextSyncAt: now,
-      retrievalRuns: { create: { id: `crr-${randomUUID()}`, memberId, generation: 1, status: "complete", completedAt: now,
+      requiresProcessorApprovals: replacement, refreshTokenEncrypted: "synthetic-refresh", patientIdEncrypted: "synthetic-patient", retrievalGeneration: 1, nextSyncAt: now,
+      retrievalRuns: { create: { id: `crr-${randomUUID()}`, memberId, generation: 1, status: openBaseline ? "queued" : "complete", completedAt: openBaseline ? null : now,
+        retrievalProtocol: "query-slices-v2",
         retrievalPlanJson: buildEpicBetaRetrievalPlan({ frozenAt: now, pageCount: "100", resourceTypes: ["Patient", "DocumentReference"] }),
         grantedScopesJson: ["patient/Patient.r", "patient/DocumentReference.s", "offline_access"],
       } },
@@ -69,22 +74,30 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     return { memberId, connectionId, decrypt, originalDecrypt, signal, row, runs, mailbox };
   }
 
-  async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", replacement = false) {
-    const f = await fixture();
+  async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", {
+    replacement = true, readers = currentReaders, reconnect = false, verified = true, group = false,
+    baselineStatus = "completed", scheduledSweep = false,
+  }: { replacement?: boolean; readers?: typeof currentReaders; reconnect?: boolean; verified?: boolean; group?: boolean;
+    baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean } = {}) {
+    const f = await fixture({ openBaseline: true, replacement });
     const { memberId, connectionId } = f;
     const [baseline] = await client.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, take: 1 });
     const threadId = `chat-${memberId}`;
     const chat = createHostedLinqChatLookupKey(threadId)!;
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "control", prisma: client, reason: "synthetic-test", userId: memberId });
+    const identity = await buildHostedMemberIdentityPrivateColumns({ memberId, phoneNumber: "+12025550137", signupPhoneNumber: null, prisma: client });
+    const routing = await buildHostedMemberRoutingPrivateColumns({ memberId, linqChatId: threadId, linqRecipientPhone: null,
+      pendingLinqChatId: null, pendingLinqRecipientPhone: null, telegramThreadId: null, telegramUserId: null, prisma: client });
     const participant = `participant-${memberId}`;
     const line = `line-${memberId}`;
     await client.hostedMember.update({ where: { id: memberId }, data: {
       clinicalRecordMessageMode: mode,
-      identity: { create: { phoneNumberVerifiedAt: now, phoneLookupKey: participant } },
-      routing: { create: { linqChatLookupKey: chat, linqParticipantContactKind: "phone",
+      identity: { create: { ...identity, phoneNumberVerifiedAt: verified ? now : null, phoneLookupKey: participant } },
+      routing: { create: { ...routing, linqChatLookupKey: chat, linqParticipantContactKind: "phone",
         linqParticipantContactLookupKey: participant, linqRecipientPhoneLookupKey: line } },
     } });
     await client.hostedLinqChatHealth.create({ data: {
-      linqChatLookupKey: chat, providerUpdatedAt: now, providerObservedAt: now, providerStatus: "healthy", service: "iMessage", isGroup: false,
+      linqChatLookupKey: chat, providerUpdatedAt: now, providerObservedAt: now, providerStatus: "healthy", service: "iMessage", isGroup: group,
       line: { create: { phoneNumberLookupKey: line, phoneNumberHint: "synthetic" } },
     } });
     const cleanup = async () => {
@@ -95,28 +108,32 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     await recordClinicalChangeProof(baselinePointer);
     expect(await f.mailbox()).toBe(0);
     if (replacement) {
-      await client.clinicalRecordConnection.update({ where: { id: connectionId }, data: { requiresProcessorApprovals: true } });
       await client.hostedConsentGrant.createMany({ data: clinicalProcessors.map(processor => ({
         memberId, scope: clinicalProcessorScope(processor), status: "granted", grantedAt: now,
         source: "synthetic", documentVersionsJson: { [processor.id]: processor.version },
       })) });
     }
-    expect(await admitClinicalDailySync({ memberId, connectionId, now })).toBe(true);
-    const [run] = await f.runs();
-    expect(run!.notificationTokenVersion).toBeNull();
-    const pointer = { memberId, runId: run!.id, generation: run!.generation };
-    // Only this fixture simulates the future admission writer.
-    await client.clinicalRecordRetrievalRun.update({ where: { id: pointer.runId }, data: {
-      retrievalProtocol: "query-slices-receipts-v3", notificationTokenVersion: 1, notificationSettingRevision: 0, notificationRouteKey: clinicalNotificationRouteKey(participant, line, chat),
+    const baselinePlan = clinicalFhirRetrievalPlanSchema.parse(baseline!.retrievalPlanJson);
+    await recordClinicalRetrievalOutcome({ memberId, request: { runId: baselinePointer.runId, generation: baselinePointer.generation, retrievalProtocol: "query-slices-v2",
+      retrievalSlices: baselinePlan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+      counts: emptyCounts, status: baselineStatus, ...(baselineStatus === "failed" ? {} : { hasChangeReceipt: true }),
     } });
+    await recordClinicalChangeProof(baselinePointer);
+    expect(await f.mailbox()).toBe(0);
+    expect((await f.row()).baselineTokenVersion).toBe(replacement && baselineStatus === "completed" ? 1 : null);
+    const due = (await f.row()).nextSyncAt!;
+    if (reconnect) await client.clinicalRecordConnection.update({ where: { id: connectionId }, data: { tokenVersion: { increment: 1 } } });
+    if (scheduledSweep) expect(await runClinicalDailySyncSweep({ now: due })).toMatchObject({ queued: 1 });
+    else expect(await admitClinicalDailySync({ memberId, connectionId, now: due, noticeReaders: readers })).toBe(true);
+    const [run] = await f.runs();
+    const pointer = { memberId, runId: run!.id, generation: run!.generation };
     const count = () => client.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.change-recorded" } });
     const terminal = async (proof = false) => {
       const plan = clinicalFhirRetrievalPlanSchema.parse(run!.retrievalPlanJson);
       await recordClinicalRetrievalOutcome({ memberId, request: { generation: pointer.generation, runId: pointer.runId,
-        status: "partial", retrievalProtocol: "query-slices-receipts-v3",
+        status: "partial", retrievalProtocol: run!.retrievalProtocol === "query-slices-receipts-v3" ? "query-slices-receipts-v3" : "query-slices-v2",
         retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
-        counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
-          rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+        counts: emptyCounts,
         ...(proof ? { hasChangeReceipt: true } : {}),
       } });
     };
@@ -132,19 +149,73 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await f.terminal();
       await f.terminal();
       expect(await f.count()).toBe(mode === "notice" ? 1 : 0);
-      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
-        retrievalGeneration: { increment: 1 }, refreshTokenEncrypted: "synthetic-rolling-successor",
-      } });
+      expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId,
+        now: (await f.row()).nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+      expect(await f.runs()).toHaveLength(2);
       await Promise.all([recordClinicalChangeProof(f.pointer), recordClinicalChangeProof(f.pointer)]);
       expect((await f.authority())?.mode ?? "off").toBe(mode);
       expect(await f.count()).toBe(mode === "off" ? 0 : 1);
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual(mode === "off" ? { mode } : { mode, threadId: f.threadId });
       const beforeCheckpoint = await f.runs();
       await recordClinicalChangeProof({ ...f.pointer, kind: "change-scheduled" });
       expect(await f.runs()).toEqual(beforeCheckpoint);
-      if (mode !== "off") expect(beforeCheckpoint[0]?.notificationCoverage).toBe("published");
+      expect(beforeCheckpoint.find(run => run.id === f.pointer.runId)).toMatchObject(mode === "off"
+        ? { retrievalProtocol: "query-slices-v2", notificationTokenVersion: null, notificationCoverage: null }
+        : { retrievalProtocol: "query-slices-receipts-v3", notificationTokenVersion: 1,
+            notificationSettingRevision: 0, notificationRouteKey: expect.stringMatching(/^[a-f0-9]{64}$/u), notificationCoverage: "published" });
       await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
       await recordClinicalChangeProof(f.pointer);
       expect(await f.count()).toBe(0);
+    } finally { await f.cleanup(); }
+  });
+
+  it.each([
+    ["production sweep", { scheduledSweep: true }],
+    ["old runner", { readers: { ...currentReaders, runner: 0 } }],
+    ["old port", { readers: { ...currentReaders, cloudflarePort: 0 } }],
+    ["legacy client", { replacement: false }],
+    ["new credential epoch", { reconnect: true }],
+    ["failed baseline", { baselineStatus: "failed" }],
+    ["partial baseline", { baselineStatus: "partial" }],
+    ["unverified phone", { verified: false }],
+    ["group thread", { group: true }],
+  ] as const)("keeps daily retrieval and its late enrichment silent for %s", async (_name, options) => {
+    const f = await notificationFixture("notice", options);
+    try {
+      expect(await f.runs()).toMatchObject([{ retrievalProtocol: "query-slices-v2", notificationTokenVersion: null,
+        notificationSettingRevision: null, notificationRouteKey: null }]);
+      await f.terminal();
+      await recordClinicalChangeProof(f.pointer);
+      expect(await f.count()).toBe(0);
+      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+    } finally { await f.cleanup(); }
+  });
+
+  it("recovers an incomplete baseline only after a full catch-up and never upgrades the catch-up run", async () => {
+    const f = await notificationFixture("notice", { baselineStatus: "partial" });
+    try {
+      for (let generation = 2; generation <= 7; generation++) {
+        const run = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
+          where: { connectionId_generation: { connectionId: f.connectionId, generation } },
+        });
+        expect(run.retrievalProtocol).toBe("query-slices-v2");
+        const pointer = { runId: run.id, generation };
+        const plan = clinicalFhirRetrievalPlanSchema.parse(run.retrievalPlanJson);
+        expect(plan.slices.every(slice => slice.coverage === "whole-family")).toBe(generation === 7);
+        await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { ...pointer,
+          retrievalProtocol: "query-slices-v2", retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+          counts: emptyCounts, status: "completed", hasChangeReceipt: true,
+        } });
+        const connection = await f.row();
+        expect(connection.baselineTokenVersion).toBe(generation === 7 ? connection.tokenVersion : null);
+        expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId,
+          now: connection.nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+        await recordClinicalChangeProof({ memberId: f.memberId, ...pointer });
+        expect(await f.count()).toBe(0);
+      }
+      expect(await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
+        where: { connectionId_generation: { connectionId: f.connectionId, generation: 8 } },
+      })).toMatchObject({ retrievalProtocol: "query-slices-receipts-v3", notificationTokenVersion: 1 });
     } finally { await f.cleanup(); }
   });
 
@@ -194,8 +265,12 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await client.hostedMember.update({ where: member, data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 3 } });
       await recordClinicalChangeProof(f.pointer);
       expect(await f.count()).toBe(0);
-      // Fresh independent route/epoch checks use a matching synthetic revision.
-      await client.clinicalRecordRetrievalRun.update({ where: { id: f.pointer.runId }, data: { notificationSettingRevision: 3 } });
+    } finally { await f.cleanup(); }
+  });
+
+  it("rechecks the frozen direct route and credential epoch across service changes", async () => {
+    const f = await notificationFixture("notice");
+    try {
       await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { isGroup: true } });
       expect(await f.authority()).toBeNull();
       for (const service of ["SMS", "RCS", "iMessage"]) {
@@ -209,8 +284,29 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     } finally { await f.cleanup(); }
   });
 
+  it("rejects a replacement private thread and a withdrawn ongoing grant after publication", async () => {
+    const f = await notificationFixture("detail");
+    const nextChat = createHostedLinqChatLookupKey(`replacement-${f.threadId}`)!;
+    try {
+      await f.terminal(true);
+      const existing = await client.hostedLinqChatHealth.findUniqueOrThrow({ where: { linqChatLookupKey: f.chat } });
+      await client.hostedLinqChatHealth.create({ data: { linqChatLookupKey: nextChat,
+        phoneNumberLookupKey: existing.phoneNumberLookupKey, providerUpdatedAt: now, providerObservedAt: now,
+        providerStatus: "healthy", service: "SMS", isGroup: false } });
+      await client.hostedMemberRouting.update({ where: { memberId: f.memberId }, data: { linqChatLookupKey: nextChat } });
+      expect(await f.authority()).toBeNull();
+      await client.hostedMemberRouting.update({ where: { memberId: f.memberId }, data: { linqChatLookupKey: f.chat } });
+      expect((await f.authority())?.mode).toBe("detail");
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { refreshTokenEncrypted: null } });
+      expect(await f.authority()).toBeNull();
+    } finally {
+      await client.hostedLinqChatHealth.deleteMany({ where: { linqChatLookupKey: nextChat } });
+      await f.cleanup();
+    }
+  });
+
   it.each([true, false])("keeps a replacement run silent after withdrawal at terminal (receipt=%s)", async receipt => {
-    const f = await notificationFixture("notice", true);
+    const f = await notificationFixture("notice");
     try {
       const where = { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } };
       expect((await f.authority())?.mode).toBe("notice");
@@ -224,7 +320,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   });
 
   it.each(["granted", "revoked"] as const)("checks a late receipt with processor approval %s", async status => {
-    const f = await notificationFixture("notice", true);
+    const f = await notificationFixture("notice");
     try {
       await f.terminal();
       expect(await f.count()).toBe(0);
@@ -238,7 +334,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   });
 
   it("rechecks processor approval for already published detail work", async () => {
-    const f = await notificationFixture("detail", true);
+    const f = await notificationFixture("detail");
     try {
       await f.terminal(true);
       expect(await f.count()).toBe(1);
