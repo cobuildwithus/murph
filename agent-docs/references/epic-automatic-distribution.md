@@ -56,7 +56,7 @@ the owner selects the answer that users specifically approve sharing with each
 entity individually. The owner makes this attestation on these conditions.
 
 1. Each member approves OpenAI by name before connecting a hospital. OpenAI reads records to organize them and answer questions. A missing, stale or withdrawn grant stops the next replacement start or hospital read.
-2. The approval screen also names xAI for X search, Google for questions about a shared video, ElevenLabs for voice messages and Mapbox for places and directions. Each receives data only at the member’s request. A detail notification that Murph starts must have no access to them.
+2. The approval screen also names xAI for X search, Google for questions about a shared video, ElevenLabs for voice messages and Mapbox for places and directions. Each receives what Murph sends when it uses that feature, usually because the member asked. No code limits the four to turns the member started, and the owner accepts that reading.
 3. Hosting, storage and message delivery are service providers. The member chooses any connected app, website or other destination for a requested action.
 
 Before submitting, the owner verifies the released screen, deployed routes and

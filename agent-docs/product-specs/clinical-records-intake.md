@@ -115,8 +115,10 @@ Legacy profiles keep their current admission rules.
 For the replacement registration, the owner attests that each member approves
 sharing with each entity individually. OpenAI alone requires that approval.
 It reads records to organize them and answer questions. Hosted inference goes
-directly to OpenAI, including retries. The four helpers receive only what Murph
-sends at the member’s request. The approval screen names xAI for X search,
+directly to OpenAI, including retries. The four helpers receive what Murph
+sends when it uses those features, usually because the member asked. No code
+limits them to turns the member started; the owner accepts that for the
+attestation. The approval screen names xAI for X search,
 Google for questions about shared videos, ElevenLabs for voice messages and
 Mapbox for places and directions. Hosting and delivery are service providers.
 Connecting an app or choosing another recipient authorizes that destination.
