@@ -29,7 +29,7 @@ describe("trend_change", () => {
     const sleep = fourMonths("sleep_total_min", [405, 427, 443, 458], 15, [24, 16, 15, 14]);
     const trend = cards(sleep).find(card => card.kind === "trend_change");
     expect(trend?.title).toEqual({ number: "+31 min", measure: "sleep" });
-    expect(trend?.subtitle).toBe("a night, vs your usual");
+    expect(trend?.subtitle).toBe("a night, vs usual");
     expect(trend?.chart).toMatchObject({
       baseline: 427, delta: 31,
       series: [
@@ -42,7 +42,7 @@ describe("trend_change", () => {
   it("keeps sleep gains in whole minutes even when the change exceeds an hour", () => {
     const sleep = fourMonths("sleep_total_min", [390, 414, 430, 486.4], 27);
     expect(cards(sleep).find(card => card.kind === "trend_change")).toMatchObject({
-      title: { number: "+72 min", measure: "sleep" }, subtitle: "a night, vs your usual",
+      title: { number: "+72 min", measure: "sleep" }, subtitle: "a night, vs usual",
       chart: { pills: ["Usual 6h 54m", "Feb 8h 6m"] },
     });
   });
@@ -112,7 +112,7 @@ describe("best_month", () => {
   it("compares six qualifying months within twelve calendar months and labels partial coverage", () => {
     const card = cards([...prior, ...current, ...monthOf("steps", "2031-02", 12000, 15),
       ...monthOf("steps", "2031-12", 11000, 14)]).find(card => card.kind === "best_month");
-    expect(card?.subtitle).toBe("February, your best month in the past 12 months");
+    expect(card?.subtitle).toBe("February, best month in the past 12 months");
     expect(card?.source_note).toContain("so far");
     expect(card?.chart.series.map(month => month.month)).toEqual([...full, "2032-02"]);
     expect(card?.chart.highlight).toBe("2032-02");
@@ -133,7 +133,7 @@ describe("best_month", () => {
     const samples = full.flatMap((month, index) => monthOf("rhr_bpm", month, means[index], 15, 2));
     const card = cards([...samples, ...monthOf("rhr_bpm", "2032-02", 62, 14, 2)])
       .find(card => card.kind === "best_month");
-    expect(card?.subtitle).toBe("February, tied for your best month in the past 12 months");
+    expect(card?.subtitle).toBe("February, tied for best month in the past 12 months");
   });
 
   it("keeps rounding differences from turning flat monthly means into a best", () => {
@@ -165,7 +165,7 @@ describe("best_month", () => {
     const best = dailyCandidates(cleanDaily(daily, asOf), asOf).find(({ card }) => card.kind === "best_month")?.card;
     expect(best).toMatchObject({
       title: { number: "84", measure: "sleep score" },
-      subtitle: "June, your best month this year",
+      subtitle: "June, best month this year",
     });
   });
 
@@ -182,7 +182,7 @@ describe("best_month", () => {
       cleanDaily([...history, ...miles("2034-09", 6.75, currentDays)], asOf), asOf,
     ).map(({ card }) => card).find(card => card.kind === "best_month");
     expect(best(5)).toMatchObject({
-      title: { number: "64", measure: "miles on foot" }, subtitle: "in May, your most this year",
+      title: { number: "64", measure: "miles on foot" }, subtitle: "in May, most this year",
       chart: { unit: "miles", highlight: "2034-05", series: [
         { month: "2034-01", value: 47.5 }, { month: "2034-02", value: 48 },
         { month: "2034-03", value: 34 }, { month: "2034-04", value: 15 }, { month: "2034-05", value: 63.75 },
@@ -191,7 +191,7 @@ describe("best_month", () => {
     });
     expect(best(10)).toBeUndefined();
     expect(best(14)).toMatchObject({
-      title: { number: "95", measure: "miles on foot" }, subtitle: "in September, your most this year",
+      title: { number: "95", measure: "miles on foot" }, subtitle: "in September, most this year",
     });
     expect(best(1, miles("2034-05", 8, 1))).toBeUndefined();
     expect(best(5, daily.filter(row => !row.date.startsWith("2034-04")))).toBeUndefined();

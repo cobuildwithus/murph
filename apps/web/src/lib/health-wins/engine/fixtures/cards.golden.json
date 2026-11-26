@@ -7,8 +7,8 @@
       "number": "+57 min",
       "measure": "sleep"
     },
-    "subtitle": "a night, vs your usual",
-    "source_note": "16 tracked days this month. Your usual is the median of the previous three monthly averages.",
+    "subtitle": "a night, vs usual",
+    "source_note": "16 tracked days this month. Usual is the median of the previous three monthly averages.",
     "chart": {
       "type": "trend",
       "unit": "min",
@@ -54,7 +54,7 @@
       "number": "14",
       "measure": "floors"
     },
-    "subtitle": "November, your best month this year",
+    "subtitle": "November, best month this year",
     "source_note": "16 tracked days this month so far. Compared across 6 qualifying monthly averages.",
     "chart": {
       "type": "monthly_bars",
@@ -106,7 +106,7 @@
       "number": "11,580",
       "measure": "steps"
     },
-    "subtitle": "on Sep 23, your most this year",
+    "subtitle": "on Sep 23, most this year",
     "source_note": "Recorded on Sep 23. Based on 2 tracked days.",
     "chart": {
       "type": "record",
@@ -581,7 +581,7 @@
       "number": "14 sec",
       "measure": "planked"
     },
-    "subtitle": "your latest time milestone, Wright brothers",
+    "subtitle": "latest time milestone, Wright brothers",
     "chart": {
       "type": "ladder",
       "exercise": "planks",
@@ -690,7 +690,7 @@
       "number": "3",
       "measure": "days"
     },
-    "subtitle": "posted in every game, your best run",
+    "subtitle": "posted in every game, best run yet",
     "source_note": "Game streak log · Nov 7 through Nov 11",
     "chart": {
       "type": "week_dots",

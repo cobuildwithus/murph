@@ -88,8 +88,8 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
           title: { number: formatMetricValue(metric, displayedDelta, "delta"), measure: label },
-          subtitle: `a ${filter === "Sleep" ? "night" : "day"}, vs your usual`,
-          source_note: `${current.days} tracked days this month. Your usual is the median of the previous three monthly averages.`,
+          subtitle: `a ${filter === "Sleep" ? "night" : "day"}, vs usual`,
+          source_note: `${current.days} tracked days this month. Usual is the median of the previous three monthly averages.`,
           chart: {
             type: "trend", unit, series: [...baselineMonths, current], baseline, delta,
             pills: [`Usual ${formatMetricValue(metric, baseline)}`, `${formatWinMonth(today, "short")} ${formatMetricValue(metric, current.value)}`],
@@ -112,7 +112,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
           title: { number: formatMetricValue(metric, current.value, "title"), measure: label },
-          subtitle: `${formatWinMonth(today)}, ${comparison === 0 ? "tied for " : ""}your best month ${period}`,
+          subtitle: `${formatWinMonth(today)}, ${comparison === 0 ? "tied for " : ""}best month ${period}`,
           source_note: `${current.days} tracked days this month so far. Compared across ${comparisonMonths.length} qualifying monthly averages.`,
           chart: { type: "monthly_bars", unit, series: comparisonMonths, highlight: currentMonth },
         },
@@ -161,7 +161,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       card: {
         id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness",
         title: { number: formatNumber(best.value, 0), measure: "miles on foot" },
-        subtitle: `in ${formatWinMonth(best.month)}, ${comparison === 0 ? "tied for " : ""}your most this year`,
+        subtitle: `in ${formatWinMonth(best.month)}, ${comparison === 0 ? "tied for " : ""}most this year`,
         source_note: `Walking and running distance across ${best.days} tracked days. Compared with every recorded monthly total this year.`,
         chart: { type: "monthly_bars", unit: "miles", series: totals, highlight: best.month },
       },

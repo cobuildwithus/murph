@@ -240,7 +240,7 @@ describe("game achievements", () => {
     expect(subtitle(passed)).toBe("enough to climb past the Space Needle");
     expect(subtitle([...passed].reverse())).toBe(subtitle(passed));
     expect(subtitle(passed.slice(0, 1))).toBe("enough to climb the Hollywood Sign");
-    expect(subtitle([{ id: "unlisted-landmark", height: 200 }])).toBe("your game total so far");
+    expect(subtitle([{ id: "unlisted-landmark", height: 200 }])).toBe("game total so far");
   });
 
   it("compares plank time with passed and upcoming rungs from the plank ladder (audit 32)", () => {
@@ -276,7 +276,7 @@ describe("game achievements", () => {
     const other = { ...game, exercise: "burpees" };
     const streaks = (games: Game[]) => generateHealthWins({ member, games }).filter(card => card.kind === "game_streak");
     expect(streaks([game, other])).toEqual([expect.objectContaining({
-      subtitle: "posted in every game, your best run",
+      subtitle: "posted in every game, best run yet",
       chart: { type: "week_dots", days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
     })]);
     const different = { ...other, bestStreak: { days: 5, start: "2025-03-02", end: "2025-03-06", missedOn: null } };
