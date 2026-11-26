@@ -3311,6 +3311,7 @@ model GameProgressSharePhoto {
 model HealthPost {
   id                 String                @id @db.Uuid
   authorMemberId     String                @map("author_member_id")
+  gameId             String?               @map("game_id")
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   deletedAt          DateTime?             @map("deleted_at") @db.Timestamptz(3)
   version            Int                   @default(1)
