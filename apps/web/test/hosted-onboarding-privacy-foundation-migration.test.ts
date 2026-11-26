@@ -90,7 +90,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantVoice String? @map("assistant_voice")',
     'assistantVoiceCausalSeq BigInt? @map("assistant_voice_causal_seq")',
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
-    'clinicalRecordMessageMode ClinicalRecordMessageMode @default(notice) @map("clinical_record_message_mode")',
+    'clinicalRecordMessageMode ClinicalRecordMessageMode @default(detail) @map("clinical_record_message_mode")',
     'clinicalRecordMessageRevision Int @default(0) @map("clinical_record_message_revision")',
     "codexAuthConnection HostedCodexAuthConnection?",
     'companionLastContactAt DateTime? @map("companion_last_contact_at")',

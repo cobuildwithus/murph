@@ -1425,7 +1425,7 @@ function buildAssistantCronNotificationDeliveryInput(input: Pick<
       trigger: input.trigger,
     }),
     deliveryIdempotencyKey: claimedJob.clinicalChange
-      ? clinicalChangeDeliveryKey(claimedJob.clinicalChange.runId, 'detail')
+      ? clinicalChangeDeliveryKey(claimedJob.clinicalChange.runId)
       : buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
           job: claimedJob,
           trigger: input.trigger,
@@ -3183,7 +3183,7 @@ async function assertClinicalCronTransport(job: AssistantCronJob, context: Assis
   const resolve = context?.hosted?.resolveScheduledLinqRoute
   if (job.target.channel === 'linq' && job.target.threadIsDirect && job.target.threadId && resolve) {
     const authority = await resolve({
-      homeRouteFallbackAllowed: false, idempotencyKey: clinicalChangeDeliveryKey(job.clinicalChange.runId, 'detail'),
+      homeRouteFallbackAllowed: false, idempotencyKey: clinicalChangeDeliveryKey(job.clinicalChange.runId),
       signal, target: job.target.threadId, targetKind: 'thread',
     })
     if (authority.deliveryBlockCode) throw new AssistantCronLinqHealthPreflightBlockedError(authority.deliveryBlockCode)

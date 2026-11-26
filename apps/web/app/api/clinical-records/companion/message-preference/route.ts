@@ -11,5 +11,5 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   if (Object.keys(body).length !== 1 || (mode !== "off" && mode !== "notice" && mode !== "detail")) {
     throw new RequestInputError("Invalid clinical record message mode.");
   }
-  return clinicalJsonOk(await setClinicalRecordMessageMode(auth, mode));
+  return clinicalJsonOk(await setClinicalRecordMessageMode(auth, mode === "notice" ? "detail" : mode));
 });

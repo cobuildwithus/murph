@@ -188,7 +188,7 @@ describe("hosted clinical records runtime port", () => {
 
   it("forwards only opaque notification pointers and strict signed decisions", async () => {
     const pointer = { runId: "synthetic-origin", generation: 2 };
-    const decision = { mode: "notice", threadId: "synthetic-thread" };
+    const decision = { mode: "detail", threadId: "synthetic-thread" };
     const bodies: unknown[] = [];
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const req = input instanceof Request ? input : new Request(input, init);

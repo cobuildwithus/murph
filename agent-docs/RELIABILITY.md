@@ -3744,14 +3744,16 @@ Current product admission, delivery and native runtime safety rules remain.
   pointer on the next page, or retries the proof if the job has finished.
   Publication and encrypted mailbox append commit together. The
   existing handoff sweep recovers an unimported pointer after signal loss.
-  A private outbox intent or one-shot job uses a stable run identity and the
-  existing workspace checkpoint precedes the scheduling acknowledgement. A
-  successor daily generation leaves the earlier run eligible for its own late
-  proof. Reauthorization changes the credential epoch and invalidates it.
+  The run key deduplicates its scheduled records review. Allowance exhaustion
+  holds model-owned work for restoration. Model unavailability keeps the same
+  one-shot pending with ordinary cron backoff. Neither hold emits fallback
+  text. The runtime rechecks authority before another generation or bubble.
+  A newer eligible run supersedes an older unannounced one, and an occurrence
+  expires 24 hours after acceptance. Reauthorization invalidates its epoch.
   Only a newly accepted complete outcome for all whole-history slices records
   a replacement ongoing grant's baseline epoch. Failed, partial, windowed and
   replayed outcomes cannot establish it. The expandable column starts empty.
-  The production daily sweep omits reader revisions and leaves every run on v2.
+  The daily sweep pins a run only after fresh authenticated runner and port evidence meets revision 4.
   A mixed deployment can continue ordinary retrieval without publishing a text.
 
 - Clinical Records retrieval is generation-fenced and page-idempotent. A

@@ -957,7 +957,7 @@ Existing product admission, delivery and runtime safety rules still apply.
 
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
 - Daily clinical change proof crosses the signed, active-write-fenced callback
-  as a run pointer and a policy result. Receipt entries and notice rendering
+  as a run pointer and a policy result. Receipt entries and review generation
   belong to the private runtime. The notification reader checks the originating run, credential
   epoch, product access, health consent, named approvals, preference revision,
   and the verified participant, assigned line and direct thread frozen at
@@ -967,9 +967,9 @@ Existing product admission, delivery and runtime safety rules still apply.
   revision. The member lock fences admission. The private outbox requires explicit
   clinical authorization for its key and frozen private thread at preflight
   and provider entry. The manually deployed port must forward this decision.
-  The owner withdrew the iMessage-only requirement. Linq may
-  select iMessage, RCS or SMS. Notices omit the hospital name. The existing
-  explicit detail setting authorizes detail on that same thread.
+  Linq may select iMessage, RCS or SMS. The member setting defaults to detail.
+  The private turn reads the run’s receipt and each outgoing bubble requires
+  current authority for that same verified thread.
   A detail turn has the same shell and network reach as any scheduled turn,
   bounded by the Worker’s existing messaging-operation check. The clinical
   per-bubble checks cover the reply path only.
@@ -1011,10 +1011,10 @@ Existing product admission, delivery and runtime safety rules still apply.
 - Clinical processor grants use one app-only consent scope per named processor. The notice version must match the registry exactly. Keep these scopes outside generic legal acceptance and launch consent. Web checks replacement-profile starts and locked persistence, and reads the persisted profile during daily admission and page/document transport. Every named company must have a current grant before the next protected read. OpenAI alone requires individual approval. The approval screen lists xAI for X search, Google for video questions, ElevenLabs for voice messages and Mapbox for places and directions together as member-directed services. Hosting and delivery are service providers. Scheduled detail turns retain the ordinary helper permissions. Each outbound message requires separate authority for the frozen private recipient. The runner regression test checks fixed hosts and model selection against that table. Previously imported data remains available to vault-capable turns after withdrawal.
 - Native Clinical Records binds the member, native session and SMART state in the app completion proof. The callback reads only the stored return target. The stateless bridge forwards the validated state and bounded code or error. Both approval and denial verify the proof before consuming state. Native persistence rechecks the credential, session, product admission, consent and consumed authorization under the member lock. Search text stays in POST bodies.
 - Clinical record text preferences belong to the member. Web rechecks the native
-  session under the member lock. Enabling notices or details requires product
-  access and current launch consent. A lapsed member can opt out. An explicit
-  change from notice to detail records the new revision in a consent audit
-  event. Only the member setting authorizes detail. Withdrawing health consent
+  session under the member lock. Enabling daily reviews requires product access
+  and current launch consent. A lapsed member can opt out. The revisioned mode
+  owns text authorization. OpenAI approval remains an independent grant.
+  Withdrawing health consent
   resets that setting and advances its revision in the grant transaction, even
   from an older Web writer. Reconsent does not enable texts.
 - Web authenticates each Epic token request with the registration bound to the

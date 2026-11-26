@@ -339,7 +339,7 @@ describe("hosted orchestration control contracts", () => {
     },
   );
 
-  it.each(["clinical-records.enrichment-requested", "meal-photo.captured", "assistant.ask.requested"])(
+  it.each(["clinical-records.change-recorded", "clinical-records.enrichment-requested", "meal-photo.captured", "assistant.ask.requested"])(
     "retains model-owned %s", (kind) => {
       expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic`, assistantExecutionBlocked: true })).toBe("default_owned");
       expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic` })).toBe("default_owned");

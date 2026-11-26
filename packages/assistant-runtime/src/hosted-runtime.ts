@@ -1,4 +1,3 @@
-import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { getHostedSystemMailboxModelFreeRouteActions } from "./hosted-runtime/mailbox-routing.ts";
 import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
@@ -1400,7 +1399,6 @@ function readHostedSystemMailboxCheckpointPreparationRecordItem(
 
 function exactSystemMailboxDeliveryKey(item: HostedSystemMailboxCheckpointPreparationRecordItem): string {
   const wake = item.wake;
-  if (wake.kind === "clinical-records.change-recorded") return clinicalChangeDeliveryKey(wake.runId, "notice");
   return wake.kind === "assistant.notification.requested" ? wake.notification.deliveryIdempotencyKey ?? "" : "";
 }
 
@@ -4060,7 +4058,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const recordItem = exactDeliveryRecordItem
             ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
           const ownsExactModelFreeDelivery = recordItem !== null
-            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem, exactDeliveryIntentState !== null);
+            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
           const preemptBeforeExactDelivery =
             shouldPreemptHostedSystemMailboxExactDelivery({
               assistantCronDueNow: projectedWake.assistantCronDueNow,
