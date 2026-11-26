@@ -10,11 +10,12 @@ type PostAccess = "content" | "includeOwnerReceipt";
 
 function healthAuthorSql(memberId: Prisma.Sql, receiptOwner?: string) {
   const authors = healthFeedAuthors();
+  // Keep PostgreSQL checking this author by ID instead of joining the whole eligible population.
   return Prisma.sql`EXISTS (SELECT 1 FROM hosted_member author WHERE author.id = ${memberId}
     ${authors === "everyone" ? Prisma.empty : Prisma.sql`AND author.id = ANY(${authors}::text[])`}
     AND ${activeHostedPersonAccessSql(Prisma.sql`author`)}
     AND (${receiptOwner === undefined ? Prisma.empty : Prisma.sql`author.id = ${receiptOwner} OR`}
-      ${hostedLaunchConsentGrantedSql(Prisma.sql`author.id`)}))`;
+      ${hostedLaunchConsentGrantedSql(Prisma.sql`author.id`)}) OFFSET 0)`;
 }
 
 function unblockedSql(first: string | Prisma.Sql, subject: Prisma.Sql, hides: "both" | "bySubject" = "both") {
@@ -48,7 +49,8 @@ export function hiddenHealthIdentitySql(viewerId: string, subject: Prisma.Sql) {
   return Prisma.sql`${unblockedSql(viewerId, subject, "bySubject")} AND ${healthAuthorSql(subject)}
     AND (EXISTS (${healthPartnersSql(viewerId, subject)}) OR EXISTS (
       SELECT 1 FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
-      WHERE c.author_member_id = ${subject} AND ${visibleCommentContextSql(viewerId)}
+      WHERE c.author_member_id = ${subject} AND ${visibleHealthPostSql(viewerId)}
+        AND ${commentContextOnPostSql(viewerId, Prisma.sql`p.author_member_id`)}
     ))`;
 }
 
@@ -68,18 +70,23 @@ export function visibleHealthPostSql(viewerId: string, access: PostAccess = "con
   return Prisma.sql`p.deleted_at IS NULL AND ${visibleHealthPersonSql(viewerId, Prisma.sql`p.author_member_id`, access)}`;
 }
 
-function visibleCommentContextSql(viewerId: string) {
-  const poster = Prisma.sql`p.author_member_id`, commenter = Prisma.sql`c.author_member_id`;
-  return Prisma.sql`${visibleHealthPostSql(viewerId)} AND c.deleted_at IS NULL
-    AND (c.visibility = 'everyone' OR c.author_member_id = ${viewerId} OR p.author_member_id = ${viewerId})
+function commentContextOnPostSql(viewerId: string, poster: Prisma.Sql) {
+  const commenter = Prisma.sql`c.author_member_id`;
+  return Prisma.sql`c.deleted_at IS NULL
+    AND (c.visibility = 'everyone' OR c.author_member_id = ${viewerId} OR ${poster} = ${viewerId})
     AND ${unblockedSql(poster, commenter)}
     AND (${poster} = ${commenter} OR EXISTS (${healthPartnersSql(poster, commenter)}))`;
 }
 
-export function visibleHealthCommentSql(viewerId: string) {
+export function visibleHealthCommentOnPostSql(viewerId: string, poster: Prisma.Sql) {
   const commenter = Prisma.sql`c.author_member_id`;
-  return Prisma.sql`${visibleCommentContextSql(viewerId)}
+  return Prisma.sql`${commentContextOnPostSql(viewerId, poster)}
     AND ${unblockedSql(viewerId, commenter)} AND ${healthAuthorSql(commenter)}`;
+}
+
+export function visibleHealthCommentSql(viewerId: string) {
+  return Prisma.sql`${visibleHealthPostSql(viewerId)}
+    AND ${visibleHealthCommentOnPostSql(viewerId, Prisma.sql`p.author_member_id`)}`;
 }
 
 export interface VisiblePost {

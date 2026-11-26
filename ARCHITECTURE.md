@@ -6751,8 +6751,9 @@ still advance. There is no limit on the number of partners who can qualify.
 Each comment requires access to the live parent post. A poster-only comment
 is visible to the poster and its writer. Blocks and hides also apply between
 the reader and the commenter and between the poster and the commenter. A
-commenter must be the poster or the poster's current game partner. Web pages
-comments and rechecks their visibility after opening the content. Post details,
+commenter must be the poster or the poster's current game partner. Web checks
+the parent before paging comments and binds its poster to the comment query.
+After opening content, Web rechecks the parent and the selected comments. Post details,
 attachment reads and push delivery use the same access decisions. Profile numbers come from
 `readPairBoard` under existing per-person grants. After consent withdrawal,
 members can list their own post IDs, timestamps and versions for deletion.
