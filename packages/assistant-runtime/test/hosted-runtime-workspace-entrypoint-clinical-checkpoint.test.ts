@@ -457,7 +457,6 @@ test("batches several one-page clinical jobs into the window's checkpoints", asy
   const events: string[] = [];
   const glucose = [94, 95, 96];
   const collectedAt = (document: number) => `2026-05-0${document}T12:00:00.000Z`;
-  const empty: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
   const extractionStarted = createDeferred<void>();
   let extracting = 0;
   // Only the provider is synthetic. Each document is its own import batch, so its own job.
@@ -471,7 +470,6 @@ test("batches several one-page clinical jobs into the window's checkpoints", asy
       events.push(`page-${document}:requeued`);
       throw request.abortSignal.reason;
     }
-    if (request.family !== "labs") return empty;
     request.onProviderUsage?.({ stage: "answer", usage: {
       occurredAt: TEST_NOW, provider: "codex-cli", providerRequestOrdinal: document, providerRequestOutcome: "succeeded",
       usage: {
