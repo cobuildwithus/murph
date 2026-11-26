@@ -2,15 +2,20 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
+import type { ClientUnits } from "../companion/client-info";
 import { assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { invalidGameRequest } from "../game/http/errors";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { findVisibleHealthPost } from "./audience";
-import { sealHealthTexts } from "./crypto";
+import type { CachedHealthCandidate, FrozenHealthCard, HealthCardSelection } from "./card-options";
+import { openHealthTexts, sealHealthTexts } from "./crypto";
+import type { RecordedActivity } from "./engine/types";
+import { assertHealthRecordEnabled } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
 import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
-import { assertHealthSetCurrent, resolveHealthCards, type HealthCardSelection } from "./wins";
+import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
+import { assertHealthSetCurrent, resolveHealthCards } from "./wins";
 
 type Tx = Prisma.TransactionClient;
 type Auth = HostedNativeMemberAuth;
@@ -25,32 +30,57 @@ function replayPost(row: { id: string; authorMemberId: string; deletedAt: Date |
   return { id: row.id, version: row.version };
 }
 
-async function preparePostContent(auth: Auth, id: string, input: Content) {
-  const memberId = auth.member.id;
-  if (input.cards?.length && !input.setRevision) throw invalidGameRequest("Choose cards from a current set.");
-  const resolved = input.cards?.length && input.setRevision
-    ? await resolveHealthCards(auth, input.setRevision, input.cards)
-    : null;
+async function resolvePostCards(auth: Auth, input: Content, candidates: readonly CachedHealthCandidate[] = []) {
+  if (!input.cards?.length) return { cards: input.cards === undefined ? undefined : [], day: undefined };
+  const winSelections = input.cards.filter(pick => !pick.candidateId.startsWith("activity:"));
+  if (winSelections.length && !input.setRevision) throw invalidGameRequest("Choose cards from a current set.");
+  const wins = winSelections.length && input.setRevision
+    ? await resolveHealthCards(auth, input.setRevision, winSelections)
+    : undefined;
+  const cards = input.cards.map(pick => {
+    if (!pick.candidateId.startsWith("activity:")) {
+      const frozen = wins?.cards.find(card => card.id === pick.candidateId);
+      if (!frozen) throw invalidGameRequest("Choose a card from this set.");
+      return frozen;
+    }
+    const variant = candidates.find(card => card.id === pick.candidateId)?.variants.find(item => item.option === pick.option);
+    if (!variant || pick.specRevision !== variant.specRevision) throw hostedOnboardingError({
+      code: "HEALTH_ACTIVITY_CARD_CHANGED", httpStatus: 409, message: "Preview the activity again before posting.",
+    });
+    return { id: pick.candidateId, specRevision: variant.specRevision, spec: variant.spec };
+  });
+  return { cards, day: wins?.day };
+}
+
+async function sealPostContent(memberId: string, id: string, caption: string | null | undefined, cards?: readonly FrozenHealthCard[]) {
   const target = { memberId, table: "health_post", rowId: id } as const;
-  const caption = input.caption?.trim();
+  const text = caption?.trim();
   const sealed = await sealHealthTexts([
-    ...(resolved?.cards.map((card, index) => ({ ...target, field: `card:${index}` as const, value: JSON.stringify(card) })) ?? []),
-    ...(caption ? [{ ...target, field: "caption" as const, value: caption }] : []),
+    ...(cards ?? []).map((card, index) => ({ ...target, field: `card:${index}`, value: JSON.stringify(card) })),
+    ...(text ? [{ ...target, field: "caption", value: text }] : []),
   ]);
   return {
-    data: {
-      ...(input.cards !== undefined ? { cardsEncrypted: sealed.slice(0, resolved?.cards.length ?? 0) } : {}),
-      ...(input.caption !== undefined ? { captionEncrypted: caption ? sealed[sealed.length - 1]! : null } : {}),
-    },
-    checkSet: async (tx: Tx) => {
-      if (resolved && input.setRevision) await assertHealthSetCurrent(tx, memberId, resolved.day, input.setRevision);
-    },
+    ...(cards !== undefined ? { cardsEncrypted: sealed.slice(0, cards.length) } : {}),
+    ...(caption !== undefined ? { captionEncrypted: text ? sealed[sealed.length - 1]! : null } : {}),
   };
 }
 
+// Card ciphertext is bound to its array position. Re-seal the retained specs at their new positions.
+async function removeFrozenCards(memberId: string, id: string, encrypted: string[], removeIds: readonly string[]) {
+  const target = { memberId, table: "health_post", rowId: id } as const;
+  const opened = await openHealthTexts(encrypted.map((value, index) => ({ ...target, field: `card:${index}`, value })));
+  const remove = new Set(removeIds);
+  const keep = opened.map(text => JSON.parse(text) as FrozenHealthCard).filter(card => !remove.has(card.id));
+  if (opened.length - keep.length !== remove.size) throw invalidGameRequest("Choose a card on this post.");
+  return keep;
+}
+
 /** An acknowledged retry does not depend on the original set still being current. */
-export async function createHealthPost(auth: Auth, input: Content & { id: string; attachmentId?: string }) {
+export async function createHealthPost(
+  auth: Auth, input: Content & { id: string; attachmentId?: string; activity?: RecordedActivity }, units: ClientUnits = "us",
+) {
   const db = getPrisma(), memberId = auth.member.id, id = input.id.toLowerCase();
+  if (input.activity) assertHealthRecordEnabled(memberId);
   const previous = await db.healthPost.findUnique({ where: { id }, select: { id: true } });
   if (previous) {
     return db.$transaction(async tx => {
@@ -62,36 +92,46 @@ export async function createHealthPost(auth: Auth, input: Content & { id: string
   }
   if (!input.caption?.trim() && !input.cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
-  const content = await preparePostContent(auth, id, input);
+  const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
+  const { cards, day } = await resolvePostCards(auth, input, recording?.candidates);
+  const data = await sealPostContent(memberId, id, input.caption, cards);
   return db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-    const inserted = await tx.healthPost.createMany({ data: [{ id, authorMemberId: memberId, ...content.data }], skipDuplicates: true });
+    const inserted = await tx.healthPost.createMany({ data: [{ id, authorMemberId: memberId, ...data }], skipDuplicates: true });
     if (!inserted.count) {
       const row = await tx.healthPost.findUniqueOrThrow({ where: { id }, select: postReceipt });
       return replayPost(row, memberId);
     }
     // A conflict rolls back the post. The shared set lock spans publication through commit.
-    await content.checkSet(tx);
+    if (day && input.setRevision) await assertHealthSetCurrent(tx, memberId, day, input.setRevision);
+    if (recording) await storeRecordedActivityTx(tx, recording.prepared, id);
     if (input.attachmentId) await publishHealthAttachmentTx(tx, memberId, id, input.attachmentId.toLowerCase());
     return { id, version: 1 };
   });
 }
 
-export async function patchHealthPost(auth: Auth, postId: string, input: Content & { expectedVersion: number }) {
+export async function patchHealthPost(auth: Auth, postId: string, input: Content & { expectedVersion: number; removeCardIds?: readonly string[] }) {
   const db = getPrisma(), memberId = auth.member.id, id = postId.toLowerCase();
-  if (input.caption === undefined && input.cards === undefined) throw invalidGameRequest("Choose an edit.");
+  if (input.caption === undefined && input.cards === undefined && !input.removeCardIds?.length) throw invalidGameRequest("Choose an edit.");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
-  const current = await db.healthPost.findFirst({ where: { id, authorMemberId: memberId, deletedAt: null }, select: { version: true } });
+  const current = await db.healthPost.findFirst({ where: { id, authorMemberId: memberId, deletedAt: null }, select: {
+    version: true, activity: { select: { id: true } }, cardsEncrypted: Boolean(input.removeCardIds),
+  } });
   if (!current) throw notFound();
   if (input.expectedVersion !== current.version) throw conflict();
-  const content = await preparePostContent(auth, id, input);
+  if (current.activity && input.cards?.length) throw invalidGameRequest("You can remove cards from a recorded post.");
+  if (input.removeCardIds && !current.activity) throw invalidGameRequest("Choose cards from the current set to edit this post.");
+  const { cards, day } = input.removeCardIds
+    ? { cards: await removeFrozenCards(memberId, id, current.cardsEncrypted, input.removeCardIds), day: undefined }
+    : await resolvePostCards(auth, input);
+  const data = await sealPostContent(memberId, id, input.caption, cards);
   return db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-    await content.checkSet(tx);
+    if (day && input.setRevision) await assertHealthSetCurrent(tx, memberId, day, input.setRevision);
     const updated = await tx.healthPost.updateMany({ where: { id, authorMemberId: memberId, deletedAt: null, version: input.expectedVersion },
-      data: { ...content.data, version: { increment: 1 } } });
+      data: { ...data, version: { increment: 1 } } });
     if (!updated.count) throw conflict();
     if (await tx.healthPost.findFirst({ where: { id, captionEncrypted: null, cardsEncrypted: { isEmpty: true }, attachment: null },
       select: { id: true } })) throw invalidGameRequest("Keep words, a card, or a photo.");

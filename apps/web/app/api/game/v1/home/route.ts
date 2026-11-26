@@ -2,7 +2,7 @@ import { readAppReviewGamePhoto } from "@/app/app-review-game-photos";
 import { gameRequestTimeZone, hasGameMultiplayer } from "@/src/lib/game/http/capability";
 import { isHostedAuthReviewMember } from "@/src/lib/better-auth/review-account";
 import { requireGameMemberAuth } from "@/src/lib/game/http/auth";
-import { isHealthFeedEnabled } from "@/src/lib/health-wins/flag";
+import { healthRecordCapability, isHealthFeedEnabled } from "@/src/lib/health-wins/flag";
 import { withLockedPreviewDeliveries } from "@/src/lib/game/http/media-routes";
 import { readHome } from "@/src/lib/game/service";
 import { refreshAppReviewGameForHome } from "@/src/lib/hosted-ops/app-review-game";
@@ -24,5 +24,6 @@ export const GET = withJsonError(async (request: Request) => runWithHostedDomain
     ? await readHome(memberId, multiplayer, auth, timeZone) : initialHome;
   const signed = new URL(request.url).searchParams.get("delivery") === "signed";
   return jsonOk({ ok: true, ...(signed ? await withLockedPreviewDeliveries(home, memberId) : home),
+    record: healthRecordCapability(memberId),
     ...(isHealthFeedEnabled(memberId) && { flags: { health_feed: true } }) });
 }));

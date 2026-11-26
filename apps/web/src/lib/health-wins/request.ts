@@ -10,7 +10,26 @@ const uuid = z.string().uuid().toLowerCase();
 const memberId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 const candidateId = z.string().min(1).max(256);
 const option = z.string().min(1).max(100);
-const card = z.strictObject({ candidateId, option });
+const digest = z.string().regex(/^[a-f0-9]{64}$/u);
+const card = z.strictObject({ candidateId, option, specRevision: z.union([uuid, digest]).optional() });
+const bpm = z.number().min(30).max(230);
+const seconds = z.number().int().nonnegative().max(6 * 60 * 60);
+const heartRateSummary = z.strictObject({ avgBpm: bpm, lowBpm: bpm, peakBpm: bpm });
+const activitySummary = z.strictObject({
+  id: uuid,
+  kind: z.enum(["sauna", "cold_plunge", "lift", "other", "run", "walk"]),
+  startedAt: z.iso.datetime({ offset: true }),
+  elapsedSec: seconds.positive(),
+  movingSec: seconds,
+  timerSec: seconds.positive().optional(),
+  heartRate: heartRateSummary.optional(),
+});
+const activityWithDisplay = activitySummary.extend({
+  heartRate: heartRateSummary.extend({ perMinute: z.array(bpm.int().nullable()).max(360) }).optional(),
+});
+
+export const previewActivityBody = z.strictObject({ activity: activityWithDisplay });
+export const saveActivityBody = z.strictObject({ activity: activitySummary });
 const postFields = {
   caption: z.string().max(2000).nullable().optional(),
   setRevision: uuid.optional(),
@@ -18,16 +37,20 @@ const postFields = {
     .refine(cards => new Set(cards.map(card => card.candidateId)).size === cards.length).optional(),
 };
 
-function hasCardRevision(input: { cards?: { candidateId: string }[]; setRevision?: string }) {
-  return !input.cards?.length || input.setRevision !== undefined;
-}
-
-export const createPostBody = z.strictObject({ ...postFields, id: uuid, attachmentId: uuid.optional() })
-  .refine(hasCardRevision)
+export const createPostBody = z.strictObject({
+  ...postFields, id: uuid, attachmentId: uuid.optional(), activity: activityWithDisplay.optional(),
+})
+  .refine(input => input.cards?.every(card => card.candidateId.startsWith("activity:")
+    ? input.activity !== undefined && digest.safeParse(card.specRevision).success
+    : input.setRevision !== undefined) ?? true)
   .refine(input => Boolean(input.caption?.trim() || input.cards?.length || input.attachmentId));
 export const patchPostBody = z.strictObject({
   ...postFields, expectedVersion: z.number().int().positive().max(2147483647),
-}).refine(hasCardRevision).refine(input => input.caption !== undefined || input.cards !== undefined);
+  removeCardIds: z.array(candidateId).min(1).max(12).refine(ids => new Set(ids).size === ids.length).optional(),
+})
+  .refine(input => !input.cards?.length || input.setRevision !== undefined)
+  .refine(input => !input.removeCardIds || (input.cards === undefined && input.setRevision === undefined))
+  .refine(input => input.caption !== undefined || input.cards !== undefined || input.removeCardIds !== undefined);
 export const commentBody = z.strictObject({
   id: uuid,
   body: z.string().trim().min(1).max(2000),

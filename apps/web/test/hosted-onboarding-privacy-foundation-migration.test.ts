@@ -113,6 +113,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "progressSharePhotos GameProgressSharePhoto[]",
     "progressShares GameProgressShare[]",
     "progressTaskMeasures GameProgressTaskMeasure[]",
+    "healthActivities HealthActivity[]",
     "healthPosts HealthPost[]",
     "healthPostComments HealthPostComment[]",
     "healthPostCheers HealthPostCheer[]",

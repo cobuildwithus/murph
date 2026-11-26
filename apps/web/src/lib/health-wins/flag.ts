@@ -12,6 +12,15 @@ export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env
   return healthFeedMemberIds(env).includes(memberId);
 }
 
+export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
+  const allowed = (env.MURPH_HEALTH_RECORD_MEMBER_IDS ?? "").split(",").some(entry => entry.trim() === memberId);
+  return allowed && isHealthFeedEnabled(memberId, env) ? { timed: true, route: false } as const : undefined;
+}
+
+export function assertHealthRecordEnabled(memberId: string): void {
+  if (!healthRecordCapability(memberId)) throw gameNotFound();
+}
+
 export function assertHealthFeedEnabled(memberId: string): void {
   if (!isHealthFeedEnabled(memberId)) throw gameNotFound();
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
 import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
 import { prepareHealthCandidates } from "../src/lib/health-wins/card-options";
@@ -158,6 +159,34 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await read()).toEqual({ people: [{ memberId: commenter.id, firstName: null, avatarUrl: null }] });
     expect((await unhide(viewer.request("hides/" + commenter.id, "DELETE"), memberContext(commenter.id))).status).toBe(200);
     expect(await read()).toEqual({ people: [] });
+  });
+
+  it("shows a frozen recorded chart to existing game partners and closes it after consent withdrawal", async () => {
+    const author = await person(), partner = await person(), stranger = await person();
+    await pair(author, partner);
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", author.id);
+    const activity = {
+      id: randomUUID(), kind: "cold_plunge", startedAt: "2031-06-12T15:34:00Z",
+      elapsedSec: 189, movingSec: 163, heartRate: { lowBpm: 83, avgBpm: 94, peakBpm: 109, perMinute: [90, 95, null, 97] },
+    };
+    const preview = await previewActivity(author.request("activities/cards", "POST", { activity }));
+    expect(preview.status).toBe(200);
+    const { cards: [card] } = await preview.json();
+    const pick = { candidateId: card.candidateId, specRevision: card.specRevision, option: "original" };
+    const body = { id: randomUUID(), activity, cards: [pick] };
+    expect((await post(author.request("posts", "POST", body))).status).toBe(200);
+    const shared = await readPost(partner, body.id);
+    expect(shared.status).toBe(200);
+    expect(await shared.json()).toMatchObject({ post: { cards: [{
+      id: pick.candidateId, specRevision: pick.specRevision,
+      spec: { kind: "activity_heart_rate", chart: { type: "heart_rate", perMinute: activity.heartRate.perMinute } },
+    }] } });
+    expect((await readPost(stranger, body.id)).status).toBe(404);
+    await revokeHostedConsentScope({ memberId: author.id, scope: "launch.health-data", prisma: db });
+    expect((await readPost(partner, body.id)).status).toBe(404);
+    const own = await readPost(author, body.id);
+    expect(own.status).toBe(200);
+    expect((await own.json()).post).toEqual({ id: body.id, createdAt: expect.any(String), version: 1 });
   });
 
   it("admits current partners and removes posts in both directions after a hide or block", async () => {
