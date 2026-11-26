@@ -3805,7 +3805,9 @@ Current product admission, delivery and native runtime safety rules remain.
   fences survive local job cleanup and prohibit replay after an ambiguous send.
   A definite provider failure consumes coverage. Quiet hours persist a safe wake,
   while an unknown region waits for verified contact information. A transient
-  handoff gets one timed retry and can resume on the next daily check.
+  handoff gets one timed retry. Each connection keeps only the newest eligible
+  occurrence. An occurrence expires 24 hours after acceptance. A chat opt-out
+  ends it immediately.
 - Clinical retrieval plans are frozen per run. Query-aware work is ordered by
   stable query/slice identity, bounded windows must be non-overlapping, and
   checkpoint completion is recorded per slice while resource-family outcome

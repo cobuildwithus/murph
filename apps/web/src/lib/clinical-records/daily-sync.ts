@@ -1,7 +1,8 @@
 import "server-only";
+import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
-import { freezeClinicalDailyNotification, type ClinicalDailyNoticeReaders } from "./notification";
+import { clinicalOccurrenceExpired, freezeClinicalDailyNotification, freshClinicalEvidence, type ClinicalDailyNoticeReaders } from "./notification";
 import { hasClinicalProcessorApprovals } from "./processor-registry";
 
 import { randomBytes } from "node:crypto";
@@ -32,9 +33,9 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
     where: { member: { suspendedAt: null }, status: { in: ["active", "error"] }, nextSyncAt: { lte: now },
       refreshTokenEncrypted: { not: null } },
     orderBy: [{ nextSyncAt: "asc" }, { id: "asc" }], take: 20,
-    select: { id: true, memberId: true },
+    select: { id: true, memberId: true, requiresProcessorApprovals: true },
   });
-  const readers = candidates.length ? await readServingReaders() : undefined;
+  const evidence = clinicalSweepEvidence();
   let checked = 0;
   let queued = 0;
   for (const candidate of candidates) {
@@ -42,7 +43,7 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
     checked++;
     let retryMs = CLINICAL_DAILY_SYNC_MS;
     try {
-      if (await admitWithServingReaders({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now }, readers)) {
+      if (await admitWithServingReaders({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now }, candidate.requiresProcessorApprovals ? evidence : undefined)) {
         queued++;
         continue; // Admission committed its own date.
       }
@@ -57,18 +58,25 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
       data: { nextSyncAt: new Date(now.getTime() + retryMs) },
     });
   }
+  evidence.report(checked, queued);
   return { checked, queued, failed };
 }
 
 async function resumeDueClinicalNotifications(now: Date, stop: AbortSignal) {
   const prisma = getPrisma();
   const due = await prisma.clinicalRecordRetrievalRun.findMany({ where: { notificationRetryAt: { lte: now } },
-    select: { id: true, memberId: true, generation: true, notificationRetryAt: true, notificationDeferral: true },
+    select: { id: true, memberId: true, generation: true, completedAt: true, notificationCoverage: true, notificationRetryAt: true, notificationDeferral: true },
     orderBy: [{ notificationRetryAt: "asc" }, { id: "asc" }], take: 20 });
   let failures = 0;
   for (const run of due) {
     if (stop.aborted) break;
     try {
+      if (clinicalOccurrenceExpired(run.completedAt, now)) {
+        await prisma.clinicalRecordRetrievalRun.updateMany({ where: { id: run.id, notificationRetryAt: run.notificationRetryAt,
+          notificationCoverage: run.notificationCoverage }, data: { notificationRetryAt: null, notificationDeferral: null,
+          notificationCoverage: run.notificationCoverage === "attempted" ? "settled" : "suppressed" } });
+        continue;
+      }
       await runWithHostedDomainRootUnwrapCache(async () => {
         const root = await unwrapHostedDomainRootForWeb({ domain: getHostedCryptoDomainForLane("mailbox-payload"),
           prisma, retainFailureInScopedCache: true, signal: stop, userId: run.memberId });
@@ -98,21 +106,80 @@ async function resumeDueClinicalNotifications(now: Date, stop: AbortSignal) {
 
 type DailyAdmission = { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date };
 
-async function readServingReaders() {
-  try {
-    const observedAt = Date.now();
-    const readers = await readHostedExecutionControlClientIfConfigured(2000)?.readClinicalNoticeReaders();
-    return readers && { ...readers, observedAt };
-  } catch {
-    return undefined; // Unavailable evidence must never prevent ordinary retrieval.
-  }
+/** One retry for an unavailable sample. Reuse a failure within the same window to avoid fanout. */
+function clinicalSweepEvidence() {
+  const counts = { fetch_failed: 0, port_unavailable: 0, stale_evidence: 0, reads: 0, candidatesWithoutEvidence: 0, admittedWithoutEvidence: 0 };
+  let readers: ClinicalDailyNoticeReaders | undefined;
+  let sampledAt: number | undefined;
+  return {
+    async read() {
+      if (sampledAt === undefined || !freshClinicalEvidence(sampledAt)) {
+        if (sampledAt !== undefined) counts.stale_evidence++;
+        readers = undefined;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          sampledAt = Date.now();
+          counts.reads++;
+          try {
+            const value = await readHostedExecutionControlClientIfConfigured(2000)?.readClinicalNoticeReaders();
+            if (!value) counts.fetch_failed++;
+            else if (!freshClinicalEvidence(sampledAt)) counts.stale_evidence++;
+            else {
+              readers = { ...value, observedAt: sampledAt };
+              break;
+            }
+          } catch (error) {
+            if (readCloudflareHostedControlHttpError(error)?.status === 503) counts.port_unavailable++;
+            else counts.fetch_failed++;
+          }
+        }
+      }
+      if (!readers) counts.candidatesWithoutEvidence++;
+      return readers;
+    },
+    staleAtLock() { counts.stale_evidence++; },
+    admittedWithoutEvidence() { counts.admittedWithoutEvidence++; },
+    report(checked: number, queued: number) {
+      if (counts.fetch_failed || counts.port_unavailable || counts.stale_evidence) {
+        console.warn("Clinical daily admission reader evidence", { eventCode: "clinical_daily_reader_evidence", ...counts, checked, queued });
+      }
+    },
+  };
 }
 
 export async function admitClinicalDailySync(input: DailyAdmission): Promise<boolean> {
-  return admitWithServingReaders(input, await readServingReaders());
+  const evidence = clinicalSweepEvidence();
+  const admitted = await admitWithServingReaders(input, evidence);
+  evidence.report(1, Number(admitted));
+  return admitted;
 }
 
-async function admitWithServingReaders(input: DailyAdmission, readers?: ClinicalDailyNoticeReaders): Promise<boolean> {
+const staleDuringAdmission = Symbol("clinical reader evidence expired during admission");
+
+async function admitWithServingReaders(input: DailyAdmission, evidence?: ReturnType<typeof clinicalSweepEvidence>) {
+  async function attempt(refreshAtLock: boolean) {
+    let sample = await evidence?.read();
+    const readLockedSample = () => {
+      if (sample && !freshClinicalEvidence(sample.observedAt)) {
+        if (refreshAtLock) throw staleDuringAdmission;
+        evidence?.staleAtLock();
+        sample = undefined;
+      }
+      return sample;
+    };
+    const admitted = await admitClinicalRun(input, readLockedSample);
+    if (admitted && !sample) evidence?.admittedWithoutEvidence();
+    return admitted;
+  }
+  try {
+    return await attempt(true);
+  } catch (error) {
+    if (error !== staleDuringAdmission) throw error;
+    // The transaction rolled back. Refresh outside the member lock before retrying this occurrence.
+    return attempt(false);
+  }
+}
+
+async function admitClinicalRun(input: DailyAdmission, readLockedSample: () => ClinicalDailyNoticeReaders | undefined): Promise<boolean> {
   if (!await readClinicalTransportAccess({ memberId: input.memberId })) return false;
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
@@ -160,12 +227,11 @@ async function admitWithServingReaders(input: DailyAdmission, readers?: Clinical
         } });
         return null;
       }
-      await revisitDeferredReply(tx, connection, input.now);
       const runId = `crr_${randomBytes(24).toString("base64url")}`;
       await tx.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
         retrievalGeneration: generation, status: "active", nextSyncAt: new Date(input.now.getTime() + CLINICAL_DAILY_SYNC_MS),
       } });
-      const notification = await freezeClinicalDailyNotification(tx, connection, grantedScopesJson, readers);
+      const notification = await freezeClinicalDailyNotification(tx, connection, grantedScopesJson, readLockedSample());
       await tx.clinicalRecordRetrievalRun.create({ data: {
         id: runId, memberId: input.memberId, connectionId: connection.id, generation,
         createdAt: input.now, status: "queued", retrievalProtocol: "query-slices-v2", retrievalPlanJson,
@@ -184,11 +250,4 @@ function hasDueClinicalGrant(connection: {
 }, now: Date) {
   return ["active", "error"].includes(connection.status) && Boolean(connection.refreshTokenEncrypted)
     && Boolean(connection.patientIdEncrypted) && connection.nextSyncAt !== null && connection.nextSyncAt <= now;
-}
-
-async function revisitDeferredReply(tx: import("@prisma/client").Prisma.TransactionClient, connection: { id: string; memberId: string }, now: Date) {
-  // Revisit one still-blocked handoff on a new hospital check, without a polling timer.
-  const held = await tx.clinicalRecordRetrievalRun.findFirst({ where: { memberId: connection.memberId,
-    connectionId: connection.id, notificationDeferral: "retried", notificationRetryAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
-  if (held) await tx.clinicalRecordRetrievalRun.update({ where: { id: held.id }, data: { notificationRetryAt: now } });
 }

@@ -1,4 +1,4 @@
-import { CLINICAL_TEXT_TRANSPORT_BLOCK, CLINICAL_REPLY_DEFERRED } from "@murphai/hosted-execution/clinical-records-boundary";
+import { clinicalBlockDisposition, CLINICAL_TEXT_TRANSPORT_BLOCK, CLINICAL_REPLY_DEFERRED } from "@murphai/hosted-execution/clinical-records-boundary";
 import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
@@ -982,7 +982,7 @@ async function preflightClinicalDispatch(input: HostedAssistantDispatchPreflight
   }
   const block = authority?.deliveryBlockCode ?? CLINICAL_TEXT_TRANSPORT_BLOCK;
   const deferred = target && authority && !authority.clinicalReplyAuthorized
-    && block !== "clinical_authority_unavailable" && block !== "chat_opted_out";
+    && clinicalBlockDisposition(block) === "hold";
   if (deferred) {
     const { intent: parked } = await saveAssistantOutboxIntentIfUnchanged({ vault: input.vaultRoot,
       expectedDedupeKey: intent.dedupeKey, expectedStatus: intent.status, expectedUpdatedAt: intent.updatedAt,
@@ -7861,8 +7861,8 @@ function assertSendPolicy(key: string | null, block: HostedRuntimeLinqRecentInbo
   const code = `ASSISTANT_LINQ_EGRESS_${
     block.toUpperCase()
   }`;
-  if (key?.startsWith("clinical-change:") && block !== "chat_opted_out") {
-    const permanent = block === "clinical_authority_unavailable";
+  if (key?.startsWith("clinical-change:")) {
+    const permanent = clinicalBlockDisposition(block) === "close";
     throw markHostedDeliveryPreProvider(createAssistantDeliveryTerminalError(permanent ? code : CLINICAL_REPLY_DEFERRED,
       "Clinical reply authority changed before provider entry."));
   }

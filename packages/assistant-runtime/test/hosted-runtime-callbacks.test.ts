@@ -4939,7 +4939,7 @@ describe("hosted runtime callbacks", () => {
     expect(dependencies).not.toHaveProperty("sendVoice");
   });
 
-  it.each(["revoked", "second recipient"])("refuses clinical outbox preflight for %s without sending text to Web", async reason => {
+  it.each(["revoked", "second recipient", "opted out", "line blocked"] as const)("refuses clinical outbox preflight for %s without sending text to Web", async reason => {
     const idempotencyKey = "clinical-change:v1:synthetic-run:notice";
     const target = "synthetic-private-thread";
     const effect = createEffect({ channel: "linq", idempotencyKey, threadId: target, threadIsDirect: true,
@@ -4954,18 +4954,27 @@ describe("hosted runtime callbacks", () => {
       expect(result.action).toBe("stop");
       return createDispatchResult(result.intent);
     });
-    const check = vi.fn(async () => reason === "revoked" ? { deliveryBlockCode: "clinical_authority_unavailable" as const }
+    const check = vi.fn(async () => reason === "line blocked" ? { deliveryBlockCode: "operator_disabled" as const }
+      : reason === "opted out" ? { deliveryBlockCode: "chat_opted_out" as const }
+      : reason === "revoked" ? { deliveryBlockCode: "clinical_authority_unavailable" as const }
       : { clinicalReplyAuthorized: true as const, resolvedRoute: { target, targetKind: "thread" as const, threadIsDirect: true,
           conversationThreadId: null, directRecipientPhoneNumber: null, fromPhoneNumber: null } });
     await drainHostedPreparedAssistantDeliveries({ ...HOSTED_WAKE, assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement: check }) });
-    const expectedCode = reason === "revoked"
-      ? "ASSISTANT_LINQ_EGRESS_CLINICAL_AUTHORITY_UNAVAILABLE"
-      : "ASSISTANT_LINQ_EGRESS_CLINICAL_IMESSAGE_ONLY_UNAVAILABLE";
-    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      error: expect.objectContaining({ code: expectedCode, retryable: false }),
-      intentId: intent.intentId, onlyCurrentStatuses: ["pending", "retryable"], status: "failed", vault: HOSTED_WAKE.vaultRoot,
-    }));
+    if (reason === "line blocked") {
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).toHaveBeenCalledWith(expect.objectContaining({
+        intent: expect.objectContaining({ nextAttemptAt: null, status: "retryable",
+          lastError: expect.objectContaining({ code: "ASSISTANT_CLINICAL_REPLY_DEFERRED" }) }),
+      }));
+      expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+    } else {
+      const code = { revoked: "CLINICAL_AUTHORITY_UNAVAILABLE", "opted out": "CHAT_OPTED_OUT",
+        "second recipient": "CLINICAL_IMESSAGE_ONLY_UNAVAILABLE" }[reason];
+      expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        error: expect.objectContaining({ code: "ASSISTANT_LINQ_EGRESS_" + code, retryable: false }),
+        intentId: intent.intentId, onlyCurrentStatuses: ["pending", "retryable"], status: "failed", vault: HOSTED_WAKE.vaultRoot,
+      }));
+    }
     expect(check).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey, target, authorityCheckOnly: true,
       targetKind: "thread", homeRouteFallbackAllowed: false }), expect.anything());
     expect(JSON.stringify(check.mock.calls)).not.toContain(effect.payload.message);

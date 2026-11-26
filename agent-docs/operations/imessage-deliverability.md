@@ -432,6 +432,7 @@ requires the member’s existing explicit detail setting. Each attempt, includin
 a retry or another bubble, must recheck the run, preference, named approvals,
 private recipient, proactive pause, line health and recipient-region window.
 A group, replacement thread or different channel cannot receive the text.
+Losing the first text bubble’s dispatch response before Web records a provider attempt can leave it unsent and ends the rest of that reply.
 Detail uses the ordinary native voice memo. If Web granted its dispatch and
 the runner lost the result, the outbox abandons the ambiguous memo and the
 run counts as attempted. Other saved bubbles still require their own keys and

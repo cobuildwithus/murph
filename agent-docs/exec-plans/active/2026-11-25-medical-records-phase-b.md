@@ -102,7 +102,7 @@ OpenAI approval, preference revision and verified private route. Eligibility is
 never backfilled. First imports, member starts and legacy runs stay silent
 through late enrichment. A change receipt can precede the accepted terminal
 outcome or arrive after a later daily check has started. It belongs to its
-originating run. Empty receipts produce no notification.
+originating run. A later eligible daily admission supersedes an older unannounced receipt. Empty receipts produce no notification.
 
 **Private reply path (#5325).** Notices and details use the frozen private
 thread on the service Linq selects. A detail turn has the same shell and
@@ -134,7 +134,9 @@ the binding across local cleanup. Web records provider outcomes and holds
 transient blocks on that run. A regional window supplies its next safe wake.
 A missing verified number or unsupported region has no timer. Verification can
 wake the hold, and every wake rechecks current authority. A transient handoff
-gets one timed recovery wake and can be revisited at the next daily admission.
+gets one timed recovery wake. Only the newest eligible run can deliver for a connection,
+and its occurrence expires 24 hours after acceptance. A permanent block closes it silently.
+A lost dispatch response for the first text bubble ends the reply when Web has no recorded provider attempt.
 
 **Deploy and operate.** Apply the additive migration before serving this Web
 build. Deploy the full hosted runner and manually deploy the Cloudflare port
@@ -153,4 +155,4 @@ verified private route and an accepted baseline in that credential epoch. Roll
 back admissions first by setting `CLINICAL_DAILY_NOTICE_ADMISSION_PAUSED=1` on
 Web. Existing replies still check current policy. Keep revision 3 or later at all readers and retain the
 dispatch fence, saved reply binding and terminal retry exclusion through all
-outstanding work and restorable snapshots.
+outstanding work and restorable snapshots. Older runners reject the strict detail decision containing `savedTurnId`.

@@ -274,3 +274,28 @@ export const CLINICAL_DAILY_NOTICE_REVISION = 3;
 
 /** Only Web's durable wake can re-arm a clinical reply stopped before provider entry. */
 export const CLINICAL_REPLY_DEFERRED = "ASSISTANT_CLINICAL_REPLY_DEFERRED";
+
+/** Member-controlled authority loss ends an occurrence. Service health and rollout blocks can clear on their own. */
+export function clinicalBlockDisposition(code: import("./routes.js").HostedRuntimeLinqDeliveryBlockCode) {
+  switch (code) {
+    case "clinical_authority_unavailable":
+    case "chat_opted_out":
+      return "close";
+    case "automation_engagement_paused":
+    case "clinical_checkpoint_pending":
+    case "clinical_window_closed":
+    case "clinical_imessage_only_unavailable":
+    case "operator_disabled":
+    case "line_flagged":
+    case "line_critical":
+    case "line_at_risk_new_conversation":
+    case "chat_critical":
+    case "delivery_unhealthy":
+    case "delivery_warning_new_conversation":
+      return "hold";
+    default: {
+      const unclassified: never = code;
+      throw new ContractValidationError("Unknown clinical dispatch policy: " + unclassified);
+    }
+  }
+}

@@ -215,6 +215,7 @@ describe("createCloudflareHostedControlClient", () => {
       "putGameMedia",
       "putProgressPic",
       "putRecapMedia",
+      "readClinicalNoticeReaders",
       "readGameMedia",
       "readProgressPic",
       "readRecapMedia",
@@ -224,6 +225,13 @@ describe("createCloudflareHostedControlClient", () => {
       "statGameImage",
       "statGameMedia",
     ]);
+  });
+
+  it("rejects serving evidence for another request nonce", async () => {
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://control.example.test",
+      getBearerToken: async () => "synthetic", fetchImpl: async () =>
+        Response.json({ nonce: "another-request", version: "synthetic", runner: 3, cloudflarePort: 3 }) });
+    await expect(client.readClinicalNoticeReaders()).rejects.toThrow();
   });
 
   it("enqueues an opaque device-webhook envelope without binding member authority", async () => {

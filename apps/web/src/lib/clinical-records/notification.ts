@@ -1,4 +1,4 @@
-import { CLINICAL_DAILY_NOTICE_REVISION, parseClinicalDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
+import { CLINICAL_DAILY_NOTICE_REVISION, clinicalBlockDisposition, parseClinicalDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import "server-only";
 import { CLINICAL_RECEIPT_PROTOCOL } from "@murphai/clinical-records/retrieval-limits";
 import { createHash } from "node:crypto";
@@ -15,6 +15,8 @@ import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { readHostedConsentStatus } from "../legal/consent";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES } from "./client-contracts";
 import { clinicalProcessors, hasClinicalProcessorApprovals } from "./processor-registry";
+
+import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 
 type RunPointer = { memberId: string; runId: string; generation: number };
 
@@ -56,18 +58,30 @@ async function readClinicalNotificationRecipient(tx: Prisma.TransactionClient, m
 
 export type ClinicalDailyNoticeReaders = { runner: number; cloudflarePort: number; observedAt: number };
 
+export function freshClinicalEvidence(observedAt: number, now = Date.now()) {
+  return observedAt <= now && now - observedAt < 30_000;
+}
+
 /** Daily admission has locked the member and checked launch consent, the due grant and named approvals. */
 export async function freezeClinicalDailyNotification(
   tx: Prisma.TransactionClient,
-  connection: Pick<ClinicalRecordConnection, "memberId" | "requiresProcessorApprovals" | "disconnectedAt" | "baselineTokenVersion" | "tokenVersion">,
+  connection: Pick<ClinicalRecordConnection, "id" | "memberId" | "requiresProcessorApprovals" | "disconnectedAt" | "baselineTokenVersion" | "tokenVersion">,
   grantedScopes: string[], readers?: ClinicalDailyNoticeReaders,
 ) {
   if (process.env.CLINICAL_DAILY_NOTICE_ADMISSION_PAUSED === "1") return null;
-  if (!readers || readers.observedAt > Date.now() || Date.now() - readers.observedAt > 30_000 || readers.runner < CLINICAL_DAILY_NOTICE_REVISION || readers.cloudflarePort < CLINICAL_DAILY_NOTICE_REVISION
+  if (!readers || !freshClinicalEvidence(readers.observedAt) || readers.runner < CLINICAL_DAILY_NOTICE_REVISION || readers.cloudflarePort < CLINICAL_DAILY_NOTICE_REVISION
     || !connection.requiresProcessorApprovals || connection.disconnectedAt
     || connection.baselineTokenVersion !== connection.tokenVersion || !grantedScopes.includes("offline_access")) return null;
   const recipient = await readVerifiedClinicalRecipient(tx, connection.memberId);
   if (!recipient) return null;
+  // The new eligible run and retirement of all prior pins commit together under the member lock.
+  const older = { connectionId: connection.id, notificationTokenVersion: { not: null } };
+  const terminal = { notificationRetryAt: null, notificationDeferral: null };
+  await tx.clinicalRecordRetrievalRun.updateMany({ where: { ...older, OR: [{ notificationCoverage: null },
+    { notificationCoverage: { in: ["proved", "published"] } }] }, data: { ...terminal, notificationCoverage: "suppressed" } });
+  await tx.clinicalRecordRetrievalRun.updateMany({ where: { ...older, notificationCoverage: "attempted" },
+    data: { ...terminal, notificationCoverage: "settled" } });
+
   return {
     retrievalProtocol: CLINICAL_RECEIPT_PROTOCOL,
     notificationTokenVersion: connection.tokenVersion,
@@ -106,9 +120,19 @@ function readClinicalNotificationMember(tx: Prisma.TransactionClient, memberId: 
   });
 }
 
-function acceptedClinicalOccurrence(authority: Awaited<ReturnType<typeof readClinicalNotificationAuthority>>) {
-  return authority && ["published", "attempted"].includes(authority.run.notificationCoverage ?? "") && authority.run.completedAt
-    && ["complete", "partial"].includes(authority.run.status) ? authority : null;
+export function clinicalOccurrenceExpired(acceptedAt: Date | null, now: Date) {
+  return acceptedAt !== null && now.getTime() - acceptedAt.getTime() >= 24 * 60 * 60_000;
+}
+
+async function acceptedClinicalOccurrence(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }, now: Date) {
+  const authority = await readClinicalNotificationAuthority(tx, pointer);
+  if (!authority?.run.completedAt || !["complete", "partial"].includes(authority.run.status)
+    || !["published", "attempted"].includes(authority.run.notificationCoverage ?? "")) return null;
+  if (clinicalOccurrenceExpired(authority.run.completedAt, now)) {
+    await closeUnauthorizedClinicalReply(tx, pointer);
+    return null;
+  }
+  return authority;
 }
 
 /** Decrypt before taking the member lock. The locked authority validates this phone's lookup key. */
@@ -128,13 +152,13 @@ export async function readClinicalNotificationDecision(input: RunPointer & { sav
       const missing = input.savedReplyResult.status === "missing";
       await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: input.runId, memberId: input.memberId,
         generation: input.generation, notificationTurnId: input.savedReplyResult.turnId,
-        notificationCoverage: { in: missing ? ["published", "attempted"] : ["attempted"] } },
+        notificationCoverage: { in: ["published", "attempted"] } },
         data: { notificationCoverage: missing ? "lost" : "settled", notificationRetryAt: null, notificationDeferral: null } });
       return null;
     }
-    const current = acceptedClinicalOccurrence(await readClinicalNotificationAuthority(tx, input));
+    const current = await acceptedClinicalOccurrence(tx, input, now);
     if (!current) {
-      if (!await holdIfPhoneUnavailable(tx, input)) await closeUnauthorizedClinicalReply(tx, input);
+      if (!await holdIfPhoneUnavailable(tx, input, now)) await closeUnauthorizedClinicalReply(tx, input);
       return null;
     }
     if (await deferOutsideClinicalWindow(tx, input, current, windowPhone, now)) return null;
@@ -160,9 +184,9 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
   const key = parseClinicalDeliveryKey(input.key);
   if (!key || input.route.targetKind !== "thread" || !input.route.threadIsDirect) return "clinical_authority_unavailable";
   const pointer = { memberId: input.memberId, runId: key.runId };
-  const authority = acceptedClinicalOccurrence(await readClinicalNotificationAuthority(tx, pointer));
+  const authority = await acceptedClinicalOccurrence(tx, pointer, input.now ?? new Date());
   if (!authority) {
-    if (await holdIfPhoneUnavailable(tx, pointer)) return "clinical_window_closed";
+    if (await holdIfPhoneUnavailable(tx, pointer, input.now)) return "clinical_window_closed";
     await closeUnauthorizedClinicalReply(tx, pointer);
     return "clinical_authority_unavailable";
   }
@@ -171,6 +195,16 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
   }
   const block = clinicalCheckpointBlock(key, authority.run, input.providerEntry);
   if (block) return block;
+  if (input.providerEntry && key.turnId && key.suffix !== ":bubble:0" && !key.suffix.startsWith(":bubble:0:")
+    && authority.run.notificationCoverage === "published") {
+    // A granted first text with no durable outcome may have disappeared before provider entry.
+    const root = input.key.slice(0, input.key.length - key.suffix.length);
+    const firstKeys = firstClinicalTextBubbleSuffixes.map(suffix => createHostedLinqDeliveryIdempotencyLookupKey(root + suffix)!);
+    if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: firstKeys } }, select: { id: true } })) {
+      await closeUnauthorizedClinicalReply(tx, pointer);
+      return "clinical_authority_unavailable";
+    }
+  }
   return await deferOutsideClinicalWindow(tx, pointer, authority, input.windowPhone, input.now ?? new Date()) ? "clinical_window_closed" : null;
 }
 
@@ -218,10 +252,16 @@ async function closeUnauthorizedClinicalReply(tx: Prisma.TransactionClient, poin
   }
 }
 
-async function holdIfPhoneUnavailable(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }) {
+async function holdIfPhoneUnavailable(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }, now = new Date()) {
   const verified = await tx.hostedMemberIdentity.findFirst({ where: { memberId: pointer.memberId,
     phoneNumberVerifiedAt: { not: null }, phoneNumberEncrypted: { not: null } }, select: { memberId: true } });
   if (verified) return false;
+  const origin = await readClinicalNotificationRun(tx, pointer);
+  if (!origin?.approved || clinicalOccurrenceExpired(origin.run.completedAt, now)) return false;
+  const stillEnabled = await tx.hostedMember.findFirst({ where: { id: pointer.memberId, suspendedAt: null,
+    clinicalRecordMessageMode: { not: "off" }, clinicalRecordMessageRevision: origin.run.notificationSettingRevision ?? -1,
+    AND: [activeHostedPersonAccessWhere(), hostedRuntimeMemberEligibleWhere()] }, select: { id: true } });
+  if (!stillEnabled || !(await readHostedConsentStatus({ memberId: pointer.memberId, prisma: tx })).launchGranted) return false;
   await deferClinicalReply(tx, pointer, null);
   return true;
 }
@@ -230,6 +270,34 @@ export async function deferTransientClinicalReply(tx: Prisma.TransactionClient, 
   await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: pointer.runId, memberId: pointer.memberId,
     notificationCoverage: { in: ["published", "attempted"] }, notificationDeferral: null, notificationRetryAt: null },
     data: { notificationDeferral: "transient", notificationRetryAt: new Date(Date.now() + 15 * 60_000) } });
+}
+
+export async function recordClinicalPolicyBlock(tx: Prisma.TransactionClient, memberId: string, deliveryKey: string,
+  code: Parameters<typeof clinicalBlockDisposition>[0], route: HostedExecutionResolvedLinqDeliveryRoute) {
+  const key = parseClinicalDeliveryKey(deliveryKey);
+  if (!key) return;
+  const pointer = { runId: key.runId, memberId };
+  const authority = await acceptedClinicalOccurrence(tx, pointer, new Date());
+  if (!authority) {
+    if (!await holdIfPhoneUnavailable(tx, pointer)) await closeUnauthorizedClinicalReply(tx, pointer);
+    return;
+  }
+  if (!matchesClinicalRoute(route, authority)) return;
+  if (clinicalBlockDisposition(code) === "hold") await deferTransientClinicalReply(tx, pointer);
+  else await closeUnauthorizedClinicalReply(tx, pointer);
+}
+
+const firstClinicalTextBubbleSuffixes = [":bubble:0", ":bubble:0:link", ":bubble:0:fallback", ":bubble:0:transcript"];
+
+export async function recordClinicalDispatchClaim(tx: Prisma.TransactionClient, memberId: string, deliveryKey: string, claimed: boolean) {
+  if (claimed && !deliveryKey.endsWith(":voice")) return;
+  const key = parseClinicalDeliveryKey(deliveryKey);
+  if (!claimed && key?.turnId && firstClinicalTextBubbleSuffixes.includes(key.suffix)) {
+    await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId, notificationTurnId: key.turnId,
+      notificationCoverage: "published" }, data: { notificationCoverage: "lost", notificationRetryAt: null, notificationDeferral: null } });
+    return;
+  }
+  await recordClinicalProviderAttempt(tx, memberId, deliveryKey);
 }
 
 export async function recordClinicalProviderAttempt(tx: Prisma.TransactionClient, memberId: string, idempotencyKey: string | null) {

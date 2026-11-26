@@ -1,4 +1,3 @@
-import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
@@ -175,7 +174,6 @@ export const POST = withJsonError(async (request: Request) => {
   const clinicalWindowPhone = clinicalKey
     ? await (await import("@/src/lib/clinical-records/notification")).readClinicalWindowPhone(userId) : null;
   const assertion = await prisma.$transaction(async (tx) => {
-    if (clinicalKey) await lockHostedMemberRow(tx, userId);
     await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target: lockTarget, userId });
 
     const asserted = await assertHostedLinqRecentInboundEngagementForRuntime({
@@ -260,14 +258,13 @@ export const POST = withJsonError(async (request: Request) => {
       target: finalAuthority.resolvedRoute.target,
       targetKind: finalAuthority.resolvedRoute.targetKind,
     });
-    async function deferClinicalHandoff() {
+    async function recordClinicalBlock(code: import("@murphai/hosted-execution/routes").HostedRuntimeLinqDeliveryBlockCode) {
       if (!clinicalKey) return;
-      const { parseClinicalDeliveryKey } = await import("@murphai/hosted-execution/clinical-records-boundary");
-      const key = parseClinicalDeliveryKey(clinicalKey);
-      if (key) await (await import("@/src/lib/clinical-records/notification")).deferTransientClinicalReply(tx, { runId: key.runId, memberId: userId });
+      const { recordClinicalPolicyBlock } = await import("@/src/lib/clinical-records/notification");
+      await recordClinicalPolicyBlock(tx, userId, clinicalKey, code, finalAuthority.resolvedRoute);
     }
     if (health.policy.kind === "block") {
-      if (health.policy.code !== "chat_opted_out") await deferClinicalHandoff();
+      await recordClinicalBlock(health.policy.code);
       return {
         assistantAskFallbackRequired: false,
         asserted: finalAuthority,
@@ -310,7 +307,7 @@ export const POST = withJsonError(async (request: Request) => {
       now: new Date(),
       prisma: tx,
     })) {
-      await deferClinicalHandoff();
+      await recordClinicalBlock("automation_engagement_paused");
       return {
         assistantAskFallbackRequired: false,
         asserted: finalAuthority,
@@ -687,14 +684,14 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
 async function authorizeClinicalDispatch(tx: Prisma.TransactionClient, userId: string, clinicalKey: string, windowPhone: string | null,
   finalAuthority: Awaited<ReturnType<typeof assertHostedLinqRecentInboundEngagementForRuntime>>,
   authorityCheckOnly: boolean, deliveryPurpose: unknown, intentId: string | null) {
-  const { clinicalEgressBlock, recordClinicalProviderAttempt } = await import("@/src/lib/clinical-records/notification");
+  const { clinicalEgressBlock, recordClinicalDispatchClaim } = await import("@/src/lib/clinical-records/notification");
   const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
     windowPhone, route: finalAuthority.resolvedRoute, providerEntry: !authorityCheckOnly });
   const dispatch = deliveryBlockCode ? { progressUpdateSuppressed: false, providerDispatchClaimed: null }
     : await claimHostedLinqEngagementProviderDispatchTx({ assistantAskFallbackRequired: false, authorityCheckOnly,
       deliveryPurpose, idempotencyKey: clinicalKey, intentId, resolvedRoute: finalAuthority.resolvedRoute, tx });
   // The native memo API has no replay key. This grant is its last provable handoff.
-  if (dispatch.providerDispatchClaimed === false || (dispatch.providerDispatchClaimed && clinicalKey.endsWith(":voice"))) await recordClinicalProviderAttempt(tx, userId, clinicalKey);
+  if (typeof dispatch.providerDispatchClaimed === "boolean") await recordClinicalDispatchClaim(tx, userId, clinicalKey, dispatch.providerDispatchClaimed);
   return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
     clinicalReplyAuthorized: deliveryBlockCode === null, deliveryPosture: null, ackReaction: null, ...dispatch };
 }

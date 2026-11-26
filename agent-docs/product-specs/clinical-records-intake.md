@@ -638,7 +638,9 @@ or allowance.
 Off suppresses publication. Detail uses one scheduled turn with the private
 run receipt reference and the member’s explicit detail setting. Web binds the first durably saved private
 reply to the originating run. Replays drain that reply under the original
-bubble keys. A restore missing the bound reply ends silently.
+bubble keys. A restore missing the bound reply ends silently. Only the newest
+eligible run for a connection can deliver. Its notification expires 24 hours
+after the import is accepted.
 
 The owner withdrew the iMessage-only requirement. Notices and details may use
 the exact verified private thread frozen at admission, including when Linq

@@ -1,3 +1,11 @@
+import * as chatLock from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import { createServer } from "node:http";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { POST as checkpointRoute } from "../app/api/internal/hosted-workspace/checkpoint/route";
+import { claimHostedRuntime } from "@/src/lib/hosted-execution/runtime-owner";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { incrementHostedLinqInboundDailyState } from "@/src/lib/hosted-onboarding/linq-daily-state";
 import * as callbackAuth from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { POST as authorizeEgress } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
@@ -41,6 +49,12 @@ import { signerPem } from "./clinical-records-synthetic-signer";
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
+
+function lockBarrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(release => { resolve = release; });
+  return { promise, resolve };
+}
 
 async function nativeAuth(memberId: string) {
   vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 11).toString("base64url"));
@@ -113,13 +127,17 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
 
   async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", {
     replacement = true, readers = currentReaders, verified = true, group = false, phone = "+12025550137",
-    baselineStatus = "completed", scheduledSweep = false, admissionsPaused = false,
+    baselineStatus = "completed", scheduledSweep = false, admissionsPaused = false, firstEvidenceFailure,
   }: { replacement?: boolean; readers?: typeof currentReaders; verified?: boolean; group?: boolean; phone?: string;
-    baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean; admissionsPaused?: boolean } = {}) {
+    baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean; admissionsPaused?: boolean; firstEvidenceFailure?: "transport" | "staged" } = {}) {
+    let reads = 0;
     if (admissionsPaused) vi.stubEnv("CLINICAL_DAILY_NOTICE_ADMISSION_PAUSED", "1");
     vi.spyOn(control, "readHostedExecutionControlClientIfConfigured").mockReturnValue(createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test", getBearerToken: async () => "synthetic",
       fetchImpl: async (url, init) => {
+        reads++;
+        if (reads === 1 && firstEvidenceFailure === "transport") throw new Error("Synthetic unavailable control route");
+        if (reads === 1 && firstEvidenceFailure === "staged") return new Response(null, { status: 503 });
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer synthetic");
         return Response.json({ ...readers, version: "synthetic-release", nonce: new URL(String(url)).searchParams.get("nonce") });
       },
@@ -173,10 +191,10 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const [run] = await f.runs();
     const pointer = { memberId, runId: run!.id, generation: run!.generation };
     const count = () => client.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.change-recorded" } });
-    const terminal = async (proof = false) => {
-      const plan = clinicalFhirRetrievalPlanSchema.parse(run!.retrievalPlanJson);
-      await recordClinicalRetrievalOutcome({ memberId, request: { generation: pointer.generation, runId: pointer.runId,
-        status: "partial", retrievalProtocol: run!.retrievalProtocol === "query-slices-receipts-v3" ? "query-slices-receipts-v3" : "query-slices-v2",
+    const terminal = async (proof = false, acceptedRun = run!) => {
+      const plan = clinicalFhirRetrievalPlanSchema.parse(acceptedRun.retrievalPlanJson);
+      await recordClinicalRetrievalOutcome({ memberId, request: { generation: acceptedRun.generation, runId: acceptedRun.id,
+        status: "partial", retrievalProtocol: acceptedRun.retrievalProtocol === "query-slices-receipts-v3" ? "query-slices-receipts-v3" : "query-slices-v2",
         retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
         counts: emptyCounts,
         ...(proof ? { hasChangeReceipt: true } : {}),
@@ -186,7 +204,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     return { ...f, pointer, threadId, chat, count, cleanup, terminal, authority };
   }
 
-  it.each(["notice", "detail", "off"] as const)("converges early and late proof on the originating run in %s mode", async mode => {
+  it.each(["notice", "detail", "off"] as const)("retires the originating run when a newer eligible daily run starts in %s mode", async mode => {
     const f = await notificationFixture(mode);
     try {
       if (mode === "notice") await recordClinicalChangeProof(f.pointer);
@@ -199,15 +217,15 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       expect(await f.runs()).toHaveLength(2);
       await Promise.all([recordClinicalChangeProof(f.pointer), recordClinicalChangeProof(f.pointer)]);
       expect((await f.authority())?.mode ?? "off").toBe(mode);
-      expect(await f.count()).toBe(mode === "off" ? 0 : 1);
-      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual(mode === "off" ? { mode } : { mode, threadId: f.threadId });
+      expect(await f.count()).toBe(mode === "notice" ? 1 : 0);
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
       const beforeCheckpoint = await f.runs();
       await recordClinicalChangeProof({ ...f.pointer, kind: "change-scheduled" });
       expect(await f.runs()).toEqual(beforeCheckpoint);
       expect(beforeCheckpoint.find(run => run.id === f.pointer.runId)).toMatchObject(mode === "off"
         ? { retrievalProtocol: "query-slices-v2", notificationTokenVersion: null, notificationCoverage: null }
         : { retrievalProtocol: "query-slices-receipts-v3", notificationTokenVersion: 1,
-            notificationSettingRevision: 0, notificationRouteKey: expect.stringMatching(/^[a-f0-9]{64}$/u), notificationCoverage: "published" });
+            notificationSettingRevision: 0, notificationRouteKey: expect.stringMatching(/^[a-f0-9]{64}$/u), notificationCoverage: "suppressed" });
       await client.hostedMailboxItem.deleteMany({ where: { userId: f.memberId } });
       await recordClinicalChangeProof(f.pointer);
       expect(await f.count()).toBe(0);
@@ -408,8 +426,8 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     } finally { await f.cleanup(); }
   });
 
-  it.each(["notice", "detail", "voice"] as const)("defers a blocked %s, grants once, and covers its terminal provider attempt", async kind => {
-    const mode = kind === "voice" ? "detail" : kind;
+  it.each(["notice", "detail", "voice", "lost-first"] as const)("defers a blocked %s, grants once, and covers its terminal provider attempt", async kind => {
+    const mode = kind === "notice" ? "notice" : "detail";
     const f = await notificationFixture(mode);
     try {
       await f.terminal(true);
@@ -433,9 +451,32 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await client.hostedLinqLine.update({ where, data: { egressPolicy: "enabled" } });
       expect(await check(true)).toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
       await incrementHostedLinqInboundDailyState({ memberId: f.memberId, occurredAt: openWindow, prisma: client });
-      expect(await check(true)).toMatchObject({ clinicalReplyAuthorized: true });
+      // Halt ordinary authorization after it owns the chat. Let the clinical transaction request that
+      // same chat before ordinary authorization takes the member row. Reversing either order deadlocks.
+      const ordinaryHasChat = lockBarrier();
+      const clinicalWantsChat = lockBarrier();
+      const acquireChat = chatLock.acquireHostedLinqChatOwnershipLockTx;
+      const interleave = vi.spyOn(chatLock, "acquireHostedLinqChatOwnershipLockTx").mockImplementationOnce(async input => {
+        await acquireChat(input);
+        ordinaryHasChat.resolve();
+        await clinicalWantsChat.promise;
+      }).mockImplementationOnce(async input => { clinicalWantsChat.resolve(); await acquireChat(input); });
+      const ordinaryPending = authorizeEgress(request({ target: f.threadId,
+        targetKind: "thread", answeredMailboxItemIds: [], authorityCheckOnly: true }));
+      await ordinaryHasChat.promise;
+      const [ordinary, clinical] = await Promise.all([ordinaryPending, check(true)]);
+      interleave.mockRestore();
+      expect(ordinary.status).toBe(200);
+      expect(clinical).toMatchObject({ clinicalReplyAuthorized: true });
       expect(await check(false)).toMatchObject({ clinicalReplyAuthorized: true, providerDispatchClaimed: true });
       expect((await f.runs())[0]?.notificationCoverage).toBe(kind === "voice" ? "attempted" : "published");
+      if (kind === "lost-first") {
+        // Web granted bubble zero. Simulate loss of that response and no provider receipt.
+        idempotencyKey = clinicalChangeDeliveryKey(f.pointer.runId, mode) + ":" + turnId + ":bubble:1";
+        expect(await check(false)).toMatchObject({ deliveryBlockCode: "clinical_authority_unavailable" });
+        expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "suppressed", notificationRetryAt: null });
+        return;
+      }
       if (kind === "voice") {
         // Lose the native response after its real Web grant. Only the following text can enter again.
         expect((await check(false)).providerDispatchClaimed).toBe(false);
@@ -449,6 +490,131 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       expect((await f.runs())[0]?.notificationCoverage).toBe("attempted");
       expect((await check(false)).providerDispatchClaimed).not.toBe(true);
     } finally { vi.useRealTimers(); await f.cleanup(); }
+  });
+
+  it("coalesces ten paused daily occurrences and grants only the newest after release", async () => {
+    const f = await notificationFixture("notice");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.spyOn(callbackAuth, "requireHostedCloudflareCallbackRequest").mockResolvedValue(f.memberId);
+      const auth = async (runId: string) => (await authorizeEgress(new Request("https://web.example.test", {
+        method: "POST", body: JSON.stringify({ idempotencyKey: clinicalChangeDeliveryKey(runId, "notice"),
+          target: f.threadId, targetKind: "thread", answeredMailboxItemIds: [], authorityCheckOnly: false, intentId: "synthetic-intent" }),
+      }))).json();
+      const ids: string[] = [];
+      for (let day = 0; day < 10; day++) {
+        vi.setSystemTime(new Date(openWindow.getTime() + day * daily));
+        if (day) {
+          expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId, now: (await f.row()).nextSyncAt! })).toBe(true);
+        }
+        const latest = (await f.runs()).sort((a,b) => b.generation - a.generation)[0]!;
+        await f.terminal(true, latest);
+        ids.push(latest.id);
+        if (day === 3) {
+          await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { providerStatus: "OPTED_OUT" } });
+          expect(await auth(latest.id)).toMatchObject({ deliveryBlockCode: "chat_opted_out" });
+          expect((await f.runs()).find(row => row.id === latest.id)?.notificationCoverage).toBe("suppressed");
+          await client.hostedLinqChatHealth.update({ where: { linqChatLookupKey: f.chat }, data: { providerStatus: "healthy" } });
+        } else {
+          expect(await auth(latest.id)).toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
+        }
+      }
+      await incrementHostedLinqInboundDailyState({ memberId: f.memberId, occurredAt: new Date(), prisma: client });
+      for (const id of ids.slice(0,-1)) expect(await auth(id)).toMatchObject({ deliveryBlockCode: "clinical_authority_unavailable" });
+      expect(await auth(ids.at(-1)!)).toMatchObject({ providerDispatchClaimed: true });
+      expect(await auth(ids.at(-1)!)).toMatchObject({ providerDispatchClaimed: false });
+      expect(await client.hostedLinqDelivery.count({ where: { linqChatLookupKey: f.chat } })).toBe(1);
+    } finally { vi.useRealTimers(); await f.cleanup(); }
+  });
+
+  it.each([-30_001, 1])("rejects serving evidence with an unsafe timestamp under the admission lock (%i ms)", async offset => {
+    const f = await notificationFixture();
+    try {
+      await client.$transaction(async tx => {
+        await lockHostedMemberRow(tx, f.memberId);
+        const connection = await tx.clinicalRecordConnection.findUniqueOrThrow({ where: { id: f.connectionId } });
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(openWindow);
+        try {
+          expect(await notification.freezeClinicalDailyNotification(tx, connection, ["offline_access"],
+            { ...currentReaders, observedAt: Date.now() + offset })).toBeNull();
+        } finally { vi.useRealTimers(); }
+      });
+    } finally { await f.cleanup(); }
+  });
+
+  it("binds the private encrypted archive through the runner, signed Cloudflare port and Web route", async () => {
+    const f = await notificationFixture("detail");
+    const server = createServer(async (req, res) => {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(Buffer.from(chunk));
+        const headers = new Headers();
+        for (const [key, value] of Object.entries(req.headers)) if (typeof value === "string") headers.set(key, value);
+        const result = await checkpointRoute(new Request("https://web.example.test" + req.url,
+          { method: "POST", headers, body: Buffer.concat(chunks).toString() }));
+        res.writeHead(result.status, { "content-type": "application/json" }).end(await result.text());
+      } catch { res.writeHead(500).end(); }
+    });
+    try {
+      await f.terminal(true);
+      const signing = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+      vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK", JSON.stringify(await crypto.subtle.exportKey("jwk", signing.publicKey)));
+      const workspace = await client.hostedWorkspace.findUniqueOrThrow({ where: { userId: f.memberId } });
+      const claim = await claimHostedRuntime({ prisma: client, userId: f.memberId, processingMode: "default" });
+      if (claim.status === "blocked" || !claim.owner.attemptId) throw new Error("Expected synthetic runtime lease.");
+      await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Expected local test port.");
+      await promisify(execFile)("pnpm", ["exec", "vitest", "run", "--config", "apps/cloudflare/vitest.node.workspace.ts", "apps/cloudflare/test/runner-outbound.test.ts",
+        "-t", "publishes the saved clinical reply through the signed checkpoint port"], {
+        cwd: fileURLToPath(new URL("../../../", import.meta.url)), timeout: 90_000,
+        env: { ...process.env, MURPH_TEST_CHECKPOINT_SIGNER: JSON.stringify(await crypto.subtle.exportKey("jwk", signing.privateKey)),
+          MURPH_TEST_CLINICAL_CHECKPOINT_PORT: String(address.port), MURPH_TEST_CLINICAL_CHECKPOINT_MEMBER: f.memberId,
+          MURPH_TEST_CLINICAL_CHECKPOINT_VERSION: workspace.version.toString(), MURPH_TEST_CLINICAL_CHECKPOINT_RUN: f.pointer.runId, MURPH_TEST_CLINICAL_CHECKPOINT_GENERATION: String(claim.owner.generation),
+          MURPH_TEST_CLINICAL_CHECKPOINT_ATTEMPT: claim.owner.attemptId },
+      });
+      expect((await f.runs())[0]).toMatchObject({ notificationTurnId: "turn_" + "e".repeat(32),
+        notificationSnapshotId: expect.stringMatching(/^snapshot_/) });
+    } finally {
+      if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+      await f.cleanup();
+    }
+  }, 120_000);
+
+  it.each(["transport", "staged"] as const)("pins a daily run when the second authenticated read recovers from %s", async failure => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await notificationFixture("notice", { scheduledSweep: true, firstEvidenceFailure: failure });
+    try {
+      expect((await f.runs())[0]?.notificationRouteKey).toBeTruthy();
+      expect(warn).toHaveBeenCalledWith("Clinical daily admission reader evidence", expect.objectContaining({
+        reads: 2, [failure === "transport" ? "fetch_failed" : "port_unavailable"]: 1, admittedWithoutEvidence: 0,
+      }));
+    } finally { warn.mockRestore(); await f.cleanup(); }
+  });
+
+  it("expires an accepted occurrence exactly 24 hours later", async () => {
+    const f = await notificationFixture();
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(openWindow);
+      await f.terminal(true);
+      const accepted = (await f.runs())[0]!.completedAt!.getTime();
+      expect(await readClinicalNotificationDecision(f.pointer, new Date(accepted + daily - 1))).toMatchObject({ mode: "notice" });
+      expect(await readClinicalNotificationDecision(f.pointer, new Date(accepted + daily))).toEqual({ mode: "off" });
+      expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "suppressed", notificationRetryAt: null });
+    } finally { vi.useRealTimers(); await f.cleanup(); }
+  });
+
+  it("closes a drained published reply even if no outcome reached Web", async () => {
+    const f = await notificationFixture("detail");
+    try {
+      await f.terminal(true);
+      const turnId = "turn_" + "5".repeat(32);
+      await client.$transaction(tx => bindClinicalRepliesToSnapshotTx(tx, f.memberId, "synthetic-reply", [{ runId: f.pointer.runId, turnId }]));
+      expect(await readClinicalNotificationDecision({ ...f.pointer, savedReplyResult: { turnId, status: "drained" } })).toEqual({ mode: "off" });
+      expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "settled", notificationRetryAt: null });
+    } finally { await f.cleanup(); }
   });
 
   it("silently closes an older snapshot only for the exact missing bound turn", async () => {

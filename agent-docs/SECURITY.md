@@ -950,6 +950,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   A detail turn has the same shell and network reach as any scheduled turn,
   bounded by the Worker’s existing messaging-operation check. The clinical
   per-bubble checks cover the reply path only.
+  Admission attests the promoted release at that moment, and dispatch accepts that the instance serving a later bubble has no separate revision check.
   Signed provider receipts can echo sent text, including clinical replies, through
   Web memory. Web verifies and reduces each receipt to operational metadata
   before persistence, logging, tracing or handoff. Ordinary diagnostics retain
