@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
@@ -9,7 +10,7 @@ import { generateHealthWins } from "../src/lib/health-wins/engine";
 import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/profile/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { POST as post } from "../app/api/game/v1/health/posts/route";
-import { DELETE as deletePost, GET as openPost } from "../app/api/game/v1/health/posts/[id]/route";
+import { DELETE as deletePost, GET as openPost, PATCH as editPost } from "../app/api/game/v1/health/posts/[id]/route";
 import { GET as comments, POST as comment } from "../app/api/game/v1/health/posts/[id]/comments/route";
 import { DELETE as deleteComment } from "../app/api/game/v1/health/comments/[id]/route";
 import { GET as listHides } from "../app/api/game/v1/health/hides/route";
@@ -17,11 +18,15 @@ import { DELETE as unhide, PUT as hide } from "../app/api/game/v1/health/hides/[
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import * as board from "../src/lib/game/board";
 import * as gameCrypto from "../src/lib/game/crypto";
+import { GET as readArt } from "../app/api/game/v1/progress/art/[key]/route";
 import { encodePolyline } from "../src/lib/game/progress/route-geometry";
 import * as crypto from "../src/lib/health-wins/crypto";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { getPrisma } from "../src/lib/prisma";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
+
+const deferred = vi.hoisted(() => [] as Array<() => Promise<void>>);
+vi.mock("next/server", async original => ({ ...await original<object>(), after: (task: () => Promise<void>) => deferred.push(task) }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) {
@@ -29,6 +34,7 @@ if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murp
 }
 const db = getPrisma();
 const games: string[] = [];
+const areaKeys: string[] = [];
 const members: string[] = [];
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 const memberContext = (memberId: string) => ({ params: Promise.resolve({ memberId }) });
@@ -91,6 +97,8 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
   afterEach(async () => {
     await db.game.deleteMany({ where: { id: { in: games.splice(0) } } });
     await db.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
+    if (areaKeys.length) await db.gamePlaceArt.deleteMany({ where: { key: { in: areaKeys.splice(0) } } });
+    deferred.length = 0;
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -165,6 +173,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
   it("advertises route recording to the author and shares the number-free map with a partner", async () => {
     const author = await person(), partner = await person();
     await pair(author, partner);
+    vi.stubEnv("MURPH_HEALTH_PAINTED_RUNS", "false");
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", [author.id, partner.id].join(","));
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", author.id);
     const readFeed = async (viewer: Person) => (await feed(viewer.request("feed"))).json();
@@ -197,7 +206,83 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(shared.status).toBe(200);
     expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision, spec: choice.spec }]);
     expect(choice.spec.chart).toEqual({ ...map.chart, paths, chips: [] });
+    expect(deferred).toHaveLength(0);
   });
+
+  it.each(["removed map", "deleted post", "withdrawn before claim", "withdrawn before painting", "retained map"] as const)(
+    "rechecks post and consent after the route post commits: %s", async change => {
+      const author = await person();
+      vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", author.id);
+      vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", author.id);
+      vi.stubEnv("MURPH_HEALTH_PAINTED_RUNS", "true");
+      const activity = {
+        id: randomUUID(), kind: "walk", startedAt: "2033-06-15T09:00:00Z", movingSec: 532, elapsedSec: 540,
+        route: { distanceM: 1000, climbM: 0, splits: [{ distanceM: 1000, seconds: 532 }],
+          paths: [encodePolyline([[-132, -41], [-131.999, -41]])] },
+      };
+      const preview = await previewActivity(author.request("activities/cards", "POST", { activity }));
+      const { cards } = await preview.json();
+      const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
+      const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
+      const key: string = map.chart.art.key;
+      areaKeys.push(key);
+      expect(deferred).toHaveLength(0);
+      const body = { id: randomUUID(), activity, caption: "An ocean fixture", cards: [
+        { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision },
+      ] };
+      const photo = await sharp({ create: { width: 48, height: 32, channels: 3, background: "#125c8c" } }).png().toBuffer();
+      vi.stubEnv("OPENAI_API_KEY", "fixture-image-service");
+      vi.stubEnv("MAPBOX_ACCESS_TOKEN", "fixture-basemap");
+      const providers: string[] = [];
+      vi.stubGlobal("fetch", async (input: URL | RequestInfo) => {
+        const url = new URL(input instanceof Request ? input.url : input);
+        // The image SDK probes local FormData support before its first multipart request.
+        if (url.href === "data:,") return new Response("");
+        providers.push(url.hostname);
+        if (url.origin === "https://api.mapbox.com") {
+          if (change === "withdrawn before painting") {
+            await revokeHostedConsentScope({ memberId: author.id, scope: "launch.health-data", prisma: db });
+          }
+          return new Response(new Uint8Array(photo), { headers: { "Content-Type": "image/png" } });
+        }
+        if (url.href === "https://api.openai.com/v1/images/edits") {
+          return Response.json({ data: [{ b64_json: photo.toString("base64") }] });
+        }
+        throw new Error("Unexpected provider in painting test.");
+      });
+      const publish = () => post(author.request("posts", "POST", body));
+      expect((await publish()).status).toBe(200);
+      expect((await publish()).status).toBe(200);
+      expect(deferred).toHaveLength(1);
+      const painting = () => readArt(author.request("art"), { params: Promise.resolve({ key }) });
+      expect((await painting()).status).toBe(404);
+      expect(providers).toEqual([]);
+
+      const path = `posts/${body.id}`;
+      if (change === "deleted post") {
+        expect((await deletePost(author.request(path, "DELETE"), context(body.id))).status).toBe(204);
+      } else if (change === "withdrawn before claim") {
+        await revokeHostedConsentScope({ memberId: author.id, scope: "launch.health-data", prisma: db });
+      } else if (change === "removed map" || change === "retained map") {
+        const update = change === "removed map" ? { removeCardIds: [map.candidateId] } : { caption: "Revised fixture" };
+        expect((await editPost(author.request(path, "PATCH", { expectedVersion: 1, ...update }), context(body.id))).status).toBe(200);
+      }
+      // The first callback claims the key and registers the painter with after().
+      for (const task of deferred) await task();
+      const response = await painting();
+      if (change === "retained map") {
+        expect(providers).toEqual(["api.mapbox.com", "api.openai.com"]);
+        expect(response.status).toBe(200);
+        expect(await sharp(Buffer.from(await response.arrayBuffer())).metadata()).toMatchObject({
+          format: "jpeg", width: 768, height: 512,
+        });
+      } else {
+        expect(providers).toEqual(change === "withdrawn before painting" ? ["api.mapbox.com"] : []);
+        expect(response.status).toBe(404);
+        if (!providers.length) expect(await db.gamePlaceArt.findUnique({ where: { key } })).toBeNull();
+      }
+    },
+  );
 
   it("shows a frozen recorded chart to existing game partners and closes it after consent withdrawal", async () => {
     const author = await person(), partner = await person(), stranger = await person();

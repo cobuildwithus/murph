@@ -165,6 +165,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", memberId);
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", memberId);
+    vi.stubEnv("MURPH_HEALTH_PAINTED_RUNS", "true");
     const summary = {
       id: randomUUID(), kind: "run" as const, startedAt: "2036-01-15T17:30:00.000Z", elapsedSec: 660, movingSec: 635,
       route: { distanceM: 2000, climbM: 11, splits: [{ distanceM: 1000, seconds: 310 }, { distanceM: 1000, seconds: 325 }] },
@@ -194,6 +195,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     await expect(createHealthPost(owner, { ...body, cards: [hideMap] }, "metric")).rejects.toMatchObject({ httpStatus: 400 });
     expect(await db.healthPost.count({ where: { id } })).toBe(0);
     expect(await createHealthPost(owner, body, "metric")).toEqual({ id, version: 1 });
+    expect(state.queued).toHaveLength(0);
 
     const post = await db.healthPost.findUniqueOrThrow({ where: { id } });
     expect(post.cardsEncrypted).toHaveLength(1);

@@ -149,7 +149,21 @@ exact points. A block may slide by whole tiles to hold a route that crosses a bl
 edge, so runs in one area share one of a few neighbouring keys rather than exactly
 one; requiring aligned blocks would push most short loops out to a much coarser zoom. A date-line crossing can have an east bound above 180 degrees so
 the frame stays continuous. Latitudes beyond the Mercator limit project to the
-outermost tile row. Use the native map when the area has no painting.
+outermost tile row.
+
+With `MURPH_HEALTH_PAINTED_RUNS=true`, committing a new post with a selected
+route map schedules a painting after the response. Before each provider call,
+Web checks the author's current access and consent and confirms the post
+still contains that route card. Mapbox receives the public grid frame. The
+image provider repaints its satellite image. Everyone with the same key shares
+one painting and the phone draws the sealed path on top.
+
+The authenticated `GET /api/game/v1/progress/art/{key}` takes the URL-encoded
+key and serves the ready JPEG. A missing painting returns 404. Reading a key
+uses no generation budget. Area and game paintings share the allowance of
+150 image attempts per UTC day. While art is pending, over budget, or
+unavailable, the phone uses its muted map. Turning the flag off stops new
+generation. Previously painted keys continue to serve their immutable JPEGs.
 
 The `activity_splits` card's `splits` chart contains `unit` (`mi` or `km`), a formatted
 summary `line`, and `splits: [{label, seconds, text, partial?}]`. Each row's

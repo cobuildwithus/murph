@@ -6069,19 +6069,19 @@ inference. The following classification covers every column of exactly
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `storage_key`: primary key, the random Progress object identity of one picture attempt; `member_id`: owner FK; `status`: generating, ready, failed or retired; `created_at`: admission time, also the public attempt id (base 36); `failure_code`: nullable generation_failed, timeout or refused |
 | `game_progress_share_photo` | None in the row; the prepared medal photo JPEG is sealed in the Progress store | None | `storage_key`: primary key, random Progress object identity; `member_id`: owner FK; `status`: pending, current or retired; `created_at`: pick time |
-| `game_place_art` | None: shared public art, plaintext `bytes` (JPEG) | None | `key`: `poster:v1:<Mapbox place id>` or `map:v1:<size>:<sha256 of route geometry>`; `kind`: poster or map; `status`: making, ready or failed; `attempts`: claim fence, at most 3; `started_at`: claim time; `ready_at`: nullable completion time; `failure_code`: nullable generation_failed, timeout, refused or drifted |
+| `game_place_art` | None: shared public art, plaintext `bytes` (JPEG) | None | `key`: `poster:v1:<Mapbox place id>`, `map:v1:<size>:<sha256 of route geometry>` or `area:v1:{z}/{x}/{y}` (northwest tile of a public three-by-two frame); `kind`: poster or map; `status`: making, ready or failed; `attempts`: claim fence, at most 3; `started_at`: claim time; `ready_at`: nullable completion time; `failure_code`: nullable generation_failed, timeout, refused or drifted |
 | `game_place_art_budget` | None | None | `day`: UTC date; `attempts`: admitted art attempts that day |
 
-Place art is not member data. A poster is made from a public Mapbox place
-name (`types=place`, never a typed address) and keyed by that place's id; a
-painting is made only for legs of 50 km or more, from Mapbox satellite imagery
-of the frame, and holds no line, pin or name. The member's own line is drawn on
-it per request. Neither row names a member, route text or progress, so everyone
-who reaches the same place or frame reuses one row. Members' route legs keep
-each town's place id and name inside sealed `state_encrypted`. Ready bytes never
-change; an attempt finishes its row only while `attempts` still matches its
-claim. Every admitted attempt, retries included, counts against the UTC day's
-`game_place_art_budget` row in the claim's transaction.
+Posters use a public Mapbox place name (`types=place`) and its place ID. Game
+route paintings use satellite imagery for legs of 50 km or more. The server
+draws the member's line on the painting per request. Health wins area paintings
+use the public tile frame and the phone draws the line. The shared JPEGs omit
+route overlays and member details, so everyone requesting a key can reuse its
+painting. Members' route legs keep each town's place ID and name inside sealed
+`state_encrypted`. Ready bytes are immutable. An attempt finishes its row only
+while `attempts` still matches its claim. Every admitted attempt, including a
+retry, counts against the UTC day's `game_place_art_budget` row in the claim's
+transaction.
 
 Each share row is one picture attempt, keyed by its storage key, with the
 member/award foreign key. Change photo adds an attempt for the same award; the
@@ -6801,10 +6801,15 @@ Web accepts at most 360 per-minute heart-rate averages and up to eight final
 trimmed paths with at most 1,000 points in total as display data. Only a
 selected, sealed post card may persist the series or paths. The phone owns
 route privacy. Web checks plausibility and derives a public tile frame and
-area key for the route card. Raw heart-rate samples (1 Hz) and GPS fixes stay
-on the phone. Save-without-posting accepts summary fields only. Settings export
-includes saved summaries under the member's account export authority, even
-after health consent withdrawal. Account deletion cascades to these rows.
+area key for the route card. A committed post that keeps the map can start a
+shared area painting. Its `game_place_art` row uses the existing `map` kind.
+The public grid key and JPEG identify only a frame. Member identity, post ID,
+activity time and route geometry stay out of the row and provider requests.
+The connection between a post and its area key lives in the sealed card.
+Raw heart-rate samples (1 Hz) and GPS fixes stay on the phone. Save-without-posting
+accepts summary fields only. Settings export includes saved summaries under the
+member's account export authority, even after health consent withdrawal. Account
+deletion cascades to these rows.
 
 ### Storage and lifecycle
 
