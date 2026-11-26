@@ -118,6 +118,7 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   if (effect < rule.step) return;
   return {
     date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
+    achievement: { kind: "lab_change", subject: latest.analyte, period: latest.date },
     card: {
       id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs",
       title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, rule.unit === "%" ? "points" : latest.unit)}`, measure: rule.label },
@@ -150,7 +151,9 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank): Cand
       id: analyte, label: rule.label, unit: latest.unit, filter: "Labs", date: latest.date,
       observation: `Lab draw on ${dateLabel}`,
     }, input.member.today);
-    if (percentile) candidates.push(percentile);
+    if (percentile) candidates.push({
+      ...percentile, achievement: { kind: "lab_percentile", subject: analyte, period: latest.date },
+    });
     if (!change && !percentile && interval && within) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {

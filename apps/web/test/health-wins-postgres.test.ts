@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PUT as saveActivity } from "../app/api/game/v1/health/activities/[id]/route";
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
 import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
@@ -19,6 +20,7 @@ import { DELETE as unhide, PUT as hide } from "../app/api/game/v1/health/hides/[
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import * as board from "../src/lib/game/board";
 import * as gameCrypto from "../src/lib/game/crypto";
+import * as moderation from "../src/lib/game/moderation";
 import { GET as readArt } from "../app/api/game/v1/progress/art/[key]/route";
 import { claimArt } from "../src/lib/game/progress/place-art";
 import { encodePolyline } from "../src/lib/game/progress/route-geometry";
@@ -173,6 +175,37 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await read()).toEqual({ people: [] });
   });
 
+  it("identifies refused activity names on writes and preserves a committed post's receipt", async () => {
+    const author = await person();
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", author.id);
+    const id = randomUUID(), path = `activities/${id}`;
+    const summary = { id, kind: "other", startedAt: "2037-10-02T11:20:00Z", movingSec: 214, elapsedSec: 230 };
+    const save = (activity: object) => saveActivity(author.request(path, "PUT", { activity }), context(id));
+
+    const refused = await save({ ...summary, name: "Ghost pepper relay" });
+    expect(refused.status).toBe(400);
+    expect(refused.headers.get("cache-control")).toBe("private, no-store");
+    expect(await refused.json()).toMatchObject({ error: { code: "HEALTH_ACTIVITY_NAME_INVALID" } });
+    const malformed = await save({ ...summary, name: "Hoop relay", elapsedSec: -1 });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(await db.healthActivity.count({ where: { id } })).toBe(0);
+    expect(await (await save(summary)).json()).toEqual({ id });
+
+    const activity = { ...summary, id: randomUUID(), name: "Hoop relay" };
+    const postId = randomUUID();
+    const publish = (id: string) => post(author.request("posts", "POST", { id, activity, caption: "Relay practice" }));
+    const receipt = { id: postId, version: 1 };
+    expect(await (await publish(postId)).json()).toEqual(receipt);
+    vi.spyOn(moderation, "isGameTextRefused").mockReturnValue(true);
+    const denied = await publish(randomUUID());
+    expect(denied.status).toBe(400);
+    expect(await denied.json()).toMatchObject({ error: { code: "HEALTH_ACTIVITY_NAME_INVALID" } });
+    const replay = await publish(postId);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(receipt);
+  });
+
   it("advertises route recording to the author and shares the number-free map with a partner", async () => {
     const author = await person(), partner = await person();
     await pair(author, partner);
@@ -180,8 +213,8 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", [author.id, partner.id].join(","));
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", author.id);
     const readFeed = async (viewer: Person) => (await feed(viewer.request("feed"))).json();
-    expect((await readFeed(author)).record).toEqual({ timed: true, route: true });
-    expect((await readFeed(partner)).record).toEqual({ timed: true, route: false });
+    expect((await readFeed(author)).record).toEqual({ timed: true, route: true, named: true });
+    expect((await readFeed(partner)).record).toEqual({ timed: true, route: false, named: true });
 
     const paths = [encodePolyline([[-141.2, -32.4], [-141.199, -32.4]])];
     const activity = {

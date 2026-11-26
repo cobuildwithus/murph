@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
+import { POST as activityKind } from "../app/api/game/v1/health/activities/kind/route";
 import { PUT as saveActivity } from "../app/api/game/v1/health/activities/[id]/route";
 import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
@@ -72,7 +73,7 @@ describe("per-member route gate", () => {
       comments(invalid, postContext), comment(invalid, postContext), removeComment(invalid, postContext),
       profile(invalid, personContext), hides(invalid), hide(invalid, personContext), unhide(invalid, personContext),
       photo(invalid, postContext), readPhoto(invalid, postContext), removePhoto(invalid, postContext),
-      previewActivity(invalid), saveActivity(invalid, postContext),
+      activityKind(invalid), previewActivity(invalid), saveActivity(invalid, postContext),
     ]);
     for (const response of responses) {
       expect(response.status).toBe(404);
@@ -83,7 +84,7 @@ describe("per-member route gate", () => {
   });
   it("requires the recording allowlist even when the member can open the feed", async () => {
     const invalid = request("activities/cards", "POST", { extra: true });
-    for (const response of [await previewActivity(invalid), await saveActivity(invalid, postContext)]) {
+    for (const response of [await activityKind(invalid), await previewActivity(invalid), await saveActivity(invalid, postContext)]) {
       expect(response.status).toBe(404);
       expect(response.headers.get("cache-control")).toBe("private, no-store");
     }
@@ -201,11 +202,55 @@ describe("timed recording requests", () => {
   const selectionFromSet = { candidateId: "slot:spruce", option: "original" };
   beforeEach(() => vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", auth.member.id));
 
-  it("advertises only timed recording on an enabled member's feed", async () => {
+  it("advertises named and timed recording on an enabled member's feed", async () => {
     service.feed.mockResolvedValue({ posts: [], nextCursor: null });
     expect(await (await feed(request("feed"))).json()).toEqual({
-      posts: [], nextCursor: null, record: { timed: true, route: false },
+      posts: [], nextCursor: null, record: { timed: true, route: false, named: true },
     });
+  });
+
+  it("returns the cleaned name and a usable recorder with Decisions off", async () => {
+    vi.stubEnv("MURPH_HEALTH_ACTIVITY_DECISIONS", "false");
+    const response = await activityKind(request("activities/kind", "POST", { name: "  Ridge   hike  " }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({ name: "Ridge hike", kind: "other", timer: false, decided: false });
+    for (const body of [{ name: "h".repeat(201) }, { name: "Hike", kind: "walk" }, {}]) {
+      const malformed = await activityKind(request("activities/kind", "POST", body));
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    }
+  });
+
+  it("keeps malformed activity-name input out of the request error log", async () => {
+    const name = "Paddle drills";
+    const response = await activityKind(new Request("https://fixture.test/api/game/v1/health/activities/kind", {
+      method: "POST", body: name,
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "INVALID_JSON" } });
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain(name);
+  });
+
+  it("returns a distinct error for refused names and requires a canonical name on preview", async () => {
+    const name = "Ghost pepper circuit";
+    const responses = [
+      await activityKind(request("activities/kind", "POST", { name })),
+      await previewActivity(request("activities/cards", "POST", { activity: { ...activity, name } })),
+      await previewActivity(request("activities/cards", "POST", { activity: { ...activity, name: " Wall ball " } })),
+    ];
+    for (const response of responses) {
+      expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(await response.json()).toMatchObject({ error: {
+        code: "HEALTH_ACTIVITY_NAME_INVALID", message: "This can't be used as an activity name.",
+      } });
+    }
+    expect(service.previewActivity).not.toHaveBeenCalled();
+    service.previewActivity.mockResolvedValue({ cards: [] });
+    const named = { ...activity, name: "Wall ball" };
+    expect((await previewActivity(request("activities/cards", "POST", { activity: named }))).status).toBe(200);
+    expect(service.previewActivity).toHaveBeenCalledExactlyOnceWith(auth, named, "us");
   });
 
   it("passes display data and presentation units to preview, and only summaries to save", async () => {

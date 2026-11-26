@@ -102,10 +102,13 @@ export function getHostedSystemMailboxModelFreeKinds(assistantExecutionBlocked =
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = getHostedSystemMailboxModelFreeKinds();
 
+export const HOSTED_HEALTH_WIN_NOTIFICATION_KEY_PREFIX = "health-win:v1:";
+
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
   [
     "assistant.notification.requested:device-delivery-stalled:v1:",
     "assistant.notification.requested:group-join:",
+    `assistant.notification.requested:${HOSTED_HEALTH_WIN_NOTIFICATION_KEY_PREFIX}`,
   ] as const;
 
 export function isHostedSystemMailboxModelFreeNotification(input: {

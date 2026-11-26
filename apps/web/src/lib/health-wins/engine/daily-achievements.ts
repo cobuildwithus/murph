@@ -37,6 +37,7 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
   if (nights.length < 10 || hits / nights.length < 0.6) return;
   return {
     date: nights[nights.length - 1].date,
+    achievement: { kind: "threshold_count", subject: "sleep_total_min", period: month },
     effect: hits,
     noise: nights.length,
     card: {
@@ -117,6 +118,7 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
   const tied = year.some(row => row !== best && row.value === best.value);
   return {
     date: best.date,
+    achievement: { kind: "personal_record", subject: metric, period: best.date },
     effect: Math.abs(best.value - median(values)),
     noise: Math.max(trendStep ?? 1, mad(values)),
     card: {

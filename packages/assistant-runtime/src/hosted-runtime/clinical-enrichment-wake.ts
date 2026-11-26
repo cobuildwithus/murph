@@ -2,6 +2,7 @@ import type { HostedExecutionClinicalEnrichmentRequestedWake } from "@murphai/ho
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
 import {
+  readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxState,
@@ -85,6 +86,22 @@ export async function makeHostedClinicalEnrichmentWakeDue(input: {
 }): Promise<boolean> {
   const now = (input.now ?? new Date()).toISOString();
   return updateClinicalEnrichmentWakeTime({ ...input, nextAttemptAt: now, onlyEarlier: true });
+}
+
+/**
+ * Makes the job's wake due now. False only while a mailbox claim holds the
+ * pointer; the caller delivers again once that claim settles.
+ */
+export async function deliverHostedClinicalEnrichmentWake(input: {
+  vaultRoot: string;
+  jobId: string;
+  now?: Date;
+}): Promise<boolean> {
+  await makeHostedClinicalEnrichmentWakeDue(input);
+  const itemId = enrichmentItemId(input.jobId);
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const item = state.pending.find((candidate) => candidate.itemId === itemId);
+  return item === undefined || item.status === "pending";
 }
 
 export async function setHostedClinicalEnrichmentWakeNextAttempt(input: {

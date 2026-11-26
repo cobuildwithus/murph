@@ -25,6 +25,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
+  "linq.health_win",
   "linq.device_delivery_stalled",
   "linq.apple_health_delivery_stalled",
   "linq.device_connection_check",
@@ -40,6 +41,12 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
 
 export type UserFacingMessageTemplateKey =
   (typeof USER_FACING_MESSAGE_TEMPLATE_KEYS)[number]
+
+const MINIMUM_VARIANTS_BY_KEY: Partial<Record<UserFacingMessageTemplateKey, number>> = {
+  "linq.home_redirect": HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT,
+  // The founder pilot has one approved lock-screen question.
+  "linq.health_win": 1,
+}
 
 export interface UserFacingMessageContextByKey {
   "linq.device_connection_check": {
@@ -57,6 +64,9 @@ export interface UserFacingMessageContextByKey {
   }
   "linq.home_redirect": {
     homeRecipientPhone: string
+  }
+  "linq.health_win": {
+    winUrl: string
   }
   "linq.device_delivery_stalled": {
     companionAppName: string
@@ -603,6 +613,10 @@ Sound good?`,
     `Resend your last message on the number where I answer you:
 {homeRecipientPhone}`,
   ],
+  "linq.health_win": [
+    `You have a new win in Murph. Want to share it with your friends?
+{winUrl}`,
+  ],
   "linq.apple_health_delivery_stalled": [
     `I haven't received new Apple Health data for a while. When you have a moment, open Murph and tap “Check for new data.”`,
     `Apple Health data hasn't reached me recently. Could you open Murph and tap “Check for new data”?`,
@@ -812,9 +826,7 @@ function selectUserFacingMessageVariantIndex(input: {
 
 function assertUserFacingMessageTemplateCoverage(): void {
   for (const key of USER_FACING_MESSAGE_TEMPLATE_KEYS) {
-    const minimumVariantCount = key === "linq.home_redirect"
-      ? HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT
-      : USER_FACING_MESSAGE_MIN_VARIANT_COUNT
+    const minimumVariantCount = MINIMUM_VARIANTS_BY_KEY[key] ?? USER_FACING_MESSAGE_MIN_VARIANT_COUNT
     const variantCount = USER_FACING_MESSAGE_TEMPLATES[key].length
     if (variantCount < minimumVariantCount) {
       throw new TypeError(

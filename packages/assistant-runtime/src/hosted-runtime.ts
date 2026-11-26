@@ -109,9 +109,9 @@ import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import { createHostedWorkspaceSystemWork, HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./hosted-runtime/workspace-system-work.ts";
-import { classifyHostedClinicalPendingCheckpointWork, createHostedClinicalEnrichmentController, orderHostedClinicalUsageEffectsLast, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
-import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
-import { hasDueHostedClinicalEnrichmentWake, isHostedClinicalEnrichmentWakeItem, makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
+import { classifyHostedClinicalPendingCheckpointWork, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
+import { createHostedClinicalEnrichmentRunner } from "./hosted-runtime/clinical-enrichment.ts";
+import { deliverHostedClinicalEnrichmentWake, hasDueHostedClinicalEnrichmentWake, isHostedClinicalEnrichmentWakeItem, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
   cancelHostedLinqInputTyping,
   createHostedAssistantChannelTypingDependencies,
@@ -211,6 +211,7 @@ export {
 } from "./hosted-workspace-restore-preparation.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD,
+  hostedCanonicalWriteReceiptLogBlocksBackgroundWrites,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
   readHostedCanonicalWriteReceiptRecoveryWake,
@@ -2129,11 +2130,24 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
     let activeWorkspace = workspaceRead.workspace;
     await recoverHostedSystemMailboxClaims(restored.vaultRoot, readCheckpointedSystemHandledThrough(activeWorkspace));
     let pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
+    // A restored log's metadata size is unknown until this invocation appends.
+    let pendingCanonicalReceiptBytes: number | null = null;
     const canonicalWriteReceiptLogBlocksBackgroundMaintenance = (): boolean =>
       pendingCanonicalReceiptCount
         >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD;
+    // Clinical apply alone admits writes past the first compaction boundary.
+    const clinicalReceiptCapacityExhausted = (): boolean =>
+      hostedCanonicalWriteReceiptLogBlocksBackgroundWrites({
+        entryCount: pendingCanonicalReceiptCount,
+        pendingReceiptBytes: pendingCanonicalReceiptBytes,
+      });
+    const recordCanonicalReceiptLog = (entryCount: number, pendingReceiptBytes: number): void => {
+      pendingCanonicalReceiptCount = entryCount;
+      pendingCanonicalReceiptBytes = pendingReceiptBytes;
+    };
     const clearPendingCanonicalReceiptCount = (): void => {
       pendingCanonicalReceiptCount = 0;
+      pendingCanonicalReceiptBytes = 0;
     };
     const canonicalWriteReceiptRecoveryFailed =
       restored.canonicalWriteReceiptRecoveryFailed;
@@ -2416,9 +2430,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           importItem: importMailboxItem,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-          onCanonicalWriteReceiptLogUpdated: (entryCount) => {
-            pendingCanonicalReceiptCount = entryCount;
-          },
+          onCanonicalWriteReceiptLogUpdated: recordCanonicalReceiptLog,
           platform: {
             ...guardedRuntime.platform,
             mailboxPort: runnerMailboxPort,
@@ -2533,9 +2545,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       importItem: importMailboxItem,
       limitPerLane: mailboxBudget.fetchLimitPerLane,
       materializeWorkspaceArtifacts: restored.materializeWorkspaceArtifacts,
-      onCanonicalWriteReceiptLogUpdated: (entryCount) => {
-        pendingCanonicalReceiptCount = entryCount;
-      },
+      onCanonicalWriteReceiptLogUpdated: recordCanonicalReceiptLog,
       onForegroundConversationWorkObserved: () => {
         if (!ordinaryConsentedAssistantAskSelected) {
           return;
@@ -2557,6 +2567,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         && options.shutdownSignal?.aborted !== true,
       shouldYieldBackgroundMaintenance:
         canonicalWriteReceiptLogBlocksBackgroundMaintenance,
+      shouldYieldClinicalApply: clinicalReceiptCapacityExhausted,
       backgroundMaintenanceYieldReason: "canonical_receipt_capacity",
       withCanonicalWritePersistence,
       vaultRoot: restored.vaultRoot,
@@ -3032,14 +3043,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...readyDurableCheckpointEffects,
       ...additionalEffects,
     ];
-    // Only these may share an extraction window's checkpoint; see the controller.
-    const clinicalUsageEffects = new WeakSet<HostedWorkspaceDurableCheckpointEffect>();
+    // Only canonical receipts may share an extraction window's checkpoint; see the controller.
     const readClinicalPendingCheckpointWork = () => classifyHostedClinicalPendingCheckpointWork({
       canonicalReceiptCount: pendingCanonicalReceiptCount,
-      canonicalReceiptLogNearlyFull: canonicalWriteReceiptLogBlocksBackgroundMaintenance(),
-      durableEffects: readOutstandingDurableCheckpointEffects(),
+      canonicalReceiptLogNearlyFull: clinicalReceiptCapacityExhausted(),
+      durableEffectCount: readOutstandingDurableCheckpointEffects().length,
       durableFollowUpPending: durableCheckpointFollowUpPending,
-      isClinicalUsageEffect: (effect) => clinicalUsageEffects.has(effect),
     });
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
@@ -3123,7 +3132,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (acceptedCanonicalSystemProgressCheckpointOrdinal === 0) {
           systemMailboxProgressedSinceCheckpoint ||= completion.systemProgressed === true;
         }
-        clinicalEnrichmentController?.kick();
+        clinicalEnrichmentController?.kick(completion.systemProgressed === true);
         // A restored recording journal is already durable. Its replay will
         // dirty cleanup state; merely recovering it must not hide a due
         // assistant wake from the initial pass.
@@ -5126,40 +5135,33 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       vaultRoot: restored.vaultRoot,
     });
     const clinicalEnrichmentCodexRuntime = hostedCodexRuntime;
-    clinicalEnrichmentController = createHostedClinicalEnrichmentController({
-      runOne: (abortSignal, onExtractionStarted) => runOneHostedClinicalEnrichment({
-        abortSignal,
-        onExtractionStarted,
-        codexHome: clinicalEnrichmentCodexRuntime.codexHome,
-        env: clinicalEnrichmentCodexRuntime.runtimeEnv,
-        memberId: input.request.userId,
-        modelProvider: clinicalEnrichmentCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
-        vaultRoot: restored.vaultRoot,
-        userEnvKeys: Object.keys(runtime.userEnv),
-        usageRecordPort: runtime.platform.usageRecordPort ?? null,
-        deferUsageUntilAfterDurableCheckpoint(effect) {
-          clinicalUsageEffects.add(effect);
-          pendingDurableCheckpointEffects.push(effect);
-        },
-        resolveRuntimeAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
-        async onWorkUpdated(jobId, nextAttemptAt) {
-          const job = { vaultRoot: restored.vaultRoot, jobId };
-          if (nextAttemptAt) await setHostedClinicalEnrichmentWakeNextAttempt({ ...job, nextAttemptAt });
-          else await makeHostedClinicalEnrichmentWakeDue(job);
-          workspaceSystemWork.kick();
-        },
-        onStateMutation() {
-          clinicalEnrichmentWorkObserved = true;
-          runtimeStateDirty = true;
-          ensureIdleCheckpointTimerAfterDirtyWork();
-          options.runtimeWakeSignal?.notify();
-        },
-      }),
+    clinicalEnrichmentController = createHostedClinicalEnrichmentRunner({
+      codexHome: clinicalEnrichmentCodexRuntime.codexHome,
+      env: clinicalEnrichmentCodexRuntime.runtimeEnv,
+      memberId: input.request.userId,
+      modelProvider: clinicalEnrichmentCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+      vaultRoot: restored.vaultRoot,
+      userEnvKeys: Object.keys(runtime.userEnv),
+      usageRecordPort: runtime.platform.usageRecordPort,
+      resolveRuntimeAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
+      async onWorkUpdated(jobId, nextAttemptAt) {
+        const job = { vaultRoot: restored.vaultRoot, jobId };
+        // A deferral's time is also durable in the job, which its wake reads back.
+        const delivered = nextAttemptAt
+          ? await setHostedClinicalEnrichmentWakeNextAttempt({ ...job, nextAttemptAt }).then(() => true)
+          : await deliverHostedClinicalEnrichmentWake(job);
+        workspaceSystemWork.kick();
+        return delivered;
+      },
+      onStateMutation() {
+        clinicalEnrichmentWorkObserved = true;
+        runtimeStateDirty = true;
+        ensureIdleCheckpointTimerAfterDirtyWork();
+        options.runtimeWakeSignal?.notify();
+      },
       onError(error) {
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
       },
-      pendingCheckpointWork: readClinicalPendingCheckpointWork,
-      onExtractionWindowReleased: () => options.runtimeWakeSignal?.notify(),
     });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
       await Promise.all([
@@ -5206,8 +5208,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       requiresFollowUpCheckpoint: boolean;
       wake: HostedRuntimePendingWake;
     }> => {
-      const effects = orderHostedClinicalUsageEffectsLast(
-        readyDurableCheckpointEffects, (effect) => clinicalUsageEffects.has(effect));
+      const effects = [...readyDurableCheckpointEffects];
       let requiresFollowUpCheckpoint = false;
       let durableWake: HostedRuntimePendingWake = {
         nextWakeAt: null,
@@ -5233,7 +5234,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 ? effect.vaultShareProjectionFailureWake
                 : await effect({
                     signal: effectSignal,
-                    wakeInterruptionSignal: interruption.signal,
                     vaultShareProjectionResult:
                       effectOptions.vaultShareProjectionResult ?? {
                         outcome: guardedRuntime.platform.vaultSharePort ? "error" : "no-port",
@@ -6388,11 +6388,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
         }
       };
-      // Every enrichment page leaves its own canonical receipt and usage effect,
-      // so each page needs a checkpoint. When the job is the only due work,
-      // continue it here instead of restoring a successor for every page.
+      // Enrichment keeps provider calls running across a plain checkpoint. When
+      // it is the only due work, continue it here instead of restoring a successor.
       const continueClinicalEnrichmentAfterCheckpoint = async (
         idleMaintenance: HostedIdleMaintenanceOutcome,
+        signal: AbortSignal,
       ): Promise<boolean> => {
         const controller = clinicalEnrichmentController;
         if (
@@ -6436,21 +6436,19 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           },
           vaultRoot: restored.vaultRoot,
         });
-        if (otherWake.nextWakeAt !== null && Date.parse(otherWake.nextWakeAt) <= nowMs) {
-          return false;
-        }
+        // Continuing reopens publication and marks the runtime dirty, so owned
+        // provider calls and the cursor's apply wake both run before release.
         if (!controller.continueAfterCheckpoint(clinicalWakeDue)) {
           return false;
         }
-        // The job starts in a microtask, so this resumes before it can request
-        // its proposal apply from system work.
         workspaceSystemWork.resume();
-        await controller.waitForExtraction();
-        if (!runtimeStateDirty) {
-          // Nothing ran. Restore the checkpoint-only boundary before release.
-          await Promise.all([workspaceSystemWork.quiesce(), controller.pauseAndRequeue()]);
+        workspaceSystemWork.kick();
+        // Another due wake runs here first, as a restored successor's first
+        // foreground pass would, instead of costing a fresh container.
+        if (otherWake.nextWakeAt !== null && Date.parse(otherWake.nextWakeAt) <= nowMs) {
+          await runForegroundPass({ requestIdKind: "checkpoint-wake", signal });
         }
-        return runtimeStateDirty;
+        return true;
       };
       // Clinical continuation is the last post-checkpoint choice before the
       // invocation finishes. Null loops back, exactly like a finish retry.
@@ -6470,7 +6468,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && !input.deferredBrowserVaultWakePrefetch
           && !input.deferredDeviceSyncWake
           && input.browserVaultRefresh?.status !== "deferred_runtime_wake"
-          && await continueClinicalEnrichmentAfterCheckpoint(input.idleMaintenance)
+          && await continueClinicalEnrichmentAfterCheckpoint(input.idleMaintenance, input.postCheckpointWorkSignal)
         ) {
           return null;
         }
@@ -6918,7 +6916,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         };
       };
       const mayFinishRuntime = (): boolean => !runtimeStateDirty;
+      // A quiet start must not release while the extractor is still planning:
+      // planning that starts a unit marks the runtime dirty first.
+      const settleClinicalPlanning = async (): Promise<void> => {
+        await clinicalEnrichmentController?.settlePlanning();
+      };
       const prepareNextRuntimeCheckpoint = async (): Promise<boolean> => {
+        await settleClinicalPlanning();
         if (!runtimeStateDirty) {
           await closeDetachedAssistantAskBeforeWorkspaceRelease();
           await workspaceSystemWork.quiesce();
@@ -6926,6 +6930,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return runtimeStateDirty;
       };
       const prepareInvocationRelease = async (): Promise<void> => {
+        await settleClinicalPlanning();
         if (mayFinishRuntime()) await closeDetachedAssistantAskBeforeWorkspaceRelease();
       };
       const finishCleanRuntimeInvocation = async () => {
@@ -7218,6 +7223,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             );
           }
         }
+        await settleClinicalPlanning();
         if (mayFinishRuntime()) {
           // Closing is terminal for this invocation. Do it at the clean-return
           // decision point so a just-claimed request is requeued and included in

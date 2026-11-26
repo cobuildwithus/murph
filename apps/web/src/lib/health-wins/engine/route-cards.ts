@@ -28,7 +28,7 @@ function distanceLabel(meters: number, unit: DistanceUnit): string {
   return `${value < 0.01 ? "<0.01" : formatNumber(value, 2)} ${unit}`;
 }
 
-export function routeCards(activity: RecordedActivity, recorded: string, units: ClientUnits): CardSpec[] {
+export function routeCards(activity: RecordedActivity, recorded: string, units: ClientUnits, word: string): CardSpec[] {
   const route = activity.route;
   if (!route?.paths) return [];
   const displayUnit = units === "metric" ? "km" : "mi";
@@ -37,7 +37,7 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
   const paceLabel = `${pace} a ${unitName[displayUnit]}`;
   const duration = clock(activity.movingSec);
   const base = {
-    title: { number: distance, measure: activity.kind }, filter: "Fitness", theme: "fitness", share: { caption_tips: [] },
+    title: { number: distance, measure: word }, filter: "Fitness", theme: "fitness", share: { caption_tips: [] },
   } as const;
 
   const unit = splitUnit(route.splits, displayUnit);

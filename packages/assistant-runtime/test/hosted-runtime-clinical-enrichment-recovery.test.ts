@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { expect, it, vi } from "vitest";
 import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
-import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { extractHostedClinicalUnit, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 
 const provider = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
@@ -37,12 +37,9 @@ it.each([
       clinicalFact: { category: "encounter-history", label: "Routine review", subject: "member", clinicalDate: at, statement: "Routine review." },
     } }] },
   };
-  const state = {
-    readNextClinicalEnrichment: vi.fn().mockResolvedValue({ status: "extract", jobId: "a".repeat(64), page: 1, timeZone: "UTC", documentPath,
-      source: { rawRef, sha256: createHash("sha256").update(text).digest("hex"), mediaType: "text/plain" } }),
-    persistClinicalEnrichmentProposals: vi.fn().mockResolvedValue(undefined),
-    blockClinicalEnrichment: vi.fn(), deferClinicalEnrichment: vi.fn().mockResolvedValue({ nextAttemptAt: "2026-07-10T13:00:00Z" }),
-  };
+  const unit = { key: "synthetic/1.json", jobId: "a".repeat(64), cursor: true, cursorRef: "0:0:1", locator: { attachmentIndex: 0 },
+    cacheSha256: "c".repeat(64), page: 1, timeZone: "UTC", documentPath, failures: 0,
+    source: { rawRef, sha256: createHash("sha256").update(text).digest("hex"), mediaType: "text/plain" } };
   const parent = new AbortController();
   let elapsed = 0;
   const deadlines: { at: number; controller: AbortController }[] = [];
@@ -88,27 +85,23 @@ it.each([
     return { finalMessage: JSON.stringify({ status: "complete", records: [...outputs.labs!.records, ...outputs.measurements!.records, ...outputs.history!.records] }), jsonEvents: [] };
   });
   const input: HostedClinicalEnrichmentInput = {
-    abortSignal: parent.signal, codexHome: null, env: {}, vaultRoot, memberId: "synthetic-member",
-    state, onStateMutation() {}, resolveRuntimeAuthority: async () => handoff && initialCalls === 1 ? "handoff" : "current",
+    codexHome: null, env: {}, vaultRoot, memberId: "synthetic-member",
+    onStateMutation() {}, resolveRuntimeAuthority: async () => handoff && initialCalls === 1 ? "handoff" : "current",
     prepareDocument: async () => ({ totalPages: 1, extractedText: text, renderedPages: [], scratchRoots: [], async cleanup() {} }),
   };
   try {
     await mkdir(path.dirname(documentPath), { recursive: true });
     await writeFile(documentPath, text);
-    const result = await runOneHostedClinicalEnrichment(input);
-    expect({ result, calls: provider.execute.mock.calls.length, elapsed }).toEqual({
-      result: cancel || handoff ? "idle" : "settled", calls: 1 + correctionCalls,
+    const outcome = await extractHostedClinicalUnit(input, unit, parent.signal);
+    expect({ result: outcome.result.kind, calls: provider.execute.mock.calls.length, elapsed }).toEqual({
+      result: cancel || handoff ? "abandoned" : "extracted", calls: 1 + correctionCalls,
       elapsed: initialMs + correctionCalls * (stall ? 57_000 : 25_000),
     });
-    expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
-    expect(state.blockClinicalEnrichment).not.toHaveBeenCalled();
-    if (cancel || handoff) expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
-    else {
-      expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledOnce();
-      expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledWith(expect.objectContaining({ outputs: {
+    if (outcome.result.kind === "extracted") {
+      expect(outcome.result.outputs).toEqual({
         labs: outputs.labs, measurements: outputs.measurements,
         history: { ...outputs.history, status: "blocked", reason: expect.any(String) },
-      } }));
+      });
     }
   } finally {
     clock.mockRestore(); timer.mockRestore(); provider.execute.mockReset();

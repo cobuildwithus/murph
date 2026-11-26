@@ -39,6 +39,36 @@ Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
 
+## Texting a new win
+
+An explicitly enrolled member can receive one iMessage about a new win per
+local day. The first complete set with an eligible achievement establishes a
+silent baseline. The pilot remembers achievements the member has seen in the
+composer, including on partial and cached reads. On later days it picks the
+highest-ranked fresh, unseen achievement in the engine's deterministic order.
+It consumes the other observed achievements that day as well.
+
+Eligible wins include trends, best months, threshold counts and session counts
+for the current calendar month. A personal record must fall within the latest
+three local dates. A lab change or lab percentile must fall within the latest
+90 local dates. Multiple results from one experiment share an identity.
+The pilot skips streaks, standing totals, wearable percentiles, game cards,
+lab-range cards and activities the member recorded.
+
+The question and link preview are generic. The link opens a compatible
+companion through `/wins/<ref>`. An eligible candidate in the member's normal
+authenticated wins response can include an opaque `winRef` for local matching.
+A previously cached candidate without an achievement descriptor has no reference.
+The browser landing page offers **Open in Murph** for any well-formed reference.
+
+The minute sweep claims an enrolled member's day once, between 10:00 and
+13:30 in their game profile time zone. Detection requires complete inputs,
+current health consent and active access, an awake account and an established
+direct iMessage thread with inbound activity in the 90-day window. Opening the composer
+during evaluation or before dispatch suppresses the pending text. Three
+accepted win texts within 28 days pause further texts until the member writes
+to Murph or posts a win, or the oldest text ages out.
+
 ## Recording an activity
 
 Members with timed recording enabled can save a session privately or share selected cards
@@ -49,8 +79,11 @@ draft. Saving or posting a recording does not count as a game check-in.
 A timed card shows how long the activity lasted. When minute averages are available, a
 heart-rate card shows them with gaps for missing readings. The markers identify the lowest and highest visible minute averages, using one-based
 minute positions. The subtitle identifies the peak individual reading.
-**Hide my numbers** replaces the chart, duration and measurements with a kind-specific
-session label. The post uses the selected version even if later recordings change.
+Members can give a recording a name. The time, heart-rate, map and splits
+cards use it in their titles. The suggested post title can also include the
+previous activity's name. **Hide my numbers** removes the duration and
+measurements and uses a fixed, kind-specific session label. The post uses
+the selected version even if later recordings change.
 
 With route recording enabled, a run or walk can also show a map and a split
 table. The map shows only the paths the phone prepared for sharing. Distance
@@ -92,16 +125,18 @@ All paths below are relative to `/api/game/v1/health` and require member
 authentication. The client reads the optional `flags.health_feed` from game
 Home and shows the feed only when it is true. A disabled route returns 404.
 Responses use `private, no-store`. Game Home and the Health wins feed add a top-level
-`record: {timed: true, route: boolean}` for members on both the feed and recording allowlists.
+`record: {timed: true, route: boolean, named: true}` for members on both the feed and recording allowlists.
 Only members also on the route allowlist receive `route: true`.
-A missing capability keeps the recorder hidden. The recording endpoints return 404 when
-recording is disabled.
+A missing `record` keeps the recorder hidden. The client offers activity-name
+search only when `record.named` is true. The recording endpoints return 404
+when recording is disabled.
 
 | Route | Request and result |
 | --- | --- |
 | `GET wins` | Returns `{day, setRevision, candidates}`. Ordinary reads reuse today's set for an hour. `?refresh=1` recomputes immediately, once per minute per member. Additional refreshes during that minute return the stored set. A timeout can return a previous day's set. Use the returned day and revision together. |
 | `POST wins/{candidateId}/change` | Send `{setRevision, option}` using an ID from the candidate's `change_options`. Returns `{card}` for preview. |
 | `PUT photos/{id}` | Upload a JPEG up to 2 MiB and 2048 pixels per side under a client-generated UUID. Each member can have 20 unpublished uploads. A new upload over the limit returns 409. Use the returned `attachmentId` at publication. `DELETE` discards an unpublished upload. `GET` reads an authorized published photo. |
+| `POST activities/kind` | Send `{name}` when the member chooses a custom name. Returns `{name, kind, timer, decided}` with the cleaned name. Send that name back unchanged on preview, save and post. |
 | `POST activities/cards` | Send `{activity}` to preview without saving. Returns `{suggestedTitle, cards}`. Each card includes the flat spec, `candidateId`, `specRevision` and `change_options`. Each option carries its own revision. Alternate options include the exact display spec, or `null` for map removal. |
 | `PUT activities/{id}` | Send `{activity}` with the matching UUID and summary fields only. Returns `{id}`. Repeating the same save returns the same receipt. Reusing the UUID for a different summary returns 409. |
 | `POST posts` | Send a client UUID in `id` and at least one of `caption`, `cards` or `attachmentId`. Send up to 12 distinct picks in display order. For suggested cards, include `setRevision` and send `{candidateId, option}`. For recorded cards, include the previewed `activity` and send `{candidateId, option, specRevision}` for the chosen option. The two kinds of pick can be interleaved. Send `original` for the unmodified card. Returns `{id, version}`. Retry with the same UUID. |
@@ -119,6 +154,7 @@ recording is disabled.
 | Field | Meaning |
 | --- | --- |
 | `id`, `kind` | Client UUID and one of `sauna`, `cold_plunge`, `lift`, `other`, `run`, or `walk`. A run or walk without a route uses the timed card builder. |
+| `name?` | Optional activity name, 1–32 Unicode scalars. The private summary and Settings export include it when supplied. |
 | `startedAt` | ISO timestamp with an offset or UTC designator. The card discloses only the day in the member’s game-profile time zone and the part of day (night before 5:00, morning, afternoon from 12:00, evening from 17:00), never the start time. |
 | `elapsedSec`, `movingSec`, `timerSec?` | Whole seconds, each positive and at most six hours. Elapsed runs from Start to Finish, pauses included. Moving time is the recording time with pauses cut out, at most the elapsed time. Cards show moving time, the same clock the phone's timer runs on. |
 | `heartRate?` | Summary with `avgBpm`, `lowBpm`, and `peakBpm`, ordered low to average to peak within 30–230 bpm. For preview and post, also send `perMinute`: one whole-number average per minute of moving time (within one of `ceil(movingSec / 60)`), or `null` for a minute without a reading. Omit the series on a private save. |
@@ -128,6 +164,36 @@ The minute array has at most 360 entries. Each reading must lie within the
 summary envelope. Raw samples, GPS fixes and extra fields are rejected at every
 level. All recording JSON shares the
 32 KiB request limit. The client supplies presentation units via `X-Murph-Client-Units`.
+
+### Choosing an activity name
+
+The client filters names locally while the member types. When the member
+chooses a new name, Web rejects raw line breaks, strips control and format
+characters, trims and collapses whitespace, and normalizes the result to NFC.
+The name must contain a letter. It may also include combining marks, numbers, spaces,
+straight or curly apostrophes, ampersands, slashes, periods and hyphens.
+Web applies the game task-text refusal rules before classification.
+
+With `MURPH_HEALTH_ACTIVITY_DECISIONS=true` and an OpenAI API key configured,
+Web reuses a shared classification or asks Decisions once with a three-second
+deadline. The cleaned name is the only member-supplied information the
+provider receives. Each member can make 30 cache-miss attempts per 24 hours.
+A run or walk requires both a route score of at least 0.5 and current route
+access. Otherwise that selection becomes `other`. A timer score of at least
+0.5 enables the countdown, as do the `sauna` and `cold_plunge` kinds. The
+client also checks route access before starting from a built-in or recent
+selection. A recording already in progress keeps its kind.
+
+When Decisions is off, unavailable, or the budget is exhausted, the result
+keeps the cleaned name with `kind: "other"`, `timer: false` and `decided: false`.
+Web checks names on new choices, previews, private saves and new posts.
+A refused name returns HTTP 400 with `HEALTH_ACTIVITY_NAME_INVALID`. On this
+code during preview or an uncommitted private save, the client can remove
+the name from its retained draft, keep the rest of the recording, retry once
+and tell the member. An exact retry of a committed private save returns its
+receipt even if the name would now be refused. Export, previous-activity
+lookup and comparison against a sealed save use the stored name without
+checking today's refusal rules.
 
 ### Route recording
 
@@ -220,8 +286,9 @@ A recorded candidate ID has the form `activity:<uuid>:<card-kind>`. Use the chos
 option's SHA-256 revision when posting. If the rebuilt spec differs, the server returns
 409 `HEALTH_ACTIVITY_CARD_CHANGED`. Preview again and ask the member to confirm.
 A successful post binds that recording once. Replaying the post ID returns its
-stored receipt even if the card builder has since changed. Deleting the post removes the
-shared cards. The private summary remains available in Settings export.
+stored receipt before name admission, even if the card builder or refusal rules
+have since changed. Deleting the post removes the shared cards. The private
+summary remains available in Settings export.
 
 Posts include `id`, `authorMemberId`, `firstName`, `avatarUrl`, `createdAt`,
 `version`, `caption`, `cards`, `attachmentId` and `cheered`. Each published
@@ -234,7 +301,8 @@ for their own posts. A cumulative distance card’s map chart may contain
 
 ## Rollout
 
-The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Each allowlist takes member IDs, or `*` for every member. Timed recording also requires membership in
+The feed and recording allowlists take member IDs, or `*` for every member.
+The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
 final route privacy transform before enabling this subset. After strict request
@@ -249,6 +317,20 @@ native composer, profile sheet, and **Try it** actions have a separate client
 rollout. Deploy the activity migration and recording-capable Web before enabling timed clients.
 Keep the compatible Web writer and exporter available once summaries exist. GPS recording
 and recording-based session wins have separate rollout steps.
+
+Win texts require explicit member IDs in `MURPH_HEALTH_WIN_TEXT_MEMBER_IDS`
+as well as feed access. An empty list disables enrollment, evaluation and
+queued delivery. A wildcard enrolls nobody. Deploy the compatible Web and
+runner builds and the companion's win-link handling before enabling the pilot.
+On rollback, keep the signed egress rejection for this key family until all
+queued and already imported delivery work has reached a terminal state.
+
+Deploy the activity-kind cache migration and finish rolling out Web readers
+and writers that support `name` before releasing a client that sends it.
+Keep compatible readers, writers and exporters available after the first
+named save. In staging, enable `MURPH_HEALTH_ACTIVITY_DECISIONS` and check
+the route and timer thresholds with synthetic names. The switch controls
+classification only. Timed-recording members can use names with it off.
 
 The server storage, authorization and deletion contract is in
 [Health wins architecture](../../ARCHITECTURE.md#health-wins).

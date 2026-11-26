@@ -9,30 +9,32 @@ import type { ClientUnits } from "../companion/client-info";
 import { assertGameMemberAuthCurrentForRead, assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { gameHttpError } from "../game/http/errors";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
-import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import {
   findCandidate, freezeHealthSelections, prepareHealthCandidates, previewHealthCandidate, withDistanceTrendUnits,
   type CachedHealthCandidate, type HealthCardSelection,
 } from "./card-options";
+import { readHealthWinIdentities } from "./achievement";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import { rankHealthCards } from "./decisions";
-import { generateHealthWins } from "./engine";
-import { readHealthWinInputs } from "./inputs";
+import { readHealthWinDetection } from "./detection";
+import { isHealthWinTextEnabled } from "./flag";
+import { recordHealthWinPresentationTx } from "./nudge-state";
 import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v6";
+const DETECTOR_VERSION = "v7";
 const CHECK_INTERVAL_MS = 60 * 60_000;
-const INPUT_BUDGET_MS = 8_000;
 
 const staleSet = () => hostedOnboardingError({
   code: "HEALTH_WIN_SET_CHANGED", httpStatus: 409, message: "Your win cards changed. Choose from your current set.",
 });
 
-async function readAuthority(auth: HostedNativeMemberAuth, db: Prisma.TransactionClient) {
-  await assertGameMemberAuthCurrentForRead(auth, db);
+async function assertAuthority(auth: HostedNativeMemberAuth, db: Prisma.TransactionClient, access: "read" | "write" = "read") {
+  if (access === "write") await assertGameMemberAuthCurrentTx(auth, db);
+  else await assertGameMemberAuthCurrentForRead(auth, db);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: db });
 }
 
@@ -48,7 +50,7 @@ function latest(db: Prisma.TransactionClient, memberId: string, today: string) {
 async function readCurrent(auth: HostedNativeMemberAuth) {
   const db = getPrisma(), memberId = auth.member.id;
   return db.$transaction(async tx => {
-    await readAuthority(auth, tx);
+    await assertAuthority(auth, tx);
     const profile = await tx.gameProfile.findUnique({ where: { memberId }, select: { timeZone: true } });
     const today = localToday(profile);
     return { today, row: await latest(tx, memberId, today) };
@@ -69,12 +71,25 @@ interface WinReadOptions { signal: AbortSignal; refresh?: boolean; units?: Clien
 
 async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal, units }: WinReadOptions) {
   signal.throwIfAborted();
-  const candidates = (await openSet(row, signal)).map(candidate =>
-    previewHealthCandidate(units === "metric" ? candidate : candidate.miles ?? candidate));
+  const cached = await openSet(row, signal);
   const memberId = auth.member.id;
+  const textEnabled = isHealthWinTextEnabled(memberId);
+  const eligible = cached.flatMap(({ id, achievement }) => achievement ? [{ id, achievement }] : []);
+  const observations = textEnabled
+    ? readHealthWinIdentities(memberId, eligible.map(({ achievement }) => achievement), row.day)
+    : null;
+  const refs = new Map(observations?.items.map((item, i) => [eligible[i].id, item.winRef]));
+  const candidates = cached.map(candidate => {
+    const display = units === "metric" ? candidate : candidate.miles ?? candidate;
+    const winRef = refs.get(candidate.id);
+    return { ...previewHealthCandidate(display), ...(winRef && { winRef }) };
+  });
   const keys = postedCardKeys(memberId, candidates.map(card => card.id));
   const posted = await getPrisma().$transaction(async tx => {
-    await readAuthority(auth, tx);
+    await assertAuthority(auth, tx, textEnabled ? "write" : "read");
+    if (textEnabled) await recordHealthWinPresentationTx(tx, {
+      memberId, observations, complete: cached.some(candidate => candidate.sourceComplete === true),
+    });
     if (!keys.size) return [];
     return tx.$queryRaw<{ key: string }[]>`
       SELECT DISTINCT card.key
@@ -89,24 +104,6 @@ async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal
     return key === undefined || !shared.has(key);
   });
   return { day: row.day, setRevision: row.revision, candidates: suggestions };
-}
-
-// Stop source work at the budget, then drain the request-scoped replica/crypto work
-// before decrypting a fallback or opening a publication transaction.
-async function loadInputs(auth: HostedNativeMemberAuth, today: string, requestSignal: AbortSignal) {
-  const deadline = AbortSignal.timeout(INPUT_BUDGET_MS);
-  const signal = AbortSignal.any([requestSignal, deadline]);
-  signal.throwIfAborted();
-  try {
-    const source = await readHealthWinInputs(auth, today, signal);
-    requestSignal.throwIfAborted();
-    return deadline.aborted ? null : source;
-  } catch (error) {
-    if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) throw error;
-    requestSignal.throwIfAborted();
-    if (deadline.aborted) return null;
-    throw error;
-  }
 }
 
 /** A post sharing yesterday's timeout fallback must also serialize with creation of today's row. */
@@ -135,7 +132,8 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   const canRecompute = !options.refresh || (await hostedAuthRateLimitStorage(db).consume(
     `health-wins-refresh:member:${memberId}`, { max: 1, window: 60 },
   )).allowed;
-  const source = canRecompute ? await loadInputs(auth, today, options.signal) : null;
+  const checkAuthority = () => db.$transaction(tx => assertAuthority(auth, tx));
+  const source = canRecompute ? await readHealthWinDetection({ memberId, today, checkAuthority, signal: options.signal }) : null;
   if (!source) {
     const { row: lastGood } = await readCurrent(auth);
     if (lastGood) return present(auth, lastGood, options);
@@ -145,11 +143,12 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   const keep = observed?.day === today && observed.sourceRevision === sourceRevision && !options.refresh;
   let replacement: HealthWinSet | null = null;
   if (!keep) {
-    const generated = generateHealthWins(source.input);
-    if (!generated.length && !source.complete && observed) return present(auth, observed, options);
-    await db.$transaction(tx => readAuthority(auth, tx));
-    const ranked = await rankHealthCards(generated, options.signal);
-    const candidates = prepareHealthCandidates(memberId, ranked, source.distanceArtUrl);
+    const { cards, achievements } = source.detect();
+    if (!cards.length && !source.complete && observed) return present(auth, observed, options);
+    await checkAuthority();
+    const ranked = await rankHealthCards(cards, options.signal);
+    const nudge = isHealthWinTextEnabled(memberId) ? { achievements, complete: source.complete } : undefined;
+    const candidates = prepareHealthCandidates(memberId, ranked, source.distanceArtUrl, nudge);
     const revision = randomUUID();
     const [candidatesEncrypted] = await sealHealthTexts([{ ...cipherTarget(memberId, revision), value: JSON.stringify(candidates) }], options.signal);
     replacement = { memberId, day: today, sourceRevision, revision, candidatesEncrypted, createdAt: now, checkedAt: now };
@@ -159,8 +158,7 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   // Serialize the brief publication step with other publishers and post acceptance. The
   // observed revision and check time also fence a slower recomputation of an unchanged set.
   const published = await db.$transaction(async tx => {
-    await assertGameMemberAuthCurrentTx(auth, tx);
-    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
+    await assertAuthority(auth, tx, "write");
     const [profile] = await tx.$queryRaw<{ timeZone: string }[]>`
       SELECT time_zone AS "timeZone" FROM game_profile WHERE member_id = ${memberId} FOR UPDATE
     `;
@@ -194,7 +192,7 @@ async function openSelectedSet(auth: HostedNativeMemberAuth, expectedRevision: s
   // Re-evaluate both content authority and set identity after decrypting. Post writes
   // repeat the revision check under the shared publication lock in their own transaction.
   await getPrisma().$transaction(async tx => {
-    await readAuthority(auth, tx);
+    await assertAuthority(auth, tx);
     await assertHealthSetCurrent(tx, auth.member.id, row.day, row.revision, "preview");
   });
   return { day: row.day, candidates };

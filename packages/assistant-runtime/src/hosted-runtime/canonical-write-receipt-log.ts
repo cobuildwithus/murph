@@ -34,6 +34,28 @@ export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD =
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES - 1;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES = 64 * 1024;
 export const HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES = 4 * 1024 * 1024;
+// Past the first compaction boundary, background owners keep headroom for
+// already-admitted writes under both the logical and the compaction budgets.
+const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_HEADROOM_ENTRIES = 8;
+const HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_MAX_BYTES =
+  HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES / 2;
+
+/**
+ * Whether background work must yield for a checkpoint. Payload bytes are
+ * separate artifacts; compaction budgets only receipt metadata, so the log
+ * admits background writes beyond its 64-reference boundary while those
+ * metadata bytes are known and small. An unknown size, as after restore, keeps
+ * the first boundary.
+ */
+export function hostedCanonicalWriteReceiptLogBlocksBackgroundWrites(input: {
+  entryCount: number;
+  pendingReceiptBytes: number | null;
+}): boolean {
+  if (input.entryCount < HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_YIELD_THRESHOLD) return false;
+  return input.pendingReceiptBytes === null
+    || input.entryCount >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES - HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_HEADROOM_ENTRIES
+    || input.pendingReceiptBytes >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BACKGROUND_MAX_BYTES;
+}
 const LEGACY_LOG_COUNT_STATUS_KEY = "hostedCanonicalWriteReceiptLogEntryCount";
 
 interface HostedCanonicalWriteReceiptLogV1 {
@@ -52,6 +74,8 @@ export interface HostedCanonicalWriteReceiptLogReadResult {
 export interface HostedCanonicalWriteReceiptLogUpdate {
   entryCount: number;
   logRef: HostedCanonicalWriteReceiptContentRef;
+  /** Receipt metadata bytes the next compaction would read. */
+  pendingReceiptBytes: number;
 }
 
 export interface HostedCanonicalWriteReceiptLogStatusFingerprint {
@@ -90,6 +114,7 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
     return {
       entryCount: previousEntryCount,
       logRef: previousRef,
+      pendingReceiptBytes: sumHostedCanonicalWriteReceiptBytes(previousLog.entries),
     };
   }
   if (previousEntryCount >= HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES) {
@@ -160,7 +185,12 @@ export async function appendHostedCanonicalWriteReceiptToArtifactLog(input: {
   return {
     entryCount,
     logRef: logArtifact.ref,
+    pendingReceiptBytes: sumHostedCanonicalWriteReceiptBytes(entries),
   };
+}
+
+function sumHostedCanonicalWriteReceiptBytes(entries: readonly HostedCanonicalWriteReceiptContentRef[]): number {
+  return dedupeHostedCanonicalWriteReceiptRefs(entries).reduce((total, entry) => total + entry.byteSize, 0);
 }
 
 async function compactHostedCanonicalWriteReceiptLogEntries(input: {
