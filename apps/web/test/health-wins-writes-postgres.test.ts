@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
+import { createHostedOpaqueDigest } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { getPrisma } from "@/src/lib/prisma";
 import { openHealthTexts } from "@/src/lib/health-wins/crypto";
 import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
@@ -121,6 +122,9 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(await db.healthActivity.count({ where: { id: activity.id } })).toBe(0);
     expect(await createHealthPost(owner, input, "metric")).toEqual({ id: input.id, version: 1 });
     expect(await db.healthActivity.findUniqueOrThrow({ where: { id: activity.id } })).toMatchObject({ postId: input.id, memberId });
+    const postedKeys = () => db.healthPost.findUniqueOrThrow({ where: { id: input.id }, select: { postedCardKeys: true } });
+    const winKeys = winCards.map(card => createHostedOpaqueDigest("health-win-card", `${memberId}:${card.id}`));
+    expect((await postedKeys()).postedCardKeys).toEqual(winKeys);
 
     const otherPostId = randomUUID();
     await expect(createHealthPost(owner, { ...input, id: otherPostId }, "metric")).rejects.toMatchObject({ httpStatus: 409 });
@@ -155,6 +159,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(await patchHealthPost(owner, input.id, { expectedVersion: 2, removeCardIds: [winCards[0]!.id] }))
       .toEqual({ id: input.id, version: 3 });
     expect(await storedCards()).toEqual(before.slice(1));
+    expect((await postedKeys()).postedCardKeys).toEqual(winKeys.slice(1));
     expect(state.resolve).not.toHaveBeenCalled();
   });
 

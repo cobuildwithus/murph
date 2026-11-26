@@ -1,5 +1,5 @@
 import { isStrictIsoDate } from "@murphai/contracts/time";
-import { normalizeLabResultMetricValue, normalizeUnit, resolveLabResultMetricDefinition } from "@murphai/health-metrics";
+import { normalizeLabResultMetricValue, normalizeUnit, resolveLabResultMetricDefinition, unitsEquivalent } from "@murphai/health-metrics";
 import type { BrowserVaultLabResultRow } from "@murphai/query/browser";
 import type { Analyte, LabDraw } from "./engine";
 
@@ -14,24 +14,60 @@ const units: Record<Analyte, string> = {
   hs_crp: "mg/L", insulin: "µIU/mL", a1c: "%", glucose: "mg/dL",
 };
 
+const quantity = String.raw`([+-]?(?:\d+(?:\.\d+)?|\.\d+))(?:\s*([A-Za-zµμ%][\wµμ%/]*))?`;
+const textInterval = new RegExp(`^${quantity}\\s*-\\s*${quantity}$`);
+const textLimit = new RegExp(`^([<>]=?)\\s*${quantity}$`);
+
+function parseTextRange(text: string, unit: string | null) {
+  const interval = textInterval.exec(text);
+  if (interval) {
+    const [, start, startUnit, end, endUnit] = interval;
+    if ([startUnit, endUnit].some(suffix => suffix && !unitsEquivalent(suffix, unit))) return;
+    const low = Number(start), high = Number(end);
+    if (Number.isFinite(low) && Number.isFinite(high)) return { low, high };
+    return;
+  }
+  const limit = textLimit.exec(text);
+  if (!limit) return;
+  const [, operator, number, suffix] = limit;
+  const value = Number(number);
+  if (!Number.isFinite(value) || (suffix && !unitsEquivalent(suffix, unit))) return;
+  const exclusive = operator === "<" || operator === ">";
+  return operator.startsWith("<") ? { high: value, exclusive } : { low: value, exclusive };
+}
+
 function reportedRange(row: BrowserVaultLabResultRow): LabDraw["referenceRange"] | null {
   const range = row.referenceRange;
   if (!range) return undefined;
-  if (range.low === undefined && range.high === undefined) return null;
+  const bounds = range.low === undefined && range.high === undefined
+    ? parseTextRange(range.text?.trim() ?? "", row.unit)
+    : range;
+  if (!bounds) return undefined;
   // The projection retains the reporting lab's bounds in its original unit.
   function bound(value: number | undefined) {
     if (value === undefined || normalizeUnit(row.unit) === row.normalizedUnit) return value;
     const result = normalizeLabResultMetricValue({ metricKey: row.metricKey, value, unit: row.unit });
     return result.canonicalUnit === row.normalizedUnit ? result.canonicalValue : null;
   }
-  const low = bound(range.low), high = bound(range.high);
+  const low = bound(bounds.low), high = bound(bounds.high);
   if (low === null || high === null || (low !== undefined && high !== undefined && low > high)) return null;
+  if ("exclusive" in bounds && bounds.exclusive && row.normalizedValue === (low ?? high)) return null;
   return { low, high };
 }
 
 function normalExactResult(row: BrowserVaultLabResultRow) {
-  return row.parentResultStatus === "normal" && (row.flag === null || row.flag === "normal")
-    && row.comparator === null && Boolean(row.unit);
+  if (row.comparator !== null || !row.unit) return false;
+  if (row.flag !== null) return row.flag === "normal";
+  return row.parentResultStatus === "normal" || row.parentResultStatus === "unknown" || row.parentResultStatus === "mixed";
+}
+
+/** The draw's range when the value sits inside it, undefined with no range, null when the value can't count. */
+function rangeForValue(row: BrowserVaultLabResultRow, value: number): LabDraw["referenceRange"] | null {
+  const referenceRange = reportedRange(row);
+  if (referenceRange === null || value < (referenceRange?.low ?? -Infinity) || value > (referenceRange?.high ?? Infinity)) return null;
+  // A lab flags the result that is out of range. An unflagged result beside a flagged one counts only inside its own range.
+  if (row.flag === null && row.parentResultStatus === "mixed" && !referenceRange) return null;
+  return referenceRange;
 }
 
 function eligibleDraw(analyte: Analyte, row: BrowserVaultLabResultRow): LabDraw | null {
@@ -39,14 +75,17 @@ function eligibleDraw(analyte: Analyte, row: BrowserVaultLabResultRow): LabDraw 
   const value = row.normalizedValue;
   const unit = units[analyte];
   if (row.normalizedUnit !== normalizeUnit(unit) || value === null || !Number.isFinite(value) || value < 0) return null;
-  const referenceRange = reportedRange(row);
-  if (referenceRange === null || value < (referenceRange?.low ?? -Infinity) || value > (referenceRange?.high ?? Infinity)) return null;
-  return { analyte, date: row.date, value, unit, referenceRange, specimen: row.specimenKind ?? undefined,
+  const referenceRange = rangeForValue(row, value);
+  if (referenceRange === null) return null;
+  // Supplying a specimen enables the engine's published fallback. An unreadable
+  // lab range still permits change and percentile cards, but rules out that fallback.
+  const specimen = row.referenceRange && !referenceRange ? undefined : row.specimenKind ?? undefined;
+  return { analyte, date: row.date, value, unit, referenceRange, specimen,
     flag: row.flag === "normal" ? "normal" : undefined,
     fasting: row.fastingStatus === "unknown" ? undefined : row.fastingStatus === "fasting" };
 }
 
-interface ResolvedDraw { draw: LabDraw; method: string; drawId: string }
+interface ResolvedDraw { draw: LabDraw; row: BrowserVaultLabResultRow }
 
 function comparableHistory(rows: BrowserVaultLabResultRow[], analyte: Analyte): LabDraw[] {
   const byDate = new Map<string, ResolvedDraw | null>();
@@ -54,7 +93,6 @@ function comparableHistory(rows: BrowserVaultLabResultRow[], analyte: Analyte): 
   for (const row of rows) {
     const draw = eligibleDraw(analyte, row);
     const previous = byDate.get(row.date);
-    const method = row.metricKey;
     const drawId = row.drawId;
     const otherDate = drawId ? datesById.get(drawId) : undefined;
     if (otherDate && otherDate !== row.date) byDate.set(otherDate, null);
@@ -62,9 +100,10 @@ function comparableHistory(rows: BrowserVaultLabResultRow[], analyte: Analyte): 
     // A conflicting duplicate or multiple independent draws on a date cannot
     // supply one authoritative daily value to the engine.
     if (draw && drawId && (!otherDate || otherDate === row.date) && (previous === undefined
-      || (previous && previous.drawId === drawId && previous.method === method
+      || (previous && previous.row.drawId === drawId && previous.row.metricKey === row.metricKey
+        && previous.row.specimenKind === row.specimenKind
         && JSON.stringify(previous.draw) === JSON.stringify(draw)))) {
-      byDate.set(row.date, { draw, drawId, method });
+      byDate.set(row.date, { draw, row });
     } else {
       byDate.set(row.date, null);
     }
@@ -76,7 +115,7 @@ function comparableHistory(rows: BrowserVaultLabResultRow[], analyte: Analyte): 
   return dates.flatMap(date => {
     const result = byDate.get(date);
     if (result === latest) return [latest.draw];
-    if (!result || result.method !== latest.method || result.draw.specimen !== latest.draw.specimen
+    if (!result || result.row.metricKey !== latest.row.metricKey || result.row.specimenKind !== latest.row.specimenKind
       || (needsFast && !(latest.draw.fasting && result.draw.fasting))) return [];
     return [result.draw];
   });

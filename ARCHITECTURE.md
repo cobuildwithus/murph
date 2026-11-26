@@ -6812,6 +6812,10 @@ those inputs' revisions to the member. A conditional write publishes a replaceme
 only if the revision observed before computation is still current. The publication
 transaction retains the member's three newest stored days under the profile lock.
 Fallback reads use the newest retained day on or before the member's local date.
+When serving a set, Web omits candidate IDs found on the member's live posts.
+One author-indexed query returns at most one matching digest per candidate (up to 24).
+This filter leaves the stored set and its revision available to open composers.
+If the opaque-ID keyring is unavailable, Web skips the filter and logs the error class.
 
 To publish a card the client submits its candidate ID, option and opaque set
 revision. A superseded set returns 409. The post freezes each selected spec
@@ -6859,7 +6863,7 @@ database transactions.
 
 | Table | Encrypted content | Approved operational metadata |
 | --- | --- | --- |
-| `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
+| `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `posted_card_keys` holds opaque keyed digests of the author's member ID and each selected suggestion's candidate ID. Recorded activity cards have no digest. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
 | `health_activity` | `summary_encrypted` holds the activity kind, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |

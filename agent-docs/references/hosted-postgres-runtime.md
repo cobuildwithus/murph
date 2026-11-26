@@ -140,6 +140,10 @@ undelivered signals and excludes parked accounts before its batch limit.
 An attributed group message stays in the group mailbox. The webhook restores
 the sender’s personal scheduler separately using the same shutdown marker.
 Background heartbeats and system mailbox items leave dormancy alone.
+Scheduled and deferred device wakes skip parked runtimes before their batch
+limits, leaving due work intact. Runtime-progress and device-import alerts
+exclude intentionally parked runtimes; the same work is eligible for probes and
+monitoring after return.
 Accepted conversation receipts keep message replay from renewing activity.
 Existing accounts also use retained conversation, inbound Linq, foreground
 companion and session evidence. Expired or deleted historical browser sessions

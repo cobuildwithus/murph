@@ -18,6 +18,7 @@ import type { RecordedActivity } from "./engine/types";
 import { assertHealthRecordEnabled, healthRecordCapability } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
 import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
+import { postedCardKeys } from "./posted-card-keys";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
 import { assertHealthSetCurrent, resolveHealthCards } from "./wins";
 
@@ -60,7 +61,10 @@ async function sealPostContent(memberId: string, id: string, caption: string | n
     ...(text ? [{ ...target, field: "caption", value: text }] : []),
   ]);
   return {
-    ...(cards !== undefined ? { cardsEncrypted: sealed.slice(0, cards.length) } : {}),
+    ...(cards !== undefined ? {
+      cardsEncrypted: sealed.slice(0, cards.length),
+      postedCardKeys: [...postedCardKeys(memberId, cards.map(card => card.id)).values()],
+    } : {}),
     ...(caption !== undefined ? { captionEncrypted: text ? sealed[sealed.length - 1]! : null } : {}),
   };
 }
@@ -199,7 +203,7 @@ export async function deleteHealthPost(auth: Auth, postId: string): Promise<void
     if (!owned) throw notFound();
     const now = new Date();
     const changed = await tx.healthPost.updateMany({ where: { id, authorMemberId: memberId, deletedAt: null },
-      data: { deletedAt: now, captionEncrypted: null, cardsEncrypted: [], version: { increment: 1 } } });
+      data: { deletedAt: now, captionEncrypted: null, cardsEncrypted: [], postedCardKeys: [], version: { increment: 1 } } });
     if (changed.count) {
       await tx.healthPostComment.updateMany({ where: { postId: id, deletedAt: null }, data: { deletedAt: now, bodyEncrypted: null } });
       await tx.healthPostCheer.deleteMany({ where: { postId: id } });
