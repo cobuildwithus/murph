@@ -5133,7 +5133,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         codexHome: clinicalEnrichmentCodexRuntime.codexHome,
         env: clinicalEnrichmentCodexRuntime.runtimeEnv,
         memberId: input.request.userId,
-        model: clinicalEnrichmentCodexRuntime.runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
         modelProvider: clinicalEnrichmentCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
         vaultRoot: restored.vaultRoot,
         userEnvKeys: Object.keys(runtime.userEnv),

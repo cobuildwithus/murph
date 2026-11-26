@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -118,7 +118,8 @@ describe('executeReadOnlyAssistantAsk', () => {
       processLifetime: 'one-shot',
       reasoningEffort: 'medium',
       runtimeWorkspaceRoots: [workspaceRoot],
-      serviceTier: 'flex',
+      // No hosted Flex catalog offers this model, so the turn runs on the default tier.
+      serviceTier: null,
       threadConfig: READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,
     })
     expect(turnInput.hostedToolContext).toMatchObject({
@@ -175,6 +176,26 @@ describe('executeReadOnlyAssistantAsk', () => {
     await expect(stat(requireString(observedWorkingDirectory))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+
+  it('runs Flex on the hosted Flex catalog when that catalog offers the model', async () => {
+    const workspaceRoot = await createTempRoot('murph-assistant-ask-vault-')
+    const catalogRoot = await createTempRoot('murph-assistant-ask-catalog-')
+    const catalog = path.join(catalogRoot, 'models.json')
+    await writeFile(`${catalog}.flex`, JSON.stringify({ models: [{ slug: 'gpt-6.1-terra', service_tiers: [{ id: 'flex' }] }] }))
+    askMocks.buildEvidence.mockResolvedValue('## Conversation evidence\n\n- user: Synthetic check-in.')
+    askMocks.executeTurn.mockResolvedValue({ finalMessage: JSON.stringify({ answer: 'Synthetic answer.', outcome: 'answered' }) })
+    const ask = (model: string) => executeReadOnlyAssistantAsk({
+      env: { MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: catalog, PATH: '/runtime/bin' },
+      model, question: 'What is due today?', requesterParticipantId: REQUESTER_PARTICIPANT_ID,
+      serviceTier: 'flex', workspaceRoot,
+    })
+
+    await ask('gpt-6.1-terra')
+    await ask('gpt-6-luna')
+
+    expect(askMocks.executeTurn.mock.calls.map(([turn]) => [turn.serviceTier, turn.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON]))
+      .toEqual([['flex', `${catalog}.flex`], [null, catalog]])
   })
 
   it('returns bounded answers and preserves explicit cannot-answer outcomes', async () => {

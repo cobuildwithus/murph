@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClinicalDocumentExtractionInput } from "@murphai/assistant-engine/clinical-document-extraction";
-import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
+import { clinicalDocumentExtractionOutputSchema, type ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import type { ReadOnlyAssistantAskProviderUsageEvent } from "@murphai/assistant-engine/assistant-ask";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 import type { HostedWorkspaceDurableCheckpointEffect } from "../src/hosted-runtime/workspace-runner.ts";
@@ -35,7 +35,15 @@ const work = {
   documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
   page: 2,
   timeZone: "America/Los_Angeles",
+  failures: 0,
 };
+const occurredAt = "2026-09-01T12:00:00Z";
+const SPLIT_RECORDS = clinicalDocumentExtractionOutputSchema.parse({ status: "complete", records: [
+  { payload: { kind: "test", occurredAt, title: "Laboratory report", testName: "Glucose", resultStatus: "normal", results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }] }, dateBasis: "document", dateEvidence: "Sep 1, 2026", page: 2 },
+  { payload: { kind: "measurement", occurredAt, title: "Blood pressure", measurements: [{ metric: "systolic-blood-pressure", value: 120, unit: "mmHg" }] }, dateBasis: "document", dateEvidence: "Sep 1, 2026", page: 2 },
+  { payload: { kind: "clinical_assertion", occurredAt, title: "Symptom denial", assertion: "denial_asserted", assertedOn: "2026-09-01", domain: "symptom", polarity: "denied", subject: "Nausea", assertionText: "Denies nausea." }, dateBasis: "document", dateEvidence: "Sep 1, 2026", page: 2 },
+] }).records;
+const [LAB, VITAL, DENIAL] = [SPLIT_RECORDS[0]!, SPLIT_RECORDS[1]!, SPLIT_RECORDS[2]!];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -91,69 +99,66 @@ describe("clinical document background runner", () => {
     expect(input.onStateMutation).not.toHaveBeenCalled();
     expect(executeExtraction).not.toHaveBeenCalled();
   });
-  it("runs exactly three independent families for one page and freezes proposals before waking canonical apply", async () => {
+  it("reads one page in a single Terra Flex pass and splits it before waking canonical apply", async () => {
     const { input, state, executeExtraction, cleanup } = setup();
-    const leaves = [deferred<ClinicalDocumentExtractionOutput>(), deferred<ClinicalDocumentExtractionOutput>(), deferred<ClinicalDocumentExtractionOutput>()];
+    const leaf = deferred<ClinicalDocumentExtractionOutput>();
     executeExtraction.mockImplementation(async (request) => {
       await request.beforeProviderEntry?.();
-      return leaves[["labs", "measurements", "history"].indexOf(request.family)]!.promise;
+      return leaf.promise;
     });
     const running = runOneHostedClinicalEnrichment(input);
-    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledOnce());
     expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
     expect(input.onExtractionStarted).toHaveBeenCalledOnce();
     expect(cleanup).not.toHaveBeenCalled();
-    for (const [request] of executeExtraction.mock.calls) {
-      expect(request.source).toEqual(work.source);
-      // History keeps the member's model; Luna dropped and inverted history facts in live evaluation.
-      const history = request.family === "history";
-      expect([request.model, request.reasoningEffort]).toEqual(history ? [input.model ?? null, undefined] : ["gpt-6-luna", "high"]);
-      expect(request.timeZone).toBe(work.timeZone);
-      expect(request.renderedPages).toEqual([{ page: 2, path: "/synthetic-scratch/page.png" }]);
-    }
-    leaves[0]!.resolve(EMPTY);
-    leaves[1]!.resolve(EMPTY);
-    leaves[2]!.resolve({ status: "blocked", records: [], reason: "Synthetic ambiguous history." });
+    const [request] = executeExtraction.mock.calls[0]!;
+    expect(request).toMatchObject({ family: "all", model: "gpt-6.1-terra", reasoningEffort: "low", serviceTier: "flex",
+      source: work.source, timeZone: work.timeZone, renderedPages: [{ page: 2, path: "/synthetic-scratch/page.png" }] });
+    leaf.resolve({ status: "blocked", records: [LAB, VITAL, DENIAL], reason: "Synthetic ambiguous history." });
     expect(await running).toBe("settled");
     expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledWith(expect.objectContaining({
       jobId: work.jobId, sourceSha256: work.source.sha256, page: 2, totalPages: 5,
-      outputs: { labs: EMPTY, measurements: EMPTY, history: { status: "blocked", records: [], reason: "Synthetic ambiguous history." } },
+      outputs: {
+        labs: { status: "complete", records: [LAB] },
+        measurements: { status: "complete", records: [VITAL] },
+        history: { status: "blocked", records: [DENIAL], reason: "Synthetic ambiguous history." },
+      },
     }));
     expect(input.onWorkUpdated).toHaveBeenCalledWith(work.jobId, null);
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("does not release scratch or persist after cancellation until every child exits", async () => {
+  it("retries a page on the standard tier and reads structured resources with Luna", async () => {
+    const { input, state, executeExtraction } = setup();
+    state.readNextClinicalEnrichment.mockResolvedValueOnce({ ...work, failures: 1 });
+    expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+    state.readNextClinicalEnrichment.mockResolvedValueOnce({ ...work, extractedText: "{}",
+      source: { ...work.source, resource: { rawRef: "raw/clinical-records/synthetic/bundle.json", resourceType: "Observation", resourceId: "synthetic", sha256: "c".repeat(64) } } });
+    expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+    expect(executeExtraction.mock.calls.map(([request]) => [request.family, request.model, request.reasoningEffort, request.serviceTier]))
+      .toEqual([["all", "gpt-6.1-terra", "low", null], ["all", "gpt-6-luna", "medium", undefined]]);
+  });
+
+  it("does not release scratch or persist after cancellation until the pass exits", async () => {
     const { input, abort, state, executeExtraction, cleanup } = setup();
-    const leaves = [deferred<ClinicalDocumentExtractionOutput>(), deferred<ClinicalDocumentExtractionOutput>(), deferred<ClinicalDocumentExtractionOutput>()];
-    executeExtraction.mockImplementation((request) => leaves[["labs", "measurements", "history"].indexOf(request.family)]!.promise);
+    const leaf = deferred<ClinicalDocumentExtractionOutput>();
+    executeExtraction.mockImplementation(() => leaf.promise);
     const running = runOneHostedClinicalEnrichment(input);
-    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledOnce());
     abort.abort();
-    leaves[0]!.resolve(EMPTY);
-    leaves[1]!.resolve(EMPTY);
     await Promise.resolve();
     expect(cleanup).not.toHaveBeenCalled();
-    leaves[2]!.resolve(EMPTY);
+    leaf.resolve(EMPTY);
     expect(await running).toBe("idle");
     expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
     expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("aborts sibling leaves on provider failure and durably defers the unchanged page after joining", async () => {
-    const { input, state, executeExtraction, cleanup } = setup();
-    const failure = deferred<ClinicalDocumentExtractionOutput>();
-    const sibling = deferred<ClinicalDocumentExtractionOutput>();
-    executeExtraction.mockImplementation((request) => request.family === "labs" ? failure.promise : sibling.promise);
-    const running = runOneHostedClinicalEnrichment(input);
-    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(3));
-    failure.reject(new Error("Synthetic provider unavailable."));
-    await vi.waitFor(() => expect(executeExtraction.mock.calls[1]![0].abortSignal?.aborted).toBe(true));
-    expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
-    expect(cleanup).not.toHaveBeenCalled();
-    sibling.resolve(EMPTY);
-    expect(await running).toBe("idle");
+  it("durably defers the unchanged page after a provider failure", async () => {
+    const { input, state, executeExtraction } = setup();
+    executeExtraction.mockRejectedValueOnce(new Error("Synthetic provider unavailable."));
+    expect(await runOneHostedClinicalEnrichment(input)).toBe("idle");
     expect(state.persistClinicalEnrichmentProposals).not.toHaveBeenCalled();
     expect(state.deferClinicalEnrichment).toHaveBeenCalledWith(expect.objectContaining({ jobId: work.jobId, nextAttemptAt: "2026-09-11T12:01:00.000Z" }));
     expect(input.onWorkUpdated).toHaveBeenCalledWith(work.jobId, "2026-09-11T12:01:00.000Z");
@@ -177,7 +182,7 @@ describe("clinical document background runner", () => {
         request.abortSignal?.addEventListener("abort", () => reject(new Error("Synthetic deadline.")), { once: true });
       }));
       const running = runOneHostedClinicalEnrichment(input);
-      await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledOnce());
       expect(timeout).toHaveBeenCalledWith(120_000);
       deadline.abort();
       expect(await running).toBe("idle");
@@ -225,7 +230,7 @@ describe("clinical document background runner", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
-  it("accounts each family and its correction separately after checkpoint even when provider ordinals match", async () => {
+  it("accounts the pass and its correction separately after checkpoint even when provider ordinals match", async () => {
     const { input, executeExtraction } = setup();
     const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
     const records: AssistantUsageRecord[] = [];
@@ -238,15 +243,15 @@ describe("clinical document background runner", () => {
     executeExtraction.mockImplementation(async (request) => {
       await request.beforeProviderEntry?.();
       request.onProviderUsage?.(event);
-      if (request.family === "history") request.onProviderUsage?.({ ...event, stage: "review" });
+      request.onProviderUsage?.({ ...event, stage: "review" });
       return EMPTY;
     });
     expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
     expect(records).toEqual([]);
     expect(effects).toHaveLength(1);
     await effects[0]!();
-    expect(records).toHaveLength(4);
-    expect(new Set(records.map((record) => record.usageId)).size).toBe(4);
+    expect(records).toHaveLength(2);
+    expect(new Set(records.map((record) => record.usageId)).size).toBe(2);
     expect(records.every((record) => record.featureKey === "clinical_document_extraction")).toBe(true);
     expect(records.every((record) => record.memberId === "synthetic-member")).toBe(true);
   });
@@ -265,6 +270,7 @@ describe("clinical document background runner", () => {
     executeExtraction.mockImplementation(async (request) => {
       await request.beforeProviderEntry?.();
       request.onProviderUsage?.(SYNTHETIC_USAGE_EVENT);
+      request.onProviderUsage?.({ ...SYNTHETIC_USAGE_EVENT, stage: "review" });
       return EMPTY;
     });
     expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
@@ -273,8 +279,8 @@ describe("clinical document background runner", () => {
     await expect(effects[0]!({ signal: shutdown, wakeInterruptionSignal: wake.signal })).rejects.toThrow("Synthetic foreground wake.");
     expect(records).toHaveLength(1);
     await effects[0]!({ signal: shutdown });
-    expect(records).toHaveLength(4);
-    expect(new Set(records.map((record) => record.usageId)).size).toBe(3);
+    expect(records).toHaveLength(3);
+    expect(new Set(records.map((record) => record.usageId)).size).toBe(2);
     expect(records[1]?.usageId).toBe(records[0]?.usageId);
   });
 });
