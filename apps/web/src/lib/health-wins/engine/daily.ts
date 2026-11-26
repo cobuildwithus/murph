@@ -32,6 +32,13 @@ export type DailyCharts = DailyAchievementCharts & {
   };
 };
 
+function monthPeriodEnd(month: string, today: string): string {
+  if (today.startsWith(month)) return today;
+  const end = new Date(`${month}-01T00:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  return end.toISOString().slice(0, 10);
+}
+
 function requiredDays(month: string, currentMonth: string): number {
   return month === currentMonth ? 14 : 15;
 }
@@ -74,7 +81,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     if (anyDelta || (trendStep !== undefined && direction * compareMonthlyValues(current.value, baseline + direction * trendStep) >= 0)) {
       const displayedDelta = roundMetricValue(metric, current.value) - roundMetricValue(metric, baseline);
       candidates.push({
-        date, effect, noise: Math.max(trendStep ?? 1, mad(values)),
+        date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(values)),
         achievement: { kind: "trend_change", subject: metric, period: currentMonth },
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
@@ -99,7 +106,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     const effect = (current.value - median(previous)) * direction;
     if (comparison >= 0 && previous.some(value => compareMonthlyValues(current.value, value) !== 0)) {
       candidates.push({
-        date, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
+        date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
         achievement: { kind: "best_month", subject: metric, period: currentMonth },
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
@@ -150,6 +157,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       metric: "distance_km",
       achievement: { kind: "best_month", subject: "distance_km", period: best.month },
       date: series.filter(point => point.date.startsWith(best.month)).at(-1)!.date,
+      eventDate: monthPeriodEnd(best.month, today),
       effect: best.value - median(others), noise: Math.max(1, mad(others)),
       card: {
         id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness", measure: "distance_km",

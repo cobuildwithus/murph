@@ -169,6 +169,17 @@ describe("game achievements", () => {
     bestStreak: { days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
   };
 
+  it.each([
+    ["2025-03-22", "2025-03-22"],
+    [undefined, member.today],
+    ["2025-02-30", member.today],
+    ["2025-04-20", member.today],
+  ])("dates game totals by their contribution day %s, or the summary day for undated totals", (latestDay, eventDate) => {
+    const [climb] = activityCandidates({ member, games: [{ ...game, latestDay }] });
+    expect(climb).toMatchObject({ date: member.today, card: { kind: "game_climb" } });
+    expect(climb.eventDate ?? climb.date).toBe(eventDate);
+  });
+
   it("carries the supplied climb, next landmark and best streak without rebuilding game totals", () => {
     expect(cards({ games: [game] })).toEqual([
       expect.objectContaining({

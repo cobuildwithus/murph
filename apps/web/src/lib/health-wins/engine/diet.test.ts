@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { prepareHealthCandidates, previewHealthCandidate } from "../card-options";
 import { dietCandidates } from "./diet";
 import { foodTally } from "./foods";
-import { generateHealthWins, type MealDay } from "./index";
+import { generateHealthWins, selectHealthWins, type MealDay } from "./index";
 
 const today = "2034-04-15";
 
@@ -15,6 +15,20 @@ function days(month: string, count: number, proteinG: number | null, fiberG: num
 function cards(meals: MealDay[], asOf = today) {
   return dietCandidates(meals, asOf).map(({ card }) => card);
 }
+
+it("dates Diet wins by the completed month, the month so far and the streak end", () => {
+  const meals = [
+    ...days("2034-01", 25, 40), ...days("2034-02", 24, 40), ...days("2034-03", 25, 40),
+    ...days("2034-04", 12, 100, 30),
+  ];
+  const selected = selectHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, meals });
+  expect(Object.fromEntries(selected.map(({ card, eventDate }) => [card.id, eventDate]))).toEqual({
+    "month_total:protein_g:2034-03": "2034-03-31",
+    "best_month:protein_g:2034-04": today,
+    "streak:fiber_g:20340412": "2034-04-12",
+  });
+  expect(dietCandidates(meals, today).find(({ card }) => card.kind === "best_month")?.date).toBe("2034-04-12");
+});
 
 describe("month_total", () => {
   it("uses independent nutrient coverage in the immediately preceding month, including the 80% boundary", () => {
