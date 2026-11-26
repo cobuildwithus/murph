@@ -1,5 +1,8 @@
+import { runHostedPreferenceHandoffSweeper } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
+import { recordCompanionHeartbeat } from "@/src/lib/companion/presence";
+import { buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
 import { randomUUID } from "node:crypto";
-import { buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
+import { buildHostedExecutionEmailConversationMessageWake, buildHostedExecutionTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import type { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -41,6 +44,48 @@ describe.skipIf(!enabled)("Postgres mailbox sequence allocation", () => {
   afterEach(async () => {
     await observer.hostedMember.delete({ where: { id: userId } });
     await Promise.all([owner, contender, observer].map(db => db.$disconnect()));
+  });
+
+  it("resumes a personal runtime on a verified reply alias and ignores duplicate or group email", async () => {
+    const dormantAt = new Date(Date.now() - 1000);
+    const park = () => observer.hostedMember.update({ where: { id: userId }, data: { runtimeDormantAt: dormantAt } });
+    const wake = buildHostedExecutionEmailConversationMessageWake({
+      userId, eventId: "synthetic-personal-reply", identityId: "fixture-identity", rawMessageKey: "fixture-reply",
+      occurredAt: new Date().toISOString(), assistantStyleSettingsAuthorized: false, threadIsDirect: true,
+    });
+    const state = () => observer.hostedMember.findUniqueOrThrow({ where: { id: userId } });
+    await park();
+    await owner.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: wake }));
+    expect(await state()).toMatchObject({ runtimeDormantAt: null, runtimeLastInteractionAt: expect.any(Date) });
+    await park();
+    await owner.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: wake }));
+    await owner.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: {
+      ...wake, eventId: "synthetic-room-mail", message: { ...wake.message, threadIsDirect: false },
+    } }));
+    expect((await state()).runtimeDormantAt).toEqual(dormantAt);
+  });
+
+  it("resumes scheduled work once on foreground return and leaves background heartbeats parked", async () => {
+    const dormantAt = new Date();
+    await observer.hostedMember.update({ where: { id: userId }, data: { billingStatus: "active", runtimeDormantAt: dormantAt } });
+    await observer.hostedConsentGrant.createMany({ data: (["launch.legal", "launch.health-data"] as const).map(scope => ({
+      memberId: userId, scope, source: "test", status: "granted", grantedAt: dormantAt,
+      documentVersionsJson: buildCurrentHostedConsentDocumentVersions(scope),
+    })) });
+    const count = () => observer.hostedMailboxItem.count({ where: { userId, kind: "runtime.maintenance-requested" } });
+    await recordCompanionHeartbeat(userId, "background");
+    expect(await count()).toBe(0);
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toEqual(dormantAt);
+    await recordCompanionHeartbeat(userId, "foreground");
+    await recordCompanionHeartbeat(userId, "foreground");
+    expect(await count()).toBe(1);
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeNull();
+    // Isolate this recovery window from other concurrently running database fixtures.
+    const item = await observer.hostedMailboxItem.findFirstOrThrow({ where: { userId, kind: "runtime.maintenance-requested" } });
+    await observer.hostedMailboxItem.update({ where: { id: item.id }, data: { createdAt: new Date("2041-04-17T06:00:00Z") } });
+    const requestHandoff = vi.fn(async () => ({ signalAccepted: true as const, workflowId: "fixture-resumed-scheduler" }));
+    await runHostedPreferenceHandoffSweeper({ now: new Date("2041-04-17T06:10:00Z"), requestHandoff });
+    expect(requestHandoff).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: userId, mailboxItemId: item.id }));
   });
 
   function envelope(eventId: string) {

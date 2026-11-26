@@ -32,6 +32,15 @@ export function buildHostedAccessRestorationRuntimeEventId(input: {
   return `${HOSTED_ACCESS_RESTORATION_RUNTIME_EVENT_ID_PREFIX}${fingerprint}`;
 }
 
+export function buildHostedAccessRestorationRuntimeWake(input: Parameters<typeof buildHostedAccessRestorationRuntimeEventId>[0]) {
+  return buildHostedExecutionRuntimeControlWake({
+    eventId: buildHostedAccessRestorationRuntimeEventId(input),
+    kind: "runtime.maintenance-requested",
+    occurredAt: HOSTED_ACCESS_RESTORATION_OCCURRED_AT,
+    userId: input.memberId,
+  });
+}
+
 export async function appendHostedAccessRestorationRuntimeHandoffTx(input: {
   memberId: string;
   sourceEventId: string;
@@ -39,12 +48,7 @@ export async function appendHostedAccessRestorationRuntimeHandoffTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedAccessRestorationRuntimeHandoff> {
   const appended = await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionRuntimeControlWake({
-      eventId: buildHostedAccessRestorationRuntimeEventId(input),
-      kind: "runtime.maintenance-requested",
-      occurredAt: HOSTED_ACCESS_RESTORATION_OCCURRED_AT,
-      userId: input.memberId,
-    }),
+    envelope: buildHostedAccessRestorationRuntimeWake(input),
     tx: input.tx,
   });
 

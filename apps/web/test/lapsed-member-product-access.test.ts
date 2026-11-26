@@ -94,6 +94,7 @@ beforeEach(() => {
   // same canceled person to the real product guard and the real usage owner.
   db.hostedMember.findUnique.mockImplementation(async ({ where }: { where: { OR?: unknown } }) => where.OR ? null : member);
   db.hostedMember.findUniqueOrThrow.mockResolvedValue(member);
+  db.hostedMember.update.mockResolvedValue({ runtimeDormantAt: null });
   db.hostedMember.updateMany.mockResolvedValue({ count: 0 });
   db.hostedThreadContainer.findUnique.mockResolvedValue(null);
   db.hostedAccountGroupMembership.findFirst.mockResolvedValue(null);
@@ -145,8 +146,8 @@ describe("lapsed member product access with real guards and companion services",
     ];
     for (const response of responses) expect({ status: response.status, body: await response.json() }).not.toMatchObject({ status: 403 });
     expect(responses.map(response => response.status)).toEqual(Array(8).fill(200));
-    expect(db.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ where: { id: member.id }, data: {
-      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormantAt: null,
+    expect(db.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ select: { runtimeDormantAt: true }, where: { id: member.id }, data: {
+      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date),
     } });
     expect(db.companionPushRoute.upsert).toHaveBeenCalledOnce();
     expect(edge.enroll).not.toHaveBeenCalled(); expect(edge.welcome).not.toHaveBeenCalled();

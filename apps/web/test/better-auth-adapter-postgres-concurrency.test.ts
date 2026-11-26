@@ -92,16 +92,21 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     const headers = new Headers({ origin: "https://www.withmurph.ai" });
     await auth.api.sendVerificationOTP({ headers, body: { email, type: "sign-in" } });
     expect(delivered).toMatch(/^\d{6}$/u);
-    await getPrisma().hostedMember.update({ where: { id: memberId }, data: { runtimeDormantAt: new Date(), runtimeLastInteractionAt: null } });
     const result = await auth.api.signInEmailOTP({ headers, body: { email, otp: delivered }, returnHeaders: true });
     expect(result.response.user.id).toBe(memberId);
-    expect(await getPrisma().hostedMember.findUniqueOrThrow({ where: { id: memberId } })).toMatchObject({
-      runtimeDormantAt: null, runtimeLastInteractionAt: expect.any(Date),
-    });
     const cookie = result.headers.get("set-cookie") ?? "";
     expect(cookie).toContain("__Host-murph-auth-session=");
     expect(cookie).toContain("Secure"); expect(cookie).toContain("HttpOnly"); expect(cookie).not.toContain("Domain=");
     const cookieHeaders = new Headers({ cookie: cookie.split(";")[0] });
+    const prisma = getPrisma();
+    await prisma.hostedMember.update({ where: { id: memberId }, data: { runtimeDormantAt: new Date() } });
+    const visit = () => readHostedAuthSession({
+      baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma,
+      credential: cookie.split(";")[0].slice("__Host-murph-auth-session=".length), transport: "browser",
+    });
+    for (const result of await Promise.all([visit(), visit()])) expect(result.session?.member.id).toBe(memberId);
+    expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: memberId } })).runtimeDormantAt).toBeNull();
+    expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId, kind: "runtime.maintenance-requested" } })).toBe(1);
     expect((await auth.api.getSession({ headers: cookieHeaders }))?.user.id).toBe(memberId);
     expect((await auth.api.getSession({ headers: new Headers({ authorization: `Bearer ${result.response.token}` }) }))?.user.id).toBe(memberId);
     await expect(auth.api.signInEmailOTP({ headers, body: { email, otp: delivered } })).rejects.toThrow();
@@ -118,7 +123,12 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     const verificationId = await prepareHostedAuthSmsOtp({ prisma, phoneNumber: phone, code, verification });
     const configuration = { baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma };
     const otp: HostedAuthOtp = { kind: "phone", phoneNumber: phone, code, verificationId };
+    await getPrisma().hostedMember.update({ where: { id: memberId }, data: { runtimeDormantAt: new Date(), runtimeLastInteractionAt: null } });
     await commitHostedAuthOtp({ ...configuration, memberId, otp, commitMember: async () => undefined });
+    expect(await getPrisma().hostedMember.findUniqueOrThrow({ where: { id: memberId } })).toMatchObject({
+      runtimeDormantAt: null, runtimeLastInteractionAt: expect.any(Date),
+    });
+    expect(await prisma.hostedMailboxItem.count({ where: { userId: memberId, kind: "runtime.maintenance-requested" } })).toBe(1);
     const user = await hostedAuthAdapter(prisma)(options).findOne<AuthRecord>({ model: "user", where: [{ field: "id", value: memberId }] });
     expect(user?.email).toMatch(/@auth\.invalid$/u);
     expect(user).toMatchObject({ id: memberId, emailVerified: false, phoneNumber: phone, phoneNumberVerified: true });

@@ -131,9 +131,12 @@ keeps the assignment. Stale retirement notices cannot change dormancy.
 Dormancy blocks every processing mode, including retention. Shared rooms have
 their own lifecycle. Billing, consent and suspension retain their separate gates.
 
-A fresh accepted member message, authenticated browser use or session issuance
-clears dormancy. A foreground companion heartbeat clears it in its existing
-presence update. Background heartbeats and system mailbox items leave it alone.
+A fresh accepted member message clears dormancy. Verified replies to personal
+email aliases count as messages. After sign-in, authenticated browser use or a
+foreground companion heartbeat, Web clears the exact shutdown marker and
+appends its access-restoration maintenance item in one transaction. The
+post-commit signal wakes the scheduler. The mailbox handoff sweep retries
+undelivered signals. Background heartbeats and system mailbox items leave it alone.
 Accepted conversation receipts keep message replay from renewing activity.
 Existing accounts also use retained conversation, inbound Linq, foreground
 companion and session evidence. Expired or deleted historical browser sessions

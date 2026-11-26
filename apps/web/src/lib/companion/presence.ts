@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { companionPresence } from "@murphai/hosted-execution/companion-presence";
+import { restoreDormantRuntime } from "../hosted-execution/runtime-return";
 import { getPrisma } from "../prisma";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { requirePersonalMember } from "./member-access";
@@ -13,14 +14,16 @@ export async function recordCompanionHeartbeat(
   state: "foreground" | "background",
   clientInfo: CompanionClientInfo | null = null,
 ): Promise<void> {
-  await getPrisma().$transaction(async (tx) => {
+  const prisma = getPrisma();
+  const member = await prisma.$transaction(async (tx) => {
     await requirePersonalMember(tx, memberId);
     // Receipt time is sampled after the member lock. Concurrent requests cannot
     // move it backward, and clients cannot manufacture freshness timestamps.
     const now = new Date();
-    await tx.hostedMember.update({
+    return tx.hostedMember.update({
+      select: { runtimeDormantAt: true },
       where: { id: memberId }, data: { companionLastContactAt: now,
-        ...(state === "foreground" ? { companionLastForegroundAt: now, runtimeDormantAt: null } : {}),
+        ...(state === "foreground" ? { companionLastForegroundAt: now } : {}),
         ...(clientInfo ? {
           companionAppPlatform: clientInfo.platform,
           companionAppVersion: clientInfo.version,
@@ -31,6 +34,7 @@ export async function recordCompanionHeartbeat(
       },
     });
   }, transactionOptions);
+  if (state === "foreground" && member.runtimeDormantAt) await restoreDormantRuntime(prisma, memberId, member.runtimeDormantAt);
 }
 
 export async function readCompanionPresenceTx(tx: Prisma.TransactionClient, memberId: string, now = new Date()) {

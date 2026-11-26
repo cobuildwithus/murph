@@ -8,7 +8,7 @@ export function interactionMemberId(wake: HostedExecutionWake): string | null {
   const message = wake.message;
   if (message.channel === "voice") return wake.userId;
   if (message.channel === "email") {
-    return message.assistantStyleSettingsAuthorized && message.threadIsDirect ? wake.userId : null;
+    return message.threadIsDirect ? wake.userId : null;
   }
   if (message.channel === "linq" && (message.linqMessage.isFromMe || message.groupParticipantAdded)) return null;
   if (message.senderMemberId) return message.senderMemberId;

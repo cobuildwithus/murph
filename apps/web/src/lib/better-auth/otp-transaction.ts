@@ -1,4 +1,5 @@
 import "server-only";
+import { recordSignedInRuntimeActivity } from "../hosted-execution/runtime-return";
 import { randomUUID } from "node:crypto";
 import { APIError } from "better-auth/api";
 import type { BetterAuthOptions } from "better-auth";
@@ -105,5 +106,6 @@ export async function commitHostedAuthOtp(input: {
     }
   }), { maxWait: 5_000, timeout: 10_000 });
   if (!outcome.ok) throw outcome.error;
+  await recordSignedInRuntimeActivity(input.prisma, input.memberId);
   return { memberId: input.memberId, token: outcome.token, expiresAt: outcome.expiresAt, headers: outcome.headers };
 }
