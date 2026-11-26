@@ -9,6 +9,7 @@ export const PUT = withHealthRoute(async (request, auth, context: HealthIdContex
   assertHealthRecordEnabled(auth.member.id);
   const id = await healthRowId(context);
   const { activity } = await readHealthBody(request, saveActivityBody);
+  if (activity.route) assertHealthRecordEnabled(auth.member.id, "route");
   if (activity.id !== id) throw invalidGameRequest("Use the activity ID from the recording.");
   return jsonOk(await saveRecordedActivity(auth, activity));
 });

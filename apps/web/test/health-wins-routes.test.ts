@@ -13,6 +13,7 @@ import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/prof
 import { GET as hides } from "../app/api/game/v1/health/hides/route";
 import { DELETE as unhide, PUT as hide } from "../app/api/game/v1/health/hides/[memberId]/route";
 import { DELETE as removePhoto, GET as readPhoto, PUT as photo } from "../app/api/game/v1/health/photos/[id]/route";
+import { encodePolyline } from "../src/lib/game/progress/route-geometry";
 import { getHostedDomainRootUnwrapCache } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
@@ -54,6 +55,7 @@ beforeEach(() => {
   vi.stubEnv("MURPH_GAME_ENABLED", "true");
   vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", auth.member.id);
   vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", "");
+  vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -223,7 +225,7 @@ describe("timed recording requests", () => {
     expect(service.saveActivity).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects raw sensor fields, routes, and oversized bodies before passing health data to services", async () => {
+  it("rejects raw sensor fields, malformed routes, and oversized bodies before passing health data to services", async () => {
     for (const extra of [
       { samples: [] }, { points: [] }, { fixes: [] }, { paths: [] },
       { route: { distanceM: 340 } }, { heartRate: { ...activity.heartRate, samples: [] } },
@@ -290,5 +292,54 @@ describe("timed recording requests", () => {
       expect((await patch(request("posts", "PATCH", invalid), postContext)).status).toBe(400);
     }
     expect(service.patch).toHaveBeenCalledExactlyOnceWith(auth, (await postContext.params).id, edit);
+  });
+});
+
+describe("GPS recording requests", () => {
+  const summary = { id, kind: "walk", startedAt: "2033-04-07T09:00:00Z", elapsedSec: 780, movingSec: 750 };
+  const route = { distanceM: 1000, climbM: 3, splits: [{ distanceM: 1000, seconds: 750 }] };
+  // Synthetic open-ocean grid.
+  const paths = [encodePolyline([[-132, -39], [-132.0004, -39.0008]])];
+  const activity = { ...summary, route: { ...route, paths } };
+  const selection = { candidateId: `activity:${id}:activity_route`, option: "original", specRevision: "ab".repeat(32) };
+
+  beforeEach(() => vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", auth.member.id));
+
+  it("requires the route allowlist for a route preview or private route summary", async () => {
+    const preview = await previewActivity(request("activities/cards", "POST", { activity }));
+    const save = await saveActivity(request(`activities/${id}`, "PUT", { activity: { ...summary, route } }), postContext);
+    for (const response of [preview, save]) {
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+    }
+    expect(service.previewActivity).not.toHaveBeenCalled();
+    expect(service.saveActivity).not.toHaveBeenCalled();
+  });
+
+  it("accepts display paths for preview and publication, and only route summaries for private saves", async () => {
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", auth.member.id);
+    service.previewActivity.mockResolvedValue({ cards: [] });
+    service.create.mockResolvedValue({ id, version: 1 });
+    service.saveActivity.mockResolvedValue({ id });
+    expect((await previewActivity(request("activities/cards", "POST", { activity }))).status).toBe(200);
+    expect(service.previewActivity).toHaveBeenCalledExactlyOnceWith(auth, activity, "us");
+    const body = { id, activity, cards: [selection] };
+    expect((await post(request("posts", "POST", body))).status).toBe(200);
+    expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "us");
+    expect((await saveActivity(request("activities", "PUT", { activity }), postContext)).status).toBe(400);
+    const saved = { ...summary, route };
+    expect((await saveActivity(request("activities", "PUT", { activity: saved }), postContext)).status).toBe(200);
+    expect(service.saveActivity).toHaveBeenCalledExactlyOnceWith(auth, saved);
+  });
+
+  it("rejects unknown fields on route and split objects before preview or publication", async () => {
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", auth.member.id);
+    for (const extra of [{ fixes: [] }, { points: [] }, { splits: [{ ...route.splits[0], points: [] }] }]) {
+      const invalid = { ...activity, route: { ...activity.route, ...extra } };
+      expect((await previewActivity(request("activities/cards", "POST", { activity: invalid }))).status).toBe(400);
+      expect((await post(request("posts", "POST", { id, activity: invalid, cards: [selection] }))).status).toBe(400);
+    }
+    expect(service.previewActivity).not.toHaveBeenCalled();
+    expect(service.create).not.toHaveBeenCalled();
   });
 });
