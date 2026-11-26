@@ -6,8 +6,9 @@ import { hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocume
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { importClinicalFhirSnapshot, type ClinicalFhirSnapshotImportInput } from "@murphai/vault-usecases/clinical-records";
-import { applyClinicalEnrichmentProposals, enqueueClinicalEnrichment, readNextClinicalEnrichment, readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
-import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { applyClinicalEnrichmentProposals, deferClinicalEnrichment, enqueueClinicalEnrichment, planClinicalExtractionUnits, readNextClinicalEnrichment, readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
+import { runCursorClinicalEnrichment } from "./clinical-enrichment-source.fixture.ts";
+import type { HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 
 const roots: string[] = [];
 const date = "2020-03-12T12:00:00.000Z";
@@ -38,7 +39,7 @@ async function fixture(resources: unknown[] = [source(), deterministic], resourc
     await request.beforeProviderEntry?.(); return output;
   });
   const runtime: HostedClinicalEnrichmentInput = { vaultRoot, memberId: "synthetic-member", codexHome: null, env: {},
-    abortSignal: new AbortController().signal, onStateMutation() {}, executeExtraction };
+    onStateMutation() {}, executeExtraction };
   return { input, result, vaultRoot, jobId, runtime, executeExtraction };
 }
 
@@ -46,13 +47,13 @@ it("extracts once per retained record, preserves deterministic results and repla
   const f = await fixture();
   expect(f.result.structuredEnrichmentSources).toHaveLength(1);
   expect(f.result.canonical.createdCount).toBe(2);
-  expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("settled");
+  expect(await runCursorClinicalEnrichment(f.runtime)).toBe("settled");
   expect(f.executeExtraction).toHaveBeenCalledOnce();
   const request = f.executeExtraction.mock.calls[0]![0];
   expect(request).toMatchObject({ family: "all", model: "gpt-6-luna", source: { resource: { resourceId: "unmapped" } } });
   expect(request.extractedText).toContain("Resting heart rate 73 bpm.");
   expect(request.extractedText).not.toContain('"id": "known"');
-  expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("idle");
+  expect(await runCursorClinicalEnrichment(f.runtime)).toBe("idle");
   expect(f.executeExtraction).toHaveBeenCalledOnce();
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const frozen = await readFile(statePath, "utf8");
@@ -70,7 +71,7 @@ it("extracts once per retained record, preserves deterministic results and repla
 
 it.each(["entered-in-error", "corrected"])("retires extracted facts when the parent is %s and rejects its queued old proposal", async (status) => {
   const f = await fixture();
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const frozen = await readFile(statePath, "utf8");
   const original = await applyClinicalEnrichmentProposals(f);
@@ -90,14 +91,14 @@ it.each(["entered-in-error", "corrected"])("retires extracted facts when the par
 it("keeps unsafe statuses held while admitting undated source observations", async () => {
   const f = await fixture([deterministic, { ...source("preliminary"), status: "preliminary" }, { ...source("undated"), effectiveDateTime: undefined }]);
   expect(f.result.structuredEnrichmentSources).toMatchObject([{ resourceId: "undated" }]);
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect(f.executeExtraction).toHaveBeenCalledOnce();
 });
 
 it.each(["Invented source evidence", "Resting pulse: 73 bpm"])("holds nonliteral evidence (%s) and preserves its source note", async (excerpt) => {
   const f = await fixture();
   f.executeExtraction.mockResolvedValue({ ...output, records: output.records.map((record) => ({ ...record, excerpt })) });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const applied = await applyClinicalEnrichmentProposals(f);
   expect(applied).toMatchObject({ canonical: null, counts: { held: 1 } });
   expect((await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 10 }))).toHaveLength(1);
@@ -109,7 +110,7 @@ it("holds a structured pulse measurement when the source value and proposal disa
     ...output.records[0]!, payload: { kind: "measurement", occurredAt: date, note: undefined,
       title: "Resting pulse", measurements: [{ metric: "resting-heart-rate", value: 37, unit: "bpm" }] },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({
     canonical: null, counts: { held: 1, created: 0 }, readback: { verifiedCount: 0 },
   });
@@ -124,7 +125,7 @@ it.each([{ value: 2, created: 1 }, { value: 20, created: 0 }])(
       payload: { kind: "measurement", occurredAt: date, note: undefined, title: "Body weight",
         measurements: [{ metric: "body-weight", value, unit: "kg" }] },
     }] });
-    await runOneHostedClinicalEnrichment(f.runtime);
+    await runCursorClinicalEnrichment(f.runtime);
     expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({
       counts: { created, held: 1 - created }, readback: { verifiedCount: created },
     });
@@ -133,7 +134,7 @@ it.each([{ value: 2, created: 1 }, { value: 20, created: 0 }])(
 
 it("does not reuse extraction for a different record on the same page", async () => {
   const f = await fixture([source(), { ...source("second"), effectiveDateTime: "2020-03-13T12:00:00.000Z", valueString: "Resting heart rate 74 bpm." }]);
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   await applyClinicalEnrichmentProposals(f);
   const next = await readNextClinicalEnrichment(f);
   expect(next).toMatchObject({ status: "extract", source: { resource: { resourceId: "second" } } });
@@ -157,7 +158,7 @@ it.each([
       title: "Clinical assessment", note: undefined, assertion: "not_applicable", domain: "exam", code, codeSystem,
       assertionText: text },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const applied = await applyClinicalEnrichmentProposals(f);
   expect(applied.counts).toMatchObject({ created: accepted ? 1 : 0, held: accepted ? 0 : 1 });
   expect(applied.readback.verifiedCount).toBe(accepted ? 1 : 0);
@@ -168,21 +169,21 @@ it("holds a changed raw page before any model call", async () => {
   const f = await fixture();
   const rawRef = f.result.structuredEnrichmentSources![0]!.rawRef;
   await writeFile(path.join(f.vaultRoot, rawRef), "{}");
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect(f.executeExtraction).not.toHaveBeenCalled();
   expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ counts: { held: 1 } });
 });
 
 it("keeps the configured OpenAI transport and selects Luna", async () => {
   const f = await fixture();
-  await runOneHostedClinicalEnrichment({ ...f.runtime, modelProvider: "hosted-openai" });
+  await runCursorClinicalEnrichment({ ...f.runtime, modelProvider: "hosted-openai" });
   expect(f.executeExtraction).toHaveBeenCalledWith(expect.objectContaining({ modelProvider: "hosted-openai", model: "gpt-6-luna", reasoningEffort: "medium" }));
 });
 
 it("clears a failed record's retry state when attestation holds it and continues to the next record", async () => {
   const f = await fixture([source(), { ...source("second"), valueString: "Resting heart rate 74 bpm." }]);
   f.executeExtraction.mockRejectedValueOnce(new Error("Synthetic transient failure"));
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const state = JSON.parse(await readFile(statePath, "utf8"));
   state.structuredSources[0].sha256 = "0".repeat(64);
@@ -191,7 +192,7 @@ it("clears a failed record's retry state when attestation holds it and continues
   const next = await readNextClinicalEnrichment(f);
   expect(next).toMatchObject({ status: "extract", source: { resource: { resourceId: "second" } } });
   f.executeExtraction.mockRejectedValueOnce(new Error("Synthetic second-record failure"));
-  expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("idle");
+  expect(await runCursorClinicalEnrichment(f.runtime)).toBe("idle");
   expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ status: "pending", counts: { held: 1 } });
 });
 
@@ -205,7 +206,7 @@ it.each([null, "2020-03-12T12:00:00.000Z"])("persists structured source answers 
     dateBasis: clinicalDate ? "document" : "unknown", ...(clinicalDate ? { dateEvidence: clinicalDate } : {}), excerpt: answer,
     payload: { kind: "note", title: "Source answer", occurredAt: "1999-01-01", note: answer, clinicalFact },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const frozen = await readFile(statePath, "utf8");
   const applied = await applyClinicalEnrichmentProposals(f);
@@ -243,7 +244,7 @@ it.each(["Condition", "Observation"] as const)("only reports the first of three 
     }
     expect(retrieval.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
     if (day > 1) expect(retrieval.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
-    await runOneHostedClinicalEnrichment(f.runtime);
+    await runCursorClinicalEnrichment(f.runtime);
     const applied = await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, jobId });
     expect(applied).toMatchObject({ counts: { created: 1 }, readback: { verifiedCount: 1 } });
     expect(applied.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
@@ -274,14 +275,14 @@ it("reimports an unchanged undated source across days and continues the enrichme
   f.executeExtraction.mockResolvedValue({ status: "complete", records: [{ dateBasis: "unknown", excerpt: answer,
     payload: { kind: "note", title: "Source answer", occurredAt: revision, note: answer, clinicalFact },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
   await readNextClinicalEnrichment(f);
 
   const repeated = await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: "cross-day-reimport", fetchedAt: "2026-07-03T12:00:00.000Z" });
   const repeatedJob = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: repeated.manifestPath,
     manifestSha256: repeated.manifestSha256, structuredSources: repeated.structuredEnrichmentSources });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect(f.executeExtraction).toHaveBeenCalledOnce();
   expect(await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, ...repeatedJob }))
     .toMatchObject({ counts: { created: 0, existing: 1, held: 0 }, readback: { verifiedCount: 1 } });
@@ -298,7 +299,7 @@ it("reimports an unchanged undated source across days and continues the enrichme
   const laterJob = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: later.manifestPath,
     manifestSha256: later.manifestSha256, structuredSources: later.structuredEnrichmentSources });
   f.executeExtraction.mockResolvedValue(output);
-  expect(await runOneHostedClinicalEnrichment(f.runtime)).toBe("settled");
+  expect(await runCursorClinicalEnrichment(f.runtime)).toBe("settled");
   expect(f.executeExtraction).toHaveBeenCalledTimes(2);
   expect((await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, ...laterJob })).counts.created).toBe(1);
   await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot });
@@ -313,7 +314,7 @@ it.each(["corrected", "entered-in-error"])("retires typed historical facts when 
       statement: "Resting heart rate 73 bpm.", value: 73, unit: "bpm",
     } },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
   const frozen = await readFile(statePath, "utf8");
   expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
@@ -340,6 +341,27 @@ it.each([
       statement: "Source statement", codings,
     } },
   }] });
-  await runOneHostedClinicalEnrichment(f.runtime);
+  await runCursorClinicalEnrichment(f.runtime);
   expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({ canonical: null, counts: { held: 1 } });
+});
+
+it("exhausts a structured resource's retries by resource before its cursor source is initialized", async () => {
+  const f = await fixture([source("first-narrative"), source("second-narrative")]);
+  const plan = () => planClinicalExtractionUnits({ vaultRoot: f.vaultRoot, limit: 10, countPages: async () => 1,
+    now: new Date("2030-01-01T00:00:00.000Z") });
+  // No cursor read first: the apply wake has not initialized the job's source.
+  const [first, second] = await plan();
+  expect([first?.cursorRef, first?.cursor, second?.cursorRef, second?.cursor]).toEqual(["resource:0", true, "resource:1", false]);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await deferClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId: f.jobId, reason: "Synthetic invalid output.",
+      nextAttemptAt: "2026-07-01T12:01:00.000Z", cursorRef: first!.cursorRef });
+  }
+  // The exhausted resource is held and the cursor moves to the next resource, not a phantom attachment.
+  expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ status: "pending", counts: { held: 1 }, nextAttemptAt: undefined });
+  const [next] = await plan();
+  expect(next).toMatchObject({ cursorRef: "resource:1", cursor: true, failures: 0 });
+  expect(await readNextClinicalEnrichment(f)).toMatchObject({ status: "extract", source: { resource: { resourceId: "second-narrative" } } });
+  // The next resource keeps normal retry handling.
+  expect(await deferClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId: f.jobId, reason: "Synthetic retry.",
+    nextAttemptAt: "2026-07-01T12:02:00.000Z", cursorRef: next!.cursorRef })).toMatchObject({ nextAttemptAt: "2026-07-01T12:02:00.000Z" });
 });

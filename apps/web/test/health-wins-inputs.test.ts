@@ -1,19 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import type { ExperimentOutcome } from "@murphai/contracts";
-import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
 const mock = vi.hoisted(() => ({
-  session: vi.fn(), native: vi.fn(), authority: vi.fn(), games: vi.fn(),
+  session: vi.fn(), authority: vi.fn(), games: vi.fn(),
   states: vi.fn(), artRows: vi.fn(),
-  tx: vi.fn((run: (tx: object) => unknown) => run({})),
 }));
-vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: mock.tx, gamePlaceArt: { findMany: mock.artRows } }) }));
+vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ gamePlaceArt: { findMany: mock.artRows } }) }));
 vi.mock("../src/lib/game/progress/state", () => ({ readMeasureStates: mock.states }));
-vi.mock("../src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentForRead: mock.native }));
-vi.mock("../src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mock.authority }));
 vi.mock("../src/lib/device-sync/companion-numbers", () => ({
   COMPANION_HEALTH_METRICS: { sleep: { key: "total-sleep-minutes" }, restingHeartRate: { key: "resting-heart-rate" },
     steps: { key: "steps" }, vo2Max: { key: "estimated-vo2-max" } },
@@ -29,7 +25,7 @@ import { artPath } from "../src/lib/game/progress/place-art";
 
 const today = "2026-09-24";
 const signal = new AbortController().signal;
-const auth = { member: { id: "m-unit" } } as HostedNativeMemberAuth;
+const memberId = "m-unit";
 
 function hr(date: string, sourceLabel: string, value: number, method = ""): BrowserVaultMetricRow {
   return { date, sourceLabel, value, biomarkerKey: null, metricKey: "resting-heart-rate", unit: "bpm", sourceFamily: "event",
@@ -57,7 +53,6 @@ function outcome(id: string, modality: string | null): ExperimentOutcome {
 beforeEach(() => {
   vi.clearAllMocks();
   mock.games.mockResolvedValue({ games: [], sourceRevision: "game-state", complete: true });
-  mock.native.mockResolvedValue(undefined);
   mock.authority.mockResolvedValue(undefined);
 });
 
@@ -111,7 +106,7 @@ it.each([
       attributes: { runPlan: { modality, interventionStart, interventionEnd } } }] },
     metrics: { series: () => [] }, labResults: { list: () => [] },
   } });
-  const { input } = await readHealthWinInputs(auth, today, signal);
+  const { input } = await readHealthWinInputs(memberId, mock.authority, today, signal);
   const cards = generateHealthWins(input).filter(card => card.kind === "experiment_result");
   expect(cards.map(card => card.title.number)).toEqual(titles);
 });
@@ -157,7 +152,7 @@ it("ranks a covered RHR month when its selected provider has no readings in the 
     metrics: { series: ({ metricKey }: { metricKey: string }) => metricKey === "resting-heart-rate" ? rows : [] },
     entities: { list: () => [] }, labResults: { list: () => [] },
   } });
-  const { input } = await readHealthWinInputs(auth, monthEnd, signal);
+  const { input } = await readHealthWinInputs(memberId, mock.authority, monthEnd, signal);
   expect(generateHealthWins(input)).toContainEqual(expect.objectContaining({
     kind: "percentile", filter: "Heart", source_note: expect.stringContaining("14 recorded days this month"),
     chart: expect.objectContaining({ value: 52 }),
@@ -170,7 +165,7 @@ it("loads one union, retains independent inputs when labs fail and checks author
     source: { dataVersion: "revision-a" }, meals: { timeZone: "UTC" }, experimentOutcomes: [outcome("exp_walk", "Walking")],
     activitySessions: [{ type: "run", date: today, minutes: 17 }],
   }, metrics: metric, entities: { list: () => [] }, labResults: { list() { throw Error("lab read failed"); } } } });
-  const { input, complete } = await readHealthWinInputs(auth, today, signal);
+  const { input, complete } = await readHealthWinInputs(memberId, mock.authority, today, signal);
   expect(mock.session).toHaveBeenCalledExactlyOnceWith({ memberId: "m-unit", signal, metricKeys: expect.arrayContaining([
     "estimated-vo2-max", "resting-heart-rate", "deep-sleep-minutes", "floors-climbed", "sleep-efficiency",
   ]), requestedShards: ["core", "metricsIndex", "labs"], timeoutMs: expect.any(Number) });
@@ -181,20 +176,19 @@ it("loads one union, retains independent inputs when labs fail and checks author
   expect(input.experiments).toHaveLength(1);
   expect(input.sessions).toHaveLength(1);
   expect(mock.authority).toHaveBeenCalledTimes(2);
-  expect(mock.native).toHaveBeenCalledTimes(2);
 });
 
 it("propagates withdrawal even when the shared ciphertext load fails", async () => {
   mock.session.mockRejectedValueOnce(Error("transport failed"));
   const denied = hostedOnboardingError({ code: "CONSENT_REQUIRED", message: "Consent required", httpStatus: 403 });
   mock.authority.mockResolvedValueOnce(undefined).mockRejectedValueOnce(denied);
-  await expect(readHealthWinInputs(auth, today, signal)).rejects.toBe(denied);
+  await expect(readHealthWinInputs(memberId, mock.authority, today, signal)).rejects.toBe(denied);
 });
 
 it("distinguishes an empty vault from a published replica that failed to open", async () => {
   mock.session.mockResolvedValueOnce({ state: "unpublished" }).mockResolvedValueOnce({ state: "not_ready" });
-  const empty = await readHealthWinInputs(auth, today, signal);
-  const partial = await readHealthWinInputs(auth, today, signal);
+  const empty = await readHealthWinInputs(memberId, mock.authority, today, signal);
+  const partial = await readHealthWinInputs(memberId, mock.authority, today, signal);
   expect(empty.complete).toBe(true);
   expect(partial.complete).toBe(false);
   expect(empty.sourceRevision).not.toBe(partial.sourceRevision);
@@ -207,14 +201,14 @@ it("reads meal days only when generating Diet wins and keys the source revision 
       experimentOutcomes: [] },
     entities: { list: () => [] }, metrics: { series: () => [] }, labResults: { list: () => [] },
   } });
-  vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", auth.member.id);
+  vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
   vi.stubEnv("MURPH_GAME_ENABLED", "true");
   vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", "");
-  const off = await readHealthWinInputs(auth, today, signal);
+  const off = await readHealthWinInputs(memberId, mock.authority, today, signal);
   expect(off.input.meals).toBeUndefined();
   expect(days).not.toHaveBeenCalled();
-  vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", auth.member.id);
-  const on = await readHealthWinInputs(auth, today, signal);
+  vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", memberId);
+  const on = await readHealthWinInputs(memberId, mock.authority, today, signal);
   expect(on.input.meals).toEqual([{ date: today, proteinG: 17.25, fiberG: 3 }]);
   expect(days).toHaveBeenCalledOnce();
   expect(on.sourceRevision).not.toBe(off.sourceRevision);
@@ -224,7 +218,7 @@ it("keeps canonical outcomes when a legacy replica lacks a lab shard or health t
   mock.session.mockResolvedValueOnce({ state: "ready", client: { replica: {
     source: { dataVersion: "legacy" }, experimentOutcomes: [outcome("exp_walk", "Walking")],
   }, metrics: { series: vi.fn() }, entities: { list: () => [] } } });
-  const { complete, input } = await readHealthWinInputs(auth, today, signal);
+  const { complete, input } = await readHealthWinInputs(memberId, mock.authority, today, signal);
   expect(complete).toBe(false);
   expect(input.experiments).toHaveLength(1);
   expect(input.daily).toEqual([]);
@@ -245,9 +239,9 @@ it("includes the author's ready regional card painting in the source revision", 
   ]));
   mock.artRows.mockResolvedValueOnce([{ key, status: "making", startedAt: new Date() }])
     .mockResolvedValueOnce([{ key, status: "ready" }]);
-  const waiting = await readHealthWinInputs(auth, today, signal);
-  const ready = await readHealthWinInputs(auth, today, signal);
-  expect(mock.states).toHaveBeenCalledWith(auth.member.id, expect.arrayContaining(["steps", "walk.meters"]), signal);
+  const waiting = await readHealthWinInputs(memberId, mock.authority, today, signal);
+  const ready = await readHealthWinInputs(memberId, mock.authority, today, signal);
+  expect(mock.states).toHaveBeenCalledWith(memberId, expect.arrayContaining(["steps", "walk.meters"]), signal);
   expect(mock.artRows).toHaveBeenCalledWith(expect.objectContaining({ where: { key: { in: [key] } } }));
   expect(waiting.distanceArtUrl).toBeNull();
   expect(ready.distanceArtUrl).toBe(artPath(key));

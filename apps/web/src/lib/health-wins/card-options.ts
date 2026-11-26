@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
-import type { CardSpec } from "./engine";
+import type { CardSpec, HealthWinAchievement } from "./engine";
 import { formatNumber, formatWinMonth, milesFromKm } from "./engine/shared";
 
 type Option = "original" | "hide_numbers" | "hide_map" | "hours";
@@ -92,6 +92,9 @@ interface CandidateDisplay {
 
 export interface CachedHealthCandidate extends CandidateDisplay {
   miles?: CandidateDisplay;
+  /** Private detector evidence on the sealed wrapper, independent of its units or variants. */
+  achievement?: HealthWinAchievement;
+  sourceComplete?: boolean;
 }
 
 /** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
@@ -109,7 +112,10 @@ export function withDistanceTrendUnits(candidate: CachedHealthCandidate): Cached
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
-export function prepareHealthCandidates(memberId: string, cards: readonly CardSpec[], distanceArtUrl: string | null = null): CachedHealthCandidate[] {
+export function prepareHealthCandidates(
+  memberId: string, cards: readonly CardSpec[], distanceArtUrl: string | null = null,
+  detection?: { achievements: ReadonlyMap<string, HealthWinAchievement>; complete: boolean },
+): CachedHealthCandidate[] {
   return cards.map(engineCard => {
     const id = createHostedOpaqueIdentifier("health-win-card", JSON.stringify([memberId, engineCard.id]))!;
     const card = engineCard.kind === "cumulative" && distanceArtUrl
@@ -119,7 +125,8 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
     const converted = hoursCard(card);
     if (converted) variants.push({ option: "hours", specRevision: randomUUID(), spec: converted });
     variants.push({ option: "hide_numbers", specRevision: randomUUID(), spec: hidden(card) });
-    return withDistanceTrendUnits({ id, variants });
+    const achievement = detection?.achievements.get(engineCard.id);
+    return withDistanceTrendUnits({ id, variants, ...(achievement && { achievement, sourceComplete: detection?.complete }) });
   });
 }
 

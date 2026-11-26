@@ -30,13 +30,25 @@ export function isHealthPayoffEnabled(memberId: string, env: FlagEnv = process.e
   return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_PAYOFF_MEMBER_IDS, memberId);
 }
 
-export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
-  if (!lists(env.MURPH_HEALTH_RECORD_MEMBER_IDS, memberId) || !isHealthFeedEnabled(memberId, env)) return undefined;
-  return { timed: true, route: lists(env.MURPH_HEALTH_ROUTE_MEMBER_IDS, memberId) } as const;
+/** Only explicitly enrolled feed members can receive pilot texts. */
+export function healthWinTextMemberIds(env: FlagEnv = process.env): string[] {
+  const entries = (env.MURPH_HEALTH_WIN_TEXT_MEMBER_IDS ?? "").split(",").map(entry => entry.trim());
+  return [...new Set(entries)].filter(id => id !== "" && id !== "*" && isHealthFeedEnabled(id, env));
 }
 
-export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed"): void {
-  if (!healthRecordCapability(memberId)?.[capability]) throw gameNotFound();
+export function isHealthWinTextEnabled(memberId: string, env: FlagEnv = process.env): boolean {
+  return healthWinTextMemberIds(env).includes(memberId);
+}
+
+export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
+  if (!lists(env.MURPH_HEALTH_RECORD_MEMBER_IDS, memberId) || !isHealthFeedEnabled(memberId, env)) return undefined;
+  return { timed: true, route: lists(env.MURPH_HEALTH_ROUTE_MEMBER_IDS, memberId), named: true } as const;
+}
+
+export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed") {
+  const record = healthRecordCapability(memberId);
+  if (!record?.[capability]) throw gameNotFound();
+  return record;
 }
 
 export function assertHealthFeedEnabled(memberId: string): void {

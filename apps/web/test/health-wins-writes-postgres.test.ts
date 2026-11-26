@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
+import * as moderation from "@/src/lib/game/moderation";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import * as gameService from "@/src/lib/game/service";
 import { createHostedOpaqueDigest } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { getPrisma } from "@/src/lib/prisma";
+import { prepareRecordedActivityExport } from "@/src/lib/health-wins/activity-export";
 import * as healthCrypto from "@/src/lib/health-wins/crypto";
 import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
 import { openRecordedActivitySummaries } from "@/src/lib/health-wins/recorded-summary";
@@ -441,13 +443,13 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(state.sent).toHaveBeenCalledTimes(2);
   });
 
-  it("previews without a write, seals a private summary once, and cascades it with the account", async () => {
+  it("previews without a write, seals a private named summary once, and cascades it with the account", async () => {
     const owner = await member(), outsider = await member(), db = getPrisma();
     for (const memberId of [owner.member.id, outsider.member.id]) {
       await db.gameProfile.create({ data: { memberId, firstNameEncrypted: "fixture-label", timeZone: "America/Chicago" } });
     }
-    const first = { id: randomUUID(), kind: "walk", startedAt: "2034-06-03T02:36:00.000Z", elapsedSec: 510, movingSec: 480 } as const;
-    const summary = { id: randomUUID(), kind: "lift" as const, startedAt: "2034-06-03T03:11:00.000Z", elapsedSec: 180, movingSec: 165,
+    const first = { id: randomUUID(), kind: "walk", name: "Orchard lap", startedAt: "2034-06-03T02:36:00.000Z", elapsedSec: 510, movingSec: 480 } as const;
+    const summary = { id: randomUUID(), kind: "lift" as const, name: "Cable circuit", startedAt: "2034-06-03T03:11:00.000Z", elapsedSec: 180, movingSec: 165,
       heartRate: { avgBpm: 94, lowBpm: 69, peakBpm: 137 } };
     const activity = { ...summary, heartRate: { ...summary.heartRate, perMinute: [77, null, 104] } };
     const before = await previewRecordedActivity(owner, activity, "us");
@@ -456,7 +458,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
 
     await Promise.all([saveRecordedActivity(owner, first), saveRecordedActivity(owner, first)]);
     const after = await previewRecordedActivity(owner, activity, "uk");
-    expect(after.suggestedTitle).toMatch(/after your walk/i);
+    expect(after.suggestedTitle).toBe("Cable circuit after your orchard lap");
     expect(after.cards).toEqual(before.cards);
     expect(await db.healthActivity.count({ where: { memberId: owner.member.id } })).toBe(1);
 
@@ -465,6 +467,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     const row = await db.healthActivity.findUniqueOrThrow({ where: receipt });
     expect(row.day).toBe("2034-06-02");
     expect(row.summaryEncrypted).not.toContain("peakBpm");
+    expect(row.summaryEncrypted).not.toContain(summary.name);
     expect(await openRecordedActivitySummaries([row])).toEqual([summary]);
     await expect(saveRecordedActivity(owner, { ...summary, movingSec: 154 })).rejects.toMatchObject({ httpStatus: 409 });
     await expect(saveRecordedActivity(outsider, summary)).rejects.toMatchObject({ httpStatus: 409 });
@@ -475,6 +478,9 @@ describe.skipIf(!enabled)("health write transactions", () => {
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", owner.member.id);
     const post = { id: randomUUID(), caption: "Fixture entry", activity };
     await expect(createHealthPost(owner, { ...post, activity: { ...activity, elapsedSec: 177 } })).rejects.toMatchObject({ httpStatus: 409 });
+    await expect(createHealthPost(owner, { ...post, activity: { ...activity, name: "Band circuit" } })).rejects.toMatchObject({
+      httpStatus: 409, code: "HEALTH_ACTIVITY_CONFLICT",
+    });
     expect(await db.healthPost.findUnique({ where: { id: post.id } })).toBeNull();
     const attempts = [post, { ...post, id: randomUUID() }];
     const results = await Promise.allSettled(attempts.map(attempt => createHealthPost(owner, attempt)));
@@ -482,6 +488,31 @@ describe.skipIf(!enabled)("health write transactions", () => {
     const winner = attempts[results.findIndex(result => result.status === "fulfilled")]!;
     expect(await db.healthPost.findMany({ where: { authorMemberId: owner.member.id }, select: { id: true } })).toEqual([{ id: winner.id }]);
     expect(await db.healthActivity.findUniqueOrThrow({ where: receipt })).toMatchObject({ postId: winner.id, summaryEncrypted: row.summaryEncrypted });
+
+    // A policy change can reject new content while prior receipts and Settings exports stay readable.
+    const policy = vi.spyOn(moderation, "isGameTextRefused").mockReturnValue(true);
+    try {
+      const freshSummary = { ...summary, id: randomUUID() };
+      await expect(saveRecordedActivity(owner, freshSummary)).rejects.toMatchObject({
+        httpStatus: 400, code: "HEALTH_ACTIVITY_NAME_INVALID",
+      });
+      expect(await db.healthActivity.findUnique({ where: { id: freshSummary.id } })).toBeNull();
+      expect(await saveRecordedActivity(owner, summary)).toEqual(receipt);
+      await expect(createHealthPost(owner, { ...post, id: randomUUID() })).rejects.toMatchObject({
+        httpStatus: 400, code: "HEALTH_ACTIVITY_NAME_INVALID",
+      });
+      expect(await createHealthPost(owner, winner)).toEqual({ id: winner.id, version: 1 });
+      const next = await previewRecordedActivity(owner, { ...activity, name: undefined }, "us");
+      expect(next.suggestedTitle).toBe("Strength session after your orchard lap");
+      const archive = await prepareRecordedActivityExport(owner.member.id, async () => {});
+      const page = await archive!().next();
+      expect(JSON.parse(page.value ?? "{}").recordedActivities).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: first.id, name: first.name }),
+        expect.objectContaining({ id: activity.id, name: activity.name, postId: winner.id }),
+      ]));
+    } finally {
+      policy.mockRestore();
+    }
 
     // A partial day cannot support an "after" title. The overflow path should open no envelopes.
     await db.healthActivity.createMany({ data: Array.from({ length: 33 }, () => ({

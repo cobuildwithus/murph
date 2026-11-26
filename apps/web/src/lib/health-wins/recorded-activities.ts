@@ -8,6 +8,7 @@ import { assertGameMemberAuthCurrentForRead, assertGameMemberAuthCurrentTx } fro
 import { gameHttpError } from "../game/http/errors";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
+import { admitActivityName } from "./activity-name";
 import { previewRecordedCandidate } from "./card-options";
 import { sealHealthTexts } from "./crypto";
 import { activitySummaryTarget, openRecordedActivitySummaries } from "./recorded-summary";
@@ -36,7 +37,7 @@ async function recordingTime(db: Tx, memberId: string, activity: RecordedActivit
   return { day, hour };
 }
 
-async function previousKind(memberId: string, day: string, activity: RecordedActivity) {
+async function previousActivity(memberId: string, day: string, activity: RecordedActivity) {
   const rows = await getPrisma().healthActivity.findMany({
     where: { memberId, day, deletedAt: null, id: { not: activity.id } }, select: sealedFields,
     orderBy: { id: "asc" }, take: titleContextLimit + 1,
@@ -44,12 +45,14 @@ async function previousKind(memberId: string, day: string, activity: RecordedAct
   // Start times are sealed. A partial day cannot identify the preceding activity reliably.
   if (rows.length > titleContextLimit) return undefined;
   const before = Date.parse(activity.startedAt);
-  let latest: { end: number; kind: RecordedActivity["kind"] } | undefined;
+  let latest: { end: number; activity: Pick<RecordedActivity, "kind" | "name"> } | undefined;
   for (const summary of await openRecordedActivitySummaries(rows)) {
     const end = Date.parse(summary.startedAt) + summary.elapsedSec * 1000;
-    if (end <= before && (!latest || end > latest.end)) latest = { end, kind: summary.kind };
+    if (end <= before && (!latest || end > latest.end)) {
+      latest = { end, activity: { kind: summary.kind, name: summary.name } };
+    }
   }
-  return latest?.kind;
+  return latest?.activity;
 }
 
 export async function previewRecordedActivity(auth: HostedNativeMemberAuth, activity: RecordedActivity, units: ClientUnits) {
@@ -57,8 +60,8 @@ export async function previewRecordedActivity(auth: HostedNativeMemberAuth, acti
   validateRecordedActivity(activity);
   await readAuthority(auth, db);
   const time = await recordingTime(db, memberId, activity);
-  const prior = await previousKind(memberId, time.day, activity);
-  const { suggestedTitle, candidates } = buildRecordedCards(activity, { ...time, previousKind: prior, units });
+  const previous = await previousActivity(memberId, time.day, activity);
+  const { suggestedTitle, candidates } = buildRecordedCards(activity, { ...time, previous, units });
   await readAuthority(auth, db);
   return { suggestedTitle, cards: candidates.map(previewRecordedCandidate) };
 }
@@ -106,6 +109,17 @@ export async function saveRecordedActivity(auth: HostedNativeMemberAuth, activit
   const db = getPrisma(), memberId = auth.member.id;
   validateRecordedActivity(activity);
   await readAuthority(auth, db);
+  if (activity.name !== undefined) {
+    // A retried PUT can refer to a name admitted under an earlier policy.
+    const saved = await db.healthActivity.findUnique({
+      where: { id: activity.id }, select: { ...sealedFields, deletedAt: true },
+    });
+    if (saved) {
+      await assertSameSummary(saved, memberId, activity);
+      return { id: activity.id };
+    }
+    admitActivityName(activity.name, "recording");
+  }
   const { day } = await recordingTime(db, memberId, activity);
   const prepared = await sealSummary(memberId, day, activity);
   const prior = await db.$transaction(async tx => {

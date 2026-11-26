@@ -186,7 +186,7 @@ it("ranks by effect versus noise, recency and record bonus, breaking ties by car
       chart: { type: "record", unit: "steps", series: [], highlight: { date: member.today, value: 7200, label: "May 16" }, pills: [] } },
   };
   function ids(...candidates: Candidate[]) {
-    return rankCandidates(candidates, member.today).map(card => card.id);
+    return rankCandidates(candidates, member.today).cards.map(card => card.id);
   }
   expect(ids(sample("noisier", 5, 4), sample("quieter", 3, 2))).toEqual(["quieter", "noisier"]);
   expect(ids(sample("older", 1, 1, "2034-04-01"), sample("recent", 1, 1))).toEqual(["recent", "older"]);

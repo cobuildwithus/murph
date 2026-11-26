@@ -2,12 +2,9 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
-import { assertHostedNativeMemberAuthCurrentForRead, type HostedNativeMemberAuth } from "../better-auth/native-auth";
-import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
 import { readPaintedRouteArt } from "../game/progress/route-art";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
 import type { HealthWinsInput } from "./engine";
 import { readHealthWinExperiments } from "./experiment-inputs";
@@ -67,12 +64,7 @@ async function readReplicaInputs(client: BrowserVaultMetricSeriesCapableQueryCli
   };
 }
 
-export async function readHealthWinInputs(auth: HostedNativeMemberAuth, today: string, signal: AbortSignal) {
-  const memberId = auth.member.id;
-  const checkAuthority = () => getPrisma().$transaction(async tx => {
-    await assertHostedNativeMemberAuthCurrentForRead(auth, tx);
-    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-  });
+export async function readHealthWinInputs(memberId: string, checkAuthority: () => Promise<void>, today: string, signal: AbortSignal) {
   await checkAuthority();
   try {
     const source = sources(signal);
@@ -88,7 +80,7 @@ export async function readHealthWinInputs(auth: HostedNativeMemberAuth, today: s
       : { inputs: { member: memberInputs(today) }, stepsThrough: null };
     // Older readable replicas can reuse Progress's matching run cache. A failed or missing replica cannot.
     const runs = client ? client.replica.runs ?? null : { days: [] };
-    const game = await source.read("game", () => readHealthWinGameInputs(auth, today, runs, clock, signal));
+    const game = await source.read("game", () => readHealthWinGameInputs(memberId, today, runs, clock, signal));
     if (game && !game.complete) source.missing.add("game");
     const input: HealthWinsInput = { ...vault.inputs, games: game?.games ?? [], gameStreak: game?.gameStreak ?? null };
     const distanceArtUrl = input.daily?.some(row => row.metric === "distance_km" && row.value > 0 && row.date.slice(0, 4) === today.slice(0, 4))

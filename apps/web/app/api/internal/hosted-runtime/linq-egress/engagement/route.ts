@@ -1,6 +1,7 @@
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
+import { assertHealthWinTextCurrentTx, assertHealthWinTextRoute, healthWinTextEgressKey } from "@/src/lib/health-wins/nudge-egress";
 import { readPrivateEveningDeliveryAuthority } from "@/src/lib/game/private-notification";
 import { readRecapVideoDeliveryCurrent } from "@/src/lib/game/recap-asset-access";
 import { readPrivateKickoffDeliveryAuthority } from "@/src/lib/game/private-kickoff";
@@ -137,6 +138,7 @@ export const POST = withJsonError(async (request: Request) => {
   const targetKind = readOptionalBodyString(body.targetKind);
   const prisma = getPrisma();
 
+  const winKey = healthWinTextEgressKey(idempotencyKey, userId, { answeredMailboxItemIds, replyToMessageId, deliveryPurpose: body.deliveryPurpose });
   const clinicalKey = clinicalProactiveKey({ idempotencyKey, answeredMailboxItemIds, replyToMessageId,
     deliveryPurpose: body.deliveryPurpose, assistantAskFallback, assistantAskCompletionExpiresAt,
     homeRouteFallbackAllowed: body.homeRouteFallbackAllowed, targetKind, target });
@@ -258,6 +260,10 @@ export const POST = withJsonError(async (request: Request) => {
       target: finalAuthority.resolvedRoute.target,
       targetKind: finalAuthority.resolvedRoute.targetKind,
     });
+    if (winKey) {
+      assertHealthWinTextRoute(finalAuthority.resolvedRoute, health);
+      await assertHealthWinTextCurrentTx(tx, winKey);
+    }
     async function recordClinicalBlock(code: import("@murphai/hosted-execution/routes").HostedRuntimeLinqDeliveryBlockCode) {
       if (!clinicalKey) return;
       const { recordClinicalPolicyBlock } = await import("@/src/lib/clinical-records/notification");

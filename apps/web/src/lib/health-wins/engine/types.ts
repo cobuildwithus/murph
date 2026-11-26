@@ -4,6 +4,7 @@ import type { LabNormMetric } from "../../game/progress/norms";
 import type { ActivityCharts } from "./activities";
 import type { DailyCharts } from "./daily";
 import type { DietCharts } from "./diet";
+import type { Nutrient } from "./foods";
 import type { GameResultCharts } from "./game-result";
 import type { LabCharts } from "./labs";
 import type { PercentileCharts } from "./percentiles";
@@ -24,6 +25,7 @@ export interface RecordedRoute extends RecordedRouteSummary {
 export interface RecordedActivitySummary {
   id: string;
   kind: RecordedActivityKind;
+  name?: string;
   startedAt: string;
   elapsedSec: number;
   movingSec: number;
@@ -188,9 +190,24 @@ export type CardSpec = DetectedCard & {
   share: { caption_tips: readonly string[] };
 };
 
+/** Private detector evidence. The period is the observed month, event day, or intervention start. */
+export type HealthWinAchievement = (
+  | { kind: "trend_change" | "threshold_count" | "personal_record"; subject: Metric }
+  | { kind: "best_month"; subject: Metric | `${Nutrient}_g` }
+  | { kind: "sessions"; subject: SessionType }
+  | { kind: "lab_change" | "lab_percentile"; subject: Analyte }
+  | { kind: "experiment_result"; subject: string }
+) & { period: string };
+
+export interface DetectedHealthWins {
+  cards: CardSpec[];
+  achievements: Map<string, HealthWinAchievement>;
+}
+
 /** Private ranking evidence. Effect and noise use the same units. */
 export interface Candidate {
   card: DetectedCard;
+  achievement?: HealthWinAchievement;
   /** Daily metric behind a trend, threshold, streak, monthly best or record. */
   metric?: Metric;
   date: string;

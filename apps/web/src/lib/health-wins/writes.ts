@@ -13,6 +13,7 @@ import { redeemGameTicketTx } from "../game/service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { describeKnownLoggedErrorType } from "../http";
 import { getPrisma } from "../prisma";
+import { admitActivityName } from "./activity-name";
 import { findVisibleHealthPost } from "./audience";
 import { type CachedHealthCandidate, type FrozenHealthCard, type HealthCardSelection, resolveRecordedSelection } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
@@ -165,7 +166,10 @@ export async function createHealthPost(
     });
   }
   // After the replay branch, so a committed post still returns its receipt if the flag is turned off.
-  if (input.activity) assertHealthRecordEnabled(memberId, input.activity.route ? "route" : "timed");
+  if (input.activity) {
+    assertHealthRecordEnabled(memberId, input.activity.route ? "route" : "timed");
+    if (input.activity.name !== undefined) admitActivityName(input.activity.name, "recording");
+  }
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
   const { cards, day, payoff } = await resolveCreateCards(auth, input, recording?.candidates);

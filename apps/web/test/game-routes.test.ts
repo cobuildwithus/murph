@@ -433,9 +433,9 @@ describe("weekly game routes", () => {
       expect(disabled).not.toHaveProperty("flags");
       expect(disabled).not.toHaveProperty("record");
       vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", `synthetic-other, ${initial.me.memberId}`);
-      expect(await read()).toMatchObject({ flags: { health_feed: true }, record: { timed: true, route: false } });
+      expect(await read()).toMatchObject({ flags: { health_feed: true }, record: { timed: true, route: false, named: true } });
       vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", initial.me.memberId);
-      expect((await read()).record).toEqual({ timed: true, route: true });
+      expect((await read()).record).toEqual({ timed: true, route: true, named: true });
       vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", "synthetic-other");
       const feedOnly = await read();
       expect(feedOnly.flags.health_feed).toBe(true);

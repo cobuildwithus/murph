@@ -1,6 +1,8 @@
 # Health wins engine
 
 `generateHealthWins(input)` returns up to 24 ranked `CardSpec` objects for one member.
+`detectHealthWins(input)` also returns a map of achievement descriptors keyed by card ID,
+which the win-text pilot uses to recognize previously seen achievements.
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.

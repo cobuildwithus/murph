@@ -3,6 +3,7 @@ import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import { classifyHostedSystemMailboxExecutionClass } from "@murphai/hosted-execution/orchestration-control";
 import {
   admitHostedClinicalEnrichmentWake,
+  deliverHostedClinicalEnrichmentWake,
   makeHostedClinicalEnrichmentWakeDue,
   setHostedClinicalEnrichmentWakeNextAttempt,
 } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
@@ -99,6 +100,22 @@ describe("clinical enrichment durable wake", () => {
     expect(await makeHostedClinicalEnrichmentWakeDue({ vaultRoot, jobId, now: new Date(now) })).toBe(false);
     expect(await setHostedClinicalEnrichmentWakeNextAttempt({ vaultRoot, jobId, nextAttemptAt: now })).toBe(false);
     expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]).toMatchObject({ status, attemptCount: 3, nextAttemptAt: later });
+  });
+
+  it("reports a delivery that an active claim held so the runner can deliver again", async () => {
+    const { vaultRoot } = await admit();
+    await updateHostedSystemMailboxState(vaultRoot, state => ({
+      pending: state.pending.map(item => ({ ...item, status: "sending", nextAttemptAt: later })),
+    }));
+    expect(await deliverHostedClinicalEnrichmentWake({ vaultRoot, jobId, now: new Date(now) })).toBe(false);
+    await updateHostedSystemMailboxState(vaultRoot, state => ({
+      pending: state.pending.map(item => ({ ...item, status: "pending" })),
+    }));
+    expect(await deliverHostedClinicalEnrichmentWake({ vaultRoot, jobId, now: new Date(now) })).toBe(true);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]).toMatchObject({ status: "pending", nextAttemptAt: now });
+    // Already due, or gone after its job finished: nothing left to deliver.
+    expect(await deliverHostedClinicalEnrichmentWake({ vaultRoot, jobId, now: new Date(now) })).toBe(true);
+    expect(await deliverHostedClinicalEnrichmentWake({ vaultRoot, jobId: "b".repeat(64), now: new Date(now) })).toBe(true);
   });
 
   it("retains pending extraction until its bounded retry instead of consuming the wake", async () => {
