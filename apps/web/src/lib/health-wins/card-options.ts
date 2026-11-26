@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
 import { invalidGameRequest } from "../game/http/errors";
 import type { CardSpec } from "./engine";
@@ -16,12 +16,12 @@ const hiddenTitles = {
   Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone",
 } satisfies Record<CardSpec["filter"], string>;
 
-function hidden(card: CardSpec) {
+function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
   // Only closed labels survive. Even the engine ID, source notes and free-text experiment
   // titles can encode readings, dates, intervention names or adherence numbers.
   return {
     id: card.id, kind: card.kind, filter: card.filter, theme: card.theme,
-    title: { number: "", measure: hiddenTitles[card.filter] }, subtitle: "Shared without numbers.",
+    title: { number: "", measure: title }, subtitle: "Shared without numbers.",
     source_note: "", chart: { type: "hidden" as const }, share: { caption_tips: [] },
   };
 }
@@ -92,7 +92,23 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
   });
 }
 
-export interface HealthCardSelection { candidateId: string; option: string }
+/** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
+function recordedVariant(option: Option, spec: FrozenHealthCard["spec"]): Variant {
+  const canonical = JSON.stringify(spec, (_key, value: unknown) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  });
+  return { option, spec, specRevision: createHash("sha256").update(canonical).digest("hex") };
+}
+
+export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): CachedHealthCandidate {
+  return { id: card.id, variants: [
+    recordedVariant("original", card),
+    recordedVariant("hide_numbers", hidden(card, hiddenTitle)),
+  ] };
+}
+
+export interface HealthCardSelection { candidateId: string; option: string; specRevision?: string }
 
 function chooseVariant(candidate: CachedHealthCandidate, option: string) {
   const variant = candidate.variants.find(item => item.option === option);
@@ -105,6 +121,15 @@ export function previewHealthCandidate(candidate: CachedHealthCandidate, option 
   return { ...spec, specRevision,
     change_options: candidate.variants.map(item => ({ id: item.option, label: labels[item.option] })),
     caption_tips: spec.share.caption_tips.length ? spec.share.caption_tips : ["What helped you get here?", "How did it feel?"] };
+}
+
+/** Recorded previews have no stored set or change endpoint, so send the exact alternate display here. */
+export function previewRecordedCandidate(candidate: CachedHealthCandidate) {
+  return { ...previewHealthCandidate(candidate), candidateId: candidate.id,
+    change_options: candidate.variants.map(({ option, specRevision, spec }) => ({
+      id: option, label: labels[option], specRevision, ...(option === "original" ? {} : { spec }),
+    })),
+  };
 }
 
 export function findCandidate(candidates: CachedHealthCandidate[], candidateId: string) {

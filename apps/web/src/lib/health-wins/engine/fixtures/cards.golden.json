@@ -863,5 +863,57 @@
     "share": {
       "caption_tips": []
     }
+  },
+  {
+    "title": {
+      "number": "3 min",
+      "measure": "cold plunge"
+    },
+    "source_note": "Nov 18, 2036 · AM",
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_time",
+    "kind": "activity_time",
+    "subtitle": "Timed with Murph.",
+    "chart": {
+      "type": "duration",
+      "minutes": 3,
+      "timerMinutes": 4
+    }
+  },
+  {
+    "title": {
+      "number": "3 min",
+      "measure": "cold plunge"
+    },
+    "source_note": "Nov 18, 2036 · AM",
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_heart_rate",
+    "kind": "activity_heart_rate",
+    "subtitle": "Highest individual heart rate reading was 109 bpm.",
+    "chart": {
+      "type": "heart_rate",
+      "perMinute": [
+        79,
+        null,
+        99
+      ],
+      "low": {
+        "minute": 1,
+        "bpm": 79
+      },
+      "peak": {
+        "minute": 3,
+        "bpm": 99
+      },
+      "timerMinutes": 4
+    }
   }
 ]

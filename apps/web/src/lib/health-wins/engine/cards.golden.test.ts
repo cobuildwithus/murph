@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
 import { generateHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
+import { buildRecordedCards } from "./recorded";
+import type { RecordedActivity } from "./types";
 
 const goldenFile = new URL("./fixtures/cards.golden.json", import.meta.url);
 const chartsByKind = {
@@ -18,6 +20,8 @@ const chartsByKind = {
   game_climb: ["ladder", "skyline"],
   game_streak: ["week_dots"],
   sessions: ["sessions"],
+  activity_heart_rate: ["heart_rate"],
+  activity_time: ["duration"],
 } satisfies { [K in CardKind]: Extract<CardSpec, { kind: K }>["chart"]["type"][] };
 
 function syntheticInput(): HealthWinsInput {
@@ -86,7 +90,15 @@ function syntheticInput(): HealthWinsInput {
 }
 
 it("exports one synthetic card of every rendered shape", () => {
-  const cards = generateHealthWins(syntheticInput());
+  const recording: RecordedActivity = {
+    id: "a013dd82-5f77-4dba-91d5-bb32734bb164", kind: "cold_plunge",
+    startedAt: "2036-11-18T09:13:00Z", elapsedSec: 180, movingSec: 180, timerSec: 240,
+  };
+  const context = { day: "2036-11-18", hour: 9, units: "metric" } as const;
+  const timedCards = [recording, { ...recording, heartRate: {
+    lowBpm: 71, avgBpm: 85, peakBpm: 109, perMinute: [79, null, 99],
+  } }].flatMap(activity => buildRecordedCards(activity, context).candidates.map(candidate => candidate.variants[0].spec));
+  const cards = [...generateHealthWins(syntheticInput()), ...timedCards];
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }
