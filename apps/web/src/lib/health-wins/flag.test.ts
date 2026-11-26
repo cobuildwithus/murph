@@ -36,6 +36,7 @@ describe("health allowlists", () => {
   it.each([
     ["MURPH_HEALTH_DIET_MEMBER_IDS", isHealthDietEnabled],
     ["MURPH_HEALTH_PAYOFF_MEMBER_IDS", isHealthPayoffEnabled],
+    ["MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", isHealthWinTextEnabled],
   ] as const)("requires the feed and an independent %s grant", (key, enabled) => {
     const feed = { ...on, MURPH_HEALTH_FEED_MEMBER_IDS: "member-a" };
     expect(enabled("member-a", feed)).toBe(false);
@@ -46,18 +47,20 @@ describe("health allowlists", () => {
     expect(enabled("member-a", { ...feed, [key]: "*", MURPH_GAME_ENABLED: "false" })).toBe(false);
   });
 
-  it("admits only explicitly enrolled feed members to win texts", () => {
-    const pilot = {
+  it("enumerates named text recipients and pages all enrollments when * appears", () => {
+    const listed = {
       ...on,
       MURPH_HEALTH_FEED_MEMBER_IDS: "member-a,member-b",
-      MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: " member-b, *,member-c,member-b ",
+      MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: " member-b, ,member-c,member-b ",
     };
-    expect(healthWinTextMemberIds(pilot)).toEqual(["member-b"]);
-    expect(isHealthWinTextEnabled("member-a", pilot)).toBe(false);
-    expect(isHealthWinTextEnabled("member-b", pilot)).toBe(true);
-    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_FEED_MEMBER_IDS: "*" })).toEqual(["member-b", "member-c"]);
-    expect(healthWinTextMemberIds({ ...pilot, MURPH_GAME_ENABLED: "false" })).toEqual([]);
-    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: "*" })).toEqual([]);
-    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: undefined })).toEqual([]);
+    expect(healthWinTextMemberIds(listed)).toEqual(["member-b"]);
+    expect(healthWinTextMemberIds({ ...listed, MURPH_HEALTH_FEED_MEMBER_IDS: "*" })).toEqual(["member-b", "member-c"]);
+    expect(healthWinTextMemberIds({ ...listed, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: undefined })).toEqual([]);
+    const wildcard = { ...listed, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: " member-b , * " };
+    expect(healthWinTextMemberIds(wildcard)).toBe("everyone");
+    expect(isHealthWinTextEnabled("member-a", wildcard)).toBe(true);
+    expect(isHealthWinTextEnabled("member-c", wildcard)).toBe(false);
+    expect(healthWinTextMemberIds({ ...wildcard, MURPH_GAME_ENABLED: "false" })).toEqual([]);
+    expect(healthWinTextMemberIds({ ...wildcard, MURPH_HEALTH_FEED_MEMBER_IDS: "" })).toEqual([]);
   });
 });
