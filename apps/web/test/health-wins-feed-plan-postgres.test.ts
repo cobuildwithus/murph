@@ -11,10 +11,10 @@ interface PlanNode {
   Plans?: PlanNode[];
 }
 
-function findAuthorPageSeek(node: PlanNode): PlanNode | undefined {
-  if (node["Index Name"] === "health_post_author_member_id_deleted_at_created_at_id_idx") return node;
+function findIndexSeek(node: PlanNode, indexName: string, condition: string): PlanNode | undefined {
+  if (node["Index Name"] === indexName && node["Index Cond"]?.includes(condition)) return node;
   for (const child of node.Plans ?? []) {
-    const found = findAuthorPageSeek(child);
+    const found = findIndexSeek(child, indexName, condition);
     if (found) return found;
   }
 }
@@ -24,8 +24,8 @@ if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murp
   throw new Error("The feed plan proof requires an isolated loopback test database.");
 }
 
-describe.skipIf(!enabled)("health feed keyset plan", () => {
-  it("seeks through the date and UUID index before opening any page content", async () => {
+describe.skipIf(!enabled)("health post query plans", () => {
+  it("seeks feed and profile pages by author and a post detail by primary key", async () => {
     const viewer = randomUUID();
     const db = getPrisma();
     vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", viewer);
@@ -38,19 +38,30 @@ describe.skipIf(!enabled)("health feed keyset plan", () => {
       await db.$transaction(async tx => {
         // Isolate both the table's cardinality and planner statistics from parallel route fixtures.
         await tx.$executeRaw`CREATE TEMP TABLE health_post (LIKE public.health_post INCLUDING ALL) ON COMMIT DROP`;
+        // The CI database can still have its predeploy indexes.
+        await tx.$executeRaw`DROP INDEX IF EXISTS pg_temp.health_post_deleted_at_created_at_id_idx`;
+        const postId = randomUUID();
         await tx.$executeRaw`INSERT INTO health_post (id, author_member_id, created_at)
-          SELECT gen_random_uuid(), ${viewer}, timestamptz '2032-04-03' - i * interval '1 second'
+          SELECT CASE WHEN i = 1 THEN ${postId}::uuid ELSE gen_random_uuid() END,
+            CASE WHEN i % 2 = 1 THEN ${viewer} ELSE ${randomUUID()} END,
+            timestamptz '2032-04-03' - i * interval '1 second'
           FROM generate_series(1, 20000) AS i`;
         await tx.$executeRaw`ANALYZE pg_temp.health_post`;
         const cursor = { createdAt: new Date("2032-04-02T21:00:00.000Z"), id: randomUUID() };
-        const query = healthPostPageSql(viewer, { cursor });
-        const [result] = await tx.$queryRaw<Array<{ "QUERY PLAN": [{ Plan: PlanNode }] }>>`
-          EXPLAIN (ANALYZE, FORMAT JSON, TIMING OFF) ${query}`;
-        const root = result["QUERY PLAN"][0].Plan;
-        expect(root).toMatchObject({ "Actual Rows": 21 });
-        const seek = findAuthorPageSeek(root);
-        expect(seek?.["Actual Rows"]).toBe(21);
-        expect(seek?.["Index Cond"]).toContain("ROW(created_at, id)");
+        const explain = async (query: ReturnType<typeof healthPostPageSql>) => {
+          const [result] = await tx.$queryRaw<Array<{ "QUERY PLAN": [{ Plan: PlanNode }] }>>`
+            EXPLAIN (ANALYZE, FORMAT JSON, TIMING OFF) ${query}`;
+          return result["QUERY PLAN"][0].Plan;
+        };
+        for (const filter of [{ cursor }, { author: viewer, cursor }]) {
+          const plan = await explain(healthPostPageSql(viewer, filter));
+          expect(plan["Actual Rows"]).toBe(21);
+          const seek = findIndexSeek(plan, "health_post_author_member_id_deleted_at_created_at_id_idx", "ROW(created_at, id)");
+          expect(seek?.["Actual Rows"]).toBe(21);
+        }
+        const detail = await explain(healthPostPageSql(viewer, { postId }));
+        expect(detail["Actual Rows"]).toBe(1);
+        expect(findIndexSeek(detail, "health_post_pkey", postId)?.["Actual Rows"]).toBe(1);
       }, { timeout: 30_000 });
     } finally {
       vi.unstubAllEnvs();

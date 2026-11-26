@@ -6592,15 +6592,11 @@ owners; no additional table or plaintext private field is introduced:
 | Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
 | Route award `data_encrypted.data` | `from`, `to`, `distanceM`, `startTotal`: frozen journey facts; common medal presentation and scoring evidence |
 
-`friend-cohort.ts` admits current, unblocked players from games already played,
-plus unjoined invitees from the viewer's current created games. Invited and
-negotiating games use the existing invitation deadline; cancelled and closed
-invitations disappear. Pending names use Home's `pendingInviteeLabel` and the
-creator-owned sealed name, never another name source. A pending row has
-`invited: true`, null total/rank/join date, and no chart line, award or sharing
-audience. Invitations without a member use the existing game id and seat as an
-opaque row identity; no contact identifier is exposed or persisted. A joined
-friend wins over duplicate pending invitations. The caller rechecks the cohort once after opening private inputs and before
+`friend-cohort.ts` includes the viewer and unsuspended partners from
+`game/partners.ts`, filtered for blocks in both directions. Only joined,
+present seats in live or settled games qualify. A separate departure query
+includes void games with a joined, departed seat and excludes cancellations.
+The caller rechecks the cohort once after opening private inputs and before
 returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
@@ -6697,16 +6693,15 @@ older eligible rooms for the same pair in the same transaction.
 Progress reads every game, entry and current player identity. Deferred friend
 inference classifies each distinct member-bound phrase once, with at most two
 sequential provider calls each. Sealing runs one owner batch at a time, then one
-transaction takes one pair lock per affected friend, two cohort queries, the
+transaction takes one pair lock per affected friend, the cohort reads, the
 existing native-session check and one cache insert.
-No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
-blocks), repeated at the post-decryption and award-commit authority boundaries.
+No provider or key work runs inside that transaction. Each cohort check reads
+the distinct partners and latest departure, plus one block query when partners
+exist. It repeats after decryption and before committing an award.
 Game inputs read contributing game ids once, then games and entries in pages of 500 games,
 then the task cache and measure state; their fields are opened in batches, outside
-transactions. Names are one batch including pending invite labels
-and a departure label. The same cohort game query selects at most ten
-player seats and nine invitation seats per game; occupied invitation seats are
-excluded. Pending identities never enter game-amount or pair-health reads. Exercise pills skip sharing-room discovery. Steps and Sleep discover
+transactions. Names are one batch including the latest departure label when
+present. Exercise pills skip sharing-room discovery. Steps and Sleep discover
 eligible pair rooms, read the viewer's requested replica metric and open
 up to six friend boards concurrently. Each board opens at most one granted
 projection for the selected friend and metric. Its two authority transactions
@@ -6735,9 +6730,10 @@ Browser Vault authority.
 
 ### Audience and disclosure
 
-A post is visible to its author and current game partners. Web checks for joined,
-present seats in the same live or settled game, excludes cancelled games, and
-applies current account eligibility, the rollout allowlist and the author's
+A post is visible to its author and current game partners. Health and Progress
+share the game-owned query for joined, present seats in the same live or settled
+game. Cancellation records the event and voids the game in one transaction.
+Health applies current account eligibility, the rollout allowlist and the author's
 health consent. A game block or health-feed hide in either direction excludes
 the other member. The feed evaluates eligibility in SQL and returns up to 20
 posts, ordered by `created_at` and `id` descending. PostgreSQL seeks up to 21 rows per
@@ -6751,8 +6747,9 @@ still advance. There is no limit on the number of partners who can qualify.
 Each comment requires access to the live parent post. A poster-only comment
 is visible to the poster and its writer. Blocks and hides also apply between
 the reader and the commenter and between the poster and the commenter. A
-commenter must be the poster or the poster's current game partner. Web pages
-comments and rechecks their visibility after opening the content. Post details,
+commenter must be the poster or the poster's current game partner. Web checks
+the parent before paging comments and binds its poster to the comment query.
+After opening content, Web rechecks the parent and the selected comments. Post details,
 attachment reads and push delivery use the same access decisions. Profile numbers come from
 `readPairBoard` under existing per-person grants. After consent withdrawal,
 members can list their own post IDs, timestamps and versions for deletion.
@@ -6779,12 +6776,16 @@ Decisions receives one call with the fixed category and detector labels and a
 three-second deadline. Failures use the engine's order. A source failure can
 omit that source. An input timeout returns the last available set, or a retryable
 503 if the member has none. Loss of member authority ends the read.
+Native authentication and Health content share unwrapped control roots for one
+request, and Web wipes the cached keys when the request ends.
 Health reads recheck session validity without taking member or session row
 locks. Writes retain those locks through commit.
 Daily candidate sets track the replica, game inputs, ready route painting
 and detector version. The keyed lookup `health_win_set.source_revision` binds
 those inputs' revisions to the member. A conditional write publishes a replacement
-only if the revision observed before computation is still current.
+only if the revision observed before computation is still current. The publication
+transaction retains the member's three newest stored days under the profile lock.
+Fallback reads use the newest retained day on or before the member's local date.
 
 To publish a card the client submits its candidate ID, option and opaque set
 revision. A superseded set returns 409. The post freezes each selected spec

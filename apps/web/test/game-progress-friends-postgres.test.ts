@@ -8,6 +8,7 @@ import { sealGameText } from "../src/lib/game/crypto";
 import { lockGamePair } from "../src/lib/game/blocks";
 import { friendsSchema } from "../src/lib/game/progress/contract";
 import { openProgress, progressLookup, sealProgress } from "../src/lib/game/progress/crypto";
+import { friendCohortIds } from "../src/lib/game/progress/friend-cohort";
 import { readFriendGameSeries } from "../src/lib/game/progress/friend-games";
 import { readAwards, settleAwards } from "../src/lib/game/progress/awards";
 import { removeRetiredProgressAwards } from "../scripts/migrations/remove-retired-progress-awards";
@@ -96,6 +97,40 @@ afterAll(async () => {
   if (!enabled) return;
   await db.game.deleteMany({ where: { id: { in: games } } });
   await db.hostedMember.deleteMany({ where: { id: { in: members } } });
+});
+
+it.skipIf(!enabled)("admits only present co-players and filters suspended partners from Progress", async () => {
+  const viewer = await member("Viewer"), peer = await member("Peer"), outsider = await member("Outsider");
+  const readIds = async () => (await friendCohortIds(viewer, db)).ids.sort();
+  expect(await readIds()).toEqual([viewer]);
+
+  const shared = await game([viewer, peer], "Balance drills");
+  await db.game.update({ where: { id: shared }, data: { maxPlayers: 10 } });
+  await db.gameInvitee.create({ data: { gameId: shared, seat: 2, memberId: outsider } });
+  for (const memberId of [viewer, outsider]) {
+    const gameId = await game([viewer, outsider], "Stretching");
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId, memberId } }, data: { leftAt: dayOne } });
+  }
+  for (const status of ["negotiating", "void"]) {
+    const id = await game([viewer, outsider], "Mobility");
+    await db.game.update({ where: { id }, data: { status } });
+  }
+  expect(await readIds()).toEqual([viewer, peer].sort());
+  await db.hostedMember.update({ where: { id: peer }, data: { suspendedAt: dayOne } });
+  expect(await readIds()).toEqual([viewer]);
+});
+
+it.skipIf(!enabled)("retains an older settled partner across 500 more games with the same peer", async () => {
+  const viewer = await member("Viewer"), oldest = await member("Earliest"), repeated = await member("Returning");
+  const ids = Array.from({ length: 501 }, () => randomUUID());
+  games.push(...ids);
+  await db.game.createMany({ data: ids.map((id, index) => ({
+    id, createdBy: viewer, wordsOwnerMemberId: viewer, status: "settled", createdAt: new Date(dayOne.getTime() + index * 1000),
+    terms: {}, termsWordsEncrypted: "synthetic-sealed-terms",
+  })) });
+  await db.gamePlayer.createMany({ data: ids.flatMap((gameId, index) =>
+    [viewer, index === 0 ? oldest : repeated].map((memberId, seat) => ({ gameId, memberId, seat, timeZone: "UTC", joinedAt: dayOne }))) });
+  expect((await friendCohortIds(viewer, db)).ids.sort()).toEqual([viewer, oldest, repeated].sort());
 });
 
 it.skipIf(!enabled)("returns the required consent scopes for a signed-in Friends health reader", async () => {

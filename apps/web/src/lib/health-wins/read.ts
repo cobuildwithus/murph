@@ -9,7 +9,7 @@ import { gameMediaUrl } from "../game/views";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { getPrisma } from "../prisma";
-import { eligibleHealthAuthorsSql, findVisibleHealthPost, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
+import { eligibleHealthAuthorsSql, findVisibleHealthPost, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
 import { openHealthTexts } from "./crypto";
 import type { FrozenHealthCard } from "./card-options";
 import { openHealthCursor, sealHealthCursor, type HealthPagePosition } from "./cursor";
@@ -146,18 +146,24 @@ export async function readHealthPost(auth: Auth, postId: string) {
   return { post: posts[0] };
 }
 
-export async function readHealthComments(auth: Auth, postId: string, cursor?: string | null) {
-  const db = getPrisma(), viewer = auth.member.id;
-  const collection = `comments:${postId}`;
-  const position = await openHealthCursor(viewer, collection, cursor);
-  const fetched = await db.$queryRaw<CommentRow[]>`SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
+export function healthCommentPageSql(viewerId: string, postId: string, posterId: string, position?: HealthPagePosition) {
+  return Prisma.sql`SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
       c.created_at AS "createdAt", c.body_encrypted AS "bodyEncrypted", c.visibility,
       profile.first_name_encrypted AS "firstNameEncrypted", profile.photo_key AS "photoKey"
-    FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
+    FROM health_post_comment c
     LEFT JOIN game_profile profile ON profile.member_id = c.author_member_id
-    WHERE p.id = ${postId}::uuid AND ${visibleHealthCommentSql(viewer)}
+    WHERE c.post_id = ${postId}::uuid AND ${visibleHealthCommentOnPostSql(viewerId, Prisma.sql`${posterId}::text`)}
       ${cursorWhere(position, Prisma.sql`(c.created_at, c.id)`)}
     ORDER BY c.deleted_at, c.created_at DESC, c.id DESC LIMIT ${PAGE_SIZE + 1}`;
+}
+
+export async function readHealthComments(auth: Auth, postId: string, cursor?: string | null) {
+  const db = getPrisma(), viewer = auth.member.id;
+  const parent = await findVisibleHealthPost(db, viewer, postId);
+  if (!parent) throw gameNotFound();
+  const collection = `comments:${postId}`;
+  const position = await openHealthCursor(viewer, collection, cursor);
+  const fetched = await db.$queryRaw<CommentRow[]>(healthCommentPageSql(viewer, postId, parent.authorMemberId, position));
   const rows = fetched.slice(0, PAGE_SIZE);
   const [identities, content, nextCursor] = await together([names(rows), openHealthTexts(rows.map(row => ({
     memberId: row.authorMemberId, table: "health_post_comment", rowId: row.id, field: "body", value: row.bodyEncrypted,

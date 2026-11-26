@@ -269,7 +269,9 @@ describe.skipIf(!runPostgresProof)("weekly game report and block", () => {
     expect(await ok(ava, { memberId: leo, type: "block" })).toBeNull();
 
     expect(await getPrisma().gameBlock.count({ where: { blockedMemberId: leo, blockerMemberId: ava } })).toBe(1);
-    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: open.id } })).toMatchObject({ status: "void" });
+    expect(await getPrisma().game.findUniqueOrThrow({ where: { id: open.id }, select: {
+      status: true, events: { where: { type: "cancelled" }, select: { actor: true } },
+    } })).toEqual({ status: "void", events: [{ actor: ava }] });
     expect((await readHome(ava)).games.map((game) => game.id)).not.toContain(open.id);
     expect(await run(leo, { gameId: randomUUID(), inviteeFirstName: "Ava", previousGameId: settled, terms: TERMS, type: "createGame" }))
       .toMatchObject({ ok: false, error: { code: "PLAYER_UNAVAILABLE" } });

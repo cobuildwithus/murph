@@ -393,6 +393,46 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await db.healthPost.findUnique({ where: { id } })).toMatchObject({ deletedAt: expect.any(Date), captionEncrypted: null });
   });
 
+  it("returns 404 for a hidden parent without reading its comment history", async () => {
+    const poster = await person(), reader = await person();
+    await pair(poster, reader);
+    const postId = await share(poster);
+    await db.$executeRaw`INSERT INTO health_post_comment (id, post_id, author_member_id, body_encrypted)
+      SELECT gen_random_uuid(), ${postId}::uuid, ${poster.id}, 'unopened-fixture' FROM generate_series(1, 1024)`;
+    await db.healthFeedHide.create({ data: { memberId: poster.id, hiddenMemberId: reader.id } });
+
+    const query = vi.spyOn(db, "$queryRaw");
+    const opening = vi.spyOn(crypto, "openHealthTexts");
+    const response = await comments(reader.request(`posts/${postId}/comments`), context(postId));
+    expect(response.status).toBe(404);
+    const statements = query.mock.calls.map(([sql]) => "sql" in sql ? sql.sql : sql.join(" "));
+    expect(statements.some(sql => /\bhealth_post\b/u.test(sql))).toBe(true);
+    expect(statements.some(sql => /\bhealth_post_comment\b/u.test(sql))).toBe(false);
+    expect(opening).not.toHaveBeenCalled();
+  });
+
+  it.each(["poster", "commenter"] as const)("rechecks comments when the %s withdraws consent during opening", async role => {
+    const poster = await person(), commenter = await person(), reader = await person();
+    await pair(poster, reader);
+    await pair(poster, commenter);
+    const postId = await share(poster), id = randomUUID();
+    expect((await comment(commenter.request(`posts/${postId}/comments`, "POST", {
+      id, body: "Synthetic comment for the access check.",
+    }), context(postId))).status).toBe(200);
+    const open = crypto.openHealthTexts;
+    const opening = vi.spyOn(crypto, "openHealthTexts").mockImplementationOnce(async (...args) => {
+      expect(args[0].map(entry => entry.rowId)).toEqual([id]);
+      const bodies = await open(...args);
+      await revokeHostedConsentScope({ memberId: role === "poster" ? poster.id : commenter.id, scope: "launch.health-data", prisma: db });
+      return bodies;
+    });
+
+    const response = await comments(reader.request(`posts/${postId}/comments`), context(postId));
+    expect(opening).toHaveBeenCalledOnce();
+    expect(response.status).toBe(role === "poster" ? 404 : 200);
+    if (role === "commenter") expect(await response.json()).toEqual({ comments: [], nextCursor: null });
+  });
+
   it("shows poster-only comments to their two participants and respects commenter hides and blocks", async () => {
     const author = await person(), commenter = await person(), reader = await person();
     await pair(author, commenter);

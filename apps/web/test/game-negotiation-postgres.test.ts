@@ -59,7 +59,9 @@ describe.skipIf(!enabled)("game negotiation persistence", () => {
     expect(await run(b,command)).toMatchObject({ok:false,error:{code:"NOT_A_PLAYER"}});
     const results = await Promise.all([run(a,command),run(a,command)]);
     expect(results).toEqual(results.map(() => expect.objectContaining({ok:true,game:expect.objectContaining({status:"void",pendingChange:null})})));
-    expect(await db.gameEvent.findMany({where:{gameId,type:"cancelled"},select:{actor:true}})).toEqual([{actor:a}]);
+    expect(await db.game.findUniqueOrThrow({ where: { id: gameId }, select: {
+      status: true, events: { where: { type: "cancelled" }, select: { actor: true } },
+    } })).toEqual({ status: "void", events: [{ actor: a }] });
     expect(await db.hostedLinqDelivery.count({where:{source:"game_lifecycle",sourceRef:gameId,template:"game_cancelled"}})).toBe(0);
     expect(await readInvitePreview(token)).toBeNull();
     for (const actor of [a,b]) expect((await readHome(actor)).games.some((game) => game.id === gameId)).toBe(false);
