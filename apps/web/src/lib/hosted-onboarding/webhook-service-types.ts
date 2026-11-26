@@ -26,7 +26,7 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
 
 export type HostedWebhookWakeHandoff = {
   conversationIsGroup?: boolean;
-  groupSenderMemberId?: string;
+  groupSenderMemberId?: string | undefined;
   acceptedLinqDeliveryId?: string;
   eventId: string;
   linqChatId?: string | null;
