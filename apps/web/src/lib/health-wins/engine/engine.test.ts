@@ -123,6 +123,25 @@ describe("generateHealthWins", () => {
     expect(bars?.chart.series.map(bar => bar.mean)).toEqual([76, 77]);
   });
 
+  it("keeps Diet to three cards in a full first twelve while retaining the other Diet claims", () => {
+    const meals = ["01", "02", "03", "04", "05"].flatMap(month => {
+      const current = month === "05";
+      return Array.from({ length: current ? 16 : 25 }, (_, i) => ({
+        date: `2034-${month}-${String(i + 1).padStart(2, "0")}`,
+        proteinG: current ? 135 : 72, fiberG: current ? 46 : 25,
+      }));
+    });
+    const cards = generateHealthWins({
+      member, meals, experiments: [1, 2, 3].map(experiment), games: ["squats", "pushups", "lunges"].map(game),
+      sessions: (["hiit", "walk", "sauna"] as const).flatMap(type =>
+        [4, 7, 10].map(day => ({ type, date: `2034-05-${String(day).padStart(2, "0")}`, minutes: 28 }))),
+    });
+    const diet = cards.filter(card => card.filter === "Diet");
+    expect(diet.map(card => card.kind).sort()).toEqual(["best_month", "best_month", "month_total", "month_total", "streak"]);
+    expect(cards.slice(0, 12).filter(card => card.filter === "Diet")).toHaveLength(3);
+    expect(cards.slice(12).filter(card => card.filter === "Diet")).toHaveLength(2);
+  });
+
   it("caps a crowded filter at 24 distinct claims and orders its remaining cards by score", () => {
     const experiments = Array.from({ length: 28 }, (_, index) => {
       const day = String(index + 1).padStart(2, "0");

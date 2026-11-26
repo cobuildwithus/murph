@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { encodePolyline } from "../../game/progress/route-geometry";
+import { buildGameResultCard } from "./game-result";
 import { generateHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
 import { buildRecordedCards } from "./recorded";
 import type { RecordedActivity } from "./types";
@@ -10,8 +11,9 @@ const goldenFile = new URL("./fixtures/cards.golden.json", import.meta.url);
 const chartsByKind = {
   trend_change: ["trend"],
   threshold_count: ["bars"],
-  streak: ["bars"],
-  best_month: ["monthly_bars"],
+  streak: ["bars", "bars"],
+  best_month: ["monthly_bars", "monthly_bars"],
+  month_total: ["tally", "tally"],
   personal_record: ["record"],
   cumulative: ["map"],
   percentile: ["percentile"],
@@ -20,6 +22,7 @@ const chartsByKind = {
   experiment_result: ["two_bars"],
   game_climb: ["ladder", "skyline"],
   game_streak: ["week_dots"],
+  game_result: ["game_result"],
   sessions: ["sessions"],
   activity_heart_rate: ["heart_rate"],
   activity_time: ["duration"],
@@ -95,7 +98,27 @@ function syntheticInput(): HealthWinsInput {
 
 afterEach(() => vi.unstubAllEnvs());
 
-it("exports one synthetic card of every rendered shape", () => {
+function dietCards() {
+  function days(month: string, first: number, last: number, proteinG: number, fiberG: number) {
+    return Array.from({ length: last - first + 1 }, (_, offset) => ({
+      date: `${month}-${String(first + offset).padStart(2, "0")}`, proteinG, fiberG,
+    }));
+  }
+  return generateHealthWins({
+    member: { today: "2036-11-28", age: null, sex: null, wearableProvider: null },
+    meals: [
+      ...days("2036-08", 1, 25, 174, 21),
+      ...days("2036-09", 1, 25, 186, 22),
+      ...days("2036-10", 1, 24, 205, 20),
+      ...days("2036-10", 25, 25, 220, 10),
+      ...days("2036-11", 1, 10, 190, 12),
+      ...days("2036-11", 11, 16, 190, 33.25),
+      ...days("2036-11", 17, 28, 190, 12),
+    ],
+  });
+}
+
+it("exports synthetic examples of every rendered shape", () => {
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v1");
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "v1:" + Buffer.alloc(32, 37).toString("base64"));
   const recording: RecordedActivity = {
@@ -118,7 +141,16 @@ it("exports one synthetic card of every rendered shape", () => {
   };
   const routeCards = buildRecordedCards(walk, { day: "2037-03-12", hour: 14, units: "metric" })
     .candidates.map(candidate => candidate.variants[0].spec);
-  const cards = [...generateHealthWins(syntheticInput()), ...timedCards, ...routeCards];
+  const gameResult = buildGameResultCard({
+    gameId: "g_canal_loop", contest: "Walk the canal path", lengthDays: 9, startDate: "2036-11-04",
+    players: [
+      { memberId: "m_indigo", firstName: "Luma", score: 8, won: true },
+      { memberId: "m_topaz", firstName: "Oriel", score: 6, won: false },
+    ],
+    stake: { kind: "dare", item: "wear a paper crown to brunch" },
+  });
+  const cards = [...generateHealthWins(syntheticInput()), ...timedCards, ...routeCards, ...dietCards(), gameResult];
+  expect(cards).toHaveLength(23);
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }

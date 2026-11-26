@@ -156,7 +156,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.health_post",
     label: "Health feed posts",
     deletion: "live-delete",
-    note: "Deleting the author cascades their posts, including sealed captions and frozen cards.",
+    note: "Deleting the author cascades their posts, including sealed captions and frozen cards. Payoff cards include both players’ profile names, scores and stake. Deleting the game preserves the post’s game scope and restricts access to its author.",
   },
   {
     slug: "prisma.health_post_comment",

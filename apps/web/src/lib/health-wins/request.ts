@@ -50,17 +50,28 @@ const postFields = {
     .refine(cards => new Set(cards.map(card => card.candidateId)).size === cards.length).optional(),
 };
 
+export function validPayoffPost(input: { cards?: readonly { candidateId: string; specRevision?: string }[]; attachmentId?: string }) {
+  const payoff = input.cards?.find(card => card.candidateId.startsWith("game:"));
+  return !payoff || (input.cards?.length === 1 && Boolean(input.attachmentId) && digest.safeParse(payoff.specRevision).success);
+}
+
+export function hasPayoffCardEdit(input: { cards?: readonly { candidateId: string }[]; removeCardIds?: readonly string[] }) {
+  return input.cards?.some(card => card.candidateId.startsWith("game:")) || input.removeCardIds?.some(id => id.startsWith("game:"));
+}
+
 export const createPostBody = z.strictObject({
   ...postFields, id: uuid, attachmentId: uuid.optional(), activity: activityWithDisplay.optional(),
 })
+  .refine(validPayoffPost)
   .refine(input => input.cards?.every(card => card.candidateId.startsWith("activity:")
     ? input.activity !== undefined && digest.safeParse(card.specRevision).success
-    : input.setRevision !== undefined) ?? true)
+    : card.candidateId.startsWith("game:") || input.setRevision !== undefined) ?? true)
   .refine(input => Boolean(input.caption?.trim() || input.cards?.length || input.attachmentId));
 export const patchPostBody = z.strictObject({
   ...postFields, expectedVersion: z.number().int().positive().max(2147483647),
   removeCardIds: z.array(candidateId).min(1).max(12).refine(ids => new Set(ids).size === ids.length).optional(),
 })
+  .refine(input => !hasPayoffCardEdit(input))
   .refine(input => !input.cards?.length || input.setRevision !== undefined)
   .refine(input => !input.removeCardIds || (input.cards === undefined && input.setRevision === undefined))
   .refine(input => input.caption !== undefined || input.cards !== undefined || input.removeCardIds !== undefined);

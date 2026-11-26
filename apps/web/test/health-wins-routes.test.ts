@@ -150,6 +150,29 @@ it("passes the winning set and a chosen option without accepting client-declared
   expect(service.create).toHaveBeenCalledTimes(1);
 });
 
+it("accepts a single payoff with its photo and digest, and rejects payoff selections on edits", async () => {
+  vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", auth.member.id);
+  const pick = { candidateId: `game:${revision}`, option: "original", specRevision: "eb".repeat(32) };
+  const input = { id, attachmentId: revision, cards: [pick] };
+  service.create.mockResolvedValue({ id, version: 1 });
+  expect((await post(request("posts", "POST", input))).status).toBe(200);
+  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, input, "us");
+  for (const invalid of [
+    { ...input, attachmentId: undefined },
+    { ...input, cards: [{ ...pick, specRevision: undefined }] },
+    { ...input, cards: [{ ...pick, specRevision: revision }] },
+    { ...input, setRevision: revision, cards: [pick, { candidateId: "slot:willow", option: "original" }] },
+  ]) {
+    expect((await post(request("posts", "POST", invalid))).status).toBe(400);
+  }
+  expect(service.create).toHaveBeenCalledTimes(1);
+  const edit = { expectedVersion: 1, setRevision: revision, cards: [pick] };
+  expect((await patch(request("posts", "PATCH", edit), postContext)).status).toBe(400);
+  const removal = { expectedVersion: 1, removeCardIds: [pick.candidateId] };
+  expect((await patch(request("posts", "PATCH", removal), postContext)).status).toBe(400);
+  expect(service.patch).not.toHaveBeenCalled();
+});
+
 it("requires an explicit option for each posted or edited card, including the original", async () => {
   const missingOption = { setRevision: revision, cards: [{ candidateId: "slot:forest" }] };
   expect((await post(request("posts", "POST", { ...missingOption, id }))).status).toBe(400);

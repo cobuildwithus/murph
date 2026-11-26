@@ -4,10 +4,12 @@ import { after } from "next/server";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import type { ClientUnits } from "../companion/client-info";
-import { assertGameMemberAuthCurrentTx } from "../game/http/auth";
+import { lockGamePair } from "../game/blocks";
+import { assertGameMemberAuthCurrentTx, requireCurrentTermsFor } from "../game/http/auth";
 import { invalidGameRequest } from "../game/http/errors";
 import { ArtSkipped } from "../game/progress/place-art";
 import type { AreaPainting } from "../game/progress/place-art-make";
+import { redeemGameTicketTx } from "../game/service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { describeKnownLoggedErrorType } from "../http";
 import { getPrisma } from "../prisma";
@@ -18,17 +20,21 @@ import type { RecordedActivity } from "./engine/types";
 import { assertHealthRecordEnabled, healthRecordCapability } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
 import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
+import { assertPayoffCurrentTx, preparePayoffSelection } from "./payoff";
 import { postedCardKeys } from "./posted-card-keys";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
+import { hasPayoffCardEdit, validPayoffPost } from "./request";
 import { assertHealthSetCurrent, resolveHealthCards } from "./wins";
 
 type Tx = Prisma.TransactionClient;
 type Auth = HostedNativeMemberAuth;
 type Content = { caption?: string | null; setRevision?: string; cards?: readonly HealthCardSelection[] };
+type CreatePost = Content & { id: string; attachmentId?: string; activity?: RecordedActivity };
 type Comment = { id: string; visibility?: "everyone" | "poster"; body: string };
 const postReceipt = { id: true, authorMemberId: true, deletedAt: true, version: true } as const;
 const notFound = () => hostedOnboardingError({ code: "HEALTH_NOT_FOUND", httpStatus: 404, message: "That item is unavailable." });
 const conflict = () => hostedOnboardingError({ code: "HEALTH_WRITE_CONFLICT", httpStatus: 409, message: "That item has changed." });
+const payoffExists = () => hostedOnboardingError({ code: "HEALTH_PAYOFF_EXISTS", httpStatus: 409, message: "This game already has a payoff post." });
 
 function replayPost(row: { id: string; authorMemberId: string; deletedAt: Date | null; version: number }, actor: string) {
   if (row.authorMemberId !== actor || row.deletedAt) throw conflict();
@@ -51,6 +57,25 @@ async function resolvePostCards(auth: Auth, input: Content, candidates: readonly
     return resolveRecordedSelection(candidates, pick);
   }).filter(card => card !== null);
   return { cards, day: wins?.day };
+}
+
+async function resolveCreateCards(auth: Auth, input: CreatePost, candidates?: readonly CachedHealthCandidate[]) {
+  const pick = input.cards?.find(card => card.candidateId.startsWith("game:"));
+  if (!pick) return { ...await resolvePostCards(auth, input, candidates), payoff: null };
+  if (!validPayoffPost(input)) throw invalidGameRequest("Choose one payoff card with its preview and a photo.");
+  const payoff = await preparePayoffSelection(auth.member.id, pick);
+  await requireCurrentTermsFor(auth.member.id, { type: "redeem" });
+  return { cards: [payoff.card], day: undefined, payoff };
+}
+
+async function lockPayoffForPostTx(tx: Tx, memberId: string, id: string, payoff: Awaited<ReturnType<typeof preparePayoffSelection>>) {
+  // Blocks take the pair lock before the game lock. Corrections and departures take the game lock.
+  await lockGamePair(tx, memberId, payoff.debtorMemberId);
+  await tx.$queryRaw`SELECT id FROM game WHERE id = ${payoff.gameId} FOR UPDATE`;
+  const accepted = await tx.healthPost.findUnique({ where: { id }, select: postReceipt });
+  if (accepted) return replayPost(accepted, memberId);
+  await assertPayoffCurrentTx(tx, memberId, payoff);
+  return null;
 }
 
 async function sealPostContent(memberId: string, id: string, caption: string | null | undefined, cards?: readonly FrozenHealthCard[]) {
@@ -127,7 +152,7 @@ function paintRouteAfterCommit(memberId: string, postId: string, painting: AreaP
 
 /** An acknowledged retry does not depend on the original set still being current. */
 export async function createHealthPost(
-  auth: Auth, input: Content & { id: string; attachmentId?: string; activity?: RecordedActivity }, units: ClientUnits = "us",
+  auth: Auth, input: CreatePost, units: ClientUnits = "us",
 ) {
   const db = getPrisma(), memberId = auth.member.id, id = input.id.toLowerCase();
   const previous = await db.healthPost.findUnique({ where: { id }, select: { id: true } });
@@ -143,21 +168,27 @@ export async function createHealthPost(
   if (input.activity) assertHealthRecordEnabled(memberId, input.activity.route ? "route" : "timed");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
-  const { cards, day } = await resolvePostCards(auth, input, recording?.candidates);
+  const { cards, day, payoff } = await resolveCreateCards(auth, input, recording?.candidates);
   if (!input.caption?.trim() && !cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   const data = await sealPostContent(memberId, id, input.caption, cards);
   const { receipt, created } = await db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-    const inserted = await tx.healthPost.createMany({ data: [{ id, authorMemberId: memberId, ...data }], skipDuplicates: true });
+    if (payoff) {
+      const replay = await lockPayoffForPostTx(tx, memberId, id, payoff);
+      if (replay) return { receipt: replay, created: false };
+    }
+    const inserted = await tx.healthPost.createMany({ data: [{ id, authorMemberId: memberId, gameId: payoff?.gameId, ...data }], skipDuplicates: true });
     if (!inserted.count) {
-      const row = await tx.healthPost.findUniqueOrThrow({ where: { id }, select: postReceipt });
+      const row = await tx.healthPost.findUnique({ where: { id }, select: postReceipt });
+      if (!row) throw payoff ? payoffExists() : conflict();
       return { receipt: replayPost(row, memberId), created: false };
     }
     // A conflict rolls back the post. The shared set lock spans publication through commit.
     if (day && input.setRevision) await assertHealthSetCurrent(tx, memberId, day, input.setRevision);
     if (recording) await storeRecordedActivityTx(tx, recording.prepared, id);
     if (input.attachmentId) await publishHealthAttachmentTx(tx, memberId, id, input.attachmentId.toLowerCase());
+    if (payoff) await redeemGameTicketTx(tx, { actor: memberId, gameId: payoff.gameId, ticketId: payoff.ticketId });
     return { receipt: { id, version: 1 }, created: true };
   });
   if (created && input.activity?.route && process.env.MURPH_HEALTH_PAINTED_RUNS === "true") {
@@ -169,13 +200,17 @@ export async function createHealthPost(
 
 export async function patchHealthPost(auth: Auth, postId: string, input: Content & { expectedVersion: number; removeCardIds?: readonly string[] }) {
   const db = getPrisma(), memberId = auth.member.id, id = postId.toLowerCase();
+  if (hasPayoffCardEdit(input)) throw invalidGameRequest("Create a payoff post to share this card.");
   if (input.caption === undefined && input.cards === undefined && !input.removeCardIds?.length) throw invalidGameRequest("Choose an edit.");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const current = await db.healthPost.findFirst({ where: { id, authorMemberId: memberId, deletedAt: null }, select: {
-    version: true, activity: { select: { id: true } }, cardsEncrypted: Boolean(input.removeCardIds),
+    version: true, gameId: true, activity: { select: { id: true } }, cardsEncrypted: Boolean(input.removeCardIds),
   } });
   if (!current) throw notFound();
   if (input.expectedVersion !== current.version) throw conflict();
+  if (current.gameId !== null && (input.cards !== undefined || input.removeCardIds !== undefined || input.setRevision !== undefined)) {
+    throw invalidGameRequest("Only the caption can change on a payoff post.");
+  }
   if (current.activity && input.cards?.length) throw invalidGameRequest("You can remove cards from a recorded post.");
   if (input.removeCardIds && !current.activity) throw invalidGameRequest("Choose cards from the current set to edit this post.");
   const { cards, day } = input.removeCardIds
