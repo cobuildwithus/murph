@@ -7264,8 +7264,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         if (workDeadline === null) return noWait;
         return {
           deadline: Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects)),
-          clinicalApplyDrained: clinicalDeadline !== null && clinicalDeadline === backgroundReadDeadline
-            ? clinicalApplies.drained : null,
+          clinicalApplyDrained: resolveClinicalApplyDrainSignal(
+            clinicalDeadline, backgroundReadDeadline, clinicalApplies.drained,
+          ),
         };
       };
       const prepareDirtyRuntimeCheckpointAttempt = async (
@@ -9047,15 +9048,27 @@ function createHostedRuntimeCheckpointWakeInterruption(input: {
   };
 }
 
-async function waitForHostedRuntimeDirtyWindow(input: {
+function resolveClinicalApplyDrainSignal(
+  clinicalDeadline: number | null,
+  backgroundReadDeadline: number | null,
+  drained: AbortSignal,
+): AbortSignal | null {
+  return clinicalDeadline !== null && clinicalDeadline === backgroundReadDeadline ? drained : null;
+}
+
+interface HostedRuntimeDirtyWindowInput {
   clinicalApplyDrained?: AbortSignal | null;
   idleCheckpointStartByMs: number;
   projectedWakeAtMs: number | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
   shutdownSignal: AbortSignal | null;
-}): Promise<HostedRuntimeDirtyWaitResult> {
-  const nowMs = Date.now();
+}
+
+function readImmediateHostedRuntimeDirtyWaitResult(
+  input: HostedRuntimeDirtyWindowInput,
+  nowMs: number,
+): HostedRuntimeDirtyWaitResult | null {
   if (input.shutdownSignal?.aborted === true) {
     return { kind: "idle_checkpoint", trigger: "shutdown_signal" };
   }
@@ -9069,6 +9082,15 @@ async function waitForHostedRuntimeDirtyWindow(input: {
   ) {
     return { kind: "recheck" };
   }
+  return null;
+}
+
+async function waitForHostedRuntimeDirtyWindow(
+  input: HostedRuntimeDirtyWindowInput,
+): Promise<HostedRuntimeDirtyWaitResult> {
+  const nowMs = Date.now();
+  const immediateResult = readImmediateHostedRuntimeDirtyWaitResult(input, nowMs);
+  if (immediateResult) return immediateResult;
 
   const waitUntilMs = input.projectedWakeAtMs === null
     ? input.idleCheckpointStartByMs
