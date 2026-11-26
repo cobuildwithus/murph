@@ -1,5 +1,7 @@
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
+import { WinLinkView } from "@/app/wins/[ref]/win-link-view";
+import { LinkPageSurface } from "@/src/components/link-page/link-page-shell";
 
 import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
 
@@ -583,6 +585,16 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
+          <Separator />
+
+          <StudySection title="Health win link">
+            <div className="flex min-h-[42rem] max-w-[26rem] flex-col overflow-hidden rounded-3xl" id="win-link" inert>
+              <LinkPageSurface>
+                <WinLinkView appUrl={`ai.withmurph.app://wins/${"w".repeat(43)}`} />
+              </LinkPageSurface>
+            </div>
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Connect source availability, actions, and disconnect lifecycle">

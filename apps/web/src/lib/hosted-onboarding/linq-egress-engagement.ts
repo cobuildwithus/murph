@@ -114,7 +114,7 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
   prisma: HostedLinqEngagementClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<{ policy: HostedLinqEgressPolicyResult; service: string | null }> {
+}): Promise<{ policy: HostedLinqEgressPolicyResult; service: string | null; isGroup?: boolean }> {
   const targetKind = input.targetKind?.trim() ?? "";
   const newConversation = targetKind === "participant";
   const chatHealth = newConversation
@@ -123,11 +123,12 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
         chatId: input.target,
         prisma: input.prisma,
       });
+  const { phoneNumberLookupKey, providerStatus = null, service = null, isGroup } = chatHealth ?? {};
   const routeLineLookupKey = normalizeNullable(
     input.linePhoneNumberLookupKey,
   );
-  const lineLookupKeys = chatHealth?.phoneNumberLookupKey
-    ? [chatHealth.phoneNumberLookupKey]
+  const lineLookupKeys = phoneNumberLookupKey
+    ? [phoneNumberLookupKey]
     : routeLineLookupKey
       ? [routeLineLookupKey]
       : createHostedPhoneLookupKeyReadCandidates(
@@ -149,9 +150,10 @@ export async function resolveHostedLinqEgressPolicyForRuntime(input: {
       });
 
   return {
-    service: chatHealth?.service ?? null,
+    service,
+    ...(isGroup === undefined ? {} : { isGroup }),
     policy: evaluateHostedLinqEgressPolicy({
-      chatHealthStatus: chatHealth?.providerStatus ?? null,
+      chatHealthStatus: providerStatus,
       lineDeliveryHealthStatus: line?.healthStatus ?? null,
       lineEgressPolicy: line?.egressPolicy ?? null,
       lineReputationStatus: line?.providerReputationStatus ?? null,

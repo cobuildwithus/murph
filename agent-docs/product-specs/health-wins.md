@@ -36,6 +36,36 @@ Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
 
+## Texting a new win
+
+An explicitly enrolled member can receive one iMessage about a new win per
+local day. The first complete set with an eligible achievement establishes a
+silent baseline. The pilot remembers achievements the member has seen in the
+composer, including on partial and cached reads. On later days it picks the
+highest-ranked fresh, unseen achievement in the engine's deterministic order.
+It consumes the other observed achievements that day as well.
+
+Eligible wins include trends, best months, threshold counts and session counts
+for the current calendar month. A personal record must fall within the latest
+three local dates. A lab change or lab percentile must fall within the latest
+90 local dates. Multiple results from one experiment share an identity.
+The pilot skips streaks, standing totals, wearable percentiles, game cards,
+lab-range cards and activities the member recorded.
+
+The question and link preview are generic. The link opens a compatible
+companion through `/wins/<ref>`. An eligible candidate in the member's normal
+authenticated wins response can include an opaque `winRef` for local matching.
+A previously cached candidate without an achievement descriptor has no reference.
+The browser landing page offers **Open in Murph** for any well-formed reference.
+
+The minute sweep claims an enrolled member's day once, between 10:00 and
+13:30 in their game profile time zone. Detection requires complete inputs,
+current health consent and active access, an awake account and an established
+direct iMessage thread with inbound activity in the 90-day window. Opening the composer
+during evaluation or before dispatch suppresses the pending text. Three
+accepted win texts within 28 days pause further texts until the member writes
+to Murph or posts a win, or the oldest text ages out.
+
 ## Recording an activity
 
 Members with timed recording enabled can save a session privately or share selected cards
@@ -220,7 +250,8 @@ for their own posts. A cumulative distance card’s map chart may contain
 
 ## Rollout
 
-The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Each allowlist takes member IDs, or `*` for every member. Timed recording also requires membership in
+The feed and recording allowlists take member IDs, or `*` for every member.
+The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
 final route privacy transform before enabling this subset. After strict request
@@ -235,6 +266,13 @@ native composer, profile sheet, and **Try it** actions have a separate client
 rollout. Deploy the activity migration and recording-capable Web before enabling timed clients.
 Keep the compatible Web writer and exporter available once summaries exist. GPS recording
 and recording-based session wins have separate rollout steps.
+
+Win texts require explicit member IDs in `MURPH_HEALTH_WIN_TEXT_MEMBER_IDS`
+as well as feed access. An empty list disables enrollment, evaluation and
+queued delivery. A wildcard enrolls nobody. Deploy the compatible Web and
+runner builds and the companion's win-link handling before enabling the pilot.
+On rollback, keep the signed egress rejection for this key family until all
+queued and already imported delivery work has reached a terminal state.
 
 The server storage, authorization and deletion contract is in
 [Health wins architecture](../../ARCHITECTURE.md#health-wins).

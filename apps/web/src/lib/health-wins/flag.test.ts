@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { healthFeedAuthors, healthRecordCapability, isHealthFeedEnabled } from "./flag";
+import { healthFeedAuthors, healthRecordCapability, healthWinTextMemberIds, isHealthFeedEnabled, isHealthWinTextEnabled } from "./flag";
 
 const on = { MURPH_GAME_ENABLED: "true" };
 
@@ -27,5 +27,20 @@ describe("health allowlists", () => {
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_ROUTE_MEMBER_IDS: "*" }))
       .toEqual({ timed: true, route: true });
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_FEED_MEMBER_IDS: "member-b" })).toBeUndefined();
+  });
+
+  it("admits only explicitly enrolled feed members to win texts", () => {
+    const pilot = {
+      ...on,
+      MURPH_HEALTH_FEED_MEMBER_IDS: "member-a,member-b",
+      MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: " member-b, *,member-c,member-b ",
+    };
+    expect(healthWinTextMemberIds(pilot)).toEqual(["member-b"]);
+    expect(isHealthWinTextEnabled("member-a", pilot)).toBe(false);
+    expect(isHealthWinTextEnabled("member-b", pilot)).toBe(true);
+    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_FEED_MEMBER_IDS: "*" })).toEqual(["member-b", "member-c"]);
+    expect(healthWinTextMemberIds({ ...pilot, MURPH_GAME_ENABLED: "false" })).toEqual([]);
+    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: "*" })).toEqual([]);
+    expect(healthWinTextMemberIds({ ...pilot, MURPH_HEALTH_WIN_TEXT_MEMBER_IDS: undefined })).toEqual([]);
   });
 });

@@ -182,6 +182,7 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/test/better-auth-settings?email=none",
     "/voice",
     "/voice?source=private#call",
+    `/wins/${"w".repeat(43)}`,
     "/screenshots/home",
     "/screenshots/channel-connection",
     "/unknown/private-segment",
