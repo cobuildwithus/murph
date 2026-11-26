@@ -68,15 +68,21 @@ export function retainedDailySamples(metric: Metric, rows: BrowserVaultMetricRow
 
 export function readHealthWinWearables(
   client: BrowserVaultMetricSeriesCapableQueryClient, today: string, stepsThrough: string,
+  metrics?: readonly Metric[],
 ) {
   let complete = true;
+  let observed = false;
   const from = addDaysToIsoDate(today, -364);
-  const daily = (Object.keys(WIN_METRIC_KEYS) as Metric[]).flatMap(metric => {
+  const requested = metrics ?? Object.keys(WIN_METRIC_KEYS) as Metric[];
+  const daily = requested.flatMap(metric => {
     try {
+      // An unsettled step day counts as observed in See yours, but cannot supply a detector value.
+      const to = metric === "steps" && !metrics ? stepsThrough : today;
       const rows = client.metrics.series({
-        metricKey: WIN_METRIC_KEYS[metric], from, to: metric === "steps" ? stepsThrough : today, grain: "day",
+        metricKey: WIN_METRIC_KEYS[metric], from, to, grain: "day",
       });
-      return retainedDailySamples(metric, rows);
+      observed ||= rows.length > 0;
+      return retainedDailySamples(metric, metric === "steps" ? rows.filter(row => row.date <= stepsThrough) : rows);
     } catch {
       // A missing bucket for one measure does not erase the other measures.
       complete = false;
@@ -87,5 +93,5 @@ export function readHealthWinWearables(
     daily.filter(row => row.metric === "rhr_bpm").map(row => ({ date: row.date, source: row.provider })),
     from, today,
   );
-  return { daily, wearableProvider, complete };
+  return { daily, wearableProvider, complete, observed };
 }

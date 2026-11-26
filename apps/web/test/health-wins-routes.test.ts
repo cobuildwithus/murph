@@ -7,6 +7,7 @@ import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
 import { POST as post } from "../app/api/game/v1/health/posts/route";
 import { DELETE as remove, GET as readPost, PATCH as patch } from "../app/api/game/v1/health/posts/[id]/route";
+import { GET as seeYours } from "../app/api/game/v1/health/posts/[id]/see-yours/route";
 import { DELETE as uncheer, PUT as cheer } from "../app/api/game/v1/health/posts/[id]/cheer/route";
 import { GET as comments, POST as comment } from "../app/api/game/v1/health/posts/[id]/comments/route";
 import { DELETE as removeComment } from "../app/api/game/v1/health/comments/[id]/route";
@@ -23,8 +24,9 @@ const service = vi.hoisted(() => ({
   feed: vi.fn(), wins: vi.fn(), change: vi.fn(), readPost: vi.fn(), create: vi.fn(), patch: vi.fn(),
   remove: vi.fn(), cheer: vi.fn(), comments: vi.fn(), comment: vi.fn(), removeComment: vi.fn(),
   profile: vi.fn(), hides: vi.fn(), hide: vi.fn(), photo: vi.fn(), readPhoto: vi.fn(), removePhoto: vi.fn(),
-  previewActivity: vi.fn(), saveActivity: vi.fn(),
+  previewActivity: vi.fn(), saveActivity: vi.fn(), seeYours: vi.fn(),
 }));
+vi.mock("../src/lib/health-wins/see-yours", () => ({ readSeeYours: service.seeYours }));
 vi.mock("../src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => auth }));
 vi.mock("../src/lib/health-wins/read", () => ({
   readHealthFeed: service.feed, readHealthPost: service.readPost,
@@ -68,7 +70,7 @@ describe("per-member route gate", () => {
     const invalid = request("posts", "POST", { unrelated: true });
     const responses = await Promise.all([
       feed(invalid), wins(invalid), change(invalid, postContext), post(invalid),
-      readPost(invalid, postContext), patch(invalid, postContext), remove(invalid, postContext),
+      readPost(invalid, postContext), patch(invalid, postContext), remove(invalid, postContext), seeYours(invalid, postContext),
       cheer(invalid, postContext), uncheer(invalid, postContext),
       comments(invalid, postContext), comment(invalid, postContext), removeComment(invalid, postContext),
       profile(invalid, personContext), hides(invalid), hide(invalid, personContext), unhide(invalid, personContext),
@@ -107,6 +109,27 @@ it("passes a bounded cursor and scopes decryption to the current request", async
   expect((await feed(request("feed?cursor=" + "a".repeat(2049)))).status).toBe(400);
 });
 
+it("accepts one bounded card selector and passes reader units and cancellation to See yours", async () => {
+  const selected = request(`posts/${id}/see-yours?card=shared-fixture`);
+  selected.headers.set("X-Murph-Client-Units", "metric");
+  const empty = { measure: { key: "insulin", label: "insulin", source: "labs" }, card: null, reason: "no_labs", friend: null };
+  service.seeYours.mockResolvedValue(empty);
+  const response = await seeYours(selected, postContext);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect(await response.json()).toEqual(empty);
+  expect(service.seeYours).toHaveBeenCalledExactlyOnceWith(auth, id, "shared-fixture", "metric", selected.signal);
+  for (const query of ["", "?card=", "?card=" + "a".repeat(257), "?card=shared-fixture&friend=unknown"]) {
+    expect((await seeYours(request(`posts/${id}/see-yours${query}`), postContext)).status).toBe(400);
+  }
+  expect(service.seeYours).toHaveBeenCalledTimes(1);
+  service.seeYours.mockRejectedValue(hostedOnboardingError({
+    code: "HEALTH_SEE_YOURS_UNAVAILABLE", httpStatus: 503, retryable: true, message: "Try again.",
+  }));
+  const failure = await seeYours(selected, postContext);
+  expect(failure.status).toBe(503);
+  expect(await failure.json()).toMatchObject({ error: { code: "HEALTH_SEE_YOURS_UNAVAILABLE", retryable: true } });
+});
+
 it("logs only a known error class when a private dependency fails", async () => {
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
@@ -140,7 +163,7 @@ it("passes the winning set and a chosen option without accepting client-declared
   const body = { id, setRevision: revision, cards: [selection] };
   service.create.mockResolvedValue({ id, version: 1 });
   expect(await (await post(request("posts", "POST", body))).json()).toEqual({ id, version: 1 });
-  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "us");
+  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "us", expect.any(AbortSignal));
   for (const invalid of [
     { id, cards: [selection] }, { ...body, cards: [selection, selection] },
     { ...body, cards: [{ ...selection, title: "Untrusted title" }] },
@@ -151,18 +174,41 @@ it("passes the winning set and a chosen option without accepting client-declared
   expect(service.create).toHaveBeenCalledTimes(1);
 });
 
+it("admits one digest-bound See yours pick on create and refuses it on edit", async () => {
+  const mine = { candidateId: "mine:hdl:lab_range", option: "original", specRevision: "9b".repeat(32) };
+  const set = { candidateId: "fixture-set-card", option: "original" };
+  const body = { id, cards: [mine] };
+  service.create.mockResolvedValue({ id, version: 1 });
+  const create = request("posts", "POST", body);
+  create.headers.set("X-Murph-Client-Units", "metric");
+  expect((await post(create)).status).toBe(200);
+  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "metric", create.signal);
+  expect((await post(request("posts", "POST", { id, cards: [mine, set], setRevision: revision }))).status).toBe(200);
+  for (const cards of [
+    [mine, set], [{ ...mine, specRevision: undefined }], [{ ...mine, specRevision: revision }],
+    [mine, { ...mine, candidateId: "mine:glucose:lab_range" }],
+  ]) {
+    expect((await post(request("posts", "POST", { id, cards }))).status).toBe(400);
+  }
+  expect((await patch(request("posts", "PATCH", { cards: [mine], expectedVersion: 1, setRevision: revision }), postContext)).status).toBe(400);
+  expect((await patch(request("posts", "PATCH", { expectedVersion: 1, removeCardIds: [mine.candidateId] }), postContext)).status).toBe(400);
+  expect(service.create).toHaveBeenCalledTimes(2);
+  expect(service.patch).not.toHaveBeenCalled();
+});
+
 it("accepts a single payoff with its photo and digest, and rejects payoff selections on edits", async () => {
   vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", auth.member.id);
   const pick = { candidateId: `game:${revision}`, option: "original", specRevision: "eb".repeat(32) };
   const input = { id, attachmentId: revision, cards: [pick] };
   service.create.mockResolvedValue({ id, version: 1 });
   expect((await post(request("posts", "POST", input))).status).toBe(200);
-  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, input, "us");
+  expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, input, "us", expect.any(AbortSignal));
   for (const invalid of [
     { ...input, attachmentId: undefined },
     { ...input, cards: [{ ...pick, specRevision: undefined }] },
     { ...input, cards: [{ ...pick, specRevision: revision }] },
     { ...input, setRevision: revision, cards: [pick, { candidateId: "slot:willow", option: "original" }] },
+    { ...input, cards: [pick, { candidateId: "mine:hdl:lab_range", option: "original", specRevision: "9b".repeat(32) }] },
   ]) {
     expect((await post(request("posts", "POST", invalid))).status).toBe(400);
   }
@@ -322,7 +368,7 @@ describe("timed recording requests", () => {
     ]) {
       const body = { id, activity, ...fields };
       expect((await post(request("posts", "POST", body))).status).toBe(200);
-      expect(service.create).toHaveBeenLastCalledWith(auth, body, "us");
+      expect(service.create).toHaveBeenLastCalledWith(auth, body, "us", expect.any(AbortSignal));
     }
     for (const invalid of [
       { id, cards: [selection] }, { id, activity, cards: [{ candidateId, option: "original" }] },
@@ -394,7 +440,7 @@ describe("GPS recording requests", () => {
     expect(service.previewActivity).toHaveBeenCalledExactlyOnceWith(auth, activity, "us");
     const body = { id, activity, cards: [selection] };
     expect((await post(request("posts", "POST", body))).status).toBe(200);
-    expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "us");
+    expect(service.create).toHaveBeenCalledExactlyOnceWith(auth, body, "us", expect.any(AbortSignal));
     expect((await saveActivity(request("activities", "PUT", { activity }), postContext)).status).toBe(400);
     const saved = { ...summary, route };
     expect((await saveActivity(request("activities", "PUT", { activity: saved }), postContext)).status).toBe(200);

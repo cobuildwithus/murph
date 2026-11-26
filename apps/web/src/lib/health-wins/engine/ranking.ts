@@ -6,6 +6,10 @@ const themes = {
   Labs: "labs", Diet: "diet", Challenges: "challenges", Experiments: "experiments",
 } as const satisfies Record<Filter, CardSpec["theme"]>;
 
+export function decorateCard(card: Candidate["card"]): CardSpec {
+  return { ...card, theme: themes[card.filter], share: { caption_tips: [] } };
+}
+
 const dailyKindOrder: Partial<Record<CardKind, number>> = {
   trend_change: 0, threshold_count: 1, streak: 2, best_month: 3, personal_record: 4,
 };
@@ -77,7 +81,7 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
   const achievements = new Map<string, HealthWinAchievement>();
   const cards = selected.map(({ card, achievement }) => {
     if (achievement) achievements.set(card.id, achievement);
-    return { ...card, theme: themes[card.filter], share: { caption_tips: [] } };
+    return decorateCard(card);
   });
   return { cards, achievements };
 }
