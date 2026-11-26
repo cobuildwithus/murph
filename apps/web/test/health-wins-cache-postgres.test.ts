@@ -6,7 +6,8 @@ import { authLookupKey } from "../src/lib/better-auth/record-crypto";
 import { getPrisma } from "../src/lib/prisma";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { assertHealthSetCurrent, changeHealthWin, readHealthWins, resolveHealthCards } from "../src/lib/health-wins/wins";
-import { createHealthPost } from "../src/lib/health-wins/writes";
+import { createHealthPost, deleteHealthPost, patchHealthPost } from "../src/lib/health-wins/writes";
+import * as cardOptions from "../src/lib/health-wins/card-options";
 import * as crypto from "../src/lib/health-wins/crypto";
 import type { HealthWinsInput } from "../src/lib/health-wins/engine";
 
@@ -122,6 +123,89 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     await expect(resolveHealthCards(auth, first.setRevision, [{ candidateId, option: "original" }])).rejects.toMatchObject({ httpStatus: 409 });
   });
 
+  it("offers only cards absent from live posts as a member posts, edits, and deletes", async () => {
+    const auth = await fixture();
+    source.mockImplementation(async (_auth, today: string) => {
+      const result = data(today);
+      result.input.daily = [{ metric: "distance_km", provider: "apple", value: 9, date: today }];
+      return result;
+    });
+    const read = () => readHealthWins(auth, { signal });
+    const initial = await read();
+    const first = initial.candidates.find(card => card.kind === "game_climb")!;
+    const second = initial.candidates.find(card => card.kind === "cumulative")!;
+    const selection = (id: string) => ({ setRevision: initial.setRevision, cards: [{ candidateId: id, option: "original" }] });
+    const without = (...ids: string[]) => ({ ...initial, candidates: initial.candidates.filter(card => !ids.includes(card.id)) });
+
+    const post = await createHealthPost(auth, { id: randomUUID(), ...selection(first.id) });
+    expect(await read()).toEqual(without(first.id));
+    // The open composer can still publish from the original set.
+    const duplicate = await createHealthPost(auth, { id: randomUUID(), ...selection(first.id) });
+    await patchHealthPost(auth, post.id, { expectedVersion: 1, ...selection(second.id) });
+    expect(await read()).toEqual(without(first.id, second.id));
+    await deleteHealthPost(auth, duplicate.id);
+    expect(await read()).toEqual(without(second.id));
+    await patchHealthPost(auth, post.id, { expectedVersion: 2, caption: "Fixture update" });
+    expect(await read()).toEqual(without(second.id));
+    await patchHealthPost(auth, post.id, { expectedVersion: 3, cards: [] });
+    expect(await read()).toEqual(initial);
+    expect(source).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps equal candidate IDs separate for two members", async () => {
+    const owner = await fixture(), peer = await fixture();
+    source.mockImplementation(async (_auth, today: string) => data(today));
+    // Exercise a literal ID collision without depending on today's member-bound candidate generation.
+    const prepare = cardOptions.prepareHealthCandidates;
+    vi.spyOn(cardOptions, "prepareHealthCandidates").mockImplementation((_memberId, cards) => prepare("fixture-namespace", cards));
+    const a = await readHealthWins(owner, { signal }), b = await readHealthWins(peer, { signal });
+    const candidateId = a.candidates[0].id;
+    expect(b.candidates[0].id).toBe(candidateId);
+    const cards = [{ candidateId, option: "original" }];
+    const ownerPost = await createHealthPost(owner, { id: randomUUID(), setRevision: a.setRevision, cards });
+    expect(await readHealthWins(peer, { signal })).toEqual(b);
+    const peerPost = await createHealthPost(peer, { id: randomUUID(), setRevision: b.setRevision, cards });
+    const keys = (id: string) => db.healthPost.findUniqueOrThrow({ where: { id }, select: { postedCardKeys: true } });
+    const ownerKeys = await keys(ownerPost.id), peerKeys = await keys(peerPost.id);
+    expect(ownerKeys.postedCardKeys).toHaveLength(1);
+    expect(peerKeys.postedCardKeys).toHaveLength(1);
+    expect(ownerKeys).not.toEqual(peerKeys);
+  });
+
+  it("offers the next month's achievement while the prior month's post is live", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2033-03-29T12:00:00Z"));
+    const auth = await fixture(14);
+    source.mockImplementation(async (_auth, today: string) => {
+      const result = data(today);
+      result.input.sessions = ["01", "02", "03"].map(day =>
+        ({ type: "walk", minutes: 23, date: `${today.slice(0, 7)}-${day}` }));
+      return result;
+    });
+    const march = await readHealthWins(auth, { signal });
+    const card = march.candidates.find(item => item.kind === "sessions")!;
+    await createHealthPost(auth, { id: randomUUID(), setRevision: march.setRevision, cards: [{ candidateId: card.id, option: "original" }] });
+    expect((await readHealthWins(auth, { signal })).candidates).not.toContainEqual(card);
+    vi.setSystemTime(new Date("2033-04-03T12:00:00Z"));
+    const april = await readHealthWins(auth, { signal });
+    const next = april.candidates.find(item => item.kind === "sessions")!;
+    expect(next.id).not.toBe(card.id);
+  });
+
+  it("returns all cached suggestions when the card-key keyring is unavailable", async ({ onTestFinished }) => {
+    const auth = await fixture();
+    source.mockImplementation(async (_auth, today: string) => data(today));
+    const first = await readHealthWins(auth, { signal });
+    await createHealthPost(auth, { id: randomUUID(), setRevision: first.setRevision,
+      cards: [{ candidateId: first.candidates[0].id, option: "original" }] });
+    expect((await readHealthWins(auth, { signal })).candidates).toHaveLength(0);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "");
+    onTestFinished(() => { vi.unstubAllEnvs(); });
+    expect(await readHealthWins(auth, { signal })).toEqual(first);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Health win card keys unavailable.", { errorClass: "TypeError" });
+  });
+
   it("admits one explicit recomputation every 60 seconds per member, including concurrent refreshes", async ({ onTestFinished }) => {
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 42).toString("base64url"));
     const auth = await fixture(), other = await fixture();
@@ -213,6 +297,9 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     source.mockImplementation(incompleteInputs);
     expect(await readHealthWins(auth, { signal, units: "metric" })).toEqual(metric);
     expect(await readHealthWins(auth, { signal })).toEqual(us);
+    await createHealthPost(auth, { id: randomUUID(), setRevision: us.setRevision, cards: [{ candidateId: mi.id, option: "original" }] });
+    expect((await readHealthWins(auth, { signal })).candidates).not.toContainEqual(mi);
+    expect(await readHealthWins(auth, { signal, units: "metric" })).toEqual(metric);
   });
 
   it("prevents a slower computation from replacing a newer publication", async () => {
