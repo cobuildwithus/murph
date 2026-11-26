@@ -108,6 +108,7 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
       hostedMailboxSystemHandledThroughSeq: "1", hostedMailboxSystemFirstPendingSeq: null,
       hostedMailboxSystemDeviceSyncContinuationSeqs: [],
     } })) },
+    clinicalRecordRetrievalRun: { findMany: vi.fn(async () => []) },
     clinicalRecordConnection: { findMany: vi.fn(async () => clinical), updateMany: writes },
   };
   leaves.prisma.mockReturnValue({ ...tx,
