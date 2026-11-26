@@ -105,6 +105,8 @@ describe("recorded route cards", () => {
     } };
     const visible = cards(activity);
     expect(visible.map(card => card.kind)).toEqual(["activity_route", "activity_splits", "activity_heart_rate"]);
+    // Heart rate lives only on its own card, so hiding or leaving out that card keeps it off the post.
+    expect(JSON.stringify(visible[1])).not.toMatch(/bpm|\b111\b/u);
     const [map, splits, hr] = visible.map(card => card.change_options.find(option => option.id === "hide_numbers")?.spec);
     const original = visible[0].chart;
     if (original.type !== "route_map") throw new Error("Expected route");

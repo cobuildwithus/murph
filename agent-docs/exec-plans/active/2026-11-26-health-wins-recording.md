@@ -67,7 +67,9 @@ GPS capture, map rendering, splits and painting have separate rollout gates.
    binding, mixed card order, edits, disabled capabilities, audience, export and deletion.
    Pre-recording clients can read frozen titles and subtitles. New clients need the
    capability before issuing writes. Keep the export-capable server as the rollback
-   floor while recordings exist.
+   floor while recordings exist. Once any saved summary carries a route, route-capable
+   Web is the floor: older Web parses sealed summaries strictly and would fail Settings
+   export, same-day previews and save replays for that member.
 4. Deliver the companion recorder, protected draft recovery and timed composer separately.
    Reuse the query-owned session reconciliation for saved summaries. Introduce the GPS
    capability only after server route validation and the client's privacy transform are

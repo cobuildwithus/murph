@@ -49,8 +49,8 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
   for (const [index, split] of splits.entries()) {
     if (!split.partial && (fastest === null || split.seconds < splits[fastest].seconds)) fastest = index;
   }
+  // No heart rate here: it has its own card, which the member can hide or leave out.
   const line = [duration, paceLabel, `${formatHeight(route.climbM / 0.3048, units)} up`];
-  if (activity.heartRate) line.push(`${formatNumber(activity.heartRate.avgBpm, 0)} bpm`);
   // No map when trimming left no path; the splits still tell the run.
   const map: CardSpec[] = route.paths.length ? [{
     ...base, id: `activity:${activity.id}:activity_route`, kind: "activity_route",

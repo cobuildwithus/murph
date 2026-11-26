@@ -144,7 +144,10 @@ The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, s
 `art: {key}`, and `chips: [distance, pace]` (two display strings). The frame covers
 three by two Web Mercator tiles. The art key `area:v1:{z}/{x}/{y}` identifies its
 northwest tile. Zoom 15 is the smallest geographic frame. Larger routes use a
-coarser zoom. A date-line crossing can have an east bound above 180 degrees so
+coarser zoom. The key and frame come only from whole tiles, never from the route's
+exact points. A block may slide by whole tiles to hold a route that crosses a block
+edge, so runs in one area share one of a few neighbouring keys rather than exactly
+one; requiring aligned blocks would push most short loops out to a much coarser zoom. A date-line crossing can have an east bound above 180 degrees so
 the frame stays continuous. Latitudes beyond the Mercator limit project to the
 outermost tile row. Use the native map when the area has no painting.
 
