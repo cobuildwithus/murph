@@ -89,7 +89,7 @@ describe("clinical enrichment import-to-query flow", () => {
       const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
         expect(request.source.sha256).toBe(retainedDigest);
         expect(request.extractedText).toBe(SOURCE_TEXT);
-        return request.family !== "labs" ? empty : { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", payload: {
+        return { status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", payload: {
           kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic glucose", note: null, testName: "Glucose", specimenType: "serum", resultStatus: "normal",
           results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
         } }] };
@@ -165,7 +165,7 @@ describe("clinical enrichment import-to-query flow", () => {
         await request.beforeProviderEntry?.();
         expect(request.source.rawRef).toBe(job.rawRef);
         expect(request.extractedText).toBe(SOURCE_TEXT);
-        return request.family !== "labs" ? empty : {
+        return {
           status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", page: 1, payload: {
             kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null,
             testName: "Glucose", specimenType: "serum", resultStatus: "normal",
@@ -179,7 +179,7 @@ describe("clinical enrichment import-to-query flow", () => {
         onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
       };
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
-      expect(executeExtraction).toHaveBeenCalledTimes(3);
+      expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "prepared" });
       expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1 }, readback: { verifiedCount: 1 } });
       const tests = await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 });
@@ -193,7 +193,7 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
       expect(await runOneHostedClinicalEnrichment(input)).toBe("idle");
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { created: 1, documents: 1, pages: 1 } });
-      expect(executeExtraction).toHaveBeenCalledTimes(3);
+      expect(executeExtraction).toHaveBeenCalledOnce();
     } finally { await workspace.cleanup(); }
   });
 
@@ -296,7 +296,7 @@ describe("clinical enrichment import-to-query flow", () => {
         await request.beforeProviderEntry?.();
         expect(request.source).toEqual({ rawRef: job.rawRef, sha256: job.sha256, mediaType: "text/plain", clinicalOccurredAt: OCCURRED_AT, recordedAt: job.fetchedAt });
         expect(request.extractedText).toBe(SOURCE_TEXT);
-        return request.family !== "labs" ? empty : {
+        return {
           status: "complete", records: [{ dateBasis: "document", dateEvidence: "Collected 2020-03-12T12:00:00Z", page: 1, excerpt: "Serum glucose 90 mg/dL.", payload: {
             kind: "test", occurredAt: OCCURRED_AT, title: "Synthetic serum glucose", note: null, testName: "Glucose",
             specimenType: "serum", resultStatus: "normal",
@@ -312,13 +312,13 @@ describe("clinical enrichment import-to-query flow", () => {
         executeExtraction,
       };
       expect(await runOneHostedClinicalEnrichment(runnerInput)).toBe("settled");
-      expect(executeExtraction).toHaveBeenCalledTimes(3);
+      expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "prepared" });
       expect(await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 })).toEqual([]);
 
       // A new runner instance after restart finds frozen proposals without another model call.
       expect(await runOneHostedClinicalEnrichment({ ...runnerInput, abortSignal: new AbortController().signal })).toBe("idle");
-      expect(executeExtraction).toHaveBeenCalledTimes(3);
+      expect(executeExtraction).toHaveBeenCalledOnce();
       const queued = (await readHostedSystemMailboxState(vaultRoot)).pending[0]!;
       if (queued.wake.kind !== "clinical-records.enrichment-requested") throw new Error("Synthetic enrichment wake missing.");
       expect(await executeHostedClinicalEnrichmentWake({ vaultRoot, wake: queued.wake, shouldYield: () => true })).toMatchObject({ backgroundMaintenanceYielded: true });
@@ -352,7 +352,7 @@ describe("clinical enrichment import-to-query flow", () => {
       await makeHostedClinicalEnrichmentWakeDue({ vaultRoot, jobId: job.jobId });
       expect(await prepareHostedSystemMailboxItemForCheckpoint(selection)).toMatchObject({ status: "processed" });
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
-      expect(executeExtraction).toHaveBeenCalledTimes(3);
+      expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 })).toHaveLength(1);
     } finally {
       await workspace.cleanup();
