@@ -17,12 +17,63 @@ const first = row("2034-10-13", 128);
 const second = row("2035-02-25", 134);
 const latest = row("2035-06-09", 95);
 it.each<Partial<BrowserVaultLabResultRow>>([
-  { parentResultStatus: "abnormal" }, { parentResultStatus: "mixed" }, { parentResultStatus: "unknown" },
+  { parentResultStatus: "unknown" },
+  { parentResultStatus: "mixed", flag: "normal" },
+  { parentResultStatus: "abnormal", flag: "normal" },
+  { parentResultStatus: "mixed", referenceRange: { low: 70, high: 99 } },
+])("keeps an eligible result regardless of other results in its panel (%j)", updates => {
+  const labs = readHealthWinLabs([first, second, { ...latest, ...updates }], today);
+  expect(labs.map(draw => draw.value)).toEqual([128, 134, 95]);
+  expect(generateHealthWins({ member, labs })).toMatchObject([{ kind: "lab_change" }]);
+});
+
+it.each<Partial<BrowserVaultLabResultRow>>([
+  { parentResultStatus: "abnormal" }, { parentResultStatus: "mixed" }, { flag: "abnormal" },
+  { parentResultStatus: "mixed", referenceRange: { low: 70, high: 90 } },
   { parentResultStatus: "pending" }, { drawId: null }, { flag: "critical" }, { flag: "low" },
   { flag: "high" }, { comparator: "<" }, { normalizedValue: null }, { referenceRange: { high: 80 } },
   { referenceRange: { text: "<80" } }, { normalizedUnit: "unknown" },
 ])("withholds the analyte when the latest row is ineligible (%j)", updates => {
   expect(readHealthWinLabs([latest, first, second, row("2035-06-15", 91, updates)], today)).toEqual([]);
+});
+
+it.each([
+  ["89-104", { low: 89, high: 104 }],
+  ["91.5 - 98.5 mg/dL", { low: 91.5, high: 98.5 }],
+  ["90 mg/dL - 99 mg/dL", { low: 90, high: 99 }],
+  ["<100", { high: 100 }],
+  ["<= 95mg/dL", { high: 95 }],
+  [">89 mg/dL", { low: 89 }],
+  [">=95", { low: 95 }],
+] as const)("reads the reporting lab's text range %s", (text, bounds) => {
+  const labs = readHealthWinLabs([{ ...latest, referenceRange: { text } }], today);
+  expect(labs).toMatchObject([{ referenceRange: bounds }]);
+  expect(generateHealthWins({ member, labs })).toMatchObject([{ kind: "lab_range" }]);
+});
+
+it.each(["<95", ">95"])("withholds the analyte at the strict limit %s", text => {
+  expect(readHealthWinLabs([first, second, { ...latest, referenceRange: { text } }], today)).toEqual([]);
+});
+
+it.each(["See lab notes", "< 90 mmol/L", "90 mmol/L - 100 mg/dL", "70-80 mg/dL after fasting"])(
+  "keeps an otherwise eligible result when the lab range cannot be interpreted (%s)", text => {
+    const draw = { ...latest, parentResultStatus: "unknown" as const, referenceRange: { text } };
+    const labs = readHealthWinLabs([first, second, draw], today);
+    expect(labs.map(lab => lab.value)).toEqual([128, 134, 95]);
+    expect(labs[2]?.referenceRange).toBeUndefined();
+    expect(generateHealthWins({ member, labs })).toMatchObject([{ kind: "lab_change" }]);
+    expect(generateHealthWins({ member: { ...member, age: 42 }, labs: labs.slice(-1), rank: () => null })).toEqual([]);
+  },
+);
+
+it("can rank a draw with an unreadable range and uses the published fallback only for a missing range", () => {
+  const adult = { ...member, age: 42 };
+  const rank = () => ({ betterShare: 79, lowerIsBetter: true, group: "Synthetic cohort",
+    source: "Synthetic reference", cuts: [{ percentile: 50, value: 110 }] });
+  const labs = readHealthWinLabs([{ ...latest, flag: "normal", referenceRange: { text: "See lab notes" } }], today);
+  expect(generateHealthWins({ member: adult, labs, rank })).toMatchObject([{ kind: "percentile" }]);
+  expect(generateHealthWins({ member: adult, labs: readHealthWinLabs([latest], today), rank: () => null }))
+    .toMatchObject([{ kind: "lab_range" }]);
 });
 
 it("coalesces repeat imports of a draw and omits ambiguous draws", () => {
@@ -57,6 +108,8 @@ it("keeps bounds and values in the same unit, including percent and insulin unit
     unit: "mmol/L", normalizedValue: 5 * 18.0182, referenceRange: { low: 3.5, high: 6.2 } });
   expect(readHealthWinLabs([glucose], today)).toMatchObject([{ analyte: "glucose", unit: "mg/dL",
     referenceRange: { low: 63.0637, high: 111.7128 } }]);
+  expect(readHealthWinLabs([{ ...glucose, referenceRange: { text: "3.5 - 6.2 mmol/L" } }], today))
+    .toEqual(readHealthWinLabs([glucose], today));
   expect(readHealthWinLabs([row(latest.date, 5.1, { metricKey: "hba1c", unit: "%", normalizedUnit: "percent",
     referenceRange: { low: 4.8, high: 6.0 } })], today)).toMatchObject([{ analyte: "a1c", unit: "%" }]);
   expect(readHealthWinLabs([row(latest.date, 7.6, { metricKey: "insulin", unit: "uIU/mL", normalizedUnit: "mIU/L" })],
