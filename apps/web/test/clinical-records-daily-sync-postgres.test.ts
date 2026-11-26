@@ -37,6 +37,7 @@ import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 
 import { startNativeAuthorization, completeNativeAuthorization } from "@/src/lib/clinical-records/control-plane";
 import { renewClinicalAccess } from "@/src/lib/clinical-records/persistent-access";
+import { readCompanionSources } from "@/src/lib/clinical-records/companion-sources";
 import * as directory from "@/src/lib/clinical-records/provider-directory-store";
 import * as smart from "@/src/lib/clinical-records/smart";
 import * as notification from "@/src/lib/clinical-records/notification";
@@ -797,6 +798,49 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
           fromPhoneNumber: null, directRecipientPhoneNumber: "+12025550137" },
       }))).toBe("clinical_authority_unavailable");
     } finally { await f.cleanup(); }
+  });
+
+  it("shows sign in again when daily retrieval encounters a rotated Basic credential", async () => {
+    const f = await fixture();
+    const { providerDirectoryEntryId, tokenVersion } = await f.row();
+    const identity = { connectionId: f.connectionId, memberId: f.memberId, tokenVersion };
+    const fhirBaseUrl = "https://portal.example.test/fhir";
+    const clientId = "synthetic-client";
+    const grantedScopes = ["patient/Patient.r", "patient/DocumentReference.s", "offline_access"];
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-test", userId: f.memberId });
+    const refreshTokenEncrypted = await sealClinicalConnectionSecret({ ...identity, field: "refreshToken", value: JSON.stringify({
+      schemaVersion: 1, clientId, grantedScopes, tokenEndpoint: fhirBaseUrl + "/token", refreshToken: "synthetic-refresh",
+      profile: { environment: "production", method: "basic", hospitalApproved: false,
+        basicCredentialSha256: createHash("sha256").update(JSON.stringify([clientId, "previous-secret"])).digest("hex") },
+    }) });
+    await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
+      sourceSystem: "epic-fhir", requestedScopesJson: grantedScopes, refreshTokenEncrypted, accessTokenExpiresAt: new Date(0),
+      accessTokenEncrypted: await sealClinicalConnectionSecret({ ...identity, field: "accessToken", value: "expired-token" }),
+      patientIdEncrypted: await sealClinicalConnectionSecret({ ...identity, field: "patientId", value: "synthetic-patient" }),
+      fhirBaseUrlEncrypted: await sealClinicalConnectionFhirBaseUrl({ ...identity, value: fhirBaseUrl }),
+    } });
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ [providerDirectoryEntryId]: { clientId, clientSecret: "rotated-secret" } }));
+    expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId, now })).toBe(true);
+    const [run] = await f.runs();
+    const pointer = { runId: run!.id, generation: run!.generation };
+    const result = await readClinicalRetrievalRun({ ...pointer, memberId: f.memberId });
+    if (result.status !== "ready") throw new Error(result.errorCode);
+    const { resourceType, sliceId, queryFingerprint, queryScopeId } = result.run.retrievalSlices[0]!;
+    const fetchImpl = vi.fn<typeof fetch>();
+    expect(await fetchClinicalRetrievalPage({ fetchImpl, memberId: f.memberId, request: { ...pointer,
+      retrievalProtocol: "query-slices-v2", requestId: "synthetic-page", cursor: null, resourceType, sliceId, queryFingerprint, queryScopeId,
+    } })).toMatchObject({ status: "unavailable", retryable: false, errorCode: "authorization-required" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(await f.row()).toMatchObject({ status: "needs_reauth", nextSyncAt: null, refreshLeaseId: null, refreshTokenEncrypted: null });
+    const auth = await nativeAuth(f.memberId);
+    expect((await readCompanionSources(auth)).sources[0]?.state).toBe("sign_in_again");
+    await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { ...pointer, status: "partial",
+      errorCode: "authorization-required", counts: emptyCounts, retrievalProtocol: "query-slices-v2",
+      retrievalSlices: result.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+    } });
+    expect((await readCompanionSources(auth)).sources).toMatchObject([
+      { id: f.connectionId, state: "sign_in_again", actions: expect.arrayContaining(["sign_in_again"]) },
+    ]);
   });
 
   it("gates a replacement daily run and its transport on current OpenAI approval", async () => {

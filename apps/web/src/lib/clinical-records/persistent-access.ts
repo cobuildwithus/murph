@@ -129,6 +129,7 @@ export async function renewClinicalAccess(input: {
           retrievalGeneration: input.generation, refreshLeaseId: leaseId,
         }, data: { refreshLeaseId: null, refreshLeaseExpiresAt: null } });
         if (retryable) throw error;
+        if (isClinicalRecordsControlPlaneError(error) && error.code === "CLINICAL_RECORD_BASIC_CREDENTIAL_CHANGED") throw authorizationRequired();
         throw clinicalRecordsError({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", httpStatus: 503,
           retryable: true, message: "Medical-record access could not be renewed yet." });
       }

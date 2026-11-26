@@ -174,15 +174,16 @@ describe("rotating clinical refresh lease", () => {
       requestedBaseScopes: [], resourceTypes: ["Patient"], sourceSystem: "epic-fhir" });
     mocks.open.mockResolvedValue(JSON.stringify({ schemaVersion: 1, profile, clientId: "client",
       tokenEndpoint: "https://portal.example.test/token", refreshToken: "old-refresh", grantedScopes: ["patient/Patient.r", "patient/Observation.s"] }));
-    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "replacement" } }));
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ access_token: "new-access", expires_in: 300, token_type: "Bearer" }));
     const input = { connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl };
-    await expect(renewClinicalAccess(input)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED" });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(f.row.refreshLeaseId).toBeNull();
-    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "secret" } }));
     await expect(renewClinicalAccess(input)).resolves.toBe("new-access");
     expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://portal.example.test/token");
+    f.row.accessTokenExpiresAt = new Date(0);
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "replacement" } }));
+    fetchImpl.mockClear();
+    await expect(renewClinicalAccess(input)).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED", retryable: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(f.row).toMatchObject({ refreshLeaseId: null, refreshLeaseExpiresAt: null });
   });
 
   it("renews expired access once and seals the rotated grant", async () => {

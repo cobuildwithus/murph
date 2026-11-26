@@ -118,7 +118,10 @@ export function resolveSavedEpicAuth(providerId: string, stored: StoredRegistrat
     return { method: "public", clientId: stored.clientId } as const;
   }
   const auth = resolveAuth(ids, stored);
-  if (profile && auth.method === "basic" && basicCredentialSha256(auth) !== profile.basicCredentialSha256) {
+  if (profile?.method === "basic" && auth.method === "basic" && basicCredentialSha256(auth) !== profile.basicCredentialSha256) {
+    if (stored.grant === "refresh") throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_BASIC_CREDENTIAL_CHANGED", httpStatus: 409, message: "The saved Basic credential has changed.",
+    });
     throw configurationError(stored);
   }
   if (profile && (auth.method !== profile.method ||
