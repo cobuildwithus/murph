@@ -3745,7 +3745,8 @@ Current product admission, delivery and native runtime safety rules remain.
   Publication and encrypted mailbox append commit together. The
   existing handoff sweep recovers an unimported pointer after signal loss.
   The run key deduplicates its scheduled records review. Allowance exhaustion
-  holds model-owned work for restoration. Model unavailability keeps the same
+  holds a new review for restoration, while a saved reply still drains through
+  the model-free mailbox. Model unavailability keeps the same
   one-shot pending with ordinary cron backoff. Neither hold emits fallback
   text. The runtime rechecks authority before another generation or bubble.
   A newer eligible run supersedes an older unannounced one, and an occurrence

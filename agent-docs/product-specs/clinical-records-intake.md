@@ -633,11 +633,11 @@ Missing and empty evidence leave the member's conversation alone.
 
 Off suppresses publication. When texts are on, the runtime stages one scheduled
 assistant job per eligible run. Its private receipt pointer tells the assistant
-which new records to review. An exhausted allowance waits for restored access.
+which new records to review. A fresh review waits for restored model allowance.
 An unavailable model backs off and retries. Both holds stay silent and current
 authority and the 24-hour expiry apply before any retry. Web binds the first
 durably saved private reply to the originating run. Replays drain that reply under the original
-bubble keys. A restore missing the bound reply ends silently. Only the newest
+bubble keys even when model allowance is exhausted. A restore missing the bound reply ends silently. Only the newest
 eligible run for a connection can deliver. Its notification expires 24 hours
 after the import is accepted.
 

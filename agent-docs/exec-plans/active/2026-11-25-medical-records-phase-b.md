@@ -118,7 +118,8 @@ A detail reply uses the ordinary native voice memo. If the runner loses the
 result after Web grants dispatch, the handoff consumes coverage and that bubble
 is abandoned while other saved bubbles can continue under their own keys.
 
-The published change waits for restored allowance as model-owned mailbox work.
+The mailbox can resume a bound reply while allowance is exhausted. A new
+review waits in its scheduled job until allowance returns.
 A temporary model failure leaves the same one-shot pending with cron backoff.
 Both holds stay silent. Every retry rechecks the run and its expiry.
 The private one-shot is removed after completion. The originating run retains
@@ -130,9 +131,10 @@ gets one timed recovery wake. Only the newest eligible run can deliver for a con
 and its occurrence expires 24 hours after acceptance. A permanent block closes it silently.
 A lost dispatch response for the first text bubble ends the reply when Web has no recorded provider attempt.
 
-**Deploy and operate.** Apply the expand migration first. It changes the
-database default to detail, converts stored notice rows and advances their
-revision, and normalizes writes from draining Web instances. Off stays off.
+**Deploy and operate.** Apply the expand migrations first. The first changes
+the database default to detail and normalizes notice writes from draining Web
+instances. The second converts stored notice rows and advances their revision
+after the member-table DDL lock is released. Off stays off.
 Deploy detail-by-default Web, promote the revision 4 hosted runtime, then
 manually deploy the revision 4 Cloudflare port from main. The Epic client
 switch is pending, so there are no eligible production runs in flight.

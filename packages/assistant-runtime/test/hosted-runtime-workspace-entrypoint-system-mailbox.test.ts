@@ -79,6 +79,8 @@ import {
   buildHostedExecutionRuntimeControlWake,
   type HostedExecutionWake,
 } from "@murphai/hosted-execution";
+import { clinicalChangeDeliveryKey, CLINICAL_REPLY_DEFERRED } from "@murphai/hosted-execution/clinical-records-boundary";
+import { HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON } from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
   type HostedVaultShareDeliverRequest,
@@ -2266,7 +2268,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       lane: "system",
       laneSeq: "3",
     });
-    const readNotification = vi.fn();
+    const readNotification = vi.fn().mockResolvedValue({ mode: "detail", threadId: "synthetic-private" });
     const buildResolvedNotificationItem = (
       item: HostedMailboxItem,
     ): HostedMailboxResolvedImportItem => ({
@@ -2516,7 +2518,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
       assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
-      expect(readNotification).not.toHaveBeenCalled();
+      expect(readNotification).toHaveBeenCalledOnce();
+      expect(await getAssistantCronStatus(vaultRoot)).toMatchObject({ dueJobs: 1, runningJobs: 0 });
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus
           ?.hostedMailboxSystemHandledThroughSeq,
@@ -2532,15 +2535,101 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           itemId: genericItem.id,
           mailboxDedupeKey: genericDedupeKey,
           mailboxLaneSeq: "2",
-        }, {
-          itemId: clinicalItem.id,
-          mailboxDedupeKey: clinicalDedupeKey,
-          mailboxLaneSeq: "3",
         }],
       );
       assert.equal(completedResult.status, "scheduled", JSON.stringify(completedResult));
       assert.equal(completedResult.nextWakeAt, TEST_NOW);
       assert.equal(completedResult.nextWakeReason, "assistant");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("blocked system mailbox mode resumes a held saved records review for delivery without the model", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runId = "synthetic-held-review";
+    const threadId = "synthetic-private-review-thread";
+    const savedTurnId = `turn_${"c".repeat(32)}`;
+    const root = `${clinicalChangeDeliveryKey(runId)}:${savedTurnId}`;
+    const dedupeKey = `clinical-resume:v1:${runId}:1`;
+    const item = createMailboxItem({ dedupeKey, id: "mailbox_item_clinical_resume",
+      kind: "clinical-records.change-recorded", lane: "system", laneSeq: "1" });
+    const readNotification = vi.fn().mockResolvedValue({ mode: "detail", threadId, savedTurnId });
+    const stage = async (key: string, message: string) => createAssistantOutboxIntent({
+      bindingDelivery: { kind: "thread", target: threadId }, channel: "linq", createdAt: TEST_NOW,
+      dedupeToken: key, deliveryIdempotencyKey: key, message, sessionId: "session_synthetic_review",
+      threadId, threadIsDirect: true, turnId: savedTurnId, turnTrigger: "automation-cron", vault: vaultRoot,
+    });
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.runAssistantAutomationPass.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      // Bubble zero went out before quiet hours. The final bubble waits for Web's resume wake.
+      const first = await stage(`${root}:bubble:0`, "Synthetic first part.");
+      await markAssistantOutboxIntentSentById({ intentId: first.intentId, vault: vaultRoot, delivery: {
+        channel: "linq", idempotencyKey: first.deliveryIdempotencyKey, messageLength: 21, providerMessageId: "provider_synthetic_first",
+        providerThreadId: threadId, sentAt: TEST_NOW, target: threadId, targetKind: "thread" } });
+      const held = await stage(root, "Synthetic final part.");
+      await saveAssistantOutboxIntent(vaultRoot, { ...held, status: "retryable", nextAttemptAt: null, updatedAt: TEST_NOW,
+        lastError: { code: CLINICAL_REPLY_DEFERRED, message: "Synthetic quiet hours." } });
+      await enqueueHostedSystemMailboxItem({
+        item: { item, payload: { payloadCiphertext: "ciphertext", payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+          requestId: `request_${item.id}`, source: "inline", status: "resolved" },
+        route: { action: "consume-clinical-change", advanceProgress: true, state: "route",
+          itemRef: { id: item.id, kind: item.kind, lane: item.lane, laneSeq: item.laneSeq } } },
+        vaultRoot,
+        wake: { kind: "clinical-records.change-recorded", runId, generation: 1, eventId: dedupeKey,
+          occurredAt: TEST_NOW, userId: TEST_USER_ID },
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({ vaultRoot });
+      const completedResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: { assistantExecutionBlocked: true, attemptId: "attempt_synthetic_blocked_review_resume",
+            processingMode: "system_mailbox", workspaceVersion: "0" },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return { snapshotRef: createSnapshotFixtureRef({ hash: "d".repeat(64), size: 512 }) };
+          },
+          async importItem() {
+            throw new Error("Already-imported records wakes must not import a new row.");
+          },
+          platform: {
+            ...createPlatform({
+              artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({ checkpointRequests, events,
+                workspace: createWorkspaceState({ snapshotRef: restoredWorkspace.snapshotRef, version: "0" }) }),
+            }),
+            clinicalRecordsPort: { readNotification, readRun: vi.fn(), fetchPage: vi.fn(), recordOutcome: vi.fn() },
+          },
+          async runAssistantPhase() {
+            throw new Error("A saved records review must not start assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      expect(readNotification).toHaveBeenCalledExactlyOnceWith({ generation: 1, runId }, expect.anything());
+      expect((await listAssistantOutboxIntents(vaultRoot)).map(({ deliveryIdempotencyKey, status }) =>
+        ({ deliveryIdempotencyKey, status })).sort((a, b) => String(a.deliveryIdempotencyKey).localeCompare(String(b.deliveryIdempotencyKey))))
+        .toEqual([{ deliveryIdempotencyKey: root, status: "pending" }, { deliveryIdempotencyKey: `${root}:bubble:0`, status: "sent" }]);
+      expect(await getAssistantCronStatus(vaultRoot)).toMatchObject({ dueJobs: 0, runningJobs: 0 });
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      // Cloudflare keeps a due delivery wake on the outbox-owning phase while metered egress stays denied.
+      assert.equal(completedResult.status, "scheduled", JSON.stringify(completedResult));
+      assert.equal(completedResult.nextWakeAt, TEST_NOW);
+      assert.equal(completedResult.nextWakeReason, HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

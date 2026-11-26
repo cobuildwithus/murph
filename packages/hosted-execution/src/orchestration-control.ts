@@ -82,6 +82,7 @@ export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMod
 // One policy owns both admission kinds and derived runner route actions.
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_POLICY = [
   ["assistant.notification.requested", "always"],
+  ["clinical-records.change-recorded", "always"],
   ["clinical-records.sync-requested", "assistant_blocked"],
   ["device-sync.wake", "always"],
   ["health.daily-metric.reported", "always"],

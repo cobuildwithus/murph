@@ -15,9 +15,4 @@ BEFORE INSERT OR UPDATE OF clinical_record_message_mode ON hosted_member
 FOR EACH ROW WHEN (NEW.clinical_record_message_mode = 'notice')
 EXECUTE FUNCTION normalize_clinical_record_message_mode();
 
-UPDATE hosted_member
-SET clinical_record_message_mode = 'detail',
-    clinical_record_message_revision = clinical_record_message_revision + 1
-WHERE clinical_record_message_mode = 'notice';
-
 COMMIT;
