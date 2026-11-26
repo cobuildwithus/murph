@@ -112,7 +112,7 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
       title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, latest.unit === "%" ? "pp" : latest.unit)}`, measure: rule.label },
       subtitle: `compared with the median of ${values.length} prior draws`,
       source_note: `Latest draw on ${dateLabel}. ${fastingKnown ? "Fasting draws" : "Lab draws"} in ${latest.unit}.`,
-      chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: dateLabel, value: latest.value } },
+      chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },
     },
   };
 }
@@ -147,7 +147,7 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank): Cand
         title: { number: formatLabValue(latest.value, latest.unit), measure: rule.label },
         subtitle: intervalSubtitle(interval, latest.unit),
         source_note: `${interval.source}. Draw on ${dateLabel}.`,
-        chart: { type: "gauge", value: latest.value, unit: latest.unit, range: interval, date: dateLabel },
+        chart: { type: "gauge", value: latest.value, unit: latest.unit, range: interval, date: latest.date },
       },
     });
   }

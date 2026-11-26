@@ -10,8 +10,8 @@ const record: CardSpec = {
   id: "fixture-private-id", kind: "personal_record", filter: "Sleep", theme: "sleep",
   title: { number: "2h 33m", measure: "deep sleep" }, subtitle: "A personal best.",
   source_note: "Fixture measurement on a private date.", share: { caption_tips: ["Measured for 153 min."] },
-  chart: { type: "record", unit: "min", series: [{ date: "Apr 7, 2031", value: 153 }],
-    highlight: { date: "Apr 7, 2031", value: 153, label: "Apr 7, 2031" }, pills: ["Apr 7, 2031"] },
+  chart: { type: "record", unit: "min", series: [{ date: "2031-04-07", value: 153 }],
+    highlight: { date: "2031-04-07", value: 153, label: "Apr 7, 2031" }, pills: ["Apr 7, 2031"] },
 };
 const challenge: CardSpec = { ...record, id: "second-fixture", filter: "Challenges", theme: "challenges" };
 afterEach(() => { post.mockReset(); vi.unstubAllEnvs(); });
@@ -22,8 +22,8 @@ it("converts a duration's title, chart and highlight together and freezes the pr
   const [saved] = freezeHealthSelections([candidate], [{ candidateId: candidate.id, option: "hours" }]);
   expect(preview.title.number).toBe("2.55 hr");
   expect(saved.specRevision).toBe(preview.specRevision);
-  expect(saved.spec.chart).toEqual({ type: "record", unit: "hr", series: [{ date: "Apr 7, 2031", value: 2.55 }],
-    highlight: { date: "Apr 7, 2031", value: 2.55, label: "Apr 7, 2031" }, pills: ["Apr 7, 2031"] });
+  expect(saved.spec.chart).toEqual({ type: "record", unit: "hr", series: [{ date: "2031-04-07", value: 2.55 }],
+    highlight: { date: "2031-04-07", value: 2.55, label: "Apr 7, 2031" }, pills: ["Apr 7, 2031"] });
   expect(previewHealthCandidate(candidate).chart).toEqual(record.chart);
 });
 

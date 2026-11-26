@@ -122,7 +122,30 @@ it("exports one synthetic card of every rendered shape", () => {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }
   const json = JSON.stringify(cards, null, 2) + "\n";
-  expect(json).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
   if (process.env.UPDATE_HEALTH_WINS_GOLDEN === "1") writeFileSync(goldenFile, json);
   expect(cards).toEqual(JSON.parse(readFileSync(goldenFile, "utf8")));
+});
+
+it("uses ISO days and months for every chart date and human dates in copy", () => {
+  function checkChartFields(chart: object, path: string) {
+    for (const [key, value] of Object.entries(chart)) {
+      const field = `${path}.${key}`;
+      if (key === "missedOn" && value === null) continue;
+      if (["date", "start", "end", "missedOn"].includes(key)) {
+        expect(value, field).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+      } else if (key === "month" || (key === "highlight" && typeof value === "string")) {
+        expect(value, field).toMatch(/^\d{4}-\d{2}$/u);
+      } else if (value !== null && typeof value === "object") {
+        checkChartFields(value, field);
+      } else if (typeof value === "string") {
+        expect(value, field).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
+      }
+    }
+  }
+
+  const cards: CardSpec[] = JSON.parse(readFileSync(goldenFile, "utf8"));
+  for (const { chart, ...card } of cards) {
+    checkChartFields(chart, `${card.kind}.chart`);
+    expect(JSON.stringify(card), card.kind).not.toMatch(/\d{4}-\d{2}-\d{2}/u);
+  }
 });

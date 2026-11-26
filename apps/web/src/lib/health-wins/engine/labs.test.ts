@@ -18,9 +18,9 @@ describe("lab draws", () => {
         source: "Synthetic reference", cuts: [{ percentile: 50, value: 100 }] });
       const change = cards([draw(112, 1, { date: "2029-02-08" }), draw(108, 2, { date: "2029-04-11" }), only]);
       expect(change).toMatchObject([{ kind: "lab_change", source_note: `Latest draw on ${label}. Lab draws in mg/dL.`,
-        chart: { latest: { date: label } } }]);
+        chart: { latest: { date } } }]);
       expect(cards([only])).toMatchObject([{ kind: "lab_range", source_note: `Reporting laboratory reference range. Draw on ${label}.`,
-        chart: { date: label } }]);
+        chart: { date } }]);
       expect(cards([only], rank)).toMatchObject([{ kind: "percentile", source_note: `Lab draw on ${label}. Synthetic reference` }]);
     },
   );

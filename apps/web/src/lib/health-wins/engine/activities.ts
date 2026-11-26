@@ -139,8 +139,8 @@ function experimentCandidates(inputs: readonly Experiment[], today: string): Can
         chart: {
           type: "two_bars", barWidth: "thin", metric, unit, expectedDirection, adherence: { done: adherence.done, target: adherence.target },
           series: [
-            { label: "Before", start: formatWinDate(baseline.start, today), end: formatWinDate(baseline.end, today), mean: baselineMean },
-            { label: "During", start: formatWinDate(intervention.start, today), end: formatWinDate(intervention.end, today), mean: interventionMean },
+            { label: "Before", start: baseline.start, end: baseline.end, mean: baselineMean },
+            { label: "During", start: intervention.start, end: intervention.end, mean: interventionMean },
           ],
           ...(overlap ? { overlap } : {}),
         },
@@ -249,7 +249,7 @@ function streakCalendar(start: string, end: string, days: readonly GameStreakDay
   const length = dayNumber(end) - dayNumber(monday) + 7 - weekdayOf(end);
   return Array.from({ length }, (_, index) => {
     const date = addDays(monday, index);
-    return { date: formatWinDate(date, today), state: date <= today ? states.get(date) ?? "no_game" : "no_game" };
+    return { date, state: date <= today ? states.get(date) ?? "no_game" : "no_game" };
   });
 }
 
@@ -267,8 +267,7 @@ function gameStreak(bestStreak: GameStreak, today: string): Candidate | null {
       subtitle: "posted in every game, your best run",
       source_note: `Game streak log · ${formatWinDate(start, today)} through ${formatWinDate(end, today)}`,
       chart: {
-        type: "week_dots", days, start: formatWinDate(start, today), end: formatWinDate(end, today),
-        missedOn: missedOn === null ? null : formatWinDate(missedOn, today),
+        type: "week_dots", days, start, end, missedOn,
         ...(calendar && { calendar: streakCalendar(start, end, calendar, today) }),
       },
     },
@@ -316,8 +315,7 @@ function sessionCandidates(sessions: readonly Session[], today: string): Candida
         title: { number: `${formatNumber(series.length, 0)} ${plural}`, measure: `in ${formatWinMonth(today)}` },
         subtitle: `${formatDuration(totalMinutes)} of ${activity}, the longest ${longest === 60 ? "a full hour" : formatDuration(longest)}`,
         source_note: `Session log · ${formatWinDate(`${month}-01`, today)} through ${formatWinDate(today, today)}`,
-        chart: { type: "sessions", sessionType: type, totalMinutes,
-          series: series.map(({ date, minutes }) => ({ date: formatWinDate(date, today), minutes })) },
+        chart: { type: "sessions", sessionType: type, totalMinutes, series },
       },
     });
   }

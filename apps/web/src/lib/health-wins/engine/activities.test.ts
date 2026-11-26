@@ -38,8 +38,8 @@ describe("finished experiments", () => {
         chart: {
           type: "two_bars", barWidth: "thin", unit: "points", metric: "sleep_score", expectedDirection: "increase",
           series: [
-            { label: "Before", start: "Feb 1", end: "Feb 28", mean: 78.5 },
-            { label: "During", start: "Mar 2", end: "Mar 17", mean: 81.75 },
+            { label: "Before", start: "2025-02-01", end: "2025-02-28", mean: 78.5 },
+            { label: "During", start: "2025-03-02", end: "2025-03-17", mean: 81.75 },
           ],
           adherence: { done: 3, target: 8 }, overlap: "Quiet drawing",
         },
@@ -181,7 +181,7 @@ describe("game achievements", () => {
       }),
       expect.objectContaining({
         kind: "game_streak", title: { number: "9", measure: "days" },
-        chart: { type: "week_dots", days: 9, start: "Jan 1", end: "Jan 9", missedOn: "Jan 10" },
+        chart: { type: "week_dots", days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
       }),
     ]);
   });
@@ -203,12 +203,12 @@ describe("game achievements", () => {
     const detailed = { ...game, bestStreak };
     const streaks = (games: Game[]) => generateHealthWins({ member, games }).filter(card => card.kind === "game_streak");
     const [streak] = streaks([detailed]);
-    expect(streak?.chart).toMatchObject({ days: 3, start: "Dec 29, 2024", end: "Jan 2", missedOn: "Jan 3" });
+    expect(streak?.chart).toMatchObject({ days: 3, start: "2024-12-29", end: "2025-01-02", missedOn: "2025-01-03" });
     expect(streak?.chart.calendar?.map(day => [day.date, day.state])).toEqual([
-      ["Dec 23, 2024", "no_game"], ["Dec 24, 2024", "no_game"], ["Dec 25, 2024", "no_game"],
-      ["Dec 26, 2024", "no_game"], ["Dec 27, 2024", "posted"], ["Dec 28, 2024", "missed"], ["Dec 29, 2024", "posted"],
-      ["Dec 30, 2024", "no_game"], ["Dec 31, 2024", "posted"], ["Jan 1", "no_game"], ["Jan 2", "posted"],
-      ["Jan 3", "missed"], ["Jan 4", "no_game"], ["Jan 5", "no_game"],
+      ["2024-12-23", "no_game"], ["2024-12-24", "no_game"], ["2024-12-25", "no_game"],
+      ["2024-12-26", "no_game"], ["2024-12-27", "posted"], ["2024-12-28", "missed"], ["2024-12-29", "posted"],
+      ["2024-12-30", "no_game"], ["2024-12-31", "posted"], ["2025-01-01", "no_game"], ["2025-01-02", "posted"],
+      ["2025-01-03", "missed"], ["2025-01-04", "no_game"], ["2025-01-05", "no_game"],
     ]);
     const { calendar, ...summary } = bestStreak;
     const legacy = { ...game, exercise: "squats", bestStreak: summary };
@@ -277,7 +277,7 @@ describe("game achievements", () => {
     const streaks = (games: Game[]) => generateHealthWins({ member, games }).filter(card => card.kind === "game_streak");
     expect(streaks([game, other])).toEqual([expect.objectContaining({
       subtitle: "posted in every game, your best run",
-      chart: { type: "week_dots", days: 9, start: "Jan 1", end: "Jan 9", missedOn: "Jan 10" },
+      chart: { type: "week_dots", days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
     })]);
     const different = { ...other, bestStreak: { days: 5, start: "2025-03-02", end: "2025-03-06", missedOn: null } };
     expect(streaks([game, different])).toEqual([]);
@@ -305,7 +305,7 @@ describe("monthly sessions", () => {
       kind: "sessions", title: { number: "3 runs", measure: "in April" },
       subtitle: "1h 6m of running, the longest 29 min",
       chart: { type: "sessions", sessionType: "run", totalMinutes: 65.5, series: [
-        { date: "Apr 1", minutes: 21.5 }, { date: "Apr 1", minutes: 29 }, { date: "Apr 19", minutes: 15 },
+        { date: "2025-04-01", minutes: 21.5 }, { date: "2025-04-01", minutes: 29 }, { date: "2025-04-19", minutes: 15 },
       ] },
     })]);
     expect(cards({ sessions: [...sessions].reverse() })).toEqual(result);
