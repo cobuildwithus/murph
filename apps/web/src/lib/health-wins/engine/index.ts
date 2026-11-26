@@ -5,9 +5,9 @@ import { defaultHealthWinRank } from "./default-rank";
 import { dietCandidates } from "./diet";
 import { labCandidates } from "./labs";
 import { percentileCandidates } from "./percentiles";
-import { rankCandidates } from "./ranking";
+import { newestHealthWinsFirst, rankCandidates } from "./ranking";
 import { isDate } from "./shared";
-import type { CardSpec, DetectedHealthWins, HealthWinsInput } from "./types";
+import type { CardSpec, DetectedHealthWins, HealthWinsInput, SelectedHealthWin } from "./types";
 
 export { canonicalProvider } from "./daily-clean";
 export { metricInfo } from "./metrics";
@@ -17,14 +17,10 @@ export type {
   HealthWinRankResult, HealthWinsInput, LabDraw, MealDay, Measure, Metric, RankMetric, Session, SessionType,
 } from "./types";
 
-/** Generate one member's ranked cards as of the supplied local calendar day. */
-export function generateHealthWins(input: HealthWinsInput): CardSpec[] {
-  return detectHealthWins(input).cards;
-}
-
+/** Detect one member's selected cards and private nudge evidence in engine rank order. */
 export function detectHealthWins(input: HealthWinsInput): DetectedHealthWins {
   const { today } = input.member;
-  if (!isDate(today)) return { cards: [], achievements: new Map() };
+  if (!isDate(today)) return { cards: [], achievements: new Map(), selected: [] };
   const daily = cleanDaily(input.daily ?? [], today);
   const rank = input.rank ?? defaultHealthWinRank;
   return rankCandidates([
@@ -34,4 +30,14 @@ export function detectHealthWins(input: HealthWinsInput): DetectedHealthWins {
     ...labCandidates(input, rank),
     ...activityCandidates(input),
   ], today);
+}
+
+/** Select cards in engine rank order for the optional Decisions pass. */
+export function selectHealthWins(input: HealthWinsInput): SelectedHealthWin[] {
+  return detectHealthWins(input).selected;
+}
+
+/** Generate one member's suggested cards, newest achievement first. */
+export function generateHealthWins(input: HealthWinsInput): CardSpec[] {
+  return newestHealthWinsFirst(selectHealthWins(input));
 }

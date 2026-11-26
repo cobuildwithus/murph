@@ -163,6 +163,29 @@ it('binds rendered page evidence to exact host roots and validates returned page
   expect(extractionMocks.executeTurn).not.toHaveBeenCalled()
 })
 
+it('asks for every page and page-local records only when an assignment supplies several pages', async () => {
+  const input = await fixture()
+  const scratchRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'clinical-render-group-test-')))
+  roots.push(scratchRoot)
+  const renderedPages = await Promise.all([3, 4].map(async (page) => {
+    const pagePath = path.join(scratchRoot, `page-${page}.png`)
+    await writeFile(pagePath, 'synthetic rendered evidence')
+    return { page, path: pagePath }
+  }))
+  for (const page of [4, 3]) {
+    extractionMocks.executeTurn.mockResolvedValueOnce({ finalMessage: JSON.stringify({ status: 'complete', records: [{ ...labRecord, page }] }) })
+  }
+  await expect(executeClinicalDocumentExtraction({ ...input, scratchRoots: [scratchRoot], renderedPages }))
+    .resolves.toMatchObject({ records: [{ page: 4 }] })
+  await expect(executeClinicalDocumentExtraction({ ...input, scratchRoots: [scratchRoot], renderedPages: renderedPages.slice(0, 1) }))
+    .resolves.toMatchObject({ records: [{ page: 3 }] })
+  const [group, single] = extractionMocks.executeTurn.mock.calls.map(([turn]) => turn.baseInstructions as string)
+  expect(group).toContain('Several supplied pages form one assignment')
+  expect(group).toContain('separate records for each page')
+  expect(single).not.toContain('Several supplied pages')
+  expect(group.startsWith(single!)).toBe(true)
+})
+
 it('preserves blocked coverage and does not infer success from readable cover text', async () => {
   const input = await fixture()
   extractionMocks.executeTurn.mockResolvedValue({

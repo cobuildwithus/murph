@@ -25,7 +25,7 @@ import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v6";
+const DETECTOR_VERSION = "v7";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 
 const staleSet = () => hostedOnboardingError({
@@ -143,10 +143,10 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   const keep = observed?.day === today && observed.sourceRevision === sourceRevision && !options.refresh;
   let replacement: HealthWinSet | null = null;
   if (!keep) {
-    const { cards, achievements } = source.detect();
-    if (!cards.length && !source.complete && observed) return present(auth, observed, options);
+    const { selected, achievements } = source.detect();
+    if (!selected.length && !source.complete && observed) return present(auth, observed, options);
     await checkAuthority();
-    const ranked = await rankHealthCards(cards, options.signal);
+    const ranked = await rankHealthCards(selected, options.signal);
     const nudge = isHealthWinTextEnabled(memberId) ? { achievements, complete: source.complete } : undefined;
     const candidates = prepareHealthCandidates(memberId, ranked, source.distanceArtUrl, nudge);
     const revision = randomUUID();

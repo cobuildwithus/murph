@@ -60,7 +60,7 @@ function bestMonth(nutrient: Nutrient, current: Month, prior: readonly Month[], 
   const period = useCalendarYear ? "this year" : "in the past 12 months";
   const superlative = rank === 0 ? "tied for most" : "your most";
   return {
-    date: lastKnown, effect: current.value - median(values), noise: Math.max(1, mad(values)),
+    date: lastKnown, eventDate: today, effect: current.value - median(values), noise: Math.max(1, mad(values)),
     achievement: { kind: "best_month", subject: `${nutrient}_g`, period: current.month },
     card: {
       id: `best_month:${nutrient}_g:${current.month}`, kind: "best_month", filter: "Diet",

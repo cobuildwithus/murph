@@ -46,7 +46,7 @@ function recordedSessions(types: SessionType[]) {
 async function seedMember() {
   localRosterCrypto();
   vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
-  vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", memberId);
+  vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "*");
   vi.stubEnv("MURPH_HEALTH_WINS_RANKING", "false");
   vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 29).toString("base64url"));
   vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 71).toString("base64url"));
@@ -89,9 +89,10 @@ describe.skipIf(!enabled)("health win text delivery through PostgreSQL", () => {
     vi.setSystemTime(new Date("2032-07-10T11:00:00Z"));
     const auth = await seedMember();
     recordedSessions(["walk"]);
+    const sweep = () => drainHealthWinTexts({ prisma: db });
+    expect(await sweep()).toMatchObject({ claimed: 0 });
     const original = await readHealthWins(auth, readOptions);
     const mailbox = () => db.hostedMailboxItem.findMany({ where: { userId: memberId, kind: "assistant.notification.requested" } });
-    const sweep = () => drainHealthWinTexts({ prisma: db });
     const seen = () => db.healthWinNudge.findUniqueOrThrow({ where: { memberId }, select: { seenKeys: true } });
     expect((await seen()).seenKeys).toHaveLength(1);
     await sweep();

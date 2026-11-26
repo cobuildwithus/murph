@@ -1344,15 +1344,22 @@ receipt for one job cannot block another job's prepared application. The
 extractor and mailbox may have different durable queue orders; exact-job claims
 and the existing canonical writer still own exclusion and mutation safety.
 
-A detached controller runs up to sixteen extraction units at once: document
+A detached controller runs up to sixteen extraction calls at once over document
 pages and structured resources at or ahead of each pending job's cursor, in
-queue order with each cursor first. Each unit is one confined read-only model
+queue order with each cursor first. Each call is one confined read-only model
 pass covering labs, measurements and history, with a 120-second provider
-timeout. Structured resources run GPT-6 Luna. Document pages run GPT-6.1 Terra
+timeout per page. Structured resources run GPT-6 Luna. Document pages run GPT-6.1 Terra
 at low reasoning, on the Flex tier for a unit's first attempt and the standard
 tier for a cursor retry, because Luna dropped and inverted document history
-facts in live evaluation. Text and rendered PDF/image pages are untrusted source
-evidence. Foreground replies can proceed during extraction.
+facts in live evaluation. Up to four consecutive first-attempt pages of one PDF
+share a call, because its fixed instructions are most of a single page's input;
+live Terra runs finished four dense pages and stopped early from six. Every
+record names one supplied page, and the runtime splits a finished group into its
+pages' cache entries, so cursor, cache, receipts and apply stay per page. A group
+that reports blocked, reaches the record limit, fails or cannot render writes
+nothing and its pages run alone for the rest of the invocation. Text and
+rendered PDF/image pages are untrusted source evidence. Foreground replies can
+proceed during extraction.
 Planning reads job descriptions under the enrichment lock; attestation and
 page counting run outside it, and the existing extraction-cache key is the
 unit identity. A finished unit publishes in one short section: a
@@ -6808,10 +6815,13 @@ has a finite value. Meal descriptions, photos and times stay in the replica.
 The source revision includes the Diet generation flag. Generated Diet specs
 use the existing sealed suggestion set and frozen post envelopes.
 
-The pure engine ranks up to 24 eligible cards and balances the first 12 across
-available categories. With `MURPH_HEALTH_WINS_RANKING=true`,
+The pure engine selects up to 24 eligible cards, balancing categories for its
+first 12 selections and reserving a place for each remaining eligible category.
+With `MURPH_HEALTH_WINS_RANKING=true`,
 Decisions receives one call with the fixed category and detector labels and a
-three-second deadline. Failures use the engine's order. A source failure can
+three-second deadline. Web sorts the selected cards by achievement day before
+caching them. Same-day cards keep their Decisions order when available or their
+engine order otherwise. A source failure can
 omit that source. An input timeout returns the last available set, or a retryable
 503 if the member has none. Loss of member authority ends the read.
 Native authentication and Health content share unwrapped control roots for one
@@ -6829,16 +6839,18 @@ One author-indexed query returns at most one matching digest per candidate (up t
 This filter leaves the stored set and its revision available to open composers.
 If the opaque-ID keyring is unavailable, Web skips the filter and logs the error class.
 
-For the win-text pilot, detectors identify achievements before card IDs and
+For win texts, detectors identify achievements before card IDs and
 units change for display. Web seals the descriptor in the candidate wrapper.
 A successful composer read records its presentation and returns an opaque,
 member-bound `winRef` on eligible candidates. The landing page validates only
 the reference format. It has no data lookup.
 
 The minute sweep reads the same inputs and deterministic detector order.
-Only the composer publishes candidate sets. A row lock on `health_win_nudge`
-serializes presentations, local-day claims and the final diff with mailbox
-append. A crash consumes the claim. Web prepares encryption outside
+Only the composer publishes candidate sets and creates `health_win_nudge` rows.
+With wildcard text enrollment, the sweep pages these rows by member ID and
+claims up to 25 feed members for evaluation within its four-minute budget.
+A row lock on `health_win_nudge` serializes presentations, local-day claims
+and the final diff with mailbox append. A crash consumes the claim. Web prepares encryption outside
 the transaction, queues one expiring exact-text wake, then signals the runtime.
 Signed Linq egress checks the evaluation start against the presentation
 watermark and rechecks current eligibility and the local dispatch window.
@@ -6931,7 +6943,7 @@ database transactions.
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
-| `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private pilot achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
+| `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
 | `health_win_nudge` | None | `member_id` owns the row. `seen_keys` holds lifetime member-bound keyed digests under a separate purpose from link references. `seen_version` identifies the keyring and achievement identity versions. `baseline_at` marks the first complete nonempty observation, `last_presented_at` fences pending delivery and `last_evaluated_day` claims a local day once. An incompatible version disables sending pending explicit handling. Account deletion cascades this operational state. |
 | `health_post_attachment` | `storage_key_encrypted` identifies the reserved Progress object. Its sealed JPEG bytes live in the object store. | `id` identifies the attachment, `member_id` owns it, nullable `post_id` binds it to a post, `status` tracks its lifecycle and `created_at` records admission. |
 

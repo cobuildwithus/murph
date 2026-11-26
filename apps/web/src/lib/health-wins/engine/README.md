@@ -1,8 +1,8 @@
 # Health wins engine
 
-`generateHealthWins(input)` returns up to 24 ranked `CardSpec` objects for one member.
-`detectHealthWins(input)` also returns a map of achievement descriptors keyed by card ID,
-which the win-text pilot uses to recognize previously seen achievements.
+`generateHealthWins(input)` returns up to 24 `CardSpec` objects for one member, newest achievement first.
+`detectHealthWins(input)` returns the cards in engine rank order and a map of achievement descriptors keyed by card ID,
+which Murph uses to recognize previously seen achievements when choosing a win to text.
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
@@ -17,6 +17,26 @@ The engine calculates distance trends in kilometres. The wins route presents the
 miles for US and UK requests and kilometres for metric requests. Selecting a trend
 preserves its displayed units on the post.
 Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
+
+## Suggestion order
+
+The engine selects up to 24 cards using the score and category rules below.
+After optional Decisions ranking, the picker sorts the entire selection by achievement
+day, newest first. Cards on the same day keep their prior rank. Filtering preserves
+that order. The sort date stays on the server.
+
+| Achievement | Day used for display order |
+| --- | --- |
+| Trend or best month | Last calendar day of the achievement month, capped at the member's current day for an ongoing month. |
+| Diet monthly total (`month_total`) | Last calendar day of the completed month covered by the tally. |
+| Diet best month | The member's current day (`member.today`), the end of the month so far. |
+| Daily, fiber or game streak | Last day of the streak. |
+| Personal record | Day the record was set. |
+| Percentile | Latest reading used in the comparison. For labs, this is the draw day. |
+| Lab change or range | Day of the latest draw used for the card. |
+| Cumulative distance, threshold count or monthly sessions | Last day counted in the total. |
+| Game climb | Latest day contributing to the exercise total. An older summary with no contribution date uses its as-of day. |
+| Experiment | Final day of the intervention. |
 
 ## Inputs that affect interpretation
 

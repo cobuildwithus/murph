@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { expect, it, vi } from "vitest";
 import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
-import { extractHostedClinicalUnit, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { extractHostedClinicalUnits, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 
 const provider = vi.hoisted(() => ({ execute: vi.fn() }));
 vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
@@ -92,16 +92,16 @@ it.each([
   try {
     await mkdir(path.dirname(documentPath), { recursive: true });
     await writeFile(documentPath, text);
-    const outcome = await extractHostedClinicalUnit(input, unit, parent.signal);
+    const outcome = await extractHostedClinicalUnits(input, [unit], parent.signal);
     expect({ result: outcome.result.kind, calls: provider.execute.mock.calls.length, elapsed }).toEqual({
       result: cancel || handoff ? "abandoned" : "extracted", calls: 1 + correctionCalls,
       elapsed: initialMs + correctionCalls * (stall ? 57_000 : 25_000),
     });
     if (outcome.result.kind === "extracted") {
-      expect(outcome.result.outputs).toEqual({
+      expect(outcome.result.outputs).toEqual([{
         labs: outputs.labs, measurements: outputs.measurements,
         history: { ...outputs.history, status: "blocked", reason: expect.any(String) },
-      });
+      }]);
     }
   } finally {
     clock.mockRestore(); timer.mockRestore(); provider.execute.mockReset();

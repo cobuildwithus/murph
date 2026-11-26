@@ -33,8 +33,9 @@ removes the measurements from the card, including tooltip values. A recording's
 route map stays visible until the member chooses **Hide the map**. If
 the suggestion set changes before posting, the composer asks the member to
 choose from the refreshed set. Later readings do not change published cards.
-The picker returns up to 24 eligible cards and balances the first 12 across
-available categories. A cumulative distance card includes the existing
+The picker shows up to 24 eligible cards, newest achievement first. Category
+filters keep this order. The engine balances categories when choosing the cards.
+A cumulative distance card includes the existing
 Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
@@ -74,18 +75,19 @@ post and photo to the author.
 
 ## Texting a new win
 
-An explicitly enrolled member can receive one iMessage about a new win per
-local day. The first complete set with an eligible achievement establishes a
-silent baseline. The pilot remembers achievements the member has seen in the
-composer, including on partial and cached reads. On later days it picks the
-highest-ranked fresh, unseen achievement in the engine's deterministic order.
-It consumes the other observed achievements that day as well.
+A feed member can receive at most one iMessage about a new win per local day
+after opening the composer while win texts are enabled for them. The first
+complete set with an eligible achievement establishes a silent baseline. Murph
+remembers achievements the member has seen in the composer, including on partial
+and cached reads. On later days it picks the highest-ranked fresh, unseen
+achievement in the engine's deterministic order. It consumes the other observed
+achievements that day as well.
 
 Eligible wins include trends, best months, threshold counts and session counts
 for the current calendar month. A personal record must fall within the latest
 three local dates. A lab change or lab percentile must fall within the latest
 90 local dates. Multiple results from one experiment share an identity.
-The pilot skips streaks, standing totals, wearable percentiles, game cards,
+Murph skips streaks, standing totals, wearable percentiles, game cards,
 lab-range cards and activities the member recorded.
 
 The question and link preview are generic. The link opens a compatible
@@ -406,10 +408,11 @@ rollout. Deploy the activity migration and recording-capable Web before enabling
 Keep the compatible Web writer and exporter available once summaries exist. GPS recording
 and recording-based session wins have separate rollout steps.
 
-Win texts require explicit member IDs in `MURPH_HEALTH_WIN_TEXT_MEMBER_IDS`
-as well as feed access. An empty list disables enrollment, evaluation and
-queued delivery. A wildcard enrolls nobody. Deploy the compatible Web and
-runner builds and the companion's win-link handling before enabling the pilot.
+Production sets `MURPH_HEALTH_WIN_TEXT_MEMBER_IDS` to `*` so every feed member
+can enroll by opening the composer. To limit texts to selected feed members,
+list their IDs. An empty list disables enrollment, evaluation and queued
+delivery. Deploy compatible Web and runner builds and the companion's win-link
+handling before enabling texts.
 On rollback, keep the signed egress rejection for this key family until all
 queued and already imported delivery work has reached a terminal state.
 

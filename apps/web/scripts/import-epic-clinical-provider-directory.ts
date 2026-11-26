@@ -30,6 +30,8 @@ const EPIC_SANDBOX_ENTRY = {
 
 type JsonRecord = Record<string, unknown>;
 
+type LocationTuple = [string | null, string | null, string | null, string | null, string[], string[], string];
+
 interface EpicProviderDirectoryArtifactV2 {
   entries: Array<{
     aliases: string[];
@@ -39,7 +41,7 @@ interface EpicProviderDirectoryArtifactV2 {
       | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
     fhirBaseUrl: string;
     id: string;
-    locations: Array<[string | null, string | null, string | null, string | null]>;
+    locations: LocationTuple[];
     policyId: string;
   }>;
   generatedAt: string;
@@ -136,7 +138,7 @@ export function buildEpicProviderDirectoryArtifact(
     brandIdentifier: string;
     brandName: string;
     endpoint: string;
-    facilities: Array<{ city: string | null; name: string | null; postalCode: string | null; state: string | null }>;
+    facilities: LocationTuple[];
   }>();
 
   for (const organization of organizations) {
@@ -150,18 +152,11 @@ export function buildEpicProviderDirectoryArtifact(
       brandIdentifier,
       brandName,
       endpoint,
-      facilities: readAddresses(organization.resource.address, brandName),
+      facilities: readLocations(organization),
     });
   }
 
-  for (const organization of organizations) {
-    const parentReference = readReference(organization.resource.partOf);
-    if (!parentReference) continue;
-    const primary = primaryBrands.get(parentReference);
-    if (!primary) continue;
-    const facilityName = optionalString(organization.resource.name, 180);
-    primary.facilities.push(...readAddresses(organization.resource.address, facilityName));
-  }
+  attachFacilities(organizations, primaryBrands);
 
   const entries = [
     EPIC_SANDBOX_ENTRY,
@@ -170,14 +165,10 @@ export function buildEpicProviderDirectoryArtifact(
         aliases: [...new Set(brand.aliases)].sort((left, right) => left.localeCompare(right)),
         brandName: brand.brandName,
         clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" as const,
-        locations: deduplicateFacilities(brand.facilities).map((facility) =>
-          [
-            facility.name,
-            facility.city,
-            facility.state,
-            facility.postalCode,
-          ] satisfies [string | null, string | null, string | null, string | null]
-        ),
+        locations: [...new Map(brand.facilities.map(tuple => [JSON.stringify(tuple), tuple])).values()]
+          .sort((left, right) => (left[2] ?? "").localeCompare(right[2] ?? "")
+            || (left[1] ?? "").localeCompare(right[1] ?? "") || (left[0] ?? "").localeCompare(right[0] ?? "")
+            || JSON.stringify(left).localeCompare(JSON.stringify(right), "en")),
         fhirBaseUrl: brand.endpoint,
         id: buildEpicProviderDirectoryEntryId(brand.brandIdentifier),
         policyId: EPIC_ACQUISITION_POLICY_ID,
@@ -195,6 +186,27 @@ export function buildEpicProviderDirectoryArtifact(
   };
   parseClinicalProviderDirectory(artifact);
   return artifact;
+}
+
+function attachFacilities(
+  organizations: readonly { resource: JsonRecord; fullUrl: string }[],
+  primaryBrands: ReadonlyMap<string, { facilities: LocationTuple[] }>,
+) {
+  const byReference = new Map(organizations.map(org => [org.fullUrl, org]));
+  const owners = new Map([...primaryBrands.keys()].map(ref => [ref, ref]));
+  for (const organization of organizations) {
+    if (primaryBrands.has(organization.fullUrl) || organization.resource.active === false) continue;
+    const visited = new Set<string>();
+    let ref: string | null = organization.fullUrl;
+    while (ref && !owners.has(ref) && !visited.has(ref)) {
+      visited.add(ref);
+      const parent = byReference.get(ref);
+      ref = parent && parent.resource.active !== false ? readReference(parent.resource.partOf) : null;
+    }
+    const owner = ref ? owners.get(ref) : undefined;
+    for (const child of visited) owners.set(child, owner ?? "");
+    if (owner) primaryBrands.get(owner)!.facilities.push(...readLocations(organization));
+  }
 }
 
 function parseArguments(args: string[]): { inputPath: string; outputPath: string } {
@@ -238,45 +250,21 @@ function readReference(value: unknown): string | null {
   return optionalString((value as JsonRecord).reference, 240);
 }
 
-function readAddresses(value: unknown, name: string | null): Array<{ city: string | null; name: string | null; postalCode: string | null; state: string | null }> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const record = item as JsonRecord;
-    const city = optionalString(record.city, 120);
-    const state = optionalString(record.state, 80);
-    const postalCode = optionalString(record.postalCode, 24);
-    return city || state || postalCode ? [{ city, name, postalCode, state }] : [];
+function readLocations(org: { resource: JsonRecord; fullUrl: string }): LocationTuple[] {
+  const { resource } = org;
+  const name = optionalString(resource.name, 180);
+  const upstreamId = optionalString(resource.id, 64) ?? org.fullUrl;
+  const aliases = [...new Set(readStringArray(resource.alias, 20, 120))].sort();
+  const addresses = Array.isArray(resource.address) && resource.address.length ? resource.address : [{}];
+  return addresses.flatMap((address): LocationTuple[] => {
+    if (!address || typeof address !== "object" || Array.isArray(address)) return [];
+    const city = optionalString(address.city, 120);
+    const state = optionalString(address.state, 80);
+    const postalCode = optionalString(address.postalCode, 24);
+    const street = readStringArray(address.line, 4, 180);
+    if (!city && !state && !postalCode && !street.length && (!resource.partOf || !name)) return [];
+    return [[name, city, state, postalCode, street, aliases, upstreamId]];
   });
-}
-
-function deduplicateFacilities(
-  facilities: Array<{ city: string | null; name: string | null; postalCode: string | null; state: string | null }>,
-) {
-  const unique = new Map<string, typeof facilities[number]>();
-  for (const facility of facilities) {
-    const key = [facility.name, facility.city, facility.state, facility.postalCode]
-      .map((value) => value?.toLocaleLowerCase("en-US") ?? "")
-      .join("|");
-    const existing = unique.get(key);
-    if (!existing || compareExactFacility(facility, existing) < 0) {
-      unique.set(key, facility);
-    }
-  }
-  return [...unique.values()].sort((left, right) =>
-    (left.state ?? "").localeCompare(right.state ?? "")
-    || (left.city ?? "").localeCompare(right.city ?? "")
-    || (left.name ?? "").localeCompare(right.name ?? "")
-  );
-}
-
-function compareExactFacility(
-  left: { city: string | null; name: string | null; postalCode: string | null; state: string | null },
-  right: { city: string | null; name: string | null; postalCode: string | null; state: string | null },
-): number {
-  const leftKey = JSON.stringify([left.name, left.city, left.state, left.postalCode]);
-  const rightKey = JSON.stringify([right.name, right.city, right.state, right.postalCode]);
-  return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
 
 function normalizePublicHttpsUrl(value: unknown): string | null {
