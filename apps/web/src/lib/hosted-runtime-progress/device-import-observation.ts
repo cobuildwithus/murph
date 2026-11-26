@@ -29,6 +29,7 @@ export async function readDeviceImportHealth(input: {
   `);
   if (connections.length > DEVICE_IMPORT_MEMBER_LIMIT) throw new Error("Device import member scan is truncated.");
   const allowed = await readHostedRuntimeAiAllowedMemberIds({
+    forRuntimeStart: true,
     memberIds: connections.map(row => row.userId), prisma, now: input.now,
   });
   const subjects = [...allowed].map(hostedRuntimeLogSubjectKey);

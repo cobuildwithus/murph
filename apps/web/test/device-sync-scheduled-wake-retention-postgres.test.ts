@@ -115,6 +115,41 @@ describe.skipIf(!runPostgresProof)(
       expect(await select()).toEqual([]);
     });
 
+    it("keeps parked device work due without occupying the scheduled or deferred sweep", async () => {
+      const parkedScheduled = await seedDueBudgetConnection();
+      const parkedDeferred = await seedDueBudgetConnection(true);
+      const activeScheduled = await seedDueBudgetConnection();
+      const activeDeferred = await seedDueBudgetConnection(true);
+      const { client, now, options: { store } } = activeScheduled;
+      const earlier = new Date(now.getTime() - 60_000);
+      await client.hostedMember.updateMany({
+        where: { id: { in: [parkedScheduled.memberId, parkedDeferred.memberId] } },
+        data: { runtimeDormantAt: earlier },
+      });
+      await client.deviceConnection.update({
+        where: { id: parkedScheduled.connectionId }, data: { nextReconcileAt: earlier },
+      });
+      await client.deviceSyncDirtyConnection.update({
+        where: { connectionId: parkedDeferred.connectionId }, data: { wakeDeferredUntil: earlier },
+      });
+      const selectScheduled = () => store.listDueReconcileConnectionsForSweep({
+        dueAt: now, limit: 1, recoveryBucketStartedAt: now,
+      });
+      const selectDeferred = () => store.listDueDeferredDirtyConnectionWakes({ dueAt: now, limit: 1 });
+
+      expect(await selectScheduled()).toMatchObject([{ connectionId: activeScheduled.connectionId }]);
+      expect(await selectDeferred()).toMatchObject([{ connectionId: activeDeferred.connectionId }]);
+      expect((await parkedScheduled.read()).nextReconcileAt).toEqual(earlier);
+      expect((await parkedDeferred.read()).dirtyState?.wakeDeferredUntil).toEqual(earlier);
+
+      await client.hostedMember.updateMany({
+        where: { id: { in: [parkedScheduled.memberId, parkedDeferred.memberId] } },
+        data: { runtimeDormantAt: null },
+      });
+      expect(await selectScheduled()).toMatchObject([{ connectionId: parkedScheduled.connectionId }]);
+      expect(await selectDeferred()).toMatchObject([{ connectionId: parkedDeferred.connectionId }]);
+    });
+
     it("postpones a quiet member's reconcile under the admission lock and releases on return", async () => {
       const f = await seedDueBudgetConnection();
       await f.client.hostedMember.update({

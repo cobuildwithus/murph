@@ -44,6 +44,17 @@ function createVoidDeferred(): {
   return { promise, resolve };
 }
 
+it("does not alert on parked runtime work but reports the same backlog after return", async () => {
+  const row = progressRow({ runtimeKey: "synthetic-parked", lane: "system",
+    headKind: "device-sync.wake", progressOriginAt: "2026-08-10T15:00:00Z" });
+  const parked = new Set([row.runtimeKey]);
+  const fixture = createProgressMonitorFixture([row], parked);
+  const read = () => readHostedRuntimeProgressHealth({ now, prisma: fixture.prisma });
+  expect(await read()).toMatchObject({ anomalous: false, excludedInactiveLaneCount: 1 });
+  parked.clear();
+  expect(await read()).toMatchObject({ anomalous: true, stalledSystemLaneCount: 1 });
+});
+
 describe("usage-paused default-owned system progress", () => {
   const notification = (runtimeKey = "runtime_paused", overrides: Partial<HostedRuntimeProgressHealthRow> = {}) => ({
     ...progressRow({ runtimeKey, lane: "system", headKind: "assistant.notification.requested",
@@ -1631,6 +1642,7 @@ function stalledDeviceSyncRow(
 
 function createProgressMonitorFixture(
   initialRows: readonly HostedRuntimeProgressHealthRow[],
+  parked: ReadonlySet<string> = new Set(),
 ) {
   let rows = [...initialRows];
   let state: HostedLinqAlert | null = null;
@@ -1638,8 +1650,9 @@ function createProgressMonitorFixture(
     void query;
     return rows;
   });
-  const hostedMemberFindMany = vi.fn(async () =>
-    [...new Set(rows.map((row) => row.runtimeKey))].map((id) => ({
+  const hostedMemberFindMany = vi.fn(async (args?: { where: { runtimeDormantAt?: null } }) =>
+    [...new Set(rows.map((row) => row.runtimeKey))]
+      .filter((id) => args?.where.runtimeDormantAt !== null || !parked.has(id)).map((id) => ({
       accountGroupMemberships: [],
       billingRef: null,
       billingStatus: "active",
