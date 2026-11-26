@@ -32,6 +32,7 @@ import {
   readCodexAppServerTurnFailureContext,
   type CodexAppServerTurnInput,
 } from './assistant-codex.js'
+import { hasHostedCodexModelCatalogServiceTier, withHostedFlexCatalog } from './assistant-codex/config.js'
 import {
   MURPH_GROUP_SHARED_READ_TOOL,
 } from './assistant-codex/dynamic-tool-catalog.js'
@@ -514,6 +515,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
       reasoningEffort: input.reasoningEffort,
       sandbox: 'read-only',
     })
+    const { env, serviceTier } = resolveReadOnlyAssistantAskServiceTier(input)
     await input.beforeProviderEntry?.()
     const providerRequestStartedAt = new Date().toISOString()
     try {
@@ -526,7 +528,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         codexHome: input.codexHome,
         developerInstructions: turn.developerInstructions,
         dynamicTools,
-        env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
+        env: stripReadOnlyAssistantAskCapabilityEnv(env),
         ephemeral: true,
         hostedToolContext,
         model: input.model,
@@ -546,7 +548,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         providerRequestOrdinal: 0,
         reasoningEffort: input.reasoningEffort,
         runtimeWorkspaceRoots,
-        serviceTier: input.serviceTier,
+        serviceTier,
         ...readOnlyAssistantAskThreadSettings(turn),
         workingDirectory,
       })
@@ -557,7 +559,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         primaryUsageOccurredAt: providerRequestStartedAt,
         providerConfig,
         rawEvents: result.jsonEvents,
-        serviceTier: input.serviceTier ?? null,
+        serviceTier,
         onProviderUsage: input.onProviderUsage ?? null,
         stage: turn.usageStage,
       })
@@ -575,7 +577,7 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
         providerConfig,
         rawEvents: failureContext?.jsonEvents ?? [],
         requirePrimaryTokenUsage: true,
-        serviceTier: input.serviceTier ?? null,
+        serviceTier,
         onProviderUsage: input.onProviderUsage ?? null,
         stage: turn.usageStage,
       })
@@ -587,6 +589,17 @@ export async function executeConfinedReadOnlyAssistantAskTurn(
       recursive: true,
     })
   }
+}
+
+// Flex models carry that tier only in the hosted Flex catalog; elsewhere the
+// turn runs on the default tier.
+function resolveReadOnlyAssistantAskServiceTier(input: Pick<ReadOnlyAssistantAskInput, 'env' | 'model' | 'serviceTier'>) {
+  const serviceTier = input.serviceTier ?? null
+  if (serviceTier !== 'flex' || !input.env) return { env: input.env, serviceTier: serviceTier === 'flex' ? null : serviceTier }
+  const env = withHostedFlexCatalog(input.env)
+  return hasHostedCodexModelCatalogServiceTier({ env, model: input.model, serviceTier })
+    ? { env, serviceTier }
+    : { env: input.env, serviceTier: null }
 }
 
 function captureReadOnlyAssistantAskCodexUsageBestEffort(input: {

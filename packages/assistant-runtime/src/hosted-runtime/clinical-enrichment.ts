@@ -1,18 +1,15 @@
 import { randomUUID } from "node:crypto";
 
 import type { ReadOnlyAssistantAskProviderUsageEvent } from "@murphai/assistant-engine/assistant-ask";
-import {
-  executeClinicalDocumentExtraction,
-  type ClinicalDocumentExtractionInput,
-} from "@murphai/assistant-engine/clinical-document-extraction";
-import type { ClinicalDocumentExtractionFamily, ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
+import { executeClinicalDocumentExtraction } from "@murphai/assistant-engine/clinical-document-extraction";
+import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
 } from "@murphai/hosted-execution/assistant-usage";
-import { HOSTED_ASSISTANT_GPT_6_LUNA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_TERRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import * as clinicalEnrichmentState from "@murphai/vault-usecases/clinical-enrichment";
 
 import {
@@ -23,11 +20,9 @@ import type { HostedClinicalEnrichmentRunResult } from "./clinical-enrichment-co
 import type { HostedRuntimeUsageRecordPort } from "./platform.ts";
 import type { HostedWorkspaceDurableCheckpointEffect } from "./workspace-runner.ts";
 
-const FAMILIES = ["labs", "measurements", "history"] as const;
 const PAGE_TIMEOUT_MS = 120_000;
 const PROVIDER_RETRY_DELAY_MS = 60_000;
 type ExtractionWork = Extract<clinicalEnrichmentState.ClinicalEnrichmentWork, { status: "extract" }>;
-type FamilyUsage = { family: ClinicalDocumentExtractionFamily; event: ReadOnlyAssistantAskProviderUsageEvent };
 type AttemptStage = "render" | "extract" | "persist";
 
 export interface HostedClinicalEnrichmentInput {
@@ -35,7 +30,6 @@ export interface HostedClinicalEnrichmentInput {
   codexHome: string | null;
   env: Readonly<Record<string, string>>;
   memberId: string;
-  model?: string | null;
   modelProvider?: string | null;
   vaultRoot: string;
   userEnvKeys?: readonly string[];
@@ -86,10 +80,10 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   now: () => string;
 }): Promise<HostedClinicalEnrichmentRunResult> {
   const attemptId = randomUUID();
-  const usages: FamilyUsage[] = [];
-  const peers = new AbortController();
+  const usages: ReadOnlyAssistantAskProviderUsageEvent[] = [];
+  const handoff = new AbortController();
   const deadlineAt = performance.now() + PAGE_TIMEOUT_MS;
-  const signal = AbortSignal.any([input.abortSignal, peers.signal, AbortSignal.timeout(PAGE_TIMEOUT_MS)]);
+  const signal = AbortSignal.any([input.abortSignal, handoff.signal, AbortSignal.timeout(PAGE_TIMEOUT_MS)]);
   let prepared: Awaited<ReturnType<typeof prepareClinicalEnrichmentDocument>> | undefined;
   let handedOff = false;
   let stage: AttemptStage = "render";
@@ -103,9 +97,9 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
     });
     signal.throwIfAborted();
     stage = "extract";
-    const outputs = await extractClinicalEnrichmentFamilies({
-      input, work, prepared, signal, peers, usages, deadlineAt,
-      onHandoff() { handedOff = true; },
+    const outputs = await extractClinicalEnrichmentOutputs({
+      input, work, prepared, signal, usages, deadlineAt,
+      onHandoff() { handedOff = true; handoff.abort(); },
     });
     stage = "persist";
     await state.persistClinicalEnrichmentProposals({
@@ -140,72 +134,51 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
 }
 
 /**
- * Live evaluation on synthetic pages: Luna at high effort matches the member's
- * model on document labs and measurements at a fraction of the cost, but it
- * dropped and inverted document history facts, so history keeps the member's model.
+ * One pass per page or resource covers labs, measurements and history together.
+ * Structured resources are short, so GPT-6 Luna reads them. Document history
+ * needs a stronger reader than Luna, which dropped and inverted history facts in
+ * live evaluation, so pages run GPT-6.1 Terra on the half-price Flex tier for
+ * their first attempt and on the standard tier for a retry.
  */
-function resolveClinicalExtractionLeafModel(work: ExtractionWork, family: ClinicalDocumentExtractionFamily, memberModel: string | null) {
+function resolveClinicalExtractionTarget(work: ExtractionWork) {
   if (work.source.resource) return { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, reasoningEffort: "medium" as const };
-  return family === "history" ? { model: memberModel } : { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, reasoningEffort: "high" as const };
+  return { model: HOSTED_ASSISTANT_TERRA_MODEL, reasoningEffort: "low" as const, serviceTier: work.failures === 0 ? "flex" as const : null };
 }
 
-async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal, peers, usages, deadlineAt, onHandoff }: {
+async function extractClinicalEnrichmentOutputs({ input, work, prepared, signal, usages, deadlineAt, onHandoff }: {
   input: HostedClinicalEnrichmentInput;
   work: ExtractionWork;
   prepared: Awaited<ReturnType<typeof prepareClinicalEnrichmentDocument>>;
   signal: AbortSignal;
-  peers: AbortController;
-  usages: FamilyUsage[];
+  usages: ReadOnlyAssistantAskProviderUsageEvent[];
   deadlineAt: number;
   onHandoff(): void;
 }) {
-  const execute = input.executeExtraction ?? executeClinicalDocumentExtraction;
-  const assignedFamilies: readonly ClinicalDocumentExtractionFamily[] = work.source.resource ? ["all"] : FAMILIES;
-  const results = await Promise.allSettled(assignedFamilies.map(async (family) => {
-    try {
-      const execution: ClinicalDocumentExtractionInput = {
-        abortSignal: signal,
-        async beforeProviderEntry() {
-          signal.throwIfAborted();
-          if (await input.resolveRuntimeAuthority?.() === "handoff") {
-            onHandoff();
-            peers.abort();
-          }
-          signal.throwIfAborted();
-        },
-        codexHome: input.codexHome, env: { ...input.env },
-        ...resolveClinicalExtractionLeafModel(work, family, input.model ?? null), modelProvider: input.modelProvider,
-        workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
-        timeZone: work.timeZone,
-        deadlineAt,
-        family, extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
-        textWindow: prepared.textWindow,
-        scratchRoots: prepared.scratchRoots,
-        onProviderUsage(event) { usages.push({ family, event }); },
-      };
-      return await execute(execution);
-    } catch (error) {
-      // Cancel siblings, then join every admitted leaf before state or scratch changes.
-      peers.abort();
-      throw error;
-    }
-  }));
-  const rejected = results.find((result) => result.status === "rejected");
-  if (rejected?.status === "rejected") throw rejected.reason;
+  const output = await (input.executeExtraction ?? executeClinicalDocumentExtraction)({
+    abortSignal: signal,
+    async beforeProviderEntry() {
+      signal.throwIfAborted();
+      if (await input.resolveRuntimeAuthority?.() === "handoff") onHandoff();
+      signal.throwIfAborted();
+    },
+    codexHome: input.codexHome, env: { ...input.env },
+    ...resolveClinicalExtractionTarget(work), modelProvider: input.modelProvider,
+    workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
+    timeZone: work.timeZone,
+    deadlineAt,
+    family: "all", extractedText: prepared.extractedText, renderedPages: prepared.renderedPages,
+    textWindow: prepared.textWindow,
+    scratchRoots: prepared.scratchRoots,
+    onProviderUsage(event) { usages.push(event); },
+  });
   signal.throwIfAborted();
-  if (work.source.resource) {
-    const result = results[0];
-    if (result?.status !== "fulfilled") throw new Error("Clinical resource extraction did not settle.");
-    return splitClinicalResourceOutput(result.value);
-  }
-  const [labs, measurements, history] = results;
-  if (labs?.status !== "fulfilled" || measurements?.status !== "fulfilled" || history?.status !== "fulfilled") {
-    throw new Error("Clinical extraction families did not settle.");
-  }
-  const historyOutput: ClinicalDocumentExtractionOutput = prepared.coverageWarning
-    ? { ...history.value, status: "blocked", reason: [history.value.reason, prepared.coverageWarning].filter(Boolean).join(" ").slice(0, 500) }
-    : history.value;
-  return { labs: labs.value, measurements: measurements.value, history: historyOutput };
+  const { labs, measurements, history } = splitClinicalExtractionOutput(output);
+  return {
+    labs, measurements,
+    history: prepared.coverageWarning
+      ? { ...history, status: "blocked" as const, reason: [history.reason, prepared.coverageWarning].filter(Boolean).join(" ").slice(0, 500) }
+      : history,
+  };
 }
 
 async function settleClinicalEnrichmentFailure({ input, work, state, stage, error, now }: {
@@ -239,18 +212,18 @@ async function settleClinicalEnrichmentFailure({ input, work, state, stage, erro
 async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRecordPort, signal }: {
   input: HostedClinicalEnrichmentInput;
   attemptId: string;
-  usages: FamilyUsage[];
+  usages: ReadOnlyAssistantAskProviderUsageEvent[];
   usageRecordPort: HostedRuntimeUsageRecordPort;
   signal: AbortSignal | null;
 }): Promise<void> {
-  for (const { family, event } of usages) {
+  for (const event of usages) {
     // A foreground wake interrupts accounting between records; the retained
     // effect replays these deterministic usage ids later without duplicate rows.
     // Shutdown does not, since an unrun effect would be lost with the container.
     signal?.throwIfAborted();
     try {
       const usage = event.usage.usage;
-      const turnId = `turn_clinical_enrichment_${attemptId}.${family}.${event.stage}`;
+      const turnId = `turn_clinical_enrichment_${attemptId}.all.${event.stage}`;
       const record = parseAssistantUsageRecord({
         ...usage,
         credentialSource: resolveAssistantUsageCredentialSource({
@@ -285,7 +258,7 @@ async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRe
   }
 }
 
-function splitClinicalResourceOutput(output: ClinicalDocumentExtractionOutput) {
+function splitClinicalExtractionOutput(output: ClinicalDocumentExtractionOutput) {
   const byKind = (kinds: readonly string[]): ClinicalDocumentExtractionOutput => ({ status: "complete", records: output.records.filter((record) => kinds.includes(record.payload.kind)) });
   return { labs: byKind(["test"]), measurements: byKind(["measurement"]),
     history: { ...output, records: output.records.filter((record) => record.payload.kind === "note" || record.payload.kind === "clinical_assertion") } };

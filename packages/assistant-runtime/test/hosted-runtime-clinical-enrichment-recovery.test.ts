@@ -78,17 +78,18 @@ it.each([
       return { finalMessage: JSON.stringify({ corrections: [] }), jsonEvents: [] };
     }
     initialCalls++;
-    if (initialCalls === 3) {
+    if (initialCalls === 1) {
       advance(initialMs);
       if (cancel) parent.abort();
       releaseInitial();
     }
     await allInitialStarted;
-    return { finalMessage: JSON.stringify(outputs[assignment.family]), jsonEvents: [] };
+    expect(assignment.family).toBe("all");
+    return { finalMessage: JSON.stringify({ status: "complete", records: [...outputs.labs!.records, ...outputs.measurements!.records, ...outputs.history!.records] }), jsonEvents: [] };
   });
   const input: HostedClinicalEnrichmentInput = {
     abortSignal: parent.signal, codexHome: null, env: {}, vaultRoot, memberId: "synthetic-member",
-    state, onStateMutation() {}, resolveRuntimeAuthority: async () => handoff && initialCalls === 3 ? "handoff" : "current",
+    state, onStateMutation() {}, resolveRuntimeAuthority: async () => handoff && initialCalls === 1 ? "handoff" : "current",
     prepareDocument: async () => ({ totalPages: 1, extractedText: text, renderedPages: [], scratchRoots: [], async cleanup() {} }),
   };
   try {
@@ -96,7 +97,7 @@ it.each([
     await writeFile(documentPath, text);
     const result = await runOneHostedClinicalEnrichment(input);
     expect({ result, calls: provider.execute.mock.calls.length, elapsed }).toEqual({
-      result: cancel || handoff ? "idle" : "settled", calls: 3 + correctionCalls,
+      result: cancel || handoff ? "idle" : "settled", calls: 1 + correctionCalls,
       elapsed: initialMs + correctionCalls * (stall ? 57_000 : 25_000),
     });
     expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
@@ -105,8 +106,8 @@ it.each([
     else {
       expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledOnce();
       expect(state.persistClinicalEnrichmentProposals).toHaveBeenCalledWith(expect.objectContaining({ outputs: {
-        labs: outputs.labs, history: outputs.history,
-        measurements: { ...outputs.measurements, status: "blocked", reason: expect.any(String) },
+        labs: outputs.labs, measurements: outputs.measurements,
+        history: { ...outputs.history, status: "blocked", reason: expect.any(String) },
       } }));
     }
   } finally {

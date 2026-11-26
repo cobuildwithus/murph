@@ -1344,11 +1344,12 @@ receipt for one job cannot block another job's prepared application. The
 extractor and mailbox may have different durable queue orders; exact-job claims
 and the existing canonical writer still own exclusion and mutation safety.
 
-A detached controller extracts one document page at a time, with at most three
-confined read-only model leaves for labs, measurements and history and a shared
-120-second provider timeout. The labs and measurements leaves run GPT-6 Luna at
-high reasoning; the history leaf keeps the member's chat model, because Luna
-dropped and inverted history facts in live evaluation. Text and rendered PDF/image
+A detached controller extracts one document page or structured resource at a
+time in one confined read-only model pass covering labs, measurements and
+history, with a 120-second provider timeout. Structured resources run GPT-6
+Luna. Document pages run GPT-6.1 Terra at low reasoning, on the Flex tier for a
+page's first attempt and the standard tier for a retry, because Luna dropped and
+inverted document history facts in live evaluation. Text and rendered PDF/image
 pages are untrusted source evidence. Foreground replies can proceed during
 extraction. The controller aborts and joins its exact owned children before
 snapshots, workspace release, fence loss or shutdown; cancellation leaves
