@@ -162,6 +162,7 @@ test("Settings export decrypts all children sequentially and preserves semantic 
   expect(requestBody).toMatchObject({
     authorization: createAuthorization(),
     browserPublicKeyJwk: { kty: "EC" },
+    includeRecordedActivities: true,
     requestedMetricBuckets: BROWSER_VAULT_METRIC_BUCKET_IDS,
     requestedShards: ["core", "labs", "metricsIndex"],
   });
@@ -193,9 +194,10 @@ test("includes the medal photo after the shares in the approved export", async (
   runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) => fixture.plaintextByCiphertext.get(envelope.ciphertext));
   const share = { awardId: 'opaque-award', status: 'ready', createdAt: '2026-11-01T00:00:00.000Z', failureCode: null, jpegBase64: 'AQID' };
   const photo = { createdAt: '2026-11-02T00:00:00.000Z', jpegBase64: 'BAUG' };
-  const body = [await fixture.response.text(), JSON.stringify({ progressShare: share }), JSON.stringify({ progressSharePhoto: photo })].join('\n') + '\n';
+  const activity = { id: "activity-a", day: "2032-03-04", kind: "lift", elapsedSec: 554 };
+  const body = [await fixture.response.text(), JSON.stringify({ recordedActivities: [activity] }), JSON.stringify({ progressShare: share }), JSON.stringify({ progressSharePhoto: photo })].join('\n') + '\n';
   const result = await loadBrowserVaultExport({ authorization: createAuthorization(), fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(body)) });
-  expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, progressShares: [share], progressSharePhoto: photo });
+  expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, recordedActivities: [activity], progressShares: [share], progressSharePhoto: photo });
 });
 
 test.each([

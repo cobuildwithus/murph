@@ -241,6 +241,7 @@ import {
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
+  "prisma.health_activity",
   "prisma.health_post",
   "prisma.health_post_comment",
   "prisma.health_post_cheer",

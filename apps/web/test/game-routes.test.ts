@@ -427,9 +427,16 @@ describe("weekly game routes", () => {
       mocks.readHome.mockResolvedValue(initial);
       const read = async () => (await routes.home.GET(new Request(`${BASE}/home`))).json();
       vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "synthetic-other");
-      expect(await read()).not.toHaveProperty("flags");
+      vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", initial.me.memberId);
+      const disabled = await read();
+      expect(disabled).not.toHaveProperty("flags");
+      expect(disabled).not.toHaveProperty("record");
       vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", `synthetic-other, ${initial.me.memberId}`);
-      expect(await read()).toMatchObject({ flags: { health_feed: true } });
+      expect(await read()).toMatchObject({ flags: { health_feed: true }, record: { timed: true, route: false } });
+      vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", "synthetic-other");
+      const feedOnly = await read();
+      expect(feedOnly.flags.health_feed).toBe(true);
+      expect(feedOnly).not.toHaveProperty("record");
     });
     it("reads Home inside the request's root unwrap cache", async () => {
       mocks.readHome.mockImplementationOnce(() => {

@@ -743,6 +743,7 @@ model HostedMember {
   progressPics                   GameProgressPic[]
   progressShares                 GameProgressShare[]
   progressSharePhotos            GameProgressSharePhoto[]
+  healthActivities               HealthActivity[]
   healthPosts                    HealthPost[]
   healthPostComments             HealthPostComment[]
   healthPostCheers               HealthPostCheer[]
@@ -3317,10 +3318,26 @@ model HealthPost {
   cheers             HealthPostCheer[]
   comments           HealthPostComment[]
   attachment         HealthPostAttachment?
+  activity           HealthActivity?
 
   @@index([deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@map("health_post")
+}
+
+model HealthActivity {
+  id               String       @id @db.Uuid
+  memberId         String       @map("member_id")
+  day              String       @db.VarChar(10)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  postId           String?      @unique @map("post_id") @db.Uuid
+  deletedAt        DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  summaryEncrypted String       @map("summary_encrypted")
+  member           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  post             HealthPost?  @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, day, id])
+  @@map("health_activity")
 }
 
 model HealthPostCheer {

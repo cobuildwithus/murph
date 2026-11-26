@@ -863,5 +863,57 @@
     "share": {
       "caption_tips": []
     }
+  },
+  {
+    "title": {
+      "number": "3 min",
+      "measure": "cold plunge"
+    },
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_time",
+    "kind": "activity_time",
+    "subtitle": "on a 4 min timer",
+    "source_note": "Recorded on Nov 18, morning",
+    "chart": {
+      "type": "duration",
+      "minutes": 3,
+      "timerMinutes": 4
+    }
+  },
+  {
+    "title": {
+      "number": "3 min",
+      "measure": "cold plunge"
+    },
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_heart_rate",
+    "kind": "activity_heart_rate",
+    "subtitle": "heart rate peaked at 109",
+    "source_note": "Recorded on Nov 18, morning. The line shows each minute's average.",
+    "chart": {
+      "type": "heart_rate",
+      "perMinute": [
+        79,
+        null,
+        99
+      ],
+      "low": {
+        "minute": 1,
+        "bpm": 79
+      },
+      "peak": {
+        "minute": 3,
+        "bpm": 99
+      },
+      "timerMinutes": 4
+    }
   }
 ]

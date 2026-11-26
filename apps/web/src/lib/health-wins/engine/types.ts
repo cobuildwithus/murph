@@ -6,6 +6,34 @@ import type { DailyCharts } from "./daily";
 import type { LabCharts } from "./labs";
 import type { PercentileCharts } from "./percentiles";
 
+export type RecordedActivityKind = "sauna" | "cold_plunge" | "lift" | "other" | "run" | "walk";
+
+export interface RecordedActivitySummary {
+  id: string;
+  kind: RecordedActivityKind;
+  startedAt: string;
+  elapsedSec: number;
+  movingSec: number;
+  timerSec?: number;
+  heartRate?: { avgBpm: number; lowBpm: number; peakBpm: number };
+}
+
+export interface RecordedActivity extends RecordedActivitySummary {
+  heartRate?: NonNullable<RecordedActivitySummary["heartRate"]> & { perMinute?: (number | null)[] };
+}
+
+type MinuteReading = { minute: number; bpm: number };
+interface RecordedCharts {
+  activity_heart_rate: {
+    type: "heart_rate";
+    perMinute: (number | null)[];
+    low: MinuteReading;
+    peak: MinuteReading;
+    timerMinutes?: number;
+  };
+  activity_time: { type: "duration"; minutes: number; timerMinutes?: number };
+}
+
 export type Metric =
   | "sleep_total_min" | "sleep_deep_min" | "sleep_score" | "sleep_efficiency"
   | "rhr_bpm" | "hrv_ms" | "steps" | "distance_km" | "floors" | "vo2max";
@@ -117,7 +145,7 @@ export interface HealthWinsInput {
 }
 
 export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments";
-type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts;
+type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts;
 export type CardKind = keyof Charts;
 
 type DetectedCard = {
