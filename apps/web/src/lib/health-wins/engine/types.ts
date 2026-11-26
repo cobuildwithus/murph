@@ -116,6 +116,8 @@ export interface Game {
   exercise: string;
   total: number;
   unit: string;
+  /** Latest contributing local day. Older aggregate-only summaries can omit it. */
+  latestDay?: string;
   /** Heights use feet from the Progress landmark bank. */
   landmarksPassed: readonly { id: string; height: number }[];
   /** Height is in feet. The remaining exercise amount uses the game's unit. */
@@ -204,9 +206,16 @@ export type HealthWinAchievement = (
   | { kind: "experiment_result"; subject: string }
 ) & { period: string };
 
+export interface SelectedHealthWin {
+  card: CardSpec;
+  eventDate: string;
+}
+
 export interface DetectedHealthWins {
   cards: CardSpec[];
   achievements: Map<string, HealthWinAchievement>;
+  /** Engine rank order with private dates for display ordering after Decisions. */
+  selected: SelectedHealthWin[];
 }
 
 /** Private ranking evidence. Effect and noise use the same units. */
@@ -215,7 +224,10 @@ export interface Candidate {
   achievement?: HealthWinAchievement;
   /** Daily metric behind a trend, threshold, streak, monthly best or record. */
   metric?: Metric;
+  /** Recency evidence used to select cards. */
   date: string;
+  /** Display ordering uses this day when it differs from selection recency. */
+  eventDate?: string;
   effect: number;
   noise: number;
 }

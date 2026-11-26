@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { activityCandidates } from "./activities";
-import { generateHealthWins, type DailySample, type Experiment, type Game, type HealthWinsInput } from "./index";
+import { generateHealthWins, selectHealthWins, type DailySample, type Experiment, type Game, type HealthWinsInput } from "./index";
 import { rankCandidates } from "./ranking";
 import type { Candidate } from "./types";
 
@@ -58,7 +58,7 @@ describe("generateHealthWins", () => {
         { metric: "sleep_score", date, value: score, provider: "garmin" },
       ];
     }).flat());
-    const kinds = (samples: DailySample[]) => generateHealthWins({ member, daily: samples }).map(card => card.kind);
+    const kinds = (samples: DailySample[]) => selectHealthWins({ member, daily: samples }).map(({ card }) => card.kind);
 
     // The sleep score monthly best follows the three higher-priority duration claims.
     expect(kinds(daily)).toEqual(["trend_change", "threshold_count", "streak", "best_month"]);
@@ -105,7 +105,7 @@ describe("generateHealthWins", () => {
       [2, 9, 12].map(day => ({ type, date: `2034-05-${String(day).padStart(2, "0")}`, minutes: 25 })));
     const input = { member, experiments, games, labs, sessions };
     const original = structuredClone(input);
-    const cards = generateHealthWins(input);
+    const cards = selectHealthWins(input).map(({ card }) => card);
     expect(input).toEqual(original);
     expect(cards).toHaveLength(17);
     expect(new Set(cards.map(card => card.id)).size).toBe(cards.length);
@@ -118,8 +118,8 @@ describe("generateHealthWins", () => {
     expect(cards.every(card => card.theme && card.source_note && card.title.number &&
       (card.kind === "experiment_result" || card.title.measure))).toBe(true);
     for (const card of cards) expect(card.source_note).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/u);
-    expect(generateHealthWins({ member, experiments: experiments.reverse(), games: games.reverse(),
-      labs: labs.reverse(), sessions: sessions.reverse() })).toEqual(cards);
+    expect(selectHealthWins({ member, experiments: experiments.reverse(), games: games.reverse(),
+      labs: labs.reverse(), sessions: sessions.reverse() }).map(({ card }) => card)).toEqual(cards);
     const bars = cards.find(card => card.kind === "experiment_result");
     expect(bars?.chart.series.map(bar => bar.mean)).toEqual([76, 77]);
   });
@@ -132,25 +132,52 @@ describe("generateHealthWins", () => {
         proteinG: current ? 135 : 72, fiberG: current ? 46 : 25,
       }));
     });
-    const cards = generateHealthWins({
+    const cards = selectHealthWins({
       member, meals, experiments: [1, 2, 3].map(experiment), games: ["squats", "pushups", "lunges"].map(game),
       sessions: (["hiit", "walk", "sauna"] as const).flatMap(type =>
         [4, 7, 10].map(day => ({ type, date: `2034-05-${String(day).padStart(2, "0")}`, minutes: 28 }))),
-    });
+    }).map(({ card }) => card);
     const diet = cards.filter(card => card.filter === "Diet");
     expect(diet.map(card => card.kind).sort()).toEqual(["best_month", "best_month", "month_total", "month_total", "streak"]);
     expect(cards.slice(0, 12).filter(card => card.filter === "Diet")).toHaveLength(3);
     expect(cards.slice(12).filter(card => card.filter === "Diet")).toHaveLength(2);
   });
 
-  it("caps a crowded filter at 24 distinct claims and orders its remaining cards by score", () => {
+  it("keeps the same 24 claims when a crowded filter has newer achievements than every other filter", () => {
     const experiments = Array.from({ length: 28 }, (_, index) => {
       const day = String(index + 1).padStart(2, "0");
       return { ...experiment(index), intervention: { start: `2034-04-${day}`, end: `2034-04-${day}` } };
     });
-    const cards = generateHealthWins({ member, experiments });
-    expect(cards.map(card => card.title.number))
-      .toEqual(experiments.slice(-24).reverse().map(item => item.title));
+    const labs = (["ldl", "hdl", "triglycerides", "total_chol"] as const).map(analyte => ({
+      analyte, value: 83, unit: "mg/dL", date: "2034-03-22", referenceRange: { low: 48, high: 123 },
+    }));
+    const cards = generateHealthWins({ member, experiments, labs, rank: () => null });
+    // The original balanced selection admitted three older labs and the 21 most recent experiments.
+    const expectedIds = [
+      ...experiments.slice(-21).reverse().map(item =>
+        `experiment_result:${item.slug}:${item.intervention.start.replaceAll("-", "")}:sleep_score`),
+      "lab-range-hdl-20340322", "lab-range-ldl-20340322", "lab-range-total_chol-20340322",
+    ];
+    expect(cards.map(card => card.id)).toEqual(expectedIds);
+  });
+
+  it("shows the latest achievement first across kinds and preserves score order on the same day", () => {
+    const input: HealthWinsInput = {
+      member, rank: () => null,
+      sessions: ["2034-05-01", "2034-05-08", "2034-05-12"].map(date => ({ type: "walk", minutes: 20, date })),
+      experiments: [{ ...experiment(1), intervention: { start: "2034-04-30", end: "2034-05-07" } }],
+      labs: [
+        { analyte: "ldl", date: "2034-01-15", unit: "mg/dL", value: 130 },
+        { analyte: "ldl", date: "2034-03-09", unit: "mg/dL", value: 128 },
+        { analyte: "ldl", date: "2034-05-07", unit: "mg/dL", value: 103 },
+      ],
+    };
+    const cards = generateHealthWins(input);
+    expect(cards.map(card => card.kind)).toEqual(["sessions", "lab_change", "experiment_result"]);
+    for (const card of cards) {
+      expect(card).not.toHaveProperty("date");
+      expect(card).not.toHaveProperty("eventDate");
+    }
   });
 
   it("keeps a distance trend and the highest monthly mileage as distinct claims", () => {
@@ -169,6 +196,15 @@ describe("generateHealthWins", () => {
     const result = generateHealthWins({ member, games: [first, second, first] });
     expect(result.map(card => card.kind)).toEqual(["game_streak"]);
     expect(generateHealthWins({ member, games: [second, first] })).toEqual(result);
+  });
+
+  it("dates an identical game total by the latest known contribution in either input order", () => {
+    const summary = game("squats");
+    const games = [summary, { ...summary, latestDay: "2034-05-02" }, { ...summary, latestDay: "2034-05-09" }];
+    for (const input of [games, [...games].reverse()]) {
+      const selected = selectHealthWins({ member, games: input });
+      expect(selected.filter(({ card }) => card.kind === "game_climb").map(win => win.eventDate)).toEqual(["2034-05-09"]);
+    }
   });
 });
 

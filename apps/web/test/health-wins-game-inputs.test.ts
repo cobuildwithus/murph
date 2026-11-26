@@ -94,7 +94,7 @@ describe("game inputs for health wins", () => {
     const runs = { days: [{ date: "2026-11-01", km: 15 }, { date: "2026-11-02", km: 3 }, { date: "2026-11-03", km: 2.5 }] };
     const result = gameWinInputs(memberId, today, snapshot, runs);
     // Progress counts meters; the card speaks miles, like the engine's other distance cards.
-    expect(result.games[0]).toMatchObject({ exercise: "run", unit: "miles", total: 6100 / 1609.344 });
+    expect(result.games[0]).toMatchObject({ exercise: "run", unit: "miles", total: 6100 / 1609.344, latestDay: "2026-11-03" });
     expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, games: result.games })
       .find(card => card.kind === "game_climb")?.title).toEqual({ number: "4 miles", measure: "running" });
     expect(result.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02" });

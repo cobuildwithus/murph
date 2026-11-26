@@ -1,5 +1,7 @@
 import { dayNumber } from "./shared";
-import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthWinAchievement } from "./types";
+import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthWinAchievement, SelectedHealthWin } from "./types";
+
+export type { SelectedHealthWin } from "./types";
 
 const themes = {
   Sleep: "sleep", Fitness: "fitness", Heart: "heart",
@@ -44,6 +46,9 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     const previous = unique.get(id);
     if (previous === undefined) unique.set(id, candidate);
     else if (previous && JSON.stringify(previous.card) !== JSON.stringify(candidate.card)) unique.set(id, null);
+    else if (previous && candidate.eventDate && candidate.eventDate > (previous.eventDate ?? "")) {
+      unique.set(id, { ...previous, eventDate: candidate.eventDate });
+    }
   }
   const groups = new Map<string, Scored[]>();
   for (const candidate of unique.values()) {
@@ -79,9 +84,14 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     if (firstForFilter || selected.length < 24 - missingFilters.size) selected.push(candidate);
   }
   const achievements = new Map<string, HealthWinAchievement>();
-  const cards = selected.map(({ card, achievement }) => {
+  const ranked = selected.map(({ card, achievement, eventDate, date }) => {
     if (achievement) achievements.set(card.id, achievement);
-    return decorateCard(card);
+    return { card: decorateCard(card), eventDate: eventDate ?? date };
   });
-  return { cards, achievements };
+  return { cards: ranked.map(({ card }) => card), achievements, selected: ranked };
+}
+
+/** The stable sort keeps the existing rank for achievements on the same day. */
+export function newestHealthWinsFirst(ranked: readonly SelectedHealthWin[]): CardSpec[] {
+  return [...ranked].sort((a, b) => b.eventDate.localeCompare(a.eventDate)).map(({ card }) => card);
 }
