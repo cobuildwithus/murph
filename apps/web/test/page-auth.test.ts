@@ -546,6 +546,8 @@ describe("hosted dashboard page auth", () => {
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
     clinicalRecordMessageMode: "notice",
+    runtimeDormantAt: null,
+    runtimeLastInteractionAt: null,
     clinicalRecordMessageRevision: 0,
     companionLastContactAt: null,
     companionAppPlatform: null,

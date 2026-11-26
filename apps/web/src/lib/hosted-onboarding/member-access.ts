@@ -374,6 +374,7 @@ export function activeHostedMemberAccessWithParticipantsWhere(now = new Date(), 
 
 export async function readActiveHostedMemberAccess(input: {
   memberId: string;
+  forRuntimeStart?: boolean;
   now?: Date;
   prisma?: HostedOnboardingReadClient;
 }): Promise<boolean> {
@@ -381,10 +382,14 @@ export async function readActiveHostedMemberAccess(input: {
   // Ordinary access is one statement. Game-only rooms additionally require
   // the exact observed pair, including the bound announcement room itself.
   const member = await prisma.hostedMember.findUnique({
-    select: { id: true },
-    where: { ...activeHostedMemberAccessWithParticipantsWhere(input.now, false), id: input.memberId },
+    select: { id: true, ...(input.forRuntimeStart ? { runtimeDormantAt: true } : {}) },
+    where: {
+      ...activeHostedMemberAccessWithParticipantsWhere(input.now, false),
+      id: input.memberId,
+    },
   });
-  return member !== null || (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
+  if (member) return !input.forRuntimeStart || member.runtimeDormantAt === null;
+  return (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
 }
 
 /** Strict personal or existing room sponsorship for spending subsidies. This

@@ -32,6 +32,7 @@ import {
   type HostedRuntimeIdentity,
   type HostedRuntimeOwner,
 } from "@/src/lib/hosted-execution/runtime-owner";
+import { markDormantRuntimeAfterStop, recordRuntimeMemberInteraction } from "@/src/lib/hosted-execution/runtime-dormancy";
 import { executeHostedRuntimeOwnerCommand } from "@/src/lib/hosted-execution/runtime-owner-control";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
@@ -207,6 +208,63 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect(await send({ operation: "accepted", ...runtime })).toMatchObject({ status: "updated" });
     return { userId, owner, runtime, target, send };
   }
+
+  it.each(["release", "target_retired"] as const)("parks every mode only after a confirmed stop through %s", async path => {
+    const { userId, runtime, send, target } = await launchedRuntime();
+    const old = new Date(Date.now() - 61 * 86_400_000);
+    await observer.hostedMember.update({ where: { id: userId }, data: { createdAt: old, companionLastContactAt: new Date() } });
+    expect(await send({ operation: "target_retired", runnerContainerName: "obsolete-slot" })).toMatchObject({ status: "stale" });
+    expect(await send({ operation: "claim", processingMode: "default" })).toMatchObject({ status: "existing" });
+    if (path === "release") {
+      await send({ operation: "retire", ...runtime, completed: false });
+      await send({ operation: "release", ...runtime, runnerContainerName: target });
+    } else {
+      await send({ operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false });
+      expect((await first.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeNull();
+      await send({ operation: "target_retired", runnerContainerName: target });
+    }
+    await recordRuntimeMemberInteraction(first, userId, old);
+    for (const processingMode of ["default", "system_mailbox", "inbox_media_retention"] as const) {
+      expect(await send({ operation: "claim", processingMode })).toMatchObject({ status: "blocked", blockedReason: "admission" });
+    }
+    await recordRuntimeMemberInteraction(first, userId);
+    await send({ operation: "target_retired", runnerContainerName: target });
+    expect(await send({ operation: "claim", processingMode: "default" })).toMatchObject({ status: "claimed" });
+  });
+
+  it("honors the most recent interaction to the millisecond at the 60-day boundary", async () => {
+    const id = await member();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 60 * 86_400_000);
+    await observer.hostedMember.update({ where: { id }, data: { createdAt: cutoff, runtimeLastInteractionAt: cutoff } });
+    await first.$transaction(tx => markDormantRuntimeAfterStop(tx, id, new Date(now.getTime() - 1)));
+    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormantAt).toBeNull();
+    await first.$transaction(tx => markDormantRuntimeAfterStop(tx, id, now));
+    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormantAt).toBeInstanceOf(Date);
+  });
+
+  it("a returning member wins a concurrent shutdown", async () => {
+    const { userId, target } = await launchedRuntime();
+    await first.hostedMember.update({ where: { id: userId }, data: { createdAt: new Date(Date.now() - 70 * 86_400_000) } });
+    await Promise.all([
+      recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: target }),
+      recordRuntimeMemberInteraction(second, userId),
+    ]);
+    expect(await claimHostedRuntime({ prisma: observer, userId, processingMode: "default" })).toMatchObject({ status: "claimed" });
+  });
+
+  it("uses retained inbound history for older members and ignores outbound-only days", async () => {
+    const { userId, target } = await launchedRuntime();
+    await first.hostedMember.update({ where: { id: userId }, data: { createdAt: new Date(Date.now() - 70 * 86_400_000) } });
+    const now = new Date();
+    const dayUtc = new Date(now.toISOString().slice(0, 10));
+    await first.hostedLinqDailyState.create({ data: { memberId: userId, dayUtc, firstSeenAt: now, lastSeenAt: now, inboundCount: 1 } });
+    await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: target });
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeNull();
+    await first.hostedLinqDailyState.update({ where: { memberId_dayUtc: { memberId: userId, dayUtc } }, data: { inboundCount: 0, outboundCount: 1 } });
+    await observer.$transaction(tx => markDormantRuntimeAfterStop(tx, userId, now));
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeInstanceOf(Date);
+  });
 
   async function gameFundingRooms(now: Date) {
     const primary = await member();

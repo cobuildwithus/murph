@@ -723,6 +723,7 @@ function createPrismaStub(input: {
       }),
     },
     hostedMember: {
+      updateMany: vi.fn(async () => ({ count: 1 })),
       findUnique: vi.fn(async (findInput: unknown) => {
         expect(findInput).toMatchObject({ where: { id: TEST_USER_ID } });
         recordDatastoreCall("access-authority");

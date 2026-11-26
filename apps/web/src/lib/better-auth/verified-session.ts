@@ -1,4 +1,5 @@
 import "server-only";
+import { recordSignedInRuntimeActivity } from "../hosted-execution/runtime-return";
 import { randomUUID } from "node:crypto";
 import { betterAuth, type BetterAuthOptions, type BetterAuthPlugin } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
@@ -18,7 +19,7 @@ export async function commitHostedAuthSession(input: {
   primaryAuthenticatedAt: Date | null; primaryAuthenticationFactor: HostedPrimaryAuthenticationFactor;
   commitMember(tx: Prisma.TransactionClient): Promise<void>;
 }) {
-  return input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
+  const issued = await input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
     await input.commitMember(tx);
     await makeHostedAuthSessionRoomTx(tx, input.memberId);
     const issuer = {
@@ -49,4 +50,6 @@ export async function commitHostedAuthSession(input: {
     const result = await auth.api.issueHostedSession({ returnHeaders: true });
     return { memberId: input.memberId, ...result.response, headers: result.headers };
   }), { maxWait: 5_000, timeout: 10_000 });
+  await recordSignedInRuntimeActivity(input.prisma, input.memberId);
+  return issued;
 }

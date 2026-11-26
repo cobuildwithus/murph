@@ -692,6 +692,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     },
     wakeHandoffs: [{
       conversationIsGroup: !summary.isDirect,
+      groupSenderMemberId: mailboxEnvelope.message.senderMemberId,
       eventId, mailboxItemId: mailboxAppend.item.id, source: "telegram", userId: runtimeMemberId,
       wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
     }],

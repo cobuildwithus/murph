@@ -106,6 +106,27 @@ describe.skipIf(!runPostgresProof)(
       expect(await recover()).toMatchObject({ handoffAttempted: 0 });
     });
 
+    it("recovers a returned member when an entire older page is parked", async () => {
+      const client = requirePrisma(prisma);
+      const now = new Date("2041-10-19T17:00:00Z");
+      const parked = Array.from({ length: 25 }, () => createId("parked"));
+      const returned = createId("returned");
+      memberIds.push(...parked, returned);
+      await client.hostedMember.createMany({ data: [...parked, returned].map(id => ({
+        id, billingStatus: "active", runtimeDormantAt: id === returned ? null : now,
+      })) });
+      await client.hostedMailboxItem.createMany({ data: [...parked, returned].map((userId, index) => mailboxItem({
+        id: createId("recovery"), userId, kind: userId === returned ? "runtime.maintenance-requested" : "device-sync.wake",
+        createdAt: new Date(now.getTime() - (50 - index) * 60_000),
+      })) });
+      const requestHandoff = buildRequestHandoff([]);
+      const recover = () => runHostedPreferenceHandoffSweeper({ now, requestHandoff, logger: buildLogger() });
+      expect(await recover()).toMatchObject({ handoffAttempted: 1, handoffAccepted: 1 });
+      expect(requestHandoff).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: returned }));
+      await client.hostedWorkspace.create({ data: { userId: returned, redactedStatusJson: { hostedMailboxSystemImportedSeq: "1" } } });
+      expect(await recover()).toMatchObject({ handoffAttempted: 0 });
+    });
+
     it("excludes expired participant leases before the bounded page", async () => {
       const client = requirePrisma(prisma);
       const now = new Date();

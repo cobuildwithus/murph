@@ -1,9 +1,11 @@
+import { restoreRuntimeForGroupSender } from "../hosted-execution/runtime-return";
+import { getPrisma } from "../prisma";
 import {
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
   type HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type {
   HostedDirectRuntimeWakeTiming,
 } from "../hosted-execution/direct-runtime-wake";
@@ -48,6 +50,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
   wakeHandoff?: HostedWebhookWakeHandoff;
+  prisma?: PrismaClient;
 }): Promise<HostedWebhookWakeHandoffResult | null> {
   if (!input.wakeHandoff) {
     return null;
@@ -125,6 +128,10 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
       errorName,
     });
     throw error;
+  } finally {
+    if (input.wakeHandoff.groupSenderMemberId) {
+      await restoreRuntimeForGroupSender(input.prisma ?? getPrisma(), input.wakeHandoff.groupSenderMemberId);
+    }
   }
 
   scheduleHostedWebhookIngressLatencyTraceWritesAfterResponse({

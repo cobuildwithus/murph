@@ -30,12 +30,12 @@ describe("companion contact evidence", () => {
   });
   it("uses server receipt time under member authority and preserves foreground evidence on background contact", async () => {
     const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) },
-      hostedMember: { update: vi.fn(), findUniqueOrThrow: vi.fn().mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null }) } };
+      hostedMember: { update: vi.fn().mockResolvedValue({ runtimeDormantAt: null }), findUniqueOrThrow: vi.fn().mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null }) } };
     m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
     await recordCompanionHeartbeat("synthetic", "foreground");
-    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date) } });
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ select: { runtimeDormantAt: true }, where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date) } });
     await recordCompanionHeartbeat("synthetic", "background");
-    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ select: { runtimeDormantAt: true }, where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
     expect(await readRuntimeCompanionPresence("synthetic", null)).toEqual({ status: "unknown", lastContactAt: null, lastForegroundAt: null });
     expect(m.runtime).toHaveBeenCalledExactlyOnceWith(tx, "synthetic", null);
     tx.hostedMember.update.mockClear();
@@ -45,19 +45,19 @@ describe("companion contact evidence", () => {
   });
   it("writes client info in the contact update, preserves it for legacy heartbeats, and clears absent optional values", async () => {
     const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) },
-      hostedMember: { update: vi.fn() } };
+      hostedMember: { update: vi.fn().mockResolvedValue({ runtimeDormantAt: null }) } };
     m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
     const clientInfo = { platform: "ios" as const, version: "1.1.22", build: "109", osVersion: "18.1.0", deviceModel: "iPhone16,2" };
     await recordCompanionHeartbeat("synthetic", "foreground", clientInfo);
-    expect(tx.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ where: { id: "synthetic" }, data: {
+    expect(tx.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ select: { runtimeDormantAt: true }, where: { id: "synthetic" }, data: {
       companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date),
       companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
       companionOsVersion: "18.1.0", companionDeviceModel: "iPhone16,2",
     } });
     await recordCompanionHeartbeat("synthetic", "background", null);
-    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ select: { runtimeDormantAt: true }, where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
     await recordCompanionHeartbeat("synthetic", "background", { ...clientInfo, osVersion: null, deviceModel: null });
-    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: {
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ select: { runtimeDormantAt: true }, where: { id: "synthetic" }, data: {
       companionLastContactAt: expect.any(Date), companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
       companionOsVersion: null, companionDeviceModel: null,
     } });

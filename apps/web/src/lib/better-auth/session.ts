@@ -1,4 +1,5 @@
 import "server-only";
+import { recordSignedInRuntimeActivity } from "../hosted-execution/runtime-return";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isNativeError } from "node:util/types";
@@ -45,6 +46,7 @@ export async function readHostedAuthSession(input: {
   // Suspension fences runtime access, but must not prevent an authenticated
   // owner from finishing deletion after a provider failure.
   if (input.purpose !== "account-deletion") assertHostedMemberNotSuspended(member);
+  if (input.transport === "browser" && !input.purpose) await recordSignedInRuntimeActivity(input.prisma, user.id);
   const proof: HostedAuthSessionProof = {
     credentialDigest: credentialDigest(input.credential), expiresAt: current.expiresAt, row,
   };
