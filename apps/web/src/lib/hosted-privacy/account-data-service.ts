@@ -14,7 +14,7 @@ import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
-  ComposioConnectedAppsRequestError,
+  isNonBlockingComposioRevokeError,
   createComposioConnectedAppsClient,
   type ComposioConnectedAccount,
 } from "../connected-apps/composio";
@@ -3825,11 +3825,6 @@ function isComposioAccountDeletable(account: ComposioConnectedAccount): boolean 
 
 function isComposioAccountRevokable(account: ComposioConnectedAccount): boolean {
   return account.status.toUpperCase() === "ACTIVE";
-}
-
-function isNonBlockingComposioRevokeError(error: unknown): boolean {
-  return error instanceof ComposioConnectedAppsRequestError
-    && (error.status === 400 || error.status === 409);
 }
 
 function formatConnectedAppProviderLabel(account: ComposioConnectedAccount): string {

@@ -51,6 +51,7 @@ interface MemberRow {
 }
 
 interface IntentRow {
+  createdAt: Date;
   alias: string | null;
   claimHash: string;
   completedAt: Date | null;
@@ -96,6 +97,7 @@ interface FakePrisma {
     options?: unknown,
   ) => Promise<T>;
   hostedConnectedAppConnectIntent: {
+    count: (input: { where: { memberId: string; createdAt: { gte: Date } }; take: number }) => Promise<number>;
     create: (input: {
       data: {
         alias: string | null;
@@ -172,8 +174,12 @@ class ConnectedAppsPrismaHarness {
       $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback) => callback(prisma)),
       hostedConnectedAppConnectIntent: {
+        count: vi.fn(async ({ where, take }) => [...this.intents.values()]
+          .filter(row => row.memberId === where.memberId && row.createdAt >= where.createdAt.gte)
+          .slice(0, take).length),
         create: vi.fn(async ({ data }) => {
           const row: IntentRow = {
+            createdAt: new Date(),
             alias: data.alias,
             claimHash: data.claimHash,
             completedAt: null,
@@ -299,6 +305,37 @@ describe("connected-app service", () => {
     vi.unstubAllEnvs();
   });
 
+  it("allows the 15th recent intent for a member and refuses the 16th companion start before provider egress", async () => {
+    const harness = installPrismaHarness();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-04T10:00:00Z"));
+    await createConnectClaim("hbm_member");
+    vi.setSystemTime(new Date("2026-05-04T10:45:01Z"));
+    await createConnectClaim("hbm_other");
+    for (let i = 0; i < 14; i++) await createConnectClaim("hbm_member");
+    const fetch = vi.fn(async (url: string) => new URL(url).pathname.endsWith("/link")
+      ? jsonResponse({ connected_account_id: "ca_crater", redirect_url: "https://provider.example.test/authorize" })
+      : jsonResponse({ session_id: "session_crater" }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect((await startCompanionGmail("ios")).status).toBe(200);
+      fetch.mockClear();
+      const size = harness.intents.size;
+      const refused = await startCompanionGmail("ios");
+      expect(refused.status).toBe(429);
+      expect((await refused.json()).error).toMatchObject({
+        code: "CONNECTED_APPS_START_LIMIT_REACHED", retryable: true,
+        message: "Too many sign-ins started. Try again in a little while.",
+      });
+      expect(harness.intents.size).toBe(size);
+      expect(fetch).not.toHaveBeenCalled();
+      await createConnectClaim("hbm_member");
+      expect(harness.intents.size).toBe(size + 1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([["ios", "ai.withmurph.app"], ["ios-dev", "ai.withmurph.app.dev"]])(
     "starts a bearer connection and returns verified success or error to %s", async (appReturn, scheme) => {
       const harness = installPrismaHarness();
@@ -319,10 +356,7 @@ describe("connected-app service", () => {
         return verify(url, init);
       });
       try {
-        const started = await startCompanion(new Request("https://hosted.example.test/api/connected-apps/companion/apps/gmail/start", {
-          method: "POST", headers: { authorization: `Bearer murph_auth_v1.${"c".repeat(32)}` },
-          body: JSON.stringify({ appReturn }),
-        }), { params: Promise.resolve({ appId: "gmail" }) });
+        const started = await startCompanionGmail(appReturn);
         expect(started.status).toBe(200);
         expect(await started.json()).toEqual({ authorizationUrl: "https://provider.example.test/authorize" });
         const callback = new URL(callbackUrl);
@@ -2121,6 +2155,7 @@ describe("connected-app service", () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
     const harness = installPrismaHarness();
     harness.intents.set("completed-gmail", {
+      createdAt: new Date("2026-08-31T07:35:00.000Z"),
       alias: "work",
       claimHash: "completed-gmail",
       completedAt: new Date("2026-08-31T07:45:00.000Z"),
@@ -2410,6 +2445,13 @@ describe("connected-app service", () => {
     });
   });
 });
+
+function startCompanionGmail(appReturn: string) {
+  return startCompanion(new Request("https://hosted.example.test/api/connected-apps/companion/apps/gmail/start", {
+    method: "POST", headers: { authorization: `Bearer murph_auth_v1.${"c".repeat(32)}` },
+    body: JSON.stringify({ appReturn }),
+  }), { params: Promise.resolve({ appId: "gmail" }) });
+}
 
 function installPrismaHarness(): ConnectedAppsPrismaHarness {
   const harness = new ConnectedAppsPrismaHarness();

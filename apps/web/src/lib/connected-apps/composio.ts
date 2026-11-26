@@ -81,6 +81,11 @@ export class ComposioConnectedAppsRequestError extends Error {
   }
 }
 
+export function isNonBlockingComposioRevokeError(error: unknown): boolean {
+  return error instanceof ComposioConnectedAppsRequestError
+    && (error.status === 400 || error.status === 409);
+}
+
 export function createComposioConnectedAppsClient(input: {
   config: HostedConnectedAppsConfig;
   fetchImpl?: typeof fetch;
@@ -283,13 +288,10 @@ export function createComposioConnectedAppsClient(input: {
             "Composio returned an invalid account-list response.",
           );
         }
-        const parsedAccounts = payload.items.flatMap(parseConnectedAccount);
-        if (parsedAccounts.length !== payload.items.length) {
-          throw new ComposioConnectedAppsRequestError(
-            "Composio returned an invalid account-list response.",
-          );
+        for (const item of payload.items) {
+          const account = parseConnectedAccount(item, inputList.userId);
+          if (account) accounts.push(account);
         }
-        accounts.push(...parsedAccounts);
         cursor = normalizeNonEmptyString(payloadRecord?.next_cursor);
       } while (cursor);
 
@@ -353,15 +355,18 @@ function readSuccessfulDirectExecutePayload(
 
 function parseConnectedAccount(
   item: Composio.ConnectedAccountListResponse["items"][number],
-): ComposioConnectedAccount[] {
+  userId: string,
+): ComposioConnectedAccount | null {
+  // Composio deprecates the returned user_id. When omitted, the scoped query supplies ownership.
+  if (item?.user_id != null && item.user_id !== userId) return null;
   const record = asRecord(item);
   const toolkit = asRecord(record?.toolkit);
   const id = normalizeNonEmptyString(record?.id);
   const toolkitSlug = normalizeNonEmptyString(toolkit?.slug);
   if (!id || !toolkitSlug) {
-    return [];
+    throw new ComposioConnectedAppsRequestError("Composio returned an invalid account-list response.");
   }
-  return [{
+  return {
     alias: normalizeNonEmptyString(record?.alias),
     createdAt: normalizeNonEmptyString(record?.created_at),
     id,
@@ -374,7 +379,7 @@ function parseConnectedAccount(
       slug: toolkitSlug,
     },
     wordId: normalizeNonEmptyString(record?.word_id),
-  }];
+  };
 }
 
 async function requestComposio<T>(request: () => Promise<T>): Promise<T> {

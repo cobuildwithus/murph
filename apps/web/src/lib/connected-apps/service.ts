@@ -17,6 +17,7 @@ import {
 import {
   ComposioConnectedAppsRequestError,
   createComposioConnectedAppsClient,
+  isNonBlockingComposioRevokeError,
   type ComposioConnectedAccount,
 } from "./composio";
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "./connect-intent-ownership";
@@ -51,6 +52,8 @@ const CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE =
   "That request returned more than Murph can read at once. Ask for fewer results, a narrower time range, or one item at a time.";
 const CONNECTED_APP_INTENT_PREFIX = "cai_";
 const CONNECTED_APP_INTENT_BYTES = 24;
+const COMPANION_START_LIMIT = 15;
+const COMPANION_START_WINDOW_MS = 45 * 60 * 1000;
 const CONNECTED_APP_INTENT_TTL_MS = 15 * 60 * 1000;
 
 export interface HostedConnectedAppIntent {
@@ -343,7 +346,7 @@ export async function startCompanionConnectedApp(input: {
   const toolkit = assertHostedConnectedAppToolkit(readHostedConnectedAppsConfig(), input.toolkit);
   const prisma = getPrisma();
   const { claim } = await createHostedConnectedAppIntent({
-    alias: null, memberId: input.memberId, prisma, toolkit,
+    alias: null, memberId: input.memberId, prisma, source: "companion", toolkit,
   });
   const { redirectUrl } = await startHostedConnectedAppConnection({
     appReturn: input.appReturn, claim, memberId: input.memberId, prisma,
@@ -541,6 +544,7 @@ async function executeConnectedAppsManagement(input: {
       const toolkit = assertHostedConnectedAppToolkit(input.config, input.input.toolkit);
       const link = await createHostedConnectedAppIntent({
         alias: input.input.alias ?? null,
+        source: "assistant",
         memberId: input.memberId,
         prisma: input.prisma,
         toolkit,
@@ -619,7 +623,14 @@ export async function disconnectCompanionConnectedApp(memberId: string, accountI
     const accounts = await client.listAccounts({ accountIds: [accountId], statuses: null, toolkits: null, userId: memberId });
     const account = accounts.find(candidate => candidate.id === accountId);
     if (!account) throw connectedAppAccountNotFound();
-    await client.disconnectAccount(account.id);
+    if (account.status === "ACTIVE") {
+      await client.disconnectAccount(account.id).catch(error => {
+        if (!isNonBlockingComposioRevokeError(error)) throw error;
+        return client.deleteAccount(account.id);
+      });
+    } else {
+      await client.deleteAccount(account.id);
+    }
   } catch (error) {
     throw mapConnectedAppsError(error);
   }
@@ -692,6 +703,7 @@ async function ensureHostedConnectedAppsSession(input: {
 }
 
 async function createHostedConnectedAppIntent(input: {
+  source: "assistant" | "companion";
   alias: string | null;
   memberId: string;
   prisma: PrismaClient;
@@ -716,6 +728,20 @@ async function createHostedConnectedAppIntent(input: {
       memberId: input.memberId,
       prisma: tx,
     });
+    if (input.source === "companion") {
+      const recent = await tx.hostedConnectedAppConnectIntent.count({
+        where: { memberId: input.memberId, createdAt: { gte: new Date(Date.now() - COMPANION_START_WINDOW_MS) } },
+        take: COMPANION_START_LIMIT,
+      });
+      if (recent >= COMPANION_START_LIMIT) {
+        throw hostedOnboardingError({
+          code: "CONNECTED_APPS_START_LIMIT_REACHED",
+          httpStatus: 429,
+          retryable: true,
+          message: "Too many sign-ins started. Try again in a little while.",
+        });
+      }
+    }
     await tx.hostedConnectedAppConnectIntent.create({
       data: {
         alias: input.alias,

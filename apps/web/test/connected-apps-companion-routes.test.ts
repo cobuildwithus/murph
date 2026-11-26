@@ -41,13 +41,15 @@ function account(id: string, toolkit: string, alias: string | null, createdAt: s
   return { id, user_id: owner, status: "ACTIVE", toolkit: { slug: toolkit }, alias, created_at: createdAt, word_id: "mint-orbit" };
 }
 
-function provider() {
+function provider({ accountStatus = "ACTIVE", revokeStatus = 200 } = {}) {
   const items = [
     account("ca_later", "gmail", "Archive", "2026-06-01"),
     account("ca_legacy", "paper_stack", null, "2026-07-01"),
     account("ca_older", "gmail", null, "2026-04-01"),
     account("ca_elsewhere", "gmail", null, "2026-02-01", "member_satellite"),
   ];
+  const legacy = items[1]!;
+  legacy.status = accountStatus;
   const calls: string[] = [];
   vi.stubGlobal("fetch", async (input: string | URL, init: RequestInit) => {
     const url = new URL(input);
@@ -59,14 +61,22 @@ function provider() {
       const id = query.get("connected_account_ids");
       calls.push(id ? `lookup ${id}` : "inventory");
       if (!id) expect(query.getAll("statuses")).toEqual(["ACTIVE"]);
-      const visible = items.filter(a => a.user_id === query.get("user_ids") && (!id || id === a.id)
+      // Simulate a provider that accepts but ignores the user_ids filter.
+      const visible = items.filter(a => (!id || id === a.id)
         && (!query.has("statuses") || a.status === query.get("statuses")));
       return Response.json({ items: visible, next_cursor: null });
+    }
+    if (init.method === "DELETE") {
+      expect(url.pathname).toBe("/api/v3.1/connected_accounts/ca_legacy");
+      calls.push("delete ca_legacy");
+      items.splice(items.indexOf(legacy), 1);
+      return Response.json({});
     }
     expect(init.method).toBe("POST");
     expect(url.pathname).toBe("/api/v3.1/connected_accounts/ca_legacy/revoke");
     calls.push("revoke ca_legacy");
-    items[1]!.status = "REVOKED";
+    if (revokeStatus !== 200) return Response.json({}, { status: revokeStatus });
+    legacy.status = "REVOKED";
     return Response.json({});
   });
   return calls;
@@ -130,7 +140,14 @@ describe("companion personal connected apps", () => {
     expect((await begin("gmail", "ios")).status).toBe(403);
     expect((await get()).status).toBe(403);
   });
-  it.each(["ca_elsewhere", "ca_missing", "Archive", "mint-orbit", "CA_LEGACY"])("refuses non-owned or inexact ID %s", async id => {
+  it("returns 404 without revoking when the provider returns the requested ID with another owner", async () => {
+    const calls = provider();
+    const response = await remove("ca_elsewhere");
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.code).toBe("CONNECTED_APPS_ACCOUNT_NOT_FOUND");
+    expect(calls).toEqual(["lookup ca_elsewhere"]);
+  });
+  it.each(["ca_missing", "Archive", "mint-orbit", "CA_LEGACY"])("refuses non-owned or inexact ID %s", async id => {
     const calls = provider();
     expect((await remove(id)).status).toBe(404);
     expect(calls).toEqual([`lookup ${id}`]);
@@ -147,6 +164,27 @@ describe("companion personal connected apps", () => {
     expect(calls).toEqual(["lookup ca_legacy", "revoke ca_legacy", "inventory"]);
     expect(mocks.access).not.toHaveBeenCalled();
     expect(mocks.active).not.toHaveBeenCalled();
+  });
+  it.each([400, 409])("deletes the account after revoke HTTP %i and refreshes the list", async revokeStatus => {
+    const calls = provider({ revokeStatus });
+    const response = await remove("ca_legacy");
+    expect(response.status).toBe(200);
+    expect((await response.json()).apps.map((app: { id: string }) => app.id)).toEqual(["notion", "gmail"]);
+    expect(calls).toEqual(["lookup ca_legacy", "revoke ca_legacy", "delete ca_legacy", "inventory"]);
+  });
+  it("deletes an inactive owned account directly", async () => {
+    const calls = provider({ accountStatus: "EXPIRED" });
+    expect((await remove("ca_legacy")).status).toBe(200);
+    expect(calls).toEqual(["lookup ca_legacy", "delete ca_legacy", "inventory"]);
+  });
+  it("propagates revoke 5xx without deleting or listing accounts", async () => {
+    const calls = provider({ revokeStatus: 502 });
+    const response = await remove("ca_legacy");
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error.code).toBe("CONNECTED_APPS_PROVIDER_UNAVAILABLE");
+    expect(body).not.toHaveProperty("apps");
+    expect(calls).toEqual(["lookup ca_legacy", "revoke ca_legacy"]);
   });
   it("backs every catalog write promise with the matching toolkit policy and ships each logo", () => {
     const rows = presentCompanionConnectedApps(readHostedConnectedAppsConfig({ COMPOSIO_API_KEY: "test" }), []).apps;
