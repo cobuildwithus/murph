@@ -22,6 +22,14 @@ export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env
   return isGameEnabled(env) && lists(env.MURPH_HEALTH_FEED_MEMBER_IDS, memberId);
 }
 
+export function isHealthDietEnabled(memberId: string, env: FlagEnv = process.env): boolean {
+  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_DIET_MEMBER_IDS, memberId);
+}
+
+export function isHealthPayoffEnabled(memberId: string, env: FlagEnv = process.env): boolean {
+  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_PAYOFF_MEMBER_IDS, memberId);
+}
+
 /** Only explicitly enrolled feed members can receive pilot texts. */
 export function healthWinTextMemberIds(env: FlagEnv = process.env): string[] {
   const entries = (env.MURPH_HEALTH_WIN_TEXT_MEMBER_IDS ?? "").split(",").map(entry => entry.trim());

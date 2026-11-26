@@ -13,9 +13,12 @@ A new period of the same achievement remains eligible for its own card.
 Each card describes the measure, time period and source. Wearable comparisons
 use comparable readings, and percentile cards require a sourced reference
 for the person's age and measurement method. Lab changes require comparable,
-eligible draws. Experiment cards carry the observed outcome, including relevant
-overlap and adherence caveats. A game streak counts a scheduled day when the
-member posted in every game due that day.
+eligible draws. An experiment card’s `two_bars` chart names the measured outcome
+once in `label` and uses `unit` for both the Before and During means in `series`.
+`adherence.done` and `adherence.target` give the logged and planned counts.
+The subtitle still describes the observed outcome, adherence and any overlap
+for older apps. A game streak counts a scheduled day when the member posted
+in every game due that day.
 Medication, genetic, condition, weight and flagged lab results are excluded
 from suggested cards. An unavailable source can leave the picker partly or
 entirely empty.
@@ -36,6 +39,38 @@ A cumulative distance card includes the existing
 Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
+
+## Diet wins
+
+Murph counts protein and fiber separately. A day counts for a nutrient when
+every logged meal has a known amount. A month qualifies when at least 80% of
+its days count. During the following month a tally can show the previous
+month's logged grams as a food equivalent, with 10 to 50 icons. The food is
+a comparison for scale. **Hide my numbers** removes both the grams and the
+icons and leaves “Diet milestone.”
+
+From day 14, a current month with 80% coverage can earn a best-month card
+when it matches or exceeds every qualifying prior month. Murph compares
+against this year's completed months when at least three qualify, otherwise
+against the preceding 12 months when at least three qualify. A fiber streak
+requires five consecutive days at or above 30 g. The longest streak in the
+last 90 days qualifies when it ended within 60 days. A missing day or
+incomplete fiber reading breaks the streak.
+
+## Posting a payoff
+
+For seven days after a two-player game settles, the winner can post a photo
+with the final score and the agreed dare or prize. Both players must still
+hold joined seats, the ticket must be owed to the winner, and a block in
+either direction prevents posting. Shared rewards, ties and legacy stake
+types are ineligible. The result uses each player's own profile first name.
+Posting marks the ticket paid. An already redeemed ticket can still be shared.
+
+The post is visible only to its author and the other current player under
+the usual Health wins access rules. Either player can hide the other. The
+author can edit the caption or delete the post. Deleting it allows another
+payoff post while the game still qualifies. Deleting the game restricts the
+post and photo to the author.
 
 ## Texting a new win
 
@@ -132,6 +167,7 @@ when recording is disabled.
 | Route | Request and result |
 | --- | --- |
 | `GET wins` | Returns `{day, setRevision, candidates}`. Ordinary reads reuse today's set for an hour. `?refresh=1` recomputes immediately, once per minute per member. Additional refreshes during that minute return the stored set. A timeout can return a previous day's set. Use the returned day and revision together. |
+| `GET payoffs` | Returns `{cards}` with up to 24 eligible original-only game previews, newest settlement first. A feed member outside the payoff allowlist receives an empty list. Each preview includes its `candidateId` and `specRevision`. |
 | `POST wins/{candidateId}/change` | Send `{setRevision, option}` using an ID from the candidate's `change_options`. Returns `{card}` for preview. |
 | `PUT photos/{id}` | Upload a JPEG up to 2 MiB and 2048 pixels per side under a client-generated UUID. Each member can have 20 unpublished uploads. A new upload over the limit returns 409. Use the returned `attachmentId` at publication. `DELETE` discards an unpublished upload. `GET` reads an authorized published photo. |
 | `POST activities/kind` | Send `{name}` when the member chooses a custom name. Returns `{name, kind, timer, decided}` with the cleaned name. Send that name back unchanged on preview, save and post. |
@@ -146,6 +182,13 @@ when recording is disabled.
 | `GET people/{memberId}/profile` | Returns `{memberId, firstName, avatarUrl, numbers, posts, nextCursor}`. Numbers come from the pair board and are null when unavailable. |
 | `GET hides` | Returns `{people: [{memberId, firstName, avatarUrl}]}` for the viewer’s outgoing hides, newest first. Name and avatar can be null when the profile is unavailable to the viewer. |
 | `PUT / DELETE hides/{memberId}` | Hide a visible partner or comment writer, or clear an existing hide. Returns `{hidden}`. |
+
+To publish a payoff, send one `game:<gameId>` pick with `option: "original"`,
+its previewed `specRevision` and a ready `attachmentId`. A payoff needs no
+`setRevision`. A changed spec returns 409 `HEALTH_PAYOFF_CHANGED`. A different
+live post for the game returns 409 `HEALTH_PAYOFF_EXISTS`. An ineligible game
+returns 404. Retrying the original post ID returns its receipt. PATCH accepts
+only caption edits on a payoff and rejects game selections on all posts.
 
 ### Recorded activity fields
 
@@ -211,9 +254,20 @@ checking today's refusal rules.
 - Send zero to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. When no shareable path remains, send `paths: []`: the run keeps its splits card and gets no map.
 - Each path may cover at most `distanceM` plus the larger of 16 metres and 1% of `distanceM`. The diagonal of the bounding box across all paths must fit within `distanceM`. Average moving pace must be 150–1,200 seconds per kilometre for runs or 300–2,400 for walks, inclusive.
 
-The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`
-and `chips: [distance, pace]` (two display strings). The frame covers three by
-two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
+The `activity_route` card's `route_map` chart contains `paths` and
+`frame: {west, south, east, north}`. Below the map, display `stats` in order.
+Each entry has a `label`, a formatted string `value` and an optional `unit`.
+
+| Label | Value and unit |
+| --- | --- |
+| Distance | Moving distance in `mi` or `km` |
+| Pace | Average moving pace with unit `/mi` or `/km` |
+| Time | Moving time as `m:ss` or `h:mm:ss`, without a unit |
+| Climb | Ascent in `ft` or `m`, included when it rounds to at least one in the display unit |
+
+Heart rate stays on its own card, so leaving that card out or hiding its numbers never shares a heart rate.
+The original chart also includes `chips: [distance, pace]` for older apps.
+The frame covers three by two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
 routes use a coarser zoom. A block may slide by whole tiles to enclose a route
 that crosses a block edge. A date-line crossing can have an east bound above
 180 degrees to keep the frame continuous. Latitudes beyond the Mercator limit
@@ -249,15 +303,16 @@ generation. Previously painted keys continue to serve their immutable JPEGs.
 The `activity_splits` card's `splits` chart contains `unit` (`mi` or `km`), a formatted
 summary `line`, and `splits: [{label, seconds, text, partial?}]`. Each row's
 `text` gives its duration. `fastest` is the zero-based index of the quickest
-full split, first on ties, or `null` when the only split is partial. Distance and
+full split, first on ties. With fewer than two full splits, `fastest` is `null`
+and the subtitle shows moving time and average pace. Distance and
 pace in the summary use miles for `us` and `uk`, kilometres for `metric`.
 Climb uses feet for `us` and metres otherwise. Split labels retain the unit the phone
 used to cut the splits. For a single partial shorter than a kilometre, either unit
 could have been used, so its label uses the request units.
 
-`hide_numbers` keeps the route map with empty chips and removes the measurements
-from the title and subtitle. On the splits and heart-rate cards, the option
-replaces the numeric chart. To share a number-free set, select this option on
+`hide_numbers` keeps the route map, omits both `stats` and `chips`, and removes
+the measurements from the title and subtitle. On the splits and heart-rate
+cards, the option replaces the numeric chart. To share a number-free set, select this option on
 each included card. Only the route card offers `hide_map`. Its change option
 carries `spec: null` and the SHA-256 revision of JSON `null`. Posting that
 option removes the entire card, including paths, frame and art key. Other picks
@@ -288,7 +343,15 @@ for their own posts. A cumulative distance card’s map chart may contain
 
 ## Rollout
 
-The feed and recording allowlists take member IDs, or `*` for every member.
+`MURPH_HEALTH_DIET_MEMBER_IDS` controls suggestion generation. Existing
+offers remain usable until their cached set is replaced. A client that lacks
+the tally chart can still show its update prompt. `MURPH_HEALTH_PAYOFF_MEMBER_IDS`
+controls payoff eligibility and publication for feed members. Apply the
+`health_post.game_id` migration and deploy the scoped readers with the writer
+disabled. Wait for every older reader to drain before enabling payoffs. Keep
+the scoped readers on every rollback once any payoff has been posted.
+
+The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's

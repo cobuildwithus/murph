@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { encodePolyline } from "../../game/progress/route-geometry";
 import { addDays } from "../../game/time";
+import { buildGameResultCard } from "./game-result";
 import { detectHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
 import { newestHealthWinsFirst } from "./ranking";
 import { buildRecordedCards } from "./recorded";
@@ -12,8 +13,9 @@ const goldenFile = new URL("./fixtures/cards.golden.json", import.meta.url);
 const chartsByKind = {
   trend_change: ["trend"],
   threshold_count: ["bars"],
-  streak: ["bars"],
-  best_month: ["monthly_bars"],
+  streak: ["bars", "bars"],
+  best_month: ["monthly_bars", "monthly_bars"],
+  month_total: ["tally", "tally"],
   personal_record: ["record"],
   cumulative: ["map"],
   percentile: ["percentile"],
@@ -22,6 +24,7 @@ const chartsByKind = {
   experiment_result: ["two_bars"],
   game_climb: ["ladder", "skyline"],
   game_streak: ["week_dots"],
+  game_result: ["game_result"],
   sessions: ["sessions"],
   activity_heart_rate: ["heart_rate"],
   activity_time: ["duration"],
@@ -97,7 +100,27 @@ function syntheticInput(): HealthWinsInput {
 
 afterEach(() => vi.unstubAllEnvs());
 
-it("exports one synthetic card of every rendered shape", () => {
+function detectDietWins() {
+  function days(month: string, first: number, last: number, proteinG: number, fiberG: number) {
+    return Array.from({ length: last - first + 1 }, (_, offset) => ({
+      date: `${month}-${String(first + offset).padStart(2, "0")}`, proteinG, fiberG,
+    }));
+  }
+  return detectHealthWins({
+    member: { today: "2036-11-28", age: null, sex: null, wearableProvider: null },
+    meals: [
+      ...days("2036-08", 1, 25, 174, 21),
+      ...days("2036-09", 1, 25, 186, 22),
+      ...days("2036-10", 1, 24, 205, 20),
+      ...days("2036-10", 25, 25, 220, 10),
+      ...days("2036-11", 1, 10, 190, 12),
+      ...days("2036-11", 11, 16, 190, 33.25),
+      ...days("2036-11", 17, 28, 190, 12),
+    ],
+  });
+}
+
+it("exports synthetic examples of every rendered shape", () => {
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v1");
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "v1:" + Buffer.alloc(32, 37).toString("base64"));
   const recording: RecordedActivity = {
@@ -111,6 +134,7 @@ it("exports one synthetic card of every rendered shape", () => {
   const walk: RecordedActivity = {
     id: "238bba63-f944-4fe7-a508-295fe7789afa", kind: "walk",
     startedAt: "2037-03-12T14:09:00Z", elapsedSec: 810, movingSec: 750,
+    heartRate: { lowBpm: 97, avgBpm: 114, peakBpm: 126 },
     route: {
       distanceM: 1250, climbM: 16,
       splits: [{ distanceM: 1000, seconds: 600 }, { distanceM: 250, seconds: 150 }],
@@ -133,7 +157,25 @@ it("exports one synthetic card of every rendered shape", () => {
       kind: "experiment_result", subject: "pencil-puzzles", period: "2036-10-08",
     },
   });
-  const cards = [...newestHealthWinsFirst(detected.selected), ...recorded.map(candidate => candidate.variants[0].spec)];
+  const diet = detectDietWins();
+  expect(Object.fromEntries(diet.achievements)).toEqual({
+    "best_month:protein_g:2036-11": { kind: "best_month", subject: "protein_g", period: "2036-11" },
+  });
+  const gameResult = buildGameResultCard({
+    gameId: "g_canal_loop", contest: "Walk the canal path", lengthDays: 9, startDate: "2036-11-04",
+    players: [
+      { memberId: "m_indigo", firstName: "Luma", score: 8, won: true },
+      { memberId: "m_topaz", firstName: "Oriel", score: 6, won: false },
+    ],
+    stake: { kind: "dare", item: "wear a paper crown to brunch" },
+  });
+  const cards = [
+    ...newestHealthWinsFirst(detected.selected),
+    ...recorded.map(candidate => candidate.variants[0].spec),
+    ...newestHealthWinsFirst(diet.selected),
+    gameResult,
+  ];
+  expect(cards).toHaveLength(23);
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }

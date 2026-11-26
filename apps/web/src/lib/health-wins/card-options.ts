@@ -15,7 +15,7 @@ const labels: Record<Option, string> = {
 
 const hiddenTitles = {
   Sleep: "Sleep milestone", Heart: "Heart health milestone", Fitness: "Fitness milestone",
-  Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone",
+  Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone", Diet: "Diet milestone",
 } satisfies Record<CardSpec["filter"], string>;
 
 function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
@@ -131,7 +131,7 @@ export function prepareHealthCandidates(
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
-function specDigest(spec: FrozenHealthCard["spec"] | null): string {
+export function specDigest(spec: FrozenHealthCard["spec"] | null): string {
   const canonical = JSON.stringify(spec, (_key, value: unknown) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
     return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
@@ -143,7 +143,7 @@ export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): C
   const safe = hidden(card, hiddenTitle);
   const withoutNumbers = card.kind === "activity_route"
     ? { ...safe, kind: card.kind, chart: {
-      type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art, chips: [],
+      type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art,
     } }
     : safe;
   const variants: CachedHealthCandidate["variants"] = [
@@ -173,8 +173,8 @@ export function previewHealthCandidate(candidate: CachedHealthCandidate, option 
 /** A preview can contain caller-chosen paths. Only a published card discloses the shared art handle. */
 function recordedPreviewDisplay<T extends FrozenHealthCard["spec"]>(spec: T) {
   if (spec.chart.type !== "route_map") return spec;
-  const { type, paths, frame, chips } = spec.chart;
-  return { ...spec, chart: { type, paths, frame, chips } };
+  const { type, paths, frame, chips, stats } = spec.chart;
+  return { ...spec, chart: { type, paths, frame, ...(chips && { chips }), ...(stats && { stats }) } };
 }
 
 /** Recorded previews have no stored set or change endpoint, so include each alternate display. */

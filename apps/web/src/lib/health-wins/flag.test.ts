@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { healthFeedAuthors, healthRecordCapability, healthWinTextMemberIds, isHealthFeedEnabled, isHealthWinTextEnabled } from "./flag";
+import {
+  healthFeedAuthors, healthRecordCapability, healthWinTextMemberIds, isHealthDietEnabled, isHealthFeedEnabled,
+  isHealthPayoffEnabled, isHealthWinTextEnabled,
+} from "./flag";
 
 const on = { MURPH_GAME_ENABLED: "true" };
 
@@ -28,6 +31,19 @@ describe("health allowlists", () => {
       .toEqual({ timed: true, route: true, named: true });
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_RECORD_MEMBER_IDS: "" })).toBeUndefined();
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_FEED_MEMBER_IDS: "member-b" })).toBeUndefined();
+  });
+
+  it.each([
+    ["MURPH_HEALTH_DIET_MEMBER_IDS", isHealthDietEnabled],
+    ["MURPH_HEALTH_PAYOFF_MEMBER_IDS", isHealthPayoffEnabled],
+  ] as const)("requires the feed and an independent %s grant", (key, enabled) => {
+    const feed = { ...on, MURPH_HEALTH_FEED_MEMBER_IDS: "member-a" };
+    expect(enabled("member-a", feed)).toBe(false);
+    expect(enabled("member-a", { ...feed, [key]: "member-b" })).toBe(false);
+    expect(enabled("member-a", { ...feed, [key]: " member-b , member-a " })).toBe(true);
+    expect(enabled("member-a", { ...feed, [key]: "*" })).toBe(true);
+    expect(enabled("member-b", { ...feed, [key]: "*" })).toBe(false);
+    expect(enabled("member-a", { ...feed, [key]: "*", MURPH_GAME_ENABLED: "false" })).toBe(false);
   });
 
   it("admits only explicitly enrolled feed members to win texts", () => {

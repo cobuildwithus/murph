@@ -1834,12 +1834,20 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
     if (!group && current.status === "open" && (!debtor || await areGamePlayersBlocked(tx, actor, debtor))) {
       reject("INVALID_REQUEST", "They left Murph, so this prize can't be marked done.");
     }
-    const changed = await tx.gameTicket.updateMany({
-      data: { redeemedAt: clock, status: "redeemed" }, where: { id: ticketId, status: "open" },
-    });
-    return changed.count === 1 ? [{ payload: { ticketId }, type: "redeemed" }] : [];
+    await redeemGameTicketTx(tx, { actor, gameId: ticket.gameId, ticketId, clock });
+    return [];
   });
   return ticket.gameId;
+}
+
+/** The caller holds the game lock and has verified the current ticket and its holder. */
+export async function redeemGameTicketTx(tx: Tx, input: { actor: string; gameId: string; ticketId: string; clock?: Date }): Promise<void> {
+  const { actor, gameId, ticketId } = input;
+  const changed = await tx.gameTicket.updateMany({
+    data: { redeemedAt: input.clock ?? await databaseNow(tx), status: "redeemed" },
+    where: { gameId, id: ticketId, status: "open" },
+  });
+  if (changed.count) await writeEvents(tx, gameId, actor, [{ type: "redeemed", payload: { ticketId } }]);
 }
 
 /** Changes only the viewer's photo, preserving their private name and relationship. */

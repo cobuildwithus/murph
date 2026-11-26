@@ -36,7 +36,7 @@ describe("finished experiments", () => {
         kind: "experiment_result", title: { number: "Morning sketching", measure: "" },
         subtitle: "Sleep score was higher during the experiment. 3 of 8 logged. Ran alongside Quiet drawing.",
         chart: {
-          type: "two_bars", barWidth: "thin", unit: "points", metric: "sleep_score", expectedDirection: "increase",
+          type: "two_bars", barWidth: "thin", unit: "points", metric: "sleep_score", label: "Sleep score", expectedDirection: "increase",
           series: [
             { label: "Before", start: "2025-02-01", end: "2025-02-28", mean: 78.5 },
             { label: "During", start: "2025-03-02", end: "2025-03-17", mean: 81.75 },
@@ -79,7 +79,7 @@ describe("finished experiments", () => {
       ...baseExperiment, slug: "neighborhood-loop", title: "Neighborhood loop",
       metric: "distance_km", baselineMean: 0, interventionMean: 60,
     };
-    expect(cards({ experiments: [walking] })).toHaveLength(1);
+    expect(cards({ experiments: [walking] })).toMatchObject([{ chart: { label: "Distance on foot" } }]);
     for (const comparison of [{ ...walking, baselineMean: -1 }, { ...walking, interventionMean: 61 }]) {
       expect(cards({ experiments: [baseExperiment, comparison] })).toEqual([expect.objectContaining({
         title: expect.objectContaining({ number: baseExperiment.title }),
@@ -138,11 +138,12 @@ describe("finished experiments", () => {
   });
 
   it.each([
-    { metric: "rhr_bpm", mean: 68, step: 2, favorable: -1, subject: "RHR" },
-    { metric: "sleep_efficiency", mean: 83, step: 1, favorable: 1, subject: "Sleep efficiency" },
-    { metric: "sleep_score", mean: 75, step: 2, favorable: 1, subject: "Sleep" },
-    { metric: "sleep_total_min", mean: 434, step: 15, favorable: 1, subject: "Sleep" },
-  ] as const)("offers neutral and favorable $metric outcomes only (audit 26)", ({ metric, mean, step, favorable, subject }) => {
+    { metric: "rhr_bpm", mean: 68, step: 2, favorable: -1, subject: "RHR", label: "Resting heart rate" },
+    { metric: "hrv_ms", mean: 50, step: 3, favorable: 1, subject: "Heart rate variability", label: "Heart rate variability" },
+    { metric: "sleep_efficiency", mean: 83, step: 1, favorable: 1, subject: "Sleep efficiency", label: "Sleep efficiency" },
+    { metric: "sleep_score", mean: 75, step: 2, favorable: 1, subject: "Sleep", label: "Sleep score" },
+    { metric: "sleep_total_min", mean: 434, step: 15, favorable: 1, subject: "Sleep", label: "Sleep" },
+  ] as const)("offers neutral and favorable $metric outcomes only (audit 26)", ({ metric, mean, step, favorable, subject, label }) => {
     const trial = {
       ...baseExperiment, title: "Running technique block", metric, baselineMean: mean,
       adherence: { done: 5, target: 7 },
@@ -151,7 +152,7 @@ describe("finished experiments", () => {
     for (const change of [step - 0.1, 0.1 - step]) {
       expect(result(change)[0]).toMatchObject({
         subtitle: `${subject} stayed about the same. 5 of 7 runs logged.`,
-        chart: { series: [{ mean }, { mean: mean + change }] },
+        chart: { label, series: [{ mean }, { mean: mean + change }] },
       });
     }
     expect(result(-favorable * step)).toEqual([]);

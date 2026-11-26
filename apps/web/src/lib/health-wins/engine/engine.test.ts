@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { activityCandidates } from "./activities";
 import { generateHealthWins, selectHealthWins, type DailySample, type Experiment, type Game, type HealthWinsInput } from "./index";
 import { rankCandidates } from "./ranking";
 import type { Candidate } from "./types";
@@ -123,6 +124,25 @@ describe("generateHealthWins", () => {
     expect(bars?.chart.series.map(bar => bar.mean)).toEqual([76, 77]);
   });
 
+  it("keeps Diet to three cards in a full first twelve while retaining the other Diet claims", () => {
+    const meals = ["01", "02", "03", "04", "05"].flatMap(month => {
+      const current = month === "05";
+      return Array.from({ length: current ? 16 : 25 }, (_, i) => ({
+        date: `2034-${month}-${String(i + 1).padStart(2, "0")}`,
+        proteinG: current ? 135 : 72, fiberG: current ? 46 : 25,
+      }));
+    });
+    const cards = selectHealthWins({
+      member, meals, experiments: [1, 2, 3].map(experiment), games: ["squats", "pushups", "lunges"].map(game),
+      sessions: (["hiit", "walk", "sauna"] as const).flatMap(type =>
+        [4, 7, 10].map(day => ({ type, date: `2034-05-${String(day).padStart(2, "0")}`, minutes: 28 }))),
+    }).map(({ card }) => card);
+    const diet = cards.filter(card => card.filter === "Diet");
+    expect(diet.map(card => card.kind).sort()).toEqual(["best_month", "best_month", "month_total", "month_total", "streak"]);
+    expect(cards.slice(0, 12).filter(card => card.filter === "Diet")).toHaveLength(3);
+    expect(cards.slice(12).filter(card => card.filter === "Diet")).toHaveLength(2);
+  });
+
   it("keeps the same 24 claims when a crowded filter has newer achievements than every other filter", () => {
     const experiments = Array.from({ length: 28 }, (_, index) => {
       const day = String(index + 1).padStart(2, "0");
@@ -209,4 +229,27 @@ it("ranks by effect versus noise, recency and record bonus, breaking ties by car
   expect(ids(sample("older", 1, 1, "2034-04-01"), sample("recent", 1, 1))).toEqual(["recent", "older"]);
   expect(ids(sample("comparison", 1, 1), record)).toEqual(["record", "comparison"]);
   expect(ids(sample("z", 1, 2), sample("a", 1, 2), sample("a", 1, 2))).toEqual(["a", "z"]);
+});
+
+it("keeps the best Challenges card when higher-scoring data fills the catalog", () => {
+  const filters = ["Sleep", "Heart", "Labs", "Fitness"] as const;
+  const data = Array.from({ length: 28 }, (_, i): Candidate => ({
+    date: member.today, effect: 28 - i, noise: 1,
+    card: {
+      id: `observation-${i}`, filter: filters[i % filters.length], kind: "percentile",
+      title: { number: "Top 20%", measure: "score" }, subtitle: "", source_note: "",
+      chart: { type: "percentile", value: 80, unit: "points", group: "Reference group",
+        cuts: [], topPercent: 20, lowerIsBetter: false },
+    },
+  }));
+  const games = activityCandidates({ member, games: [game("lunges")] });
+  const ids = (candidates: Candidate[]) => rankCandidates([...candidates, ...games], member.today).cards.map(card => card.id);
+  expect(ids(data)).toEqual([...data.slice(0, 23).map(item => item.card.id), "game_climb:lunges"]);
+
+  const [result] = activityCandidates({ member, experiments: [experiment(1)] });
+  expect(ids([...data, result])).toEqual([...data.slice(0, 22).map(item => item.card.id), "game_climb:lunges", result.card.id]);
+
+  // When only 22 observations outrank the games, both fit in score order.
+  const lowerTail = data.map((item, i) => i < 22 ? item : { ...item, date: "2032-03-01", effect: 0 });
+  expect(ids(lowerTail)).toEqual([...data.slice(0, 22).map(item => item.card.id), "game_climb:lunges", "game_streak"]);
 });

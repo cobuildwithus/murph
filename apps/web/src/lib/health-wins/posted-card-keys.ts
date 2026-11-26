@@ -6,7 +6,7 @@ export function postedCardKeys(memberId: string, candidateIds: readonly string[]
   const keys = new Map<string, string>();
   try {
     for (const id of candidateIds) {
-      if (!id.startsWith("activity:")) {
+      if (!id.startsWith("activity:") && !id.startsWith("game:")) {
         keys.set(id, createHostedOpaqueDigest("health-win-card", `${memberId}:${id}`));
       }
     }
