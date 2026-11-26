@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { toLocalDayKey } from "@murphai/contracts";
 import { type HealthWinSet, Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { hostedAuthRateLimitStorage } from "../better-auth/rate-limit";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { assertGameMemberAuthCurrentForRead, assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { gameHttpError } from "../game/http/errors";
@@ -20,7 +21,7 @@ import { readHealthWinInputs } from "./inputs";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v3";
+const DETECTOR_VERSION = "v4";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 
@@ -106,11 +107,14 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: { si
   const db = getPrisma(), memberId = auth.member.id;
   const { today, row: observed } = await readCurrent(auth);
   const now = new Date();
-  if (observed?.day === today && now.getTime() - observed.checkedAt.getTime() < CHECK_INTERVAL_MS) {
+  if (!options.refresh && observed?.day === today && now.getTime() - observed.checkedAt.getTime() < CHECK_INTERVAL_MS) {
     return present(auth, observed, options.signal);
   }
 
-  const source = await loadInputs(auth, today, options.signal);
+  const canRecompute = !options.refresh || (await hostedAuthRateLimitStorage(db).consume(
+    `health-wins-refresh:member:${memberId}`, { max: 1, window: 60 },
+  )).allowed;
+  const source = canRecompute ? await loadInputs(auth, today, options.signal) : null;
   if (!source) {
     const { row: lastGood } = await readCurrent(auth);
     if (lastGood) return present(auth, lastGood, options.signal);

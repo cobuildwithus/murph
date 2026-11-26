@@ -113,16 +113,16 @@
       "unit": "steps",
       "series": [
         {
-          "date": "Sep 23",
+          "date": "2036-09-23",
           "value": 11580
         },
         {
-          "date": "Nov 6",
+          "date": "2036-11-06",
           "value": 7300
         }
       ],
       "highlight": {
-        "date": "Sep 23",
+        "date": "2036-09-23",
         "value": 11580,
         "label": "Sep 23"
       },
@@ -153,7 +153,7 @@
         "draws": 2
       },
       "latest": {
-        "date": "Nov 6",
+        "date": "2036-11-06",
         "value": 106
       }
     },
@@ -215,82 +215,82 @@
       "threshold": 480,
       "series": [
         {
-          "date": "Nov 1",
+          "date": "2036-11-01",
           "value": 455,
           "passing": false
         },
         {
-          "date": "Nov 2",
+          "date": "2036-11-02",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 3",
+          "date": "2036-11-03",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 4",
+          "date": "2036-11-04",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 5",
+          "date": "2036-11-05",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 6",
+          "date": "2036-11-06",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 7",
+          "date": "2036-11-07",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 8",
+          "date": "2036-11-08",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 9",
+          "date": "2036-11-09",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 10",
+          "date": "2036-11-10",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 11",
+          "date": "2036-11-11",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 12",
+          "date": "2036-11-12",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 13",
+          "date": "2036-11-13",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 14",
+          "date": "2036-11-14",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 15",
+          "date": "2036-11-15",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 16",
+          "date": "2036-11-16",
           "value": 492,
           "passing": true
         }
@@ -320,242 +320,242 @@
       "threshold": 480,
       "series": [
         {
-          "date": "Sep 1",
+          "date": "2036-09-01",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 2",
+          "date": "2036-09-02",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 3",
+          "date": "2036-09-03",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 4",
+          "date": "2036-09-04",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 5",
+          "date": "2036-09-05",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 6",
+          "date": "2036-09-06",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 7",
+          "date": "2036-09-07",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 8",
+          "date": "2036-09-08",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 9",
+          "date": "2036-09-09",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 10",
+          "date": "2036-09-10",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 11",
+          "date": "2036-09-11",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 12",
+          "date": "2036-09-12",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 13",
+          "date": "2036-09-13",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 14",
+          "date": "2036-09-14",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Sep 15",
+          "date": "2036-09-15",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Sep 16",
+          "date": "2036-09-16",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 1",
+          "date": "2036-10-01",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 2",
+          "date": "2036-10-02",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 3",
+          "date": "2036-10-03",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 4",
+          "date": "2036-10-04",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 5",
+          "date": "2036-10-05",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 6",
+          "date": "2036-10-06",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 7",
+          "date": "2036-10-07",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 8",
+          "date": "2036-10-08",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 9",
+          "date": "2036-10-09",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 10",
+          "date": "2036-10-10",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 11",
+          "date": "2036-10-11",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 12",
+          "date": "2036-10-12",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 13",
+          "date": "2036-10-13",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 14",
+          "date": "2036-10-14",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Oct 15",
+          "date": "2036-10-15",
           "value": 425,
           "passing": false
         },
         {
-          "date": "Oct 16",
+          "date": "2036-10-16",
           "value": 441,
           "passing": false
         },
         {
-          "date": "Nov 1",
+          "date": "2036-11-01",
           "value": 455,
           "passing": false
         },
         {
-          "date": "Nov 2",
+          "date": "2036-11-02",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 3",
+          "date": "2036-11-03",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 4",
+          "date": "2036-11-04",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 5",
+          "date": "2036-11-05",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 6",
+          "date": "2036-11-06",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 7",
+          "date": "2036-11-07",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 8",
+          "date": "2036-11-08",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 9",
+          "date": "2036-11-09",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 10",
+          "date": "2036-11-10",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 11",
+          "date": "2036-11-11",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 12",
+          "date": "2036-11-12",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 13",
+          "date": "2036-11-13",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 14",
+          "date": "2036-11-14",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 15",
+          "date": "2036-11-15",
           "value": 492,
           "passing": true
         },
         {
-          "date": "Nov 16",
+          "date": "2036-11-16",
           "value": 492,
           "passing": true
         }
@@ -564,8 +564,8 @@
         "8 hours"
       ],
       "highlight": {
-        "start": "Nov 2",
-        "end": "Nov 16"
+        "start": "2036-11-02",
+        "end": "2036-11-16"
       }
     },
     "theme": "sleep",
@@ -664,15 +664,15 @@
       "totalMinutes": 77,
       "series": [
         {
-          "date": "Nov 2",
+          "date": "2036-11-02",
           "minutes": 18
         },
         {
-          "date": "Nov 8",
+          "date": "2036-11-08",
           "minutes": 24
         },
         {
-          "date": "Nov 14",
+          "date": "2036-11-14",
           "minutes": 35
         }
       ]
@@ -695,64 +695,64 @@
     "chart": {
       "type": "week_dots",
       "days": 3,
-      "start": "Nov 7",
-      "end": "Nov 11",
-      "missedOn": "Nov 12",
+      "start": "2036-11-07",
+      "end": "2036-11-11",
+      "missedOn": "2036-11-12",
       "calendar": [
         {
-          "date": "Nov 3",
+          "date": "2036-11-03",
           "state": "no_game"
         },
         {
-          "date": "Nov 4",
+          "date": "2036-11-04",
           "state": "no_game"
         },
         {
-          "date": "Nov 5",
+          "date": "2036-11-05",
           "state": "no_game"
         },
         {
-          "date": "Nov 6",
+          "date": "2036-11-06",
           "state": "missed"
         },
         {
-          "date": "Nov 7",
+          "date": "2036-11-07",
           "state": "posted"
         },
         {
-          "date": "Nov 8",
+          "date": "2036-11-08",
           "state": "no_game"
         },
         {
-          "date": "Nov 9",
+          "date": "2036-11-09",
           "state": "no_game"
         },
         {
-          "date": "Nov 10",
+          "date": "2036-11-10",
           "state": "posted"
         },
         {
-          "date": "Nov 11",
+          "date": "2036-11-11",
           "state": "posted"
         },
         {
-          "date": "Nov 12",
+          "date": "2036-11-12",
           "state": "missed"
         },
         {
-          "date": "Nov 13",
+          "date": "2036-11-13",
           "state": "no_game"
         },
         {
-          "date": "Nov 14",
+          "date": "2036-11-14",
           "state": "no_game"
         },
         {
-          "date": "Nov 15",
+          "date": "2036-11-15",
           "state": "no_game"
         },
         {
-          "date": "Nov 16",
+          "date": "2036-11-16",
           "state": "no_game"
         }
       ]
@@ -785,14 +785,14 @@
       "series": [
         {
           "label": "Before",
-          "start": "Oct 1",
-          "end": "Oct 7",
+          "start": "2036-10-01",
+          "end": "2036-10-07",
           "mean": 74
         },
         {
           "label": "During",
-          "start": "Oct 8",
-          "end": "Oct 14",
+          "start": "2036-10-08",
+          "end": "2036-10-14",
           "mean": 77.5
         }
       ]
@@ -818,11 +818,11 @@
       "days": 2,
       "series": [
         {
-          "date": "Nov 6",
+          "date": "2036-11-06",
           "miles": 3.3554044380816035
         },
         {
-          "date": "Nov 9",
+          "date": "2036-11-09",
           "miles": 3.3554044380816035
         }
       ]
@@ -857,7 +857,7 @@
         },
         "source": "Reporting laboratory reference range"
       },
-      "date": "Dec 18, 2035"
+      "date": "2035-12-18"
     },
     "theme": "labs",
     "share": {

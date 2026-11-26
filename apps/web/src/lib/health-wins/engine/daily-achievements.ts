@@ -19,12 +19,12 @@ export type DailyAchievementCharts = {
 
 const SLEEP_TARGET_MINUTES = 8 * 60;
 
-function sleepBars(rows: readonly DailySample[], today: string): SleepBars {
+function sleepBars(rows: readonly DailySample[]): SleepBars {
   return {
     type: "bars",
     unit: "min",
     threshold: SLEEP_TARGET_MINUTES,
-    series: rows.map(({ date, value }) => ({ date: formatWinDate(date, today), value, passing: value >= SLEEP_TARGET_MINUTES })),
+    series: rows.map(({ date, value }) => ({ date, value, passing: value >= SLEEP_TARGET_MINUTES })),
     pills: ["8 hours"],
   };
 }
@@ -45,7 +45,7 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
       title: { number: `${hits} of ${nights.length} nights`, measure: "8+ hours" },
       subtitle: `in ${formatWinMonth(today)} so far`,
       source_note: `Based on ${nights.length} tracked nights.`,
-      chart: sleepBars(nights, today),
+      chart: sleepBars(nights),
     },
   };
 }
@@ -92,7 +92,7 @@ function sleepStreak(rows: readonly DailySample[], today: string): Candidate | u
       title: { number: `${bestLength} nights`, measure: "8+ hours" },
       subtitle: `in a row, ${streakDateRange(start, end, today)}`,
       source_note: `Longest recorded run in the last 90 days, ending ${formatWinDate(end, today)}.`,
-      chart: { ...sleepBars(nights, today), highlight: { start: formatWinDate(start, today), end: formatWinDate(end, today) } },
+      chart: { ...sleepBars(nights), highlight: { start, end } },
     },
   };
 }
@@ -129,8 +129,8 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
       source_note: `Recorded on ${dateLabel}. Based on ${year.length} tracked days.`,
       chart: {
         type: "record", unit: distance ? "miles" : unit,
-        series: year.map(({ date, value }) => ({ date: formatWinDate(date, today), value: chartValue(value) })),
-        highlight: { date: dateLabel, value: chartValue(best.value), label: dateLabel }, pills: [dateLabel],
+        series: year.map(({ date, value }) => ({ date, value: chartValue(value) })),
+        highlight: { date: best.date, value: chartValue(best.value), label: dateLabel }, pills: [dateLabel],
       },
     },
   };

@@ -6,9 +6,9 @@ card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
 The function runs in memory and leaves the supplied arrays untouched.
 
-Full calendar days in chart data and copy read `Nov 6`, or `Nov 6, 2035` when
-the year differs from `member.today`. A record's `highlight.label` and pill
-use the same date. Render trend pills verbatim in their supplied order.
+Chart data uses `YYYY-MM-DD` for days and `YYYY-MM` for months. Copy displays
+dates as `Nov 6`, or `Nov 6, 2035` when the year differs from `member.today`.
+A record's `highlight.label` and pill use that display format. Render trend pills verbatim in their supplied order.
 Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 
 ## Inputs that affect interpretation

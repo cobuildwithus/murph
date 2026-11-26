@@ -29,10 +29,10 @@ describe("game inputs for health wins", () => {
     const streak = generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
       games: result.games, gameStreak: result.gameStreak }).find(card => card.kind === "game_streak");
     expect(streak?.chart.calendar?.map(day => [day.date, day.state])).toEqual([
-      ["Oct 26", "no_game"], ["Oct 27", "no_game"], ["Oct 28", "no_game"], ["Oct 29", "no_game"],
-      ["Oct 30", "no_game"], ["Oct 31", "no_game"], ["Nov 1", "posted"],
-      ["Nov 2", "posted"], ["Nov 3", "posted"], ["Nov 4", "missed"], ["Nov 5", "posted"],
-      ["Nov 6", "no_game"], ["Nov 7", "no_game"], ["Nov 8", "no_game"],
+      ["2026-10-26", "no_game"], ["2026-10-27", "no_game"], ["2026-10-28", "no_game"], ["2026-10-29", "no_game"],
+      ["2026-10-30", "no_game"], ["2026-10-31", "no_game"], ["2026-11-01", "posted"],
+      ["2026-11-02", "posted"], ["2026-11-03", "posted"], ["2026-11-04", "missed"], ["2026-11-05", "posted"],
+      ["2026-11-06", "no_game"], ["2026-11-07", "no_game"], ["2026-11-08", "no_game"],
     ]);
     expect(result.games[0].landmarksPassed.length).toBeGreaterThan(0);
     expect(result.games[0].landmarksPassed.every(item => item.height <= 352)).toBe(true);
@@ -55,10 +55,10 @@ describe("game inputs for health wins", () => {
     expect(unclassified.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02", missedOn: "2026-11-04" });
     expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
       games: unclassified.games, gameStreak: unclassified.gameStreak })).toMatchObject([
-      { kind: "game_streak", chart: { days: 1, missedOn: "Nov 4", calendar: [
-        { date: "Nov 2", state: "posted" }, { date: "Nov 3", state: "no_game" }, { date: "Nov 4", state: "missed" },
-        { date: "Nov 5", state: "no_game" }, { date: "Nov 6", state: "no_game" }, { date: "Nov 7", state: "no_game" },
-        { date: "Nov 8", state: "no_game" },
+      { kind: "game_streak", chart: { days: 1, missedOn: "2026-11-04", calendar: [
+        { date: "2026-11-02", state: "posted" }, { date: "2026-11-03", state: "no_game" }, { date: "2026-11-04", state: "missed" },
+        { date: "2026-11-05", state: "no_game" }, { date: "2026-11-06", state: "no_game" }, { date: "2026-11-07", state: "no_game" },
+        { date: "2026-11-08", state: "no_game" },
       ] } },
     ]);
 
@@ -93,9 +93,12 @@ describe("game inputs for health wins", () => {
       vaultRuns: { savedAt: "2026-11-05T00:00:00Z", days: [["2026-11-03", 9000] as [string, number]] } }]]), awards: [] };
     const runs = { days: [{ date: "2026-11-01", km: 15 }, { date: "2026-11-02", km: 3 }, { date: "2026-11-03", km: 2.5 }] };
     const result = gameWinInputs(memberId, today, snapshot, runs);
-    expect(result.games[0]).toMatchObject({ exercise: "run", total: 6100 });
+    // Progress counts meters; the card speaks miles, like the engine's other distance cards.
+    expect(result.games[0]).toMatchObject({ exercise: "run", unit: "miles", total: 6100 / 1609.344 });
+    expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, games: result.games })
+      .find(card => card.kind === "game_climb")?.title).toEqual({ number: "4 miles", measure: "running" });
     expect(result.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02" });
-    expect(gameWinInputs(memberId, today, snapshot, { days: [] }).games[0].total).toBe(3600);
+    expect(gameWinInputs(memberId, today, snapshot, { days: [] }).games[0].total).toBe(3600 / 1609.344);
     expect(gameWinInputs(memberId, today, { ...snapshot, facts: [] }, runs).games).toEqual([]);
   });
 

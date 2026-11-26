@@ -79,16 +79,18 @@ export function gameWinInputs(memberId: string, today: string, { facts, states, 
   const context = achievementContext(measures, states);
   const rounds = roundTotals(context);
   const crossings = ladderRungs(context);
-  const gamesByExercise = new Map<string, { game: Game; latest: string }>();
+  const gamesByExercise = new Map<string, { game: Game; latest: string; unit: string }>();
   // The card id belongs to the exercise. Use the most recently observed unit if the member switched units.
   for (const [index, measure] of measures.entries()) {
     const last = context.measures[index].points.at(-1);
     if (!last || last[1] <= 0) continue;
     const [latest, total] = last;
     const prior = gamesByExercise.get(measure.name);
-    if (prior && (prior.latest > latest || (prior.latest === latest && prior.game.unit <= measure.unit))) continue;
-    gamesByExercise.set(measure.name, { latest, game: {
-      exercise: measure.name, unit: measure.unit, total,
+    if (prior && (prior.latest > latest || (prior.latest === latest && prior.unit <= measure.unit))) continue;
+    // Progress keeps route distance in meters. The engine's distance copy reads in miles, like its other distance cards.
+    const meters = measure.unit === "meters";
+    gamesByExercise.set(measure.name, { latest, unit: measure.unit, game: {
+      exercise: measure.name, unit: meters ? "miles" : measure.unit, total: meters ? total / 1609.344 : total,
       ...gameLandmarks(measure, total, states.get(measure.id) ?? {}, awards, crossings),
       bestStreak: null,
     } });

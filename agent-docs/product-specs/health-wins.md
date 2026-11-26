@@ -67,7 +67,8 @@ delete their own posts and comments.
 
 ## Responding
 
-A member can cheer once per post and undo the cheer. Comments default to
+A member can cheer once per post. Adding or removing a cheer requires the
+viewer's current health consent. Comments default to
 **Everyone**, meaning people who can open the post. **Just the poster** limits
 a comment to its writer and the poster. Hides and blocks apply to the comment
 writer as well as the poster. A partner’s comment disappears for all readers
@@ -92,7 +93,7 @@ recording is disabled.
 
 | Route | Request and result |
 | --- | --- |
-| `GET wins` | Returns `{day, setRevision, candidates}`. Use `?refresh=1` to request a refresh. A timeout can return a previous day's set. Use the returned day and revision together. |
+| `GET wins` | Returns `{day, setRevision, candidates}`. Ordinary reads reuse today's set for an hour. `?refresh=1` recomputes immediately, once per minute per member. Additional refreshes during that minute return the stored set. A timeout can return a previous day's set. Use the returned day and revision together. |
 | `POST wins/{candidateId}/change` | Send `{setRevision, option}` using an ID from the candidate's `change_options`. Returns `{card}` for preview. |
 | `PUT photos/{id}` | Upload a JPEG up to 2 MiB and 2048 pixels per side under a client-generated UUID. Each member can have 20 unpublished uploads. A new upload over the limit returns 409. Use the returned `attachmentId` at publication. `DELETE` discards an unpublished upload. `GET` reads an authorized published photo. |
 | `POST activities/cards` | Send `{activity}` to preview without saving. Returns `{suggestedTitle, cards}`. Each card includes the flat spec, `candidateId`, `specRevision` and `change_options`. Each option carries its own revision. Alternate options include the exact display spec, or `null` for map removal. |
