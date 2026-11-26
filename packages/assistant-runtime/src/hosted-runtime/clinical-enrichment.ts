@@ -130,8 +130,8 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
     } finally {
       if (usages.length && input.usageRecordPort && input.deferUsageUntilAfterDurableCheckpoint) {
         const usageRecordPort = input.usageRecordPort;
-        input.deferUsageUntilAfterDurableCheckpoint(async () => {
-          await recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRecordPort });
+        input.deferUsageUntilAfterDurableCheckpoint(async (context) => {
+          await recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRecordPort, signal: context?.wakeInterruptionSignal ?? null });
         });
         input.onStateMutation();
       }
@@ -236,13 +236,18 @@ async function settleClinicalEnrichmentFailure({ input, work, state, stage, erro
   return deferred.nextAttemptAt ? "idle" : "settled";
 }
 
-async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRecordPort }: {
+async function recordClinicalEnrichmentUsage({ input, attemptId, usages, usageRecordPort, signal }: {
   input: HostedClinicalEnrichmentInput;
   attemptId: string;
   usages: FamilyUsage[];
   usageRecordPort: HostedRuntimeUsageRecordPort;
+  signal: AbortSignal | null;
 }): Promise<void> {
   for (const { family, event } of usages) {
+    // A foreground wake interrupts accounting between records; the retained
+    // effect replays these deterministic usage ids later without duplicate rows.
+    // Shutdown does not, since an unrun effect would be lost with the container.
+    signal?.throwIfAborted();
     try {
       const usage = event.usage.usage;
       const turnId = `turn_clinical_enrichment_${attemptId}.${family}.${event.stage}`;

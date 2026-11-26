@@ -74,7 +74,8 @@ The live ownership split is:
   Its admission paths remain gated by background abort and owner handoff.
   Clinical enrichment retains its existing foreground-pass resume boundary,
   and also continues after a checkpoint when it is the only due work, within
-  the ten-minute bound in `ARCHITECTURE.md` § Hosted Clinical Records.
+  the ten-minute bound in `ARCHITECTURE.md` § Hosted Clinical Records. Its
+  finished pages share one checkpoint per extraction window, as described there.
   Shutdown and owner handoff still abort and requeue the exact child. Other
   active-child deadlines and save-before-effect ordering still apply. This lets
   background runs reach ordinary container cleanup, including its 60-second

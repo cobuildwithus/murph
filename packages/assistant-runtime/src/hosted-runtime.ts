@@ -109,7 +109,7 @@ import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import { createHostedWorkspaceSystemWork, HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./hosted-runtime/workspace-system-work.ts";
-import { createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
+import { classifyHostedClinicalPendingCheckpointWork, createHostedClinicalEnrichmentController, orderHostedClinicalUsageEffectsLast, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
 import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
 import { hasDueHostedClinicalEnrichmentWake, isHostedClinicalEnrichmentWakeItem, makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
@@ -3032,6 +3032,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       ...readyDurableCheckpointEffects,
       ...additionalEffects,
     ];
+    // Only these may share an extraction window's checkpoint; see the controller.
+    const clinicalUsageEffects = new WeakSet<HostedWorkspaceDurableCheckpointEffect>();
+    const readClinicalPendingCheckpointWork = () => classifyHostedClinicalPendingCheckpointWork({
+      canonicalReceiptCount: pendingCanonicalReceiptCount,
+      canonicalReceiptLogNearlyFull: canonicalWriteReceiptLogBlocksBackgroundMaintenance(),
+      durableEffects: readOutstandingDurableCheckpointEffects(),
+      durableFollowUpPending: durableCheckpointFollowUpPending,
+      isClinicalUsageEffect: (effect) => clinicalUsageEffects.has(effect),
+    });
     let idleCheckpointStartByMs: number | null = null;
     let idleWakeOrdinal = 0;
     const publishCheckpointPublicationExpectation = (
@@ -5130,6 +5139,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         userEnvKeys: Object.keys(runtime.userEnv),
         usageRecordPort: runtime.platform.usageRecordPort ?? null,
         deferUsageUntilAfterDurableCheckpoint(effect) {
+          clinicalUsageEffects.add(effect);
           pendingDurableCheckpointEffects.push(effect);
         },
         resolveRuntimeAuthority: async () => runtimeOwnerHandoffRequested ? "handoff" : "current",
@@ -5149,9 +5159,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       onError(error) {
         emitPhaseLog({ error, input, requestId, stage: "runtime", status: "fail" });
       },
-      // Either one voids the extraction window, so the next checkpoint is due.
-      deferNextJobUntilCheckpoint: () =>
-        pendingDurableCheckpointEffects.length > 0 || pendingCanonicalReceiptCount > 0,
+      pendingCheckpointWork: readClinicalPendingCheckpointWork,
+      onExtractionWindowReleased: () => options.runtimeWakeSignal?.notify(),
     });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {
       await Promise.all([
@@ -5198,7 +5207,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       requiresFollowUpCheckpoint: boolean;
       wake: HostedRuntimePendingWake;
     }> => {
-      const effects = readyDurableCheckpointEffects.slice();
+      const effects = orderHostedClinicalUsageEffectsLast(
+        readyDurableCheckpointEffects, (effect) => clinicalUsageEffects.has(effect));
       let requiresFollowUpCheckpoint = false;
       let durableWake: HostedRuntimePendingWake = {
         nextWakeAt: null,
@@ -5224,6 +5234,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 ? effect.vaultShareProjectionFailureWake
                 : await effect({
                     signal: effectSignal,
+                    wakeInterruptionSignal: interruption.signal,
                     vaultShareProjectionResult:
                       effectOptions.vaultShareProjectionResult ?? {
                         outcome: guardedRuntime.platform.vaultSharePort ? "error" : "no-port",
@@ -5266,7 +5277,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               status: "fail",
             });
           }
-          readyDurableCheckpointEffects.shift();
+          readyDurableCheckpointEffects.splice(readyDurableCheckpointEffects.indexOf(effect), 1);
         }
       } finally {
         await interruption.dispose();
@@ -7226,9 +7237,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
           clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
-          canonicalReceiptCount: pendingCanonicalReceiptCount,
-          durableEffectCount: effects.length,
-          durableFollowUpPending: durableCheckpointFollowUpPending,
+          pendingCheckpointWork: readClinicalPendingCheckpointWork(),
         });
         let workDeadline = !runtimeOwnerHandoffRequested
           && !runtimeAbortController.signal.aborted

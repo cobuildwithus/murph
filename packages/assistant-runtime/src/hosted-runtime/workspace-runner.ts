@@ -389,6 +389,8 @@ export interface HostedWorkspaceDurableCheckpointEffectResult {
 
 export interface HostedWorkspaceDurableCheckpointEffectContext {
   signal?: AbortSignal | null;
+  /** Aborts only when a foreground wake should run first; shutdown never sets it. */
+  wakeInterruptionSignal?: AbortSignal | null;
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
 }
 
