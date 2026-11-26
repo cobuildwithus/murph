@@ -409,6 +409,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
         method: "POST",
+        headers: { "X-Clinical-Directory-Version": "2" },
         payload: { query: "Piedmont" },
         signal: expect.any(AbortSignal),
         url: "/api/clinical-records/providers/search",

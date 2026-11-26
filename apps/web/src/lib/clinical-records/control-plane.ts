@@ -12,7 +12,8 @@ import { CLINICAL_CODE_LIMIT } from "./return-query";
 import { hasImportCapacity, countedSourceFilter } from "./source-state";
 import { prepareClinicalPersistentAccess } from "./persistent-access";
 
-import { resolveEpicClient } from "./epic-import-config";
+import * as z from "@murphai/contracts/zod-runtime";
+import { epicProfileSchema, resolveSavedEpicAuth, resolveEpicClient, type EpicProfile } from "./epic-import-config";
 
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 
@@ -58,6 +59,7 @@ import {
   discoverSmartConfiguration,
   exchangeSmartAuthorizationCode,
   normalizeSmartStateHash,
+  requirePinnedEndpoint,
   readGrantedSmartResourceTypes,
 } from "./smart";
 import {
@@ -72,6 +74,12 @@ import {
 const OAUTH_SESSION_TTL_MS = 10 * 60 * 1_000;
 const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
 const CLINICAL_RETRIEVAL_RUN_ID_PREFIX = "crr_";
+
+const authorizationBinding = z.object({
+  version: z.literal(1), verifier: z.string().min(1).max(128), profile: epicProfileSchema,
+  brandName: z.string().min(1).max(160), fhirBaseUrl: z.string().url().max(2048),
+  resourceTypes: z.array(z.string().min(1).max(80)).min(1).max(100),
+}).strict();
 
 export async function startClinicalRecordConnection(input: {
   claim: string;
@@ -135,7 +143,10 @@ async function startAuthorization(input: {
     const codeVerifierEncrypted = await sealClinicalOauthVerifier({
       memberId: auth.member.id,
       stateHash: state.stateHash,
-      value: pkce.verifier,
+      value: process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES === "1"
+        ? JSON.stringify({ version: 1, verifier: pkce.verifier, profile: configuration.profile,
+          brandName: provider.brandName, fhirBaseUrl: provider.fhirBaseUrl, resourceTypes: configuration.resourceTypes })
+        : pkce.verifier,
     });
 
     const data = {
@@ -263,18 +274,27 @@ async function finishAuthorization(input: {
     });
   }
 
-  const provider = requireProviderEntry(session.providerDirectoryEntryId);
-  if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) {
-    throw providerConfigurationChangedError();
-  }
-  const configuration = resolveEpicClient(provider, { clientId: session.clientId, grant: "callback" });
+  const opened = await openClinicalOauthVerifier({
+    encrypted: session.codeVerifierEncrypted, memberId: auth.member.id, stateHash: session.stateHash,
+  });
+  const saved = opened.startsWith("{") ? authorizationBinding.parse(JSON.parse(opened)) : null;
+  const stored = { clientId: session.clientId, grant: "callback" as const };
+  const configuration = (() => {
+    if (!saved) {
+      const provider = requireProviderEntry(session.providerDirectoryEntryId);
+      return { ...resolveEpicClient(provider, stored), provider };
+    }
+    return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
+      resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
+      provider: { id: session.providerDirectoryEntryId, brandName: saved.brandName,
+        fhirBaseUrl: saved.fhirBaseUrl, sourceSystem: "epic-fhir" as const } };
+  })();
+  const { provider } = configuration;
+  if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) throw providerConfigurationChangedError();
+  requirePinnedEndpoint(session.tokenEndpoint, new URL(provider.fhirBaseUrl), "token endpoint");
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
-  const verifier = await openClinicalOauthVerifier({
-    encrypted: session.codeVerifierEncrypted,
-    memberId: auth.member.id,
-    stateHash: session.stateHash,
-  });
+  const verifier = saved?.verifier ?? opened;
   const token = await exchangeSmartAuthorizationCode({
     auth: configuration.auth,
     code: normalizeAuthorizationCode(input.code),
@@ -306,6 +326,7 @@ async function finishAuthorization(input: {
     requiresProcessorApprovals: configuration.auth.method === "private_key_jwt",
     clientId: session.clientId,
     tokenEndpoint: session.tokenEndpoint,
+    profile: saved?.profile,
     authorizationStartedAt: session.createdAt,
     token,
   }));
@@ -377,6 +398,7 @@ async function consumeClinicalOauthSession(input: {
 }
 
 async function persistClinicalConnection(input: {
+  profile?: EpicProfile;
   clientId: string;
   tokenEndpoint: string;
   hospitalApprovedImports: boolean;
@@ -388,7 +410,7 @@ async function persistClinicalConnection(input: {
   fhirBaseHash: string;
   memberId: string;
   now: Date;
-  provider: ClinicalProviderDirectoryEntry;
+  provider: Pick<ClinicalProviderDirectoryEntry, "id" | "brandName" | "fhirBaseUrl" | "sourceSystem">;
   requestedScopes: readonly string[];
   resourceTypes: readonly string[];
   token: Awaited<ReturnType<typeof exchangeSmartAuthorizationCode>>;

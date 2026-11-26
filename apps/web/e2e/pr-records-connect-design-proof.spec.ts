@@ -13,6 +13,9 @@ for (const width of [390, 1280]) {
     const search = study.locator('[data-slot="link-page-screen"]').first();
     await search.scrollIntoViewIfNeeded();
     await expect(search.getByText("Cleveland Clinic", { exact: true })).toBeVisible();
+    const shared = search.getByRole("button", { name: "Continue to Alder Health patient portal", includeHidden: true });
+    await expect(shared).toContainText("Harbor Clinic, 42 Cove Road, Elm Bay, ME");
+    await expect(shared).toContainText("May already be included through Lantern Medical");
     await page.evaluate(async () => {
       await document.fonts.ready;
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -40,6 +43,7 @@ for (const width of [390, 1280]) {
     const output = process.env.DESIGN_PROOF_OUTPUT_DIR;
     if (output) {
       await mkdir(output, { recursive: true });
+      await shared.screenshot({ path: path.join(output, `shared-portal-${width}.png`) });
       await search.screenshot({ path: path.join(output, `provider-search-${width}.png`), style: "nextjs-portal { visibility: hidden; }" });
     }
   });

@@ -9,16 +9,16 @@ import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { clinicalRecordsError, isClinicalRecordsControlPlaneError } from "./errors";
-import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
-import { resolveEpicClient } from "./epic-import-config";
-import { openClinicalConnectionSecret, sealClinicalConnectionSecret } from "./secrets";
-import { refreshSmartAccessToken, type SmartTokenResponse } from "./smart";
+import { epicProfileSchema, resolveSavedEpicAuth, type EpicProfile } from "./epic-import-config";
+import { openClinicalConnectionFhirBaseUrl, openClinicalConnectionSecret, sealClinicalConnectionSecret } from "./secrets";
+import { requirePinnedEndpoint, refreshSmartAccessToken, type SmartTokenResponse } from "./smart";
 
 import { CLINICAL_DAILY_SYNC_MS } from "./run-lifecycle";
 export const CLEAR_CLINICAL_PERSISTENT_ACCESS = {
   refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null,
 } as const;
 const refreshPayloadSchema = z.object({
+  profile: epicProfileSchema.optional(),
   schemaVersion: z.literal(1), clientId: z.string().min(1).max(512),
   tokenEndpoint: z.string().url().max(2048), refreshToken: z.string().min(1).max(65_536),
   grantedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -26,14 +26,14 @@ const refreshPayloadSchema = z.object({
 
 export async function prepareClinicalPersistentAccess(input: {
   connectionId: string; memberId: string; tokenVersion: number; clientId: string;
-  tokenEndpoint: string; requestedScopes: readonly string[]; token: SmartTokenResponse; now: Date;
+  profile?: EpicProfile; tokenEndpoint: string; requestedScopes: readonly string[]; token: SmartTokenResponse; now: Date;
 }) {
   if (!input.requestedScopes.includes("offline_access") || !input.token.grantedScopes.includes("offline_access") || !input.token.refreshToken) {
     return CLEAR_CLINICAL_PERSISTENT_ACCESS;
   }
   const refreshTokenEncrypted = await sealClinicalConnectionSecret({
     connectionId: input.connectionId, memberId: input.memberId, tokenVersion: input.tokenVersion, field: "refreshToken",
-    value: JSON.stringify({ schemaVersion: 1, clientId: input.clientId, tokenEndpoint: input.tokenEndpoint,
+    value: JSON.stringify({ schemaVersion: 1, profile: input.profile, clientId: input.clientId, tokenEndpoint: input.tokenEndpoint,
       refreshToken: input.token.refreshToken, grantedScopes: input.token.grantedScopes }),
   });
   if (!refreshTokenEncrypted) throw new TypeError("Persistent access encryption returned an empty value.");
@@ -87,9 +87,11 @@ export async function renewClinicalAccess(input: {
     try {
       const value = await openClinicalConnectionSecret({ ...identity, field: "refreshToken", encrypted: current.refreshTokenEncrypted });
       const payload = refreshPayloadSchema.parse(JSON.parse(value ?? "null"));
-      const provider = resolveClinicalProviderDirectoryEntry(current.providerDirectoryEntryId);
-      if (!provider) throw new Error("Refresh provider unavailable.");
-      const { auth } = resolveEpicClient(provider, { clientId: payload.clientId, grant: "refresh" });
+      if (current.sourceSystem !== "epic-fhir") throw authorizationRequired();
+      const base = await openClinicalConnectionFhirBaseUrl({ ...identity, encrypted: current.fhirBaseUrlEncrypted });
+      requirePinnedEndpoint(payload.tokenEndpoint, new URL(base), "token endpoint");
+      const auth = resolveSavedEpicAuth(current.providerDirectoryEntryId,
+        { clientId: payload.clientId, grant: "refresh" }, payload.profile);
       if (auth.method === "public") throw new Error("Refresh client unavailable.");
       const token = await refreshSmartAccessToken({ ...payload, auth,
         fetchImpl: (url, init) => {
@@ -127,6 +129,7 @@ export async function renewClinicalAccess(input: {
           retrievalGeneration: input.generation, refreshLeaseId: leaseId,
         }, data: { refreshLeaseId: null, refreshLeaseExpiresAt: null } });
         if (retryable) throw error;
+        if (isClinicalRecordsControlPlaneError(error) && error.code === "CLINICAL_RECORD_BASIC_CREDENTIAL_CHANGED") throw authorizationRequired();
         throw clinicalRecordsError({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", httpStatus: 503,
           retryable: true, message: "Medical-record access could not be renewed yet." });
       }

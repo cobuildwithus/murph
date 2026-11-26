@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
+import { parseClinicalProviderDirectory, searchClinicalProviderDirectorySnapshot } from "@/src/lib/clinical-records/provider-directory";
+import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
 import { buildEpicProviderDirectoryArtifact } from "@/scripts/import-epic-clinical-provider-directory";
 
 const generatedAt = "2026-07-20T08:00:05.631Z";
@@ -20,8 +22,30 @@ describe("Epic Clinical Records provider directory importer", () => {
     expect(first.entries[0]).toMatchObject({
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       id: "epic-brand-123",
-      locations: [["TEST CLINIC", "ATLANTA", "ga", "30309"]],
+      locations: expect.arrayContaining([
+        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], "urn:uuid:facility-1"],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], "facility-north"],
+      ]),
     });
+  });
+
+  it("keeps nested aliases and streets on their place, skips inactive parents and serves both browser shapes", () => {
+    const bundle = makeBundle();
+    const child = bundle.entry[3]!;
+    child.resource.partOf = { reference: "urn:uuid:facility-1" };
+    const load = () => parseClinicalProviderDirectory(buildEpicProviderDirectoryArtifact(JSON.stringify(bundle)));
+    const directory = load();
+    const query = "Harbor Lane";
+    const legacy = searchClinicalProviderDirectorySnapshot(directory, { query }).providers[0]!;
+    expect(Object.keys(legacy).sort()).toEqual(["brandName", "facilities", "id", "sourceSystem"]);
+    expect(Object.keys(legacy.facilities[0]!).sort()).toEqual(["city", "name", "postalCode", "state"]);
+    const grouped = searchClinicalProviderDirectorySnapshot(directory, { query, grouped: true });
+    expect(parseClinicalProviderSearchResponse({ ...grouped, ok: true }).providers[0]?.matchedFacility?.street).toEqual(["32 Harbor Lane"]);
+    expect(directory.entries[0]?.aliases).not.toContain("Lantern");
+    expect(searchClinicalProviderDirectorySnapshot(directory, { query: "Lantern", grouped: true }).providers[0]?.matchedFacility?.street)
+      .toEqual(["18 Lantern Way"]);
+    bundle.entry[2]!.resource.active = false;
+    expect(searchClinicalProviderDirectorySnapshot(load(), { query }).providers).toEqual([]);
   });
 
   it("canonicalizes source entry order without falsifying the exact-byte hash", () => {
@@ -85,7 +109,8 @@ function makeBundle() {
         fullUrl: "urn:uuid:facility-1",
         resource: {
           active: true,
-          address: [{ city: "Atlanta", postalCode: "30309", state: "GA" }],
+          alias: ["Lantern"],
+          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["18 Lantern Way"] }],
           name: "Test Clinic",
           partOf: { reference: "urn:uuid:brand-1" },
           resourceType: "Organization",
@@ -95,8 +120,9 @@ function makeBundle() {
         fullUrl: "urn:uuid:facility-2",
         resource: {
           active: true,
-          address: [{ city: "ATLANTA", postalCode: "30309", state: "ga" }],
-          name: "TEST CLINIC",
+          id: "facility-north",
+          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["32 Harbor Lane"] }],
+          name: "Test Clinic",
           partOf: { reference: "urn:uuid:brand-1" },
           resourceType: "Organization",
         },

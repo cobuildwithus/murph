@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import providerDirectory from "@/src/lib/clinical-records/provider-directory.v2.json";
 import squareLogos from "@/src/lib/clinical-records/provider-logos-square.json";
 import wideLogos from "@/src/lib/clinical-records/provider-logos.json";
 
@@ -36,6 +35,7 @@ describe("Clinical Records provider search route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.bearer.mockResolvedValue({ member: { id: "member_clinical_1" } });
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_clinical_1" },
     });
@@ -59,7 +59,7 @@ describe("Clinical Records provider search route", () => {
     expect(await (await POST(request)).json()).toEqual({ providers: [{ id: "epic-example", name: query, place: "Sample City, ZZ" }] });
     expect(mocks.bearer).toHaveBeenCalledWith(request);
     expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
-    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledExactlyOnceWith({ query });
+    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledExactlyOnceWith({ query }, "member_clinical_1");
     const urlOnly = new Request(request.url, { method: "POST", body: "{}" });
     expect((await POST(urlOnly)).status).toBe(400);
     expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledOnce();
@@ -95,7 +95,7 @@ describe("Clinical Records provider search route", () => {
       city: "Atlanta",
       query: "Piedmont",
       state: "GA",
-    });
+    }, undefined);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
   });
 
@@ -116,11 +116,11 @@ describe("Clinical Records provider search route", () => {
 
 describe("Clinical Records square provider logos", () => {
   it("maps directory providers to 144-pixel PNG files the app is allowed to load", () => {
-    const directoryIds = new Set(providerDirectory.entries.map(entry => entry.id));
     const entries = Object.entries(squareLogos);
     expect(entries.length).toBeGreaterThan(0);
     for (const [id, logoPath] of entries) {
-      expect(directoryIds.has(id), `${id} should be a directory provider`).toBe(true);
+      // Removed search brands can still have saved connections using their logo.
+      expect(id).toMatch(/^epic-[a-z0-9-]+$/u);
       // The same pattern the app checks before it loads a logo.
       expect(logoPath).toMatch(/^\/clinical-provider-logos\/[0-9a-f]{24}\.png$/u);
       const file = path.join(process.cwd(), "apps/web/public", logoPath);

@@ -1,5 +1,6 @@
 "use client";
 
+import { clinicalProviderPlaceLabels } from "@/src/lib/clinical-records/client-contracts";
 import { ChevronRightIcon, XIcon } from "lucide-react";
 import { useId, type RefCallback } from "react";
 
@@ -201,14 +202,15 @@ function ProviderResult({ provider, disabled, pending, onSelect }: {
   pending: boolean;
   onSelect: () => void;
 }) {
+  const descriptionId = useId();
   const logos: Readonly<Record<string, string>> = providerLogos;
-  const locations = [...new Set(provider.facilities.map((facility) => [facility.city, facility.state].filter(Boolean).join(", ")).filter(Boolean))];
-  const location = locations.slice(0, 2).join(" · ");
+  const labels = clinicalProviderPlaceLabels(provider);
   return (
     <li>
       <button
         type="button"
         aria-label={`Continue to ${provider.brandName} patient portal`}
+        aria-describedby={descriptionId}
         aria-busy={pending}
         disabled={disabled}
         onClick={onSelect}
@@ -234,8 +236,8 @@ function ProviderResult({ provider, disabled, pending, onSelect }: {
         </Avatar>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-pretty text-[17px] font-semibold leading-[22px]">{provider.brandName}</span>
-          <span className="text-sm font-medium leading-[19px] text-[#FFFCF6]/60">
-            {location || "Patient portal"}{locations.length > 2 ? ` +${locations.length - 2} more` : ""}
+          <span id={descriptionId} className="flex flex-col gap-0.5 text-sm font-medium leading-[19px] text-[#FFFCF6]/60">
+            {labels.length ? labels.map((label, index) => <span key={index}>{label}</span>) : "Patient portal"}
           </span>
         </span>
         {pending ? (
