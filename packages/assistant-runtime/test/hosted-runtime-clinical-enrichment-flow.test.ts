@@ -1,6 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
@@ -11,7 +12,7 @@ import { applyClinicalEnrichmentProposals, persistClinicalEnrichmentProposals, p
 import { describe, expect, it, vi } from "vitest";
 
 import { countClinicalEnrichmentDocumentPages, prepareClinicalEnrichmentDocument } from "../src/hosted-runtime/clinical-enrichment-document.ts";
-import type { HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { createHostedClinicalEnrichmentRunner, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 import { makeHostedClinicalEnrichmentWakeDue } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import { executeHostedClinicalEnrichmentWake } from "../src/hosted-runtime/events/clinical-enrichment.ts";
 import { readHostedSystemMailboxState, updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -28,6 +29,32 @@ vi.mock("../src/hosted-runtime/context.ts", () => ({
 }));
 
 const digest = (value: Buffer | string) => createHash("sha256").update(value).digest("hex");
+const hasPoppler = ["pdfinfo", "pdftoppm", "pdftotext"].every((command) => {
+  try { execFileSync(command, ["-v"], { stdio: "ignore" }); return true; }
+  catch { return false; }
+});
+
+// One synthetic text line per page; no patient fixture.
+function textPdf(lines: readonly string[]): Buffer {
+  const objects = ["<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${lines.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${lines.length} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+  for (const [index, line] of lines.entries()) {
+    const content = `BT /F1 12 Tf 40 740 Td (${line}) Tj ET`;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + index * 2} 0 R >>`,
+      `<< /Length ${Buffer.byteLength(content, "latin1")} >>\nstream\n${content}\nendstream`);
+  }
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf, "latin1"));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf, "latin1");
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf, "latin1");
+}
 const empty: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
 
 function runtime(): HostedSystemMailboxRuntime {
@@ -134,6 +161,49 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { pages: 1 } });
       expect(Date.parse(interrupted.nextWakeAt ?? "")).toBeLessThanOrEqual(Date.now());
       // The next wake applies the remaining cached pages back to back and finishes the job.
+      await executeHostedClinicalEnrichmentWake({ wake, vaultRoot });
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { pages: 3, created: 3 } });
+      expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value).sort()).toEqual([91, 92, 93]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it.skipIf(!hasPoppler)("extracts a real three-page PDF in one grouped pass and applies each page", async () => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-page-group-");
+    const { vaultRoot } = workspace;
+    const at = (page: number) => `2020-03-1${page}T12:00:00Z`;
+    const scratch: string[] = [];
+    const onError = vi.fn();
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: OCCURRED_AT });
+      const lines = [1, 2, 3].map((page) => `Synthetic page ${page}. Collected ${at(page)}. Serum glucose ${90 + page} mg/dL.`);
+      const job = await importClinicalEnrichmentSource(vaultRoot, undefined, { bytes: textPdf(lines), mediaType: "application/pdf" });
+      const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
+        const pages = request.renderedPages ?? [];
+        expect(pages.map(({ page }) => page)).toEqual([1, 2, 3]);
+        for (const page of pages) {
+          // Each page renders into its own scratch root, which the assignment binds.
+          expect((await readFile(page.path)).toString("ascii", 12, 16)).toBe("IHDR");
+          expect(request.scratchRoots?.some((root) => page.path.startsWith(`${root}${path.sep}`))).toBe(true);
+        }
+        scratch.push(...request.scratchRoots ?? []);
+        expect(request.extractedText).toBe(lines.map((line, index) => `--- page ${index + 1} ---\n${line}`).join("\n\n"));
+        return { status: "complete", records: pages.map(({ page }) => ({
+          dateBasis: "document" as const, dateEvidence: `Collected ${at(page)}`, page, payload: { kind: "test" as const, occurredAt: at(page), title: `Synthetic glucose ${page}`,
+            note: null, testName: "Glucose", specimenType: "serum", resultStatus: "normal" as const, results: [{ analyte: "Glucose", value: 90 + page, unit: "mg/dL" }] } })) };
+      });
+      const runner = createHostedClinicalEnrichmentRunner({ codexHome: null, env: {}, memberId: "synthetic-member", vaultRoot, onStateMutation() {}, onError, executeExtraction });
+      runner.kick();
+      // Real poppler rendering of three pages can outlast the default one-second wait.
+      await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledOnce(), { timeout: 30_000 });
+      await vi.waitFor(() => expect(runner.hasOwnedWork()).toBe(false), { timeout: 30_000 });
+      expect(onError).not.toHaveBeenCalled();
+      for (const root of scratch) await expect(stat(root)).rejects.toMatchObject({ code: "ENOENT" });
+      // Every page has its own cache entry, so planning finds nothing left to extract.
+      expect(await planClinicalExtractionUnits({ vaultRoot, limit: 10, countPages: (document) => countClinicalEnrichmentDocumentPages({ vaultRoot, ...document }) })).toEqual([]);
+      const wake = (await readHostedSystemMailboxState(vaultRoot)).pending[0]!.wake;
+      if (wake.kind !== "clinical-records.enrichment-requested") throw new Error("Expected the clinical wake.");
       await executeHostedClinicalEnrichmentWake({ wake, vaultRoot });
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { pages: 3, created: 3 } });
       expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value).sort()).toEqual([91, 92, 93]);

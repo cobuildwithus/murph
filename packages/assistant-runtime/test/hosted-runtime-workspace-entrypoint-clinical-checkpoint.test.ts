@@ -50,7 +50,8 @@ function mockClinicalUnits(events: string[], total: number, hold?: (page: number
   let maxInFlight = 0;
   const unit = (page: number): ClinicalExtractionUnit => ({
     key: `synthetic/${page}.json`, jobId: "a".repeat(64), cursor: page === saved.length + 1, cursorRef: `0:0:${page}`,
-    locator: { attachmentIndex: 0 }, cacheSha256: "c".repeat(64), page, failures: 0, timeZone: "UTC",
+    // One attachment per unit keeps one call per unit here; page groups have their own runner tests.
+    locator: { attachmentIndex: page - 1 }, cacheSha256: "c".repeat(64), page, failures: 0, timeZone: "UTC",
     source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
     documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
   });
