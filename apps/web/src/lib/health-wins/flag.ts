@@ -24,11 +24,13 @@ export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env
 
 export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
   if (!lists(env.MURPH_HEALTH_RECORD_MEMBER_IDS, memberId) || !isHealthFeedEnabled(memberId, env)) return undefined;
-  return { timed: true, route: lists(env.MURPH_HEALTH_ROUTE_MEMBER_IDS, memberId) } as const;
+  return { timed: true, route: lists(env.MURPH_HEALTH_ROUTE_MEMBER_IDS, memberId), named: true } as const;
 }
 
-export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed"): void {
-  if (!healthRecordCapability(memberId)?.[capability]) throw gameNotFound();
+export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed") {
+  const record = healthRecordCapability(memberId);
+  if (!record?.[capability]) throw gameNotFound();
+  return record;
 }
 
 export function assertHealthFeedEnabled(memberId: string): void {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { freezeHealthSelections, previewRecordedCandidate } from "../card-options";
+import { sealedActivitySummary } from "../request";
 import { buildRecordedCards, recordedActivitySummary, validateRecordedActivity } from "./recorded";
 import type { RecordedActivity, RecordedActivityKind } from "./types";
 
@@ -63,9 +64,24 @@ describe("recorded timed cards", () => {
     const activity = { ...summary, kind: "sauna" } as const;
     const morning = buildRecordedCards(activity, { ...context, hour: 8 });
     expect(morning.suggestedTitle).toBe("Morning sauna");
-    const afterWalk = buildRecordedCards(activity, { ...context, hour: 8, previousKind: "walk" });
+    const afterWalk = buildRecordedCards(activity, { ...context, hour: 8, previous: { kind: "walk" } });
     expect(afterWalk.suggestedTitle).toBe("Sauna after your walk");
     expect(afterWalk.candidates).toEqual(morning.candidates);
+  });
+
+  it("uses the activity name on the card and compares display words for the suggested title", () => {
+    const activity = { ...summary, kind: "other", name: "Pickleball", elapsedSec: 4320, movingSec: 4320 } as const;
+    const { suggestedTitle, candidates } = buildRecordedCards(activity, context);
+    const [card] = candidates.map(previewRecordedCandidate);
+    expect(card.title).toEqual({ number: "1h 12m", measure: "pickleball" });
+    expect(preview({ ...activity, name: undefined }).title).toEqual({ number: "1 hr 12 min", measure: "activity" });
+    expect(suggestedTitle).toBe("Evening pickleball");
+    expect(card.change_options.find(option => option.id === "hide_numbers")?.spec?.title)
+      .toEqual({ number: "", measure: "Timed activity" });
+    expect(buildRecordedCards(activity, { ...context, previous: { kind: "other", name: "Badminton" } }).suggestedTitle)
+      .toBe("Pickleball after your badminton");
+    expect(buildRecordedCards(activity, { ...context, previous: { kind: "lift", name: "pickleball" } }).suggestedTitle)
+      .toBe(suggestedTitle);
   });
 
   it("accepts inclusive limits and the one-minute allowance independently of summary extremes", () => {
@@ -137,5 +153,19 @@ describe("recorded timed cards", () => {
     expect(saved).toEqual({ ...summary, startedAt: "2033-02-16T19:07:00.000Z",
       heartRate: { lowBpm: 63, avgBpm: 91.5, peakBpm: 133 } });
     expect(recordedActivitySummary({ ...summary, heartRate, startedAt: "2033-02-16T12:07:00-07:00" })).toEqual(saved);
+  });
+
+  it("decodes sealed names structurally and preserves both named and legacy summaries", () => {
+    const legacy = recordedActivitySummary(summary);
+    expect(legacy).not.toHaveProperty("name");
+    expect(sealedActivitySummary.parse(legacy)).toEqual(legacy);
+    for (const name of ["Pickleball", "Retro: circuit", "𐐀".repeat(32)]) {
+      const saved = recordedActivitySummary({ ...summary, name });
+      expect(saved.name).toBe(name);
+      expect(sealedActivitySummary.parse(saved)).toEqual(saved);
+    }
+    for (const name of ["", "𐐀".repeat(33), 17]) {
+      expect(sealedActivitySummary.safeParse({ ...legacy, name }).success).toBe(false);
+    }
   });
 });

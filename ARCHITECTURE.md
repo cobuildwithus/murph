@@ -6808,7 +6808,10 @@ allowlists. GPS routes also require the route-recording allowlist.
 Clients preview transient activity input, then submit their selected
 cards and revisions with the activity. Web hashes the canonical final card spec
 after applying the option and client units. A change requires a new preview.
-A committed retry returns the post receipt before rebuilding any cards.
+A committed retry returns the post receipt before activity-name admission or
+card rebuilding. Sealed summary reads check the stored name's type and length.
+Only new name choices, previews, private saves and new posts apply the current
+cleanup and refusal rules.
 The transaction binds the activity to a single post and preserves the member's
 selection order across recorded and suggested cards.
 
@@ -6838,7 +6841,8 @@ database transactions.
 | Table | Encrypted content | Approved operational metadata |
 | --- | --- | --- |
 | `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `posted_card_keys` holds opaque keyed digests of the author's member ID and each selected suggestion's candidate ID. Recorded activity cards have no digest. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
-| `health_activity` | `summary_encrypted` holds the activity kind, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
+| `health_activity` | `summary_encrypted` holds the activity kind, optional name, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
+| `health_activity_kind_decision` | None | Shared across members. `key` contains the prompt version, privacy key version and a purpose-specific HMAC of the NFKC-normalized, lowercased name. `kind`, `route` and `timer` hold the classifier's answer before member capability checks. `created_at` records insertion. The table excludes raw names, member references and fallback answers. |
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
