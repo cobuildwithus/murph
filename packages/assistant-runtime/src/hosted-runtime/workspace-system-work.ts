@@ -15,8 +15,18 @@ import {
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
+  type HostedSystemMailboxPendingItem,
   type HostedSystemMailboxRouteAction,
 } from "./system-mailbox-state.ts";
+
+/**
+ * An enrichment pointer with nothing to publish is removed when its final apply
+ * commits. Losing that removal only reruns the apply, which finishes through its
+ * saved receipt, so the job end joins the batched checkpoint.
+ */
+function finishesWithItsApply(item: HostedSystemMailboxPendingItem): boolean {
+  return item.routeAction === "apply-clinical-enrichment" && item.postCheckpointRecord === null;
+}
 
 export const HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS = [
   "run-device-sync-wake",
@@ -56,7 +66,8 @@ export function createHostedWorkspaceSystemWork(input: {
         ? { systemProgressed: true as const } : {}),
       nextWakeAt: nextWake.at,
       nextWakeReason: nextWake.reason,
-      ...(preparation.status === "processed" || preparation.status === "recording"
+      ...(preparation.status === "recording"
+        || (preparation.status === "processed" && !finishesWithItsApply(preparation.item))
         ? {
             afterDurableCheckpoint: async (context) => {
               (context?.signal ?? input.preparation.signal)?.throwIfAborted();
@@ -117,7 +128,7 @@ export function createHostedWorkspaceSystemWork(input: {
               allowedRouteActions: [routeAction],
               pendingOnly: true,
               runtimeLogContext: input.runnerInput.runtimeLogContext,
-              retainProcessedItemUntilRecorded: true,
+              retainProcessedItemUntilRecorded: routeAction !== "apply-clinical-enrichment",
               shouldYieldDeviceImportPreparation: input.runnerInput.shouldYieldDeviceImportPreparation,
               shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
               backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,

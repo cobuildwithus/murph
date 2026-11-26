@@ -440,12 +440,90 @@ test("batches real clinical page applies into the job's checkpoints", async () =
     expect(executeExtraction.mock.calls.map(([request]) => `${request.textWindow?.index}:${request.family}`))
       .toEqual(["1:all", "2:all", "3:all"]);
     expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
-    // Mid-job applies leave only usage and receipts, so the pages share a
-    // snapshot. The job's final apply receipt is due work, and recording it
-    // needs a follow-up snapshot. Usage waits for the first.
+    // Every apply, the job's last included, leaves only usage and receipts, so
+    // the pages share one snapshot and usage follows it.
     expect(pageProgress(events)).toEqual([
       "page-1:done", "page-2:done", "page-3:done",
-      "snapshot", "page-1:usage", "page-2:usage", "page-3:usage", "snapshot",
+      "snapshot", "page-1:usage", "page-2:usage", "page-3:usage",
+    ]);
+  } finally {
+    runOne.mockRestore();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+test("batches several one-page clinical jobs into the window's checkpoints", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-real-jobs-"));
+  const events: string[] = [];
+  const glucose = [94, 95, 96];
+  const collectedAt = (document: number) => `2026-05-0${document}T12:00:00.000Z`;
+  const extractionStarted = createDeferred<void>();
+  let extracting = 0;
+  // Only the provider is synthetic. Each document is its own import batch, so its own job.
+  const executeExtraction = vi.fn<NonNullable<clinicalEnrichment.HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
+    await request.beforeProviderEntry?.();
+    const document = Number(/Synthetic document (\d)/u.exec(request.extractedText ?? "")?.[1]);
+    extractionStarted.resolve();
+    extracting += 1;
+    await setImmediate().finally(() => { extracting -= 1; });
+    if (request.abortSignal?.aborted) {
+      events.push(`page-${document}:requeued`);
+      throw request.abortSignal.reason;
+    }
+    request.onProviderUsage?.({ stage: "answer", usage: {
+      occurredAt: TEST_NOW, provider: "codex-cli", providerRequestOrdinal: document, providerRequestOutcome: "succeeded",
+      usage: {
+        apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: null, inputTokens: 10, outputTokens: 2,
+        providerMetadataJson: null, providerName: "OpenAI", providerRequestId: null, rawUsageJson: null, reasoningTokens: null,
+        requestedModel: "gpt-synthetic", servedModel: "gpt-synthetic", tokenPricingBasis: "standard", totalTokens: 12,
+        turnProfileJson: null, usageExtractionSourcePath: "test.clinical-jobs", usageExtractionVersion: "test-v1",
+      },
+    } });
+    events.push(`page-${document}:done`);
+    return { status: "complete", records: [{
+      dateBasis: "document", dateEvidence: `Collected ${collectedAt(document)}`, payload: {
+        kind: "test", occurredAt: collectedAt(document), title: `Synthetic glucose ${document}`, note: null, testName: "Glucose",
+        specimenType: "serum", resultStatus: "normal", results: [{ analyte: "Glucose", value: glucose[document - 1]!, unit: "mg/dL" }],
+      },
+    }] };
+  });
+  const actualRunOne = clinicalEnrichment.runOneHostedClinicalEnrichment;
+  const runOne = vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment")
+    .mockImplementation((input) => actualRunOne({ ...input, executeExtraction }));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC", createdAt: TEST_NOW });
+    const jobs = [];
+    for (const [index, value] of glucose.entries()) {
+      const document = index + 1;
+      const text = `Synthetic document ${document}. Collected ${collectedAt(document)}. Serum glucose ${value} mg/dL.`;
+      // Like production query-slices-v2 imports, the wake carries no change run.
+      jobs.push(await importClinicalEnrichmentSource(vaultRoot, {
+        resourceType: "DocumentReference", status: "current", resourceId: `synthetic-lab-document-${document}`,
+        revision: `2026-05-0${document}T13:00:00.000Z`,
+      }, { bytes: Buffer.from(text), mediaType: "text/plain" }));
+    }
+    await runClinicalPagesInvocation({
+      attemptId: "attempt_synthetic_clinical_real_jobs", events, extracting: () => extracting > 0, vaultRoot,
+      foregroundHeldUntil: extractionStarted.promise,
+      snapshot: await createVaultSnapshotBundle({ vaultRoot }),
+      usageRecordPort: { async recordUsage(record) {
+        events.push(`page-${record.providerRequestOrdinal}:usage`);
+        return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true };
+      } },
+    });
+    for (const job of jobs) {
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId }), events.join(","))
+        .toMatchObject({ status: "complete", counts: { created: 1, held: 0, pages: 1 } });
+    }
+    const points = await listMetricPoints(vaultRoot, { limit: 10 });
+    expect(points.map((point) => point.value).sort()).toEqual(glucose);
+    expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
+    // Each job end leaves only usage and receipts: its pointer leaves with the
+    // final apply. Main took three snapshots per one-page job here.
+    expect(pageProgress(events)).toEqual([
+      "page-1:done", "snapshot", "page-1:usage",
+      "page-2:done", "snapshot", "page-2:usage",
+      "page-3:done", "snapshot", "page-3:usage", "snapshot",
     ]);
   } finally {
     runOne.mockRestore();
