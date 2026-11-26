@@ -54,7 +54,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 94.00 Tm (search and logo provider / subprocessor) Tj
 endstream
 endobj
 4 0 obj
-<< /Length 5757 >>
+<< /Length 5820 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Deployment-specific Postgres provider; Service: Hosted database selected by the deployment) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (through DATABASE_URL.; Data categories: Hosted member, routing, billing reference, mailbox,) Tj ET
@@ -90,13 +90,14 @@ BT /F1 10 Tf 1 0 0 1 54.00 302.00 Tm (For games, provider abuse-monitoring logs 
 BT /F1 10 Tf 1 0 0 1 54.00 288.00 Tm (flags can be kept longer for review.; Role: Model provider / subprocessor) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 270.00 Tm (Provider: xAI; Service: Searches X for Murph.; Data categories: The search question, which can include) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 256.00 Tm (health details from the conversation.; Country/region: Provider-specific; Murph-authorized model) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (training or secondary use?: No model training on Murph-managed health data.; Retention: Per provider) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (service settings and Murph retention rules.; Role: Search provider / subprocessor) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 210.00 Tm (Provider: ElevenLabs; Service: Recap songs and Murph's voice notes.; Data categories: A description of) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (the sound and lyrics about the game, which can include players' first names; the words of a voice note) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (Murph sends. No photos.; Country/region: United States; Murph-authorized model training or secondary) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (use?: No model training or unrelated secondary use authorized by Murph.; Retention: Per provider service) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (settings and Murph retention rules.; Role: Voice and music provider / subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 242.00 Tm (training or secondary use?: No model training or unrelated secondary use authorized by Murph.;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 228.00 Tm (Retention: Per provider service settings and Murph retention rules.; Role: Search provider /) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 214.00 Tm (subprocessor) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 196.00 Tm (Provider: ElevenLabs; Service: Recap songs and Murph's voice notes.; Data categories: A description of) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 182.00 Tm (the sound and lyrics about the game, which can include players' first names; the words of a voice note) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 168.00 Tm (Murph sends. No photos.; Country/region: United States; Murph-authorized model training or secondary) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (use?: No model training or unrelated secondary use authorized by Murph.; Retention: Per provider service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 140.00 Tm (settings and Murph retention rules.; Role: Voice and music provider / subprocessor) Tj ET
 endstream
 endobj
 5 0 obj
@@ -264,19 +265,19 @@ xref
 0000000079 00000 n 
 0000000154 00000 n 
 0000005929 00000 n 
-0000011738 00000 n 
-0000017732 00000 n 
-0000023408 00000 n 
-0000028364 00000 n 
-0000028501 00000 n 
-0000028638 00000 n 
-0000028776 00000 n 
-0000028914 00000 n 
-0000029052 00000 n 
-0000029137 00000 n 
-0000029318 00000 n 
+0000011801 00000 n 
+0000017795 00000 n 
+0000023471 00000 n 
+0000028427 00000 n 
+0000028564 00000 n 
+0000028701 00000 n 
+0000028839 00000 n 
+0000028977 00000 n 
+0000029115 00000 n 
+0000029200 00000 n 
+0000029381 00000 n 
 trailer
 << /Size 16 /Root 15 0 R /Info 14 0 R >>
 startxref
-29369
+29432
 %%EOF
