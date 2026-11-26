@@ -3,19 +3,28 @@ import { gameNotFound } from "../game/http/errors";
 
 type FlagEnv = Readonly<Record<string, string | undefined>>;
 
-export function healthFeedMemberIds(env: FlagEnv = process.env): string[] {
+/** An allowlist names members, or `*` for every member. */
+function lists(ids: string | undefined, memberId: string): boolean {
+  return (ids ?? "").split(",").some(entry => {
+    const id = entry.trim();
+    return id === "*" || (id !== "" && id === memberId);
+  });
+}
+
+/** The feed's authors: a list of members, or "everyone" for `*`; none when games are off. */
+export function healthFeedAuthors(env: FlagEnv = process.env): string[] | "everyone" {
   if (!isGameEnabled(env)) return [];
-  return (env.MURPH_HEALTH_FEED_MEMBER_IDS ?? "").split(",").map(entry => entry.trim()).filter(Boolean);
+  const ids = (env.MURPH_HEALTH_FEED_MEMBER_IDS ?? "").split(",").map(entry => entry.trim()).filter(Boolean);
+  return ids.includes("*") ? "everyone" : ids;
 }
 
 export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env): boolean {
-  return healthFeedMemberIds(env).includes(memberId);
+  return isGameEnabled(env) && lists(env.MURPH_HEALTH_FEED_MEMBER_IDS, memberId);
 }
 
 export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
-  const includesMember = (ids: string | undefined) => ids?.split(",").some(entry => entry.trim() === memberId) ?? false;
-  if (!includesMember(env.MURPH_HEALTH_RECORD_MEMBER_IDS) || !isHealthFeedEnabled(memberId, env)) return undefined;
-  return { timed: true, route: includesMember(env.MURPH_HEALTH_ROUTE_MEMBER_IDS) } as const;
+  if (!lists(env.MURPH_HEALTH_RECORD_MEMBER_IDS, memberId) || !isHealthFeedEnabled(memberId, env)) return undefined;
+  return { timed: true, route: lists(env.MURPH_HEALTH_ROUTE_MEMBER_IDS, memberId) } as const;
 }
 
 export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed"): void {
