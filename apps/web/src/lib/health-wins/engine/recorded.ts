@@ -16,7 +16,7 @@ const activityLabels = {
   walk: { name: "walk", hidden: "Went for a walk" },
 } satisfies Record<RecordedActivityKind, { name: string; hidden: string }>;
 
-const dayLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const dayLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
 function validDuration(seconds: number) {
   return Number.isInteger(seconds) && seconds > 0 && seconds <= maxMinutes * 60;
@@ -70,10 +70,10 @@ export function buildRecordedCards(activity: RecordedActivity, context: Recorded
   const suggestedTitle = previousKind && previousKind !== activity.kind
     ? `${name} after your ${activityLabels[previousKind].name}`
     : `${bucket} ${label.name}`;
-  const dayText = dayLabel.format(new Date(day));
-  const source_note = `${dayText} · ${hour < 12 ? "AM" : "PM"}`;
+  // Day and part of day only: the card never carries the start time.
+  const recorded = `Recorded on ${dayLabel.format(new Date(day))}, ${bucket.toLowerCase()}`;
   const title = { number: formatRungTime(activity.elapsedSec), measure: label.name };
-  const base = { title, source_note, filter: "Fitness", theme: "fitness", share: { caption_tips: [] } } as const;
+  const base = { title, filter: "Fitness", theme: "fitness", share: { caption_tips: [] } } as const;
   const timer = activity.timerSec === undefined ? {} : { timerMinutes: activity.timerSec / 60 };
   const hr = activity.heartRate;
   const series = hr?.perMinute;
@@ -86,11 +86,14 @@ export function buildRecordedCards(activity: RecordedActivity, context: Recorded
   }
   const card: CardSpec = hr && series && low && peak ? {
     ...base, id: `activity:${activity.id}:activity_heart_rate`, kind: "activity_heart_rate",
-    subtitle: `Highest individual heart rate reading was ${formatNumber(hr.peakBpm)} bpm.`,
+    // The subtitle reports the highest single reading; the line shows minute averages, so the note says so.
+    subtitle: `heart rate peaked at ${formatNumber(hr.peakBpm)}`,
+    source_note: `${recorded}. The line shows each minute's average.`,
     chart: { type: "heart_rate", perMinute: [...series], low, peak, ...timer },
   } : {
     ...base, id: `activity:${activity.id}:activity_time`, kind: "activity_time",
-    subtitle: "Timed with Murph.", chart: { type: "duration", minutes: activity.elapsedSec / 60, ...timer },
+    subtitle: activity.timerSec === undefined ? "timed with Murph" : `on a ${formatRungTime(activity.timerSec)} timer`,
+    source_note: recorded, chart: { type: "duration", minutes: activity.elapsedSec / 60, ...timer },
   };
   return { suggestedTitle, candidates: [prepareRecordedCandidate(card, label.hidden)] };
 }

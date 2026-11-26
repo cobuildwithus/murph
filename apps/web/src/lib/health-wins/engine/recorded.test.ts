@@ -20,7 +20,8 @@ describe("recorded timed cards", () => {
     const card = preview({ ...summary, heartRate });
     expect(card).toMatchObject({
       candidateId: `activity:${summary.id}:activity_heart_rate`, title: { number: "4 min", measure: "strength session" },
-      subtitle: "Highest individual heart rate reading was 133 bpm.", source_note: "Feb 16, 2033 · PM",
+      subtitle: "heart rate peaked at 133",
+      source_note: "Recorded on Feb 16, evening. The line shows each minute's average.",
       chart: { type: "heart_rate", perMinute: [82, null, 114, 87], low: { minute: 1, bpm: 82 }, peak: { minute: 3, bpm: 114 }, timerMinutes: 3 },
     });
     expect(JSON.stringify(card)).not.toContain("19:07");
@@ -32,6 +33,7 @@ describe("recorded timed cards", () => {
     "builds a duration card for a timed %s without any usable readings", kind => {
       const card = preview({ ...summary, kind });
       expect(card).toMatchObject({ candidateId: `activity:${summary.id}:activity_time`, kind: "activity_time",
+        subtitle: "on a 3 min timer", source_note: "Recorded on Feb 16, evening",
         chart: { type: "duration", minutes: 4, timerMinutes: 3 } });
       expect(preview({ ...summary, kind, heartRate: { ...heartRate, perMinute: [null, null, null, null] } })).toEqual(card);
     },
@@ -43,6 +45,7 @@ describe("recorded timed cards", () => {
     for (const units of ["uk", "metric"] as const) expect(buildRecordedCards(activity, { ...context, units })).toEqual(original);
     const untimed = preview({ ...summary, elapsedSec: 37, movingSec: 29, timerSec: undefined });
     expect(untimed.title.number).toBe("37 sec");
+    expect(untimed.subtitle).toBe("timed with Murph");
     expect(untimed.chart).toEqual({ type: "duration", minutes: 37 / 60 });
   });
 

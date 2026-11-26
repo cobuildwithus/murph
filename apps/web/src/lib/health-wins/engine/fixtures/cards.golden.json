@@ -869,7 +869,6 @@
       "number": "3 min",
       "measure": "cold plunge"
     },
-    "source_note": "Nov 18, 2036 · AM",
     "filter": "Fitness",
     "theme": "fitness",
     "share": {
@@ -877,7 +876,8 @@
     },
     "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_time",
     "kind": "activity_time",
-    "subtitle": "Timed with Murph.",
+    "subtitle": "on a 4 min timer",
+    "source_note": "Recorded on Nov 18, morning",
     "chart": {
       "type": "duration",
       "minutes": 3,
@@ -889,7 +889,6 @@
       "number": "3 min",
       "measure": "cold plunge"
     },
-    "source_note": "Nov 18, 2036 · AM",
     "filter": "Fitness",
     "theme": "fitness",
     "share": {
@@ -897,7 +896,8 @@
     },
     "id": "activity:a013dd82-5f77-4dba-91d5-bb32734bb164:activity_heart_rate",
     "kind": "activity_heart_rate",
-    "subtitle": "Highest individual heart rate reading was 109 bpm.",
+    "subtitle": "heart rate peaked at 109",
+    "source_note": "Recorded on Nov 18, morning. The line shows each minute's average.",
     "chart": {
       "type": "heart_rate",
       "perMinute": [
