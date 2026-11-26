@@ -63,7 +63,7 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
     ];
     const [climbValue, climbUnit] = climb.split(" ");
     if (Number.parseInt(climbValue, 10) > 0) stats.push({ label: "Climb", value: climbValue, unit: climbUnit });
-    if (activity.heartRate) stats.push({ label: "Heart rate", value: formatNumber(activity.heartRate.avgBpm), unit: "bpm avg" });
+    // No heart rate here: it has its own card, which the member can hide or leave out.
     map.push({
       ...base, id: `activity:${activity.id}:activity_route`, kind: "activity_route",
       subtitle: `in ${duration}, ${paceLabel}`, source_note: recorded,

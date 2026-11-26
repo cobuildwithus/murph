@@ -105,7 +105,7 @@ describe("recorded route cards", () => {
     expect(splits.subtitle).toBe(metricSplits.subtitle);
   });
 
-  it.each([0, 0.4])("omits a climb of %s metres and includes a summary-only heart rate", climbM => {
+  it.each([0, 0.4])("omits a climb of %s metres and leaves heart rate to its own card", climbM => {
     const result = cards({ ...run, elapsedSec: 4000, movingSec: 3725,
       route: { ...route, climbM, distanceM: 5000, splits: Array.from({ length: 5 }, () => ({ distanceM: 1000, seconds: 745 })) },
       heartRate: { lowBpm: 95, avgBpm: 127, peakBpm: 152 },
@@ -115,8 +115,8 @@ describe("recorded route cards", () => {
       { label: "Distance", value: "5", unit: "km" },
       { label: "Pace", value: "12:25", unit: "/km" },
       { label: "Time", value: "1:02:05" },
-      { label: "Heart rate", value: "127", unit: "bpm avg" },
     ] });
+    expect(JSON.stringify(result[0])).not.toMatch(/bpm|\b127\b/u);
   });
 
   it("recognizes mile splits on a metric client and ignores a partial and later ties for fastest", () => {
@@ -157,9 +157,8 @@ describe("recorded route cards", () => {
     expect(visible.map(card => card.kind)).toEqual(["activity_route", "activity_splits", "activity_heart_rate"]);
     expect(visible[0].chart).toMatchObject({ stats: [
       { label: "Distance" }, { label: "Pace" }, { label: "Time" }, { label: "Climb" },
-      { label: "Heart rate", value: "111", unit: "bpm avg" },
     ] });
-    expect(JSON.stringify(visible[1])).not.toMatch(/bpm|\b111\b/u);
+    for (const card of visible.slice(0, 2)) expect(JSON.stringify(card)).not.toMatch(/bpm|\b111\b/u);
     const [map, splits, hr] = visible.map(card => card.change_options.find(option => option.id === "hide_numbers")?.spec);
     const original = visible[0].chart;
     if (original.type !== "route_map") throw new Error("Expected route");

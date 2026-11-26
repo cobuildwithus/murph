@@ -157,8 +157,8 @@ Each entry has a `label`, a formatted string `value` and an optional `unit`.
 | Pace | Average moving pace with unit `/mi` or `/km` |
 | Time | Moving time as `m:ss` or `h:mm:ss`, without a unit |
 | Climb | Ascent in `ft` or `m`, included when it rounds to at least one in the display unit |
-| Heart rate | Recorded average with unit `bpm avg`, included when the activity has a heart-rate summary |
 
+Heart rate stays on its own card, so leaving that card out or hiding its numbers never shares a heart rate.
 The original chart also includes `chips: [distance, pace]` for older apps.
 The frame covers three by two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
 routes use a coarser zoom. A block may slide by whole tiles to enclose a route
