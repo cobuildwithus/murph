@@ -151,9 +151,17 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: { si
       throw staleSet();
     }
     const where = { memberId_day: { memberId, day: today } };
-    if (!replacement) return tx.healthWinSet.update({ where, data: { checkedAt: now } });
-    if (current?.day === today) return tx.healthWinSet.update({ where, data: replacement });
-    return tx.healthWinSet.create({ data: replacement });
+    const stored = replacement && current?.day !== today
+      ? await tx.healthWinSet.create({ data: replacement })
+      : await tx.healthWinSet.update({ where, data: replacement ?? { checkedAt: now } });
+    // A sparse older day can still serve as the fallback after a time-zone change.
+    await tx.$executeRaw`
+      DELETE FROM health_win_set WHERE member_id = ${memberId} AND day < (
+        SELECT day FROM health_win_set WHERE member_id = ${memberId}
+        ORDER BY day DESC LIMIT 1 OFFSET 2
+      )
+    `;
+    return stored;
   });
   return present(auth, published, options.signal);
 }

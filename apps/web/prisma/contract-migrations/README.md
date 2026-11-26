@@ -111,3 +111,9 @@ and drained. Deploy Web before the matching runner, with no recap turns in
 flight. This Web version is the rollback floor after cleanup; older Web requires
 re-expanding the nullable JSON column first. The runtime-local media count is
 in-memory only and needs no data migration.
+
+After the Web writer that prunes daily Health win sets is live and older
+functions have drained, `20261126010000_prune_health_win_sets` keeps each
+member's three newest stored days, including days separated by gaps in use.
+Rolling back Web cannot restore the discarded suggestion history. Published
+posts keep their frozen cards.

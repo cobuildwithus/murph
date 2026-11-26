@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
 import { authLookupKey } from "../src/lib/better-auth/record-crypto";
 import { getPrisma } from "../src/lib/prisma";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { assertHealthSetCurrent, changeHealthWin, readHealthWins, resolveHealthCards } from "../src/lib/health-wins/wins";
+import { createHealthPost } from "../src/lib/health-wins/writes";
 import * as crypto from "../src/lib/health-wins/crypto";
 import type { HealthWinsInput } from "../src/lib/health-wins/engine";
 
@@ -29,11 +31,11 @@ function data(today: string, total = 27, complete = true) {
   return { input, complete, sourceRevision: `fixture-revision-${total}` };
 }
 
-async function fixture(): Promise<HostedNativeMemberAuth> {
+async function fixture(sessionDays = 1): Promise<HostedNativeMemberAuth> {
   const memberId = randomUUID(), credential = randomUUID(), now = new Date();
   members.push(memberId);
   const member = await db.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
-  const expiresAt = new Date(now.getTime() + 86_400_000);
+  const expiresAt = new Date(now.getTime() + sessionDays * 86_400_000);
   const row = await db.hostedAuthRecord.create({ data: { model: "session", id: randomUUID(), memberId,
     createdAt: now, updatedAt: now, expiresAt, payloadEncrypted: "fixture-session" } });
   await db.gameProfile.create({ data: { memberId, firstNameEncrypted: "fixture-name", timeZone: "UTC" } });
@@ -44,10 +46,55 @@ async function fixture(): Promise<HostedNativeMemberAuth> {
     proof: { row, expiresAt, credentialDigest: createHash("sha256").update(credential).digest() } };
 }
 
+async function publishEasternHistory(utcDays: number[]) {
+  // At 11:00 UTC the UTC+14 and UTC-12 local dates are two days apart.
+  const instant = (day: number) => Date.UTC(2031, 5, day, 11);
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(instant(utcDays[0]));
+  const auth = await fixture(30);
+  await db.gameProfile.update({ where: { memberId: auth.member.id }, data: { timeZone: "Pacific/Kiritimati" } });
+  source.mockImplementation(async (_auth, today: string) => data(today));
+  for (const day of utcDays) {
+    vi.setSystemTime(instant(day));
+    await readHealthWins(auth, { signal });
+  }
+  return auth;
+}
+
+function incompleteInputs(_auth: HostedNativeMemberAuth, today: string) {
+  return { input: { member: data(today).input.member }, complete: false, sourceRevision: "fixture-incomplete" };
+}
+
 describe.skipIf(!enabled)("member-local health win sets", () => {
   afterEach(async () => {
+    vi.useRealTimers();
     source.mockReset();
     await db.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
+  });
+
+  it("cleans up excess history per member after deploy and preserves the remaining days on retry", async () => {
+    const migration = await readFile(new URL(
+      "../prisma/contract-migrations/20261126010000_prune_health_win_sets/migration.sql", import.meta.url,
+    ), "utf8");
+    await db.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL search_path TO pg_temp`;
+      await tx.$executeRaw`CREATE TEMP TABLE health_win_set (
+        member_id text, day varchar(10), PRIMARY KEY (member_id, day)
+      ) ON COMMIT DROP`;
+      await tx.$executeRaw`INSERT INTO health_win_set VALUES
+        ('daily', '2032-04-06'), ('daily', '2032-04-07'), ('daily', '2032-04-08'), ('daily', '2032-04-09'),
+        ('sparse', '2031-02-01'), ('sparse', '2031-11-09'), ('sparse', '2032-04-06'), ('sparse', '2032-10-17'),
+        ('single', '2031-02-01')`;
+      expect(await tx.$executeRawUnsafe(migration)).toBe(2);
+      expect(await tx.$executeRawUnsafe(migration)).toBe(0);
+      expect(await tx.$queryRaw`
+        SELECT member_id, array_agg(day ORDER BY day) AS days FROM health_win_set GROUP BY member_id ORDER BY member_id
+      `).toEqual([
+        { member_id: "daily", days: ["2032-04-07", "2032-04-08", "2032-04-09"] },
+        { member_id: "single", days: ["2031-02-01"] },
+        { member_id: "sparse", days: ["2031-11-09", "2032-04-06", "2032-10-17"] },
+      ]);
+    });
   });
 
   it("serves one stable set within the hour, freezes the selected option, and conflicts after replacement", async () => {
@@ -148,6 +195,45 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     } finally {
       release();
     }
+  });
+
+  it.each([
+    { visits: "consecutive", utcDays: [12, 13, 14, 15], westDay: "2031-06-14" },
+    { visits: "sparse", utcDays: [1, 5, 14, 15], westDay: "2031-06-06" },
+  ])("retains three $visits days for one- and two-day timezone reversals", async ({ utcDays, westDay }) => {
+    const auth = await publishEasternHistory(utcDays), memberId = auth.member.id;
+    const stored = await db.healthWinSet.findMany({ where: { memberId }, orderBy: { day: "asc" }, select: { day: true } });
+    expect(stored.map(row => row.day)).toEqual([westDay, "2031-06-15", "2031-06-16"]);
+
+    source.mockImplementation(incompleteInputs);
+    for (const [timeZone, day] of [["UTC", "2031-06-15"], ["Etc/GMT+12", westDay]]) {
+      await db.gameProfile.update({ where: { memberId }, data: { timeZone } });
+      expect(await readHealthWins(auth, { signal })).toMatchObject({ day });
+    }
+  });
+
+  it("rolls back a post prepared from a fallback that a concurrent publication prunes", async () => {
+    const auth = await publishEasternHistory([5, 14, 15]), memberId = auth.member.id;
+    await db.gameProfile.update({ where: { memberId }, data: { timeZone: "Etc/GMT+12" } });
+    source.mockImplementationOnce(incompleteInputs);
+    const fallback = await readHealthWins(auth, { signal });
+    expect(fallback.day).toBe("2031-06-06");
+    const post = { id: randomUUID(), setRevision: fallback.setRevision,
+      cards: [{ candidateId: fallback.candidates[0].id, option: "original" }] };
+    const receipt = await createHealthPost(auth, post);
+
+    // Finish the local day's set after the fallback cards are frozen, before the post transaction.
+    const seal = crypto.sealHealthTexts;
+    vi.spyOn(crypto, "sealHealthTexts").mockImplementationOnce(async (...args) => {
+      const encrypted = await seal(...args);
+      expect((await readHealthWins(auth, { signal })).day).toBe("2031-06-14");
+      return encrypted;
+    });
+    const id = randomUUID();
+    await expect(createHealthPost(auth, { ...post, id })).rejects.toMatchObject({ httpStatus: 409, code: "HEALTH_WIN_SET_CHANGED" });
+    expect(await db.healthPost.count({ where: { id } })).toBe(0);
+    expect(await db.healthWinSet.count({ where: { memberId, day: fallback.day } })).toBe(0);
+    expect(await createHealthPost(auth, post)).toEqual(receipt);
   });
 
   it("returns the last good day on timeout and rejects it after the next day's set arrives", async () => {

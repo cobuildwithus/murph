@@ -6783,7 +6783,9 @@ locks. Writes retain those locks through commit.
 Daily candidate sets track the replica, game inputs, ready route painting
 and detector version. The keyed lookup `health_win_set.source_revision` binds
 those inputs' revisions to the member. A conditional write publishes a replacement
-only if the revision observed before computation is still current.
+only if the revision observed before computation is still current. The publication
+transaction retains the member's three newest stored days under the profile lock.
+Fallback reads use the newest retained day on or before the member's local date.
 
 To publish a card the client submits its candidate ID, option and opaque set
 revision. A superseded set returns 409. The post freezes each selected spec
