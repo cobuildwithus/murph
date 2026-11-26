@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
+import { POST as companionSearch } from "../app/api/clinical-records/companion/providers/search/route";
 import { POST } from "../app/api/clinical-records/providers/search/route";
 import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
 import { searchClinicalProviderDirectory } from "@/src/lib/clinical-records/provider-directory-store";
@@ -11,6 +12,10 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({ assertHostedOnboardingMutat
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: async () => ({ member: { id: "member-alder" } }),
 }));
+vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
+  requireActiveHostedMemberAuthFromBearerToken: async () => ({ member: { id: "member-alder" } }),
+}));
+afterEach(() => vi.unstubAllEnvs());
 vi.mock("@/src/lib/clinical-records/provider-directory.v2.json", async () => {
   const { EPIC_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY_ID } = await import("@/src/lib/clinical-records/epic-policy");
   return { default: {
@@ -59,4 +64,24 @@ it("negotiates place fields while a loaded legacy browser gets its exact project
   expect(rich.providers).toHaveLength(1);
   expect(rich.providers[0]?.matchedFacility).toEqual({ name: "Alder Clinic", city: "Cove", state: "ME",
     postalCode: null, street: ["12 Pine Road"] });
+});
+
+it.each(["basic", "hospital"] as const)("selects the %s sibling in both grouped search responses", async access => {
+  vi.stubEnv("EPIC_SMART_CLIENT_ID", "public");
+  vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({
+    [access === "hospital" ? "epic-alder" : "epic-birch"]: { clientId: "refresh", clientSecret: "synthetic-secret" },
+  }));
+  vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", access === "hospital" ? "epic-birch" : "");
+  vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_CLIENT_ID", "approved");
+  findMany.mockResolvedValue([]);
+  for (const search of [POST, companionSearch]) {
+    for (const query of ["Cove", "Alder"]) {
+      const response = await search(new Request("https://app.example.test/search", {
+        method: "POST", headers: { "X-Clinical-Directory-Version": "2" }, body: JSON.stringify({ query }),
+      }));
+      expect((await response.json()).providers).toMatchObject([{
+        id: "epic-birch", matchedFacility: { name: "Alder Clinic" }, sharedPlaces: ["Alder"],
+      }]);
+    }
+  }
 });

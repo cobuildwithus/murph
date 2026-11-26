@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
+import { epicPortalAccessRank } from "./epic-import-config";
 import { countedSourceFilter } from "./source-state";
 import directoryArtifact from "./provider-directory.v2.json";
 import {
@@ -33,7 +34,7 @@ export async function searchClinicalProviderDirectory(input: {
   state?: string | null;
 }, memberId?: string) {
   const directory = readClinicalProviderDirectory();
-  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined });
+  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined, accessRank: epicPortalAccessRank });
   if (memberId === undefined || !result.providers.length) return result;
   const hashes = result.providers.map(provider => {
     const entry = resolveClinicalProviderDirectoryEntry(provider.id)!;

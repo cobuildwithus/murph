@@ -69,6 +69,7 @@ export function searchClinicalProviderDirectorySnapshot(
   directory: ClinicalProviderDirectory,
   input: {
     grouped?: boolean;
+    accessRank?: (entry: ClinicalProviderDirectoryEntry) => number;
     city?: string | null;
     query?: string | null;
     state?: string | null;
@@ -82,11 +83,11 @@ export function searchClinicalProviderDirectorySnapshot(
   const state = normalizeSearchText(input.state);
   const scored = directory.entries
     .map((entry) => ({ entry, score: scoreDirectoryEntry({ city, entry, query, state }) }))
-    .filter((candidate) => candidate.score > 0 || (!query && !city && !state))
     .sort((left, right) => right.score - left.score || left.entry.brandName.localeCompare(right.entry.brandName));
   const results: ClinicalProviderSearchResult[] = [];
   const byBase = new Map<string, ClinicalProviderSearchResult>();
-  for (const { entry } of scored) {
+  for (const { entry, score } of scored) {
+    if (!score && (query || city || state)) break;
     if (input.grouped && byBase.has(entry.fhirBaseUrl)) continue;
     const ranked = rankFacilities({ city, entry, query, state }).slice(0, 8);
     const best = ranked[0];
@@ -101,14 +102,40 @@ export function searchClinicalProviderDirectorySnapshot(
     if (results.length === MAX_PROVIDER_RESULTS) break;
   }
   if (input.grouped) {
-    for (const entry of directory.entries) {
-      const group = byBase.get(entry.fhirBaseUrl);
-      if (!group || group.id === entry.id || group.brandName === entry.brandName) continue;
-      const places = group.sharedPlaces ?? [];
-      if (places.length < 8 && !places.includes(entry.brandName)) group.sharedPlaces = [...places, entry.brandName];
-    }
+    if (input.accessRank) selectPortalBrands(scored, byBase, input.accessRank);
+    addSharedPlaces(directory.entries, byBase);
   }
   return { directoryVersion: directory.version, providers: results };
+}
+
+// Keep the matched facility and portal order, even when another brand owns the preferred registration.
+function selectPortalBrands(
+  scored: readonly { entry: ClinicalProviderDirectoryEntry }[],
+  byBase: ReadonlyMap<string, ClinicalProviderSearchResult>,
+  accessRank: (entry: ClinicalProviderDirectoryEntry) => number,
+) {
+  const ranks = new Map<string, number>();
+  for (const { entry } of scored) {
+    const result = byBase.get(entry.fhirBaseUrl);
+    if (!result) continue;
+    const rank = accessRank(entry);
+    if (rank <= (ranks.get(entry.fhirBaseUrl) ?? -Infinity)) continue;
+    ranks.set(entry.fhirBaseUrl, rank);
+    result.id = entry.id;
+    result.brandName = entry.brandName;
+  }
+}
+
+function addSharedPlaces(
+  entries: readonly ClinicalProviderDirectoryEntry[],
+  byBase: ReadonlyMap<string, ClinicalProviderSearchResult>,
+) {
+  for (const entry of entries) {
+    const group = byBase.get(entry.fhirBaseUrl);
+    if (!group || group.id === entry.id || group.brandName === entry.brandName) continue;
+    const places = group.sharedPlaces ?? [];
+    if (places.length < 8 && !places.includes(entry.brandName)) group.sharedPlaces = [...places, entry.brandName];
+  }
 }
 
 function publicFacility({ city, name, postalCode, state }: ClinicalProviderFacility): ClinicalProviderFacilityContract {

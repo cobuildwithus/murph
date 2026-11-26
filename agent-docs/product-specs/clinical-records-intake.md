@@ -280,8 +280,10 @@ its existing display string. Browsers request grouped results with the
 `X-Clinical-Directory-Version: 2` header. Older requests keep the original
 exact provider and facility shapes.
 
-Each grouped result uses the best matching directory ID for the portal and
-lists up to eight other brand names on the same canonical FHIR base. A bounded
+Each grouped result keeps its best matching facility. Its selectable brand on
+the same canonical FHIR base prefers a usable hospital-approved registration,
+then a Basic registration, with search relevance breaking ties. It lists up
+to eight other brand names on that base. A bounded
 member-scoped lookup compares the base against the member’s remaining
 connections and names a possible existing source. Search cannot establish
 the patient, client or acquisition authority before sign-in, so the choice
@@ -695,7 +697,7 @@ See [Epic's CarePlan specification](https://fhir.epic.com/Specifications?api=106
 
 ## Epic client authentication and sandbox proof
 
-The directory selects the registration environment. The existing automatic client ID selects new starts. Hospital-approved providers use the separate approved registration and skip the Basic map. For other providers, selecting the public ID starts with the organization's Basic credentials when available, including when the Basic and public IDs are the same. Selecting the asymmetric ID starts with the signer. New starts bind the production or sandbox registration, authentication method, hospital-approved policy, original FHIR base, brand label and permitted families inside the encrypted verifier. The callback validates the saved base hash and token origin before exchange. Renewable grants carry the registration profile inside the existing encrypted refresh payload. Renewal checks the saved token endpoint against the encrypted connection base. A missing registration or mismatched method fails before egress. Historical callbacks retain the directory and base-hash check. Historical grants retain Epic client-ID resolution using the original fixed sandbox namespace and per-brand Basic lookup. A selected asymmetric ID must be distinct from the public, hospital-approved and applicable Basic IDs. Signer failure stops the request before token egress.
+The directory selects the registration environment. The existing automatic client ID selects new starts. Hospital-approved providers use the separate approved registration and skip the Basic map. For other providers, selecting the public ID starts with the organization's Basic credentials when available, including when the Basic and public IDs are the same. Selecting the asymmetric ID starts with the signer. New starts bind the production or sandbox registration, authentication method, hospital-approved policy, original FHIR base, brand label and permitted families inside the encrypted verifier. The callback validates the saved base hash and token origin before exchange. Renewable grants carry the registration profile inside the existing encrypted refresh payload. Renewal checks the saved token endpoint against the encrypted connection base. A bound Basic profile also saves a SHA-256 fingerprint of the client ID and secret. Changing the secret requires a new authorization. A missing registration, mismatched method or mismatched Basic fingerprint fails before token egress. Historical callbacks retain the directory and base-hash check. Historical grants retain Epic client-ID resolution using the original fixed sandbox namespace and per-brand Basic lookup. A selected asymmetric ID must be distinct from the public, hospital-approved and applicable Basic IDs. Signer failure stops the request before token egress.
 
 | Web configuration | Production | Sandbox |
 | --- | --- | --- |

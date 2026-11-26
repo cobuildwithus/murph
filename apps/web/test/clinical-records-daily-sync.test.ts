@@ -29,6 +29,7 @@ vi.mock("@/src/lib/clinical-records/retrieval", () => ({ appendClinicalRetrieval
 vi.mock("@/src/lib/clinical-records/secrets", () => ({ openClinicalConnectionFhirBaseUrl: async () => "https://portal.example.test/FHIR/R4", openClinicalConnectionSecret: mocks.open, sealClinicalConnectionSecret: mocks.seal }));
 
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
+import { resolveEpicClient } from "@/src/lib/clinical-records/epic-import-config";
 import { renewClinicalAccess } from "@/src/lib/clinical-records/persistent-access";
 
 const now = new Date("2026-09-17T12:00:00Z");
@@ -163,6 +164,25 @@ describe("rotating clinical refresh lease", () => {
       .rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED" });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(f.row.refreshLeaseId).toBeNull();
+  });
+
+  it("keeps a bound Basic grant on its saved endpoint and rejects a replacement secret before egress", async () => {
+    const f = fixture();
+    vi.stubEnv("EPIC_SMART_CLIENT_ID", "client");
+    const { profile } = resolveEpicClient({ id: f.row.providerDirectoryEntryId, clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID",
+      fhirBaseUrl: "https://portal.example.test/FHIR/R4", brandName: "Sample", aliases: [], facilities: [], policyId: "sample",
+      requestedBaseScopes: [], resourceTypes: ["Patient"], sourceSystem: "epic-fhir" });
+    mocks.open.mockResolvedValue(JSON.stringify({ schemaVersion: 1, profile, clientId: "client",
+      tokenEndpoint: "https://portal.example.test/token", refreshToken: "old-refresh", grantedScopes: ["patient/Patient.r", "patient/Observation.s"] }));
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "replacement" } }));
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ access_token: "new-access", expires_in: 300, token_type: "Bearer" }));
+    const input = { connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl };
+    await expect(renewClinicalAccess(input)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(f.row.refreshLeaseId).toBeNull();
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "secret" } }));
+    await expect(renewClinicalAccess(input)).resolves.toBe("new-access");
+    expect(String(fetchImpl.mock.calls[0]![0])).toBe("https://portal.example.test/token");
   });
 
   it("renews expired access once and seals the rotated grant", async () => {

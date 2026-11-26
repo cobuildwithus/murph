@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: main
+          persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -34,10 +35,13 @@ jobs:
             --max-time 300 --max-filesize 268435456 https://open.epic.com/Endpoints/Brands |
             pnpm --dir apps/web clinical-records:providers:import -- --input -
       - name: Publish changed data for directory review
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           file=apps/web/src/lib/clinical-records/provider-directory.v2.json
           git diff --quiet -- "$file" && exit 0
           branch="records/epic-directory-$(git hash-object "$file")"
+          gh auth setup-git --hostname github.com
           existing=$(git ls-remote --heads origin "refs/heads/$branch")
           if [[ -z "$existing" ]]; then
             git switch -c "$branch"

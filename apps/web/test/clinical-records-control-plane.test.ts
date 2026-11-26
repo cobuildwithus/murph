@@ -511,6 +511,24 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.sealClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith(expect.objectContaining({ value: provider.fhirBaseUrl }));
   });
 
+  it("rejects a replacement Basic credential before exchanging a bound callback", async () => {
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
+    const setSecret = (clientSecret: string) => vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS",
+      JSON.stringify({ [PROVIDER_ID]: { clientId: "epic-client-id", clientSecret } }));
+    setSecret("synthetic-original");
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) });
+    const verifier = mocks.sealClinicalOauthVerifier.mock.lastCall![0].value;
+    expect(verifier).not.toContain("synthetic-original");
+    mocks.openClinicalOauthVerifier.mockResolvedValue(verifier);
+    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...provider, fhirBaseUrl: "https://moved.example.test/fhir" });
+    setSecret("synthetic-replacement");
+    await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED" });
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+  });
+
   it("services the stored public session after switching the active client", async () => {
     vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "old-public");
     vi.stubEnv("EPIC_SMART_ASYMMETRIC_CLIENT_ID", "new-signed");

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/epic/production.jwks.json";
 import sandboxSet from "../../../public/.well-known/epic/sandbox.jwks.json";
@@ -24,6 +25,7 @@ export const epicProfileSchema = z.object({
   environment: z.enum(["production", "sandbox"]),
   method: z.enum(["public", "basic", "private_key_jwt"]),
   hospitalApproved: z.boolean(),
+  basicCredentialSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
 }).strict();
 export type EpicProfile = z.infer<typeof epicProfileSchema>;
 type RegistrationOwner = Pick<ClinicalProviderDirectoryEntry, "id" | "clientIdEnvironmentKey">;
@@ -78,12 +80,30 @@ function resolveAuth(ids: ReturnType<typeof readRegistrations>, stored?: StoredR
   return { method: "public", clientId };
 }
 
+/** Only per-brand registrations can improve access over another brand on the same portal. */
+export function epicPortalAccessRank(provider: ClinicalProviderDirectoryEntry): number {
+  try {
+    const ids = readRegistrations(provider);
+    if (!ids.approved && !ids.basic) return 0;
+    const auth = resolveAuth(ids);
+    if (ids.approved) return 2;
+    return Number(auth.method === "basic");
+  } catch {
+    return -1;
+  }
+}
+
+function basicCredentialSha256(auth: Extract<EpicClientAuth, { method: "basic" }>): string {
+  return createHash("sha256").update(JSON.stringify([auth.clientId, auth.clientSecret])).digest("hex");
+}
+
 export function resolveEpicClient(provider: ClinicalProviderDirectoryEntry, stored?: StoredRegistration) {
   const registrations = readRegistrations(provider);
   const auth = resolveAuth(registrations, stored);
   const hospitalApprovedImports = registrations.approved && auth.clientId === registrations.approvedId;
   const profile: EpicProfile = { environment: registrations.production ? "production" : "sandbox",
-    method: auth.method, hospitalApproved: hospitalApprovedImports };
+    method: auth.method, hospitalApproved: hospitalApprovedImports,
+    ...(auth.method === "basic" ? { basicCredentialSha256: basicCredentialSha256(auth) } : {}) };
   return { auth, profile, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
     : provider.resourceTypes.filter(type => EPIC_AUTOMATIC_RESOURCE_TYPES.includes(type)) };
 }
@@ -98,6 +118,9 @@ export function resolveSavedEpicAuth(providerId: string, stored: StoredRegistrat
     return { method: "public", clientId: stored.clientId } as const;
   }
   const auth = resolveAuth(ids, stored);
+  if (profile && auth.method === "basic" && basicCredentialSha256(auth) !== profile.basicCredentialSha256) {
+    throw configurationError(stored);
+  }
   if (profile && (auth.method !== profile.method ||
     profile.hospitalApproved !== (ids.approved && auth.clientId === ids.approvedId))) throw configurationError(stored);
   return auth;
