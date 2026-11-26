@@ -1,1 +1,12 @@
-{"keys":[]}
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-production-S7crRq-Rc0j8",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "uc635uydIIR6LWWS5qhb28NYMevYkgaVkPyePRdexQNLfZrp6Wgk4at02UXMxmEvWhiaCD7C4yYGqr6qigUuGvcTovzdPMmbM61FpWpHjUV8rRxCRnhZMKeESsYEfxm-OSyTw0rDAVMpm6eLW5-_AWf8ESyDqkzckXIBn84wMwhguV-rC91weEfkvBscYvl6DKbaYINs3Mvqr0Jn8MGmAL3PUTck5TJrHCS1aWLCAYLvrAZDmzPTx8-RfBc0upiE9CJv9QaCXqHX8CyilyMtxcVUlBeS-Slpczgga7dEiCDMR7yLhgWWJE8BEf4Ijuhf8S_hEapK135M8PnSfnpyEQ",
+      "e": "AQAB"
+    }
+  ]
+}
