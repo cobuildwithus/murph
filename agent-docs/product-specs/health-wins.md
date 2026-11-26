@@ -13,9 +13,12 @@ A new period of the same achievement remains eligible for its own card.
 Each card describes the measure, time period and source. Wearable comparisons
 use comparable readings, and percentile cards require a sourced reference
 for the person's age and measurement method. Lab changes require comparable,
-eligible draws. Experiment cards carry the observed outcome, including relevant
-overlap and adherence caveats. A game streak counts a scheduled day when the
-member posted in every game due that day.
+eligible draws. An experiment card’s `two_bars` chart names the measured outcome
+once in `label` and uses `unit` for both the Before and During means in `series`.
+`adherence.done` and `adherence.target` give the logged and planned counts.
+The subtitle still describes the observed outcome, adherence and any overlap
+for older apps. A game streak counts a scheduled day when the member posted
+in every game due that day.
 Medication, genetic, condition, weight and flagged lab results are excluded
 from suggested cards. An unavailable source can leave the picker partly or
 entirely empty.
@@ -210,9 +213,20 @@ checking today's refusal rules.
 - Send zero to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. When no shareable path remains, send `paths: []`: the run keeps its splits card and gets no map.
 - Each path may cover at most `distanceM` plus the larger of 16 metres and 1% of `distanceM`. The diagonal of the bounding box across all paths must fit within `distanceM`. Average moving pace must be 150–1,200 seconds per kilometre for runs or 300–2,400 for walks, inclusive.
 
-The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`
-and `chips: [distance, pace]` (two display strings). The frame covers three by
-two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
+The `activity_route` card's `route_map` chart contains `paths` and
+`frame: {west, south, east, north}`. Below the map, display `stats` in order.
+Each entry has a `label`, a formatted string `value` and an optional `unit`.
+
+| Label | Value and unit |
+| --- | --- |
+| Distance | Moving distance in `mi` or `km` |
+| Pace | Average moving pace with unit `/mi` or `/km` |
+| Time | Moving time as `m:ss` or `h:mm:ss`, without a unit |
+| Climb | Ascent in `ft` or `m`, included when it rounds to at least one in the display unit |
+
+Heart rate stays on its own card, so leaving that card out or hiding its numbers never shares a heart rate.
+The original chart also includes `chips: [distance, pace]` for older apps.
+The frame covers three by two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
 routes use a coarser zoom. A block may slide by whole tiles to enclose a route
 that crosses a block edge. A date-line crossing can have an east bound above
 180 degrees to keep the frame continuous. Latitudes beyond the Mercator limit
@@ -255,9 +269,9 @@ Climb uses feet for `us` and metres otherwise. Split labels retain the unit the 
 used to cut the splits. For a single partial shorter than a kilometre, either unit
 could have been used, so its label uses the request units.
 
-`hide_numbers` keeps the route map with empty chips and removes the measurements
-from the title and subtitle. On the splits and heart-rate cards, the option
-replaces the numeric chart. To share a number-free set, select this option on
+`hide_numbers` keeps the route map, omits both `stats` and `chips`, and removes
+the measurements from the title and subtitle. On the splits and heart-rate
+cards, the option replaces the numeric chart. To share a number-free set, select this option on
 each included card. Only the route card offers `hide_map`. Its change option
 carries `spec: null` and the SHA-256 revision of JSON `null`. Posting that
 option removes the entire card, including paths, frame and art key. Other picks

@@ -880,6 +880,7 @@
       "type": "two_bars",
       "barWidth": "thin",
       "metric": "sleep_score",
+      "label": "Sleep score",
       "unit": "points",
       "expectedDirection": "increase",
       "adherence": {
@@ -1051,6 +1052,27 @@
       "chips": [
         "1.25 km",
         "10:00 /km"
+      ],
+      "stats": [
+        {
+          "label": "Distance",
+          "value": "1.25",
+          "unit": "km"
+        },
+        {
+          "label": "Pace",
+          "value": "10:00",
+          "unit": "/km"
+        },
+        {
+          "label": "Time",
+          "value": "12:30"
+        },
+        {
+          "label": "Climb",
+          "value": "16",
+          "unit": "m"
+        }
       ]
     }
   },
