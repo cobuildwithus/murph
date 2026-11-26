@@ -26,6 +26,20 @@ signed delivery reach the other player's app (`authorizeLockedPreviewReads`:
 the media rules minus post-to-unlock), which keeps it hidden until its own post
 is in; the media route itself stays post-to-unlock.
 
+## Recorded Health wins
+
+Raw heart-rate samples (1 Hz) and GPS fixes stay on the phone. The recording API
+accepts up to 360 per-minute heart-rate averages for stateless preview and
+explicit card publication. The only durable server copy of that display series
+is inside a selected, sealed health post card. A hidden-number card omits the
+series and its extrema. The private activity row stores only the sealed summary.
+Keep bodies and decrypted data out of logs and telemetry.
+
+The same card-only storage rule applies to trimmed, simplified paths when route
+sharing ships. The phone must enforce end trimming and its optional private zone
+on the final path. A server distance or size check establishes plausibility only.
+Timed recording rejects route data.
+
 ## Typed-word game ideas
 
 `POST /api/game/v1/ideas` is an optional authenticated native game action.

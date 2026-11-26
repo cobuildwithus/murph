@@ -6785,9 +6785,26 @@ sealed chart. Looking up that painting only reads existing route state and art.
 Clients render unknown charts with the title, subtitle and an update note.
 The server stores no card images.
 
+### Recorded activities
+
+Recording requires the intersection of the Health wins feed and timed recording
+allowlists. Clients preview transient activity input, then submit their selected
+cards and revisions with the activity. Web hashes the canonical final card spec
+after applying the option and client units. A change requires a new preview.
+A committed retry returns the post receipt before rebuilding any cards.
+The transaction binds the activity to a single post and preserves the member's
+selection order across recorded and suggested cards.
+
+Web accepts at most 360 per-minute heart-rate averages as display data. Only a
+selected, sealed post card may persist the series. The same restriction applies
+to future trimmed paths. Raw heart-rate samples (1 Hz) and GPS fixes stay on
+the phone. Save-without-posting accepts summary fields only. Settings export
+includes saved summaries under the member's account export authority, even
+after health consent withdrawal. Account deletion cascades to these rows.
+
 ### Storage and lifecycle
 
-The classification below covers the six Health wins tables. Approved metadata
+The classification below covers the Health wins tables. Approved metadata
 supports ownership, access, ordering and retry checks. Content is sealed under
 the author's member-private-field key with the `health-post` scope and the
 table, row and field bound to the envelope. Web batches crypto outside
@@ -6796,6 +6813,7 @@ database transactions.
 | Table | Encrypted content | Approved operational metadata |
 | --- | --- | --- |
 | `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
+| `health_activity` | `summary_encrypted` holds the activity kind, start, durations, optional timer and heart-rate summary, sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
