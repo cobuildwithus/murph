@@ -132,8 +132,9 @@ it("logs only a known error class when a private dependency fails", async () => 
 it("passes the winning set and a chosen option without accepting client-declared card specs", async () => {
   service.wins.mockResolvedValue({ day: "2026-02-09", setRevision: revision, candidates: [] });
   const refresh = request("wins?refresh=1");
+  refresh.headers.set("X-Murph-Client-Units", "metric");
   expect((await wins(refresh)).status).toBe(200);
-  expect(service.wins).toHaveBeenCalledExactlyOnceWith(auth, { refresh: true, signal: refresh.signal });
+  expect(service.wins).toHaveBeenCalledExactlyOnceWith(auth, { refresh: true, signal: refresh.signal, units: "metric" });
   const selection = { candidateId: "slot:forest", option: "hide_numbers" };
   const body = { id, setRevision: revision, cards: [selection] };
   service.create.mockResolvedValue({ id, version: 1 });

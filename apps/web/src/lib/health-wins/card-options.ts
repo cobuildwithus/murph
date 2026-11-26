@@ -3,7 +3,7 @@ import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-priva
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
 import type { CardSpec } from "./engine";
-import { formatWinMonth } from "./engine/shared";
+import { formatNumber, formatWinMonth, milesFromKm } from "./engine/shared";
 
 type Option = "original" | "hide_numbers" | "hide_map" | "hours";
 const labels: Record<Option, string> = {
@@ -80,9 +80,38 @@ interface MapRemoval {
   spec: null;
 }
 
-export interface CachedHealthCandidate {
+interface CandidateDisplay {
   id: string;
   variants: [Variant, ...(Variant | MapRemoval)[]];
+}
+
+export interface CachedHealthCandidate extends CandidateDisplay {
+  miles?: CandidateDisplay;
+}
+
+/** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
+export function withDistanceTrendUnits(candidate: CachedHealthCandidate): CachedHealthCandidate {
+  const original = candidate.variants[0].spec;
+  if (candidate.miles || original.kind !== "trend_change" || original.chart.type !== "trend" || original.chart.unit !== "km") return candidate;
+  const chart = original.chart;
+  const series = chart.series.map(point => ({ ...point, value: milesFromKm(point.value) }));
+  const latest = series.at(-1);
+  if (!latest) return candidate;
+  const baseline = milesFromKm(chart.baseline);
+  const usualTenths = Math.round(baseline * 10), currentTenths = Math.round(latest.value * 10);
+  const deltaTenths = currentTenths - usualTenths;
+  const id = createHash("sha256").update(`miles:${candidate.id}`).digest("base64url");
+  const card: CardSpec = {
+    ...original, id, kind: original.kind,
+    title: { ...original.title, number: `${deltaTenths < 0 ? "−" : "+"}${formatNumber(Math.abs(deltaTenths) / 10)} mi` },
+    chart: { ...chart, unit: "mi", baseline, delta: milesFromKm(chart.delta), series,
+      pills: [`Usual ${formatNumber(usualTenths / 10)} mi`, `${formatWinMonth(latest.month, "short")} ${formatNumber(currentTenths / 10)} mi`] },
+  };
+  const safe = hidden(card);
+  return { ...candidate, miles: { id, variants: [
+    { option: "original", spec: card, specRevision: specDigest(card) },
+    { option: "hide_numbers", spec: safe, specRevision: specDigest(safe) },
+  ] } };
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
@@ -96,12 +125,12 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
     const converted = hoursCard(card);
     if (converted) variants.push({ option: "hours", specRevision: randomUUID(), spec: converted });
     variants.push({ option: "hide_numbers", specRevision: randomUUID(), spec: hidden(card) });
-    return { id, variants };
+    return withDistanceTrendUnits({ id, variants });
   });
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
-function recordedSpecRevision(spec: FrozenHealthCard["spec"] | null): string {
+function specDigest(spec: FrozenHealthCard["spec"] | null): string {
   const canonical = JSON.stringify(spec, (_key, value: unknown) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
     return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
@@ -117,10 +146,10 @@ export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): C
     } }
     : card.kind === "activity_splits" ? { ...safe, subtitle: "shared without numbers" } : safe;
   const variants: CachedHealthCandidate["variants"] = [
-    { option: "original", spec: card, specRevision: recordedSpecRevision(card) },
-    { option: "hide_numbers", spec: withoutNumbers, specRevision: recordedSpecRevision(withoutNumbers) },
+    { option: "original", spec: card, specRevision: specDigest(card) },
+    { option: "hide_numbers", spec: withoutNumbers, specRevision: specDigest(withoutNumbers) },
   ];
-  if (card.kind === "activity_route") variants.push({ option: "hide_map", spec: null, specRevision: recordedSpecRevision(null) });
+  if (card.kind === "activity_route") variants.push({ option: "hide_map", spec: null, specRevision: specDigest(null) });
   return { id: card.id, variants };
 }
 
@@ -157,17 +186,19 @@ export function previewRecordedCandidate(candidate: CachedHealthCandidate) {
 }
 
 export function findCandidate(candidates: CachedHealthCandidate[], candidateId: string) {
-  const candidate = candidates.find(item => item.id === candidateId);
+  const candidate = candidates.find(item => item.id === candidateId || item.miles?.id === candidateId);
   if (!candidate) throw invalidGameRequest("Choose a card from this set.");
-  return candidate;
+  return { claimId: candidate.id, display: candidate.miles?.id === candidateId ? candidate.miles : candidate };
 }
 
 export function freezeHealthSelections(candidates: CachedHealthCandidate[], selections: readonly HealthCardSelection[]): FrozenHealthCard[] {
-  if (selections.length > 12 || new Set(selections.map(item => item.candidateId)).size !== selections.length) {
-    throw invalidGameRequest("Choose up to twelve different cards.");
-  }
+  if (selections.length > 12) throw invalidGameRequest("Choose up to twelve different cards.");
+  const seen = new Set<string>();
   return selections.flatMap(({ candidateId, option }) => {
-    const { spec, specRevision } = chooseVariant(findCandidate(candidates, candidateId), option);
+    const { claimId, display } = findCandidate(candidates, candidateId);
+    if (seen.has(claimId)) throw invalidGameRequest("Choose up to twelve different cards.");
+    seen.add(claimId);
+    const { spec, specRevision } = chooseVariant(display, option);
     return spec === null ? [] : [{ id: candidateId, specRevision, spec }];
   });
 }

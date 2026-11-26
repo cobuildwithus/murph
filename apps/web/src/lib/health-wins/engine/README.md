@@ -9,6 +9,9 @@ The function runs in memory and leaves the supplied arrays untouched.
 Chart data uses `YYYY-MM-DD` for days and `YYYY-MM` for months. Copy displays
 dates as `Nov 6`, or `Nov 6, 2035` when the year differs from `member.today`.
 A record's `highlight.label` and pill use that display format. Render trend pills verbatim in their supplied order.
+The engine calculates distance trends in kilometres. The wins route presents them in
+miles for US and UK requests and kilometres for metric requests. Selecting a trend
+preserves its displayed units on the post.
 Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 
 ## Inputs that affect interpretation

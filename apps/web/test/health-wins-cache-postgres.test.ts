@@ -173,6 +173,48 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     expect(hidden.card.chart).toEqual({ type: "hidden" });
   });
 
+  it("serves one distance trend in the requested units and freezes the selected display", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2034-07-24T12:00:00Z"));
+    const auth = await fixture(7);
+    source.mockImplementation(async (_auth, today: string) => {
+      const result = data(today);
+      result.input.daily = ["04", "05", "06", "07"].flatMap(month => Array.from({ length: 16 }, (_, i) => ({
+        metric: "distance_km", provider: "garmin", date: `2034-${month}-${String(i + 1).padStart(2, "0")}`,
+        value: (month === "07" ? 3.28 : 2.34) * 1.609344,
+      })));
+      return result;
+    });
+    const metric = await readHealthWins(auth, { signal, units: "metric" });
+    const us = await readHealthWins(auth, { signal, units: "us" });
+    expect(await readHealthWins(auth, { signal, units: "uk" })).toEqual(us);
+    expect(source).toHaveBeenCalledTimes(1);
+    expect(us.setRevision).toBe(metric.setRevision);
+    expect(us.candidates.map(card => card.kind)).toEqual(metric.candidates.map(card => card.kind));
+    const km = metric.candidates.find(card => card.kind === "trend_change")!;
+    const mi = us.candidates.find(card => card.kind === "trend_change")!;
+    expect(km.chart).toMatchObject({ unit: "km", pills: ["Usual 3.8 km", "Jul 5.3 km"] });
+    expect(mi.id).not.toBe(km.id);
+    expect(mi).toMatchObject({ title: { number: "+1 mi" }, chart: { unit: "mi",
+      baseline: expect.closeTo(2.34), delta: expect.closeTo(0.94), pills: ["Usual 2.3 mi", "Jul 3.3 mi"],
+      series: [2.34, 2.34, 2.34, 3.28].map(value => ({ value: expect.closeTo(value) })),
+    } });
+    for (const card of [km, mi]) {
+      const selection = { candidateId: card.id, option: "original" };
+      expect((await changeHealthWin(auth, { ...selection, setRevision: us.setRevision })).card).toEqual(card);
+      expect((await resolveHealthCards(auth, us.setRevision, [selection])).cards[0]).toMatchObject({
+        id: card.id, specRevision: card.specRevision, spec: { title: card.title, chart: card.chart },
+      });
+    }
+    await expect(resolveHealthCards(auth, us.setRevision, [km, mi].map(card => ({ candidateId: card.id, option: "original" }))))
+      .rejects.toMatchObject({ httpStatus: 400 });
+
+    vi.setSystemTime(new Date("2034-07-25T12:00:00Z"));
+    source.mockImplementation(incompleteInputs);
+    expect(await readHealthWins(auth, { signal, units: "metric" })).toEqual(metric);
+    expect(await readHealthWins(auth, { signal })).toEqual(us);
+  });
+
   it("prevents a slower computation from replacing a newer publication", async () => {
     const auth = await fixture();
     let markStarted!: () => void;
