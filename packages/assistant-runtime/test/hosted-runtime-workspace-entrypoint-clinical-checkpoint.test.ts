@@ -2,7 +2,6 @@ import { setImmediate } from "node:timers/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import { initializeVault } from "@murphai/core";
 import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { listMetricPoints } from "@murphai/query";
@@ -34,7 +33,7 @@ test("drains checkpoint-ready effects before restarting an unfinished clinical p
     events.push("queue:read");
     // The restarted reader finds an empty queue, so one snapshot ends the run.
     return queueReads > 1 ? null : {
-      status: "extract" as const, jobId: "a".repeat(64), page: 2, timeZone: "UTC",
+      status: "extract" as const, jobId: "a".repeat(64), page: 2, timeZone: "UTC", failures: 0,
       source: { rawRef: "raw/clinical-records/synthetic/source.pdf", sha256: "b".repeat(64), mediaType: "application/pdf" },
       documentPath: "/synthetic-vault/raw/clinical-records/synthetic/source.pdf",
     };
@@ -383,7 +382,6 @@ test("batches real clinical page applies into the job's checkpoints", async () =
   const events: string[] = [];
   const glucose = [91, 92, 93];
   const collectedAt = (page: number) => `2026-04-0${page}T12:00:00.000Z`;
-  const empty: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
   const extractionStarted = createDeferred<void>();
   let extracting = 0;
   // Only the provider is synthetic. Rendering, proposals, mailbox apply and vault state are real.
@@ -397,7 +395,6 @@ test("batches real clinical page applies into the job's checkpoints", async () =
       events.push(`page-${page}:requeued`);
       throw request.abortSignal.reason;
     }
-    if (request.family !== "labs") return empty;
     request.onProviderUsage?.({ stage: "answer", usage: {
       occurredAt: TEST_NOW, provider: "codex-cli", providerRequestOrdinal: page, providerRequestOutcome: "succeeded",
       usage: {
@@ -441,7 +438,7 @@ test("batches real clinical page applies into the job's checkpoints", async () =
     expect(points.map((point) => point.value)).toEqual(expect.arrayContaining(glucose));
     expect(points).toHaveLength(glucose.length);
     expect(executeExtraction.mock.calls.map(([request]) => `${request.textWindow?.index}:${request.family}`))
-      .toEqual([1, 2, 3].flatMap((page) => ["labs", "measurements", "history"].map((family) => `${page}:${family}`)));
+      .toEqual(["1:all", "2:all", "3:all"]);
     expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
     // Every apply, the job's last included, leaves only usage and receipts, so
     // the pages share one snapshot and usage follows it.

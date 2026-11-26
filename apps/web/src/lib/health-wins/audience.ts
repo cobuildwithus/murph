@@ -2,15 +2,16 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { activeHostedPersonAccessSql } from "../hosted-onboarding/member-access-projections";
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
-import { healthFeedMemberIds } from "./flag";
+import { healthFeedAuthors } from "./flag";
 
 type Db = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 type PostAccess = "content" | "includeOwnerReceipt";
 
 function healthAuthorSql(memberId: Prisma.Sql, receiptOwner?: string) {
+  const authors = healthFeedAuthors();
   return Prisma.sql`EXISTS (SELECT 1 FROM hosted_member author WHERE author.id = ${memberId}
-    AND author.id = ANY(${healthFeedMemberIds()}::text[])
+    ${authors === "everyone" ? Prisma.empty : Prisma.sql`AND author.id = ANY(${authors}::text[])`}
     AND ${activeHostedPersonAccessSql(Prisma.sql`author`)}
     AND (${receiptOwner === undefined ? Prisma.empty : Prisma.sql`author.id = ${receiptOwner} OR`}
       ${hostedLaunchConsentGrantedSql(Prisma.sql`author.id`)}))`;

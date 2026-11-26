@@ -55,7 +55,7 @@ const jobSchema = z.object({
 type Job = z.infer<typeof jobSchema>;
 export type ClinicalEnrichmentSource = Pick<z.infer<typeof sourceSchema>, "rawRef" | "sha256" | "mediaType" | "resource"> & { clinicalOccurredAt?: string; recordedAt?: string };
 export type ClinicalEnrichmentWork =
-  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string; extractedText?: string }
+  | { status: "extract"; jobId: string; source: ClinicalEnrichmentSource; documentPath: string; page: number; timeZone: string; extractedText?: string; failures: number }
   | { status: "deferred"; jobId: string; nextAttemptAt: string }
   | { status: "apply" | "advance"; jobId: string };
 const indexSchema = z.object({ schema: z.literal("murph.clinical-enrichment-index.v1"), pending: z.array(digestSchema).max(128) }).strict();
@@ -238,7 +238,7 @@ async function prepareCurrentClinicalDocument(
   }
   await saveJob(vaultRoot, job);
   const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
-  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: attested.storedSha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone };
+  return { status: "extract", jobId: job.jobId, source: { rawRef: job.source.rawRef, sha256: attested.storedSha256, mediaType: job.source.mediaType, clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt }, documentPath: attested.documentPath, page: job.page, timeZone: metadata.timezone, failures: job.failures };
 }
 
 async function prepareCurrentClinicalResource(vaultRoot: string, job: Job, manifest: z.infer<typeof clinicalRawManifestSchema>, resource: ClinicalStructuredSource): Promise<ClinicalEnrichmentWork | null> {
@@ -268,7 +268,7 @@ async function prepareCurrentClinicalResource(vaultRoot: string, job: Job, manif
   await saveJob(vaultRoot, job);
   const metadata = vaultMetadataSchema.parse(await readVaultMetadataSource(vaultRoot));
   return { status: "extract", jobId: job.jobId, source: { ...job.source, clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt },
-    documentPath: attested.documentPath, extractedText: attested.extractedText, page: 1, timeZone: metadata.timezone };
+    documentPath: attested.documentPath, extractedText: attested.extractedText, page: 1, timeZone: metadata.timezone, failures: job.failures };
 }
 
 export async function persistClinicalEnrichmentProposals(input: { vaultRoot: string; jobId: string; sourceSha256: string; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): Promise<void> {
