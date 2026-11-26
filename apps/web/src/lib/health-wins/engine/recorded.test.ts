@@ -19,7 +19,7 @@ describe("recorded timed cards", () => {
   it("uses minute averages for chart markers, names the sample peak, and preserves gaps", () => {
     const card = preview({ ...summary, heartRate });
     expect(card).toMatchObject({
-      candidateId: `activity:${summary.id}:activity_heart_rate`, title: { number: "4 min", measure: "strength session" },
+      candidateId: `activity:${summary.id}:activity_heart_rate`, title: { number: "3 min", measure: "strength session" },
       subtitle: "heart rate peaked at 133",
       source_note: "Recorded on Feb 16, evening. The line shows each minute's average.",
       chart: { type: "heart_rate", perMinute: [82, null, 114, 87], low: { minute: 1, bpm: 82 }, peak: { minute: 3, bpm: 114 }, timerMinutes: 3 },
@@ -34,19 +34,29 @@ describe("recorded timed cards", () => {
       const card = preview({ ...summary, kind });
       expect(card).toMatchObject({ candidateId: `activity:${summary.id}:activity_time`, kind: "activity_time",
         subtitle: "on a 3 min timer", source_note: "Recorded on Feb 16, evening",
-        chart: { type: "duration", minutes: 4, timerMinutes: 3 } });
+        chart: { type: "duration", minutes: 201 / 60, timerMinutes: 3 } });
       expect(preview({ ...summary, kind, heartRate: { ...heartRate, perMinute: [null, null, null, null] } })).toEqual(card);
     },
   );
+
+  it("reads a paused recording on its recording clock, as the phone draws it", () => {
+    // 31 minutes from Start to Finish with a 9 minute pause: the phone sends 22 minute values.
+    const paused = { ...summary, kind: "sauna", elapsedSec: 31 * 60, movingSec: 22 * 60, timerSec: 20 * 60,
+      heartRate: { lowBpm: 70, avgBpm: 104, peakBpm: 131, perMinute: Array.from({ length: 22 }, (_, i) => 80 + i) } } as const;
+    const card = preview(paused);
+    expect(card).toMatchObject({ title: { number: "22 min", measure: "sauna" }, subtitle: "heart rate peaked at 131" });
+    expect(() => validateRecordedActivity({ ...paused, heartRate: { ...paused.heartRate, perMinute: Array(31).fill(95) } }))
+      .toThrow("Check the minute heart rate readings.");
+  });
 
   it("keeps time and bpm in the same units across client settings", () => {
     const activity = { ...summary, heartRate };
     const original = buildRecordedCards(activity, context);
     for (const units of ["uk", "metric"] as const) expect(buildRecordedCards(activity, { ...context, units })).toEqual(original);
     const untimed = preview({ ...summary, elapsedSec: 37, movingSec: 29, timerSec: undefined });
-    expect(untimed.title.number).toBe("37 sec");
+    expect(untimed.title.number).toBe("29 sec");
     expect(untimed.subtitle).toBe("timed with Murph");
-    expect(untimed.chart).toEqual({ type: "duration", minutes: 37 / 60 });
+    expect(untimed.chart).toEqual({ type: "duration", minutes: 29 / 60 });
   });
 
   it("suggests an editable title from the local time or the preceding activity", () => {
@@ -59,7 +69,7 @@ describe("recorded timed cards", () => {
   });
 
   it("accepts inclusive limits and the one-minute allowance independently of summary extremes", () => {
-    const activity = { ...summary, elapsedSec: 360 * 60, movingSec: 0, timerSec: 360 * 60 };
+    const activity = { ...summary, elapsedSec: 360 * 60, movingSec: 360 * 60, timerSec: 360 * 60 };
     expect(() => validateRecordedActivity({ ...activity, heartRate: {
       lowBpm: 30, avgBpm: 120.5, peakBpm: 230, perMinute: Array(360).fill(95),
     } })).not.toThrow();
@@ -75,7 +85,7 @@ describe("recorded timed cards", () => {
   it("rejects out-of-range or fractional durations", () => {
     for (const change of [
       { elapsedSec: 0 }, { elapsedSec: 360 * 60 + 1 }, { elapsedSec: 249.5 },
-      { movingSec: -1 }, { movingSec: 241 }, { movingSec: 0.5 },
+      { movingSec: -1 }, { movingSec: 0 }, { movingSec: 241 }, { movingSec: 0.5 },
       { timerSec: 0 }, { timerSec: 360 * 60 + 1 }, { timerSec: 4.25 },
     ]) expect(() => validateRecordedActivity({ ...summary, ...change })).toThrow();
   });
@@ -113,7 +123,8 @@ describe("recorded timed cards", () => {
       source_note: "", subtitle: "Shared without numbers.", theme: "fitness", title: { measure: "Strength session", number: "" },
     });
     expect(hidden.specRevision).toBe(createHash("sha256").update(canonical).digest("hex"));
-    expect(preview({ ...activity, movingSec: 215 })).toEqual(display);
+    // Pauses stay out of the card: only the time spent recording is shown.
+    expect(preview({ ...activity, elapsedSec: 230 })).toEqual(display);
     const changed = preview({ ...activity, heartRate: { ...heartRate, peakBpm: 135 } });
     expect(changed.specRevision).not.toBe(display.specRevision);
     expect(changed.change_options[1].specRevision).toBe(hidden.specRevision);

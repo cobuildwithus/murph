@@ -23,8 +23,8 @@ function validDuration(seconds: number) {
 }
 
 export function validateRecordedActivity(activity: RecordedActivity): void {
-  if (!validDuration(activity.elapsedSec) || !Number.isInteger(activity.movingSec)
-    || activity.movingSec < 0 || activity.movingSec > activity.elapsedSec
+  if (!validDuration(activity.elapsedSec) || !validDuration(activity.movingSec)
+    || activity.movingSec > activity.elapsedSec
     || (activity.timerSec !== undefined && !validDuration(activity.timerSec))) {
     throw invalidGameRequest("Check the recorded activity duration.");
   }
@@ -35,7 +35,8 @@ export function validateRecordedActivity(activity: RecordedActivity): void {
     throw invalidGameRequest("Check the heart rate summary.");
   }
   if (hr.perMinute !== undefined) {
-    const minutes = Math.ceil(activity.elapsedSec / 60);
+    // The phone cuts pauses out of the line, so it has one value per minute of recording.
+    const minutes = Math.ceil(activity.movingSec / 60);
     if (hr.perMinute.length > maxMinutes || Math.abs(hr.perMinute.length - minutes) > 1
       || hr.perMinute.some(bpm => bpm !== null && (!Number.isInteger(bpm) || bpm < hr.lowBpm || bpm > hr.peakBpm))) {
       throw invalidGameRequest("Check the minute heart rate readings.");
@@ -72,7 +73,8 @@ export function buildRecordedCards(activity: RecordedActivity, context: Recorded
     : `${bucket} ${label.name}`;
   // Day and part of day only: the card never carries the start time.
   const recorded = `Recorded on ${dayLabel.format(new Date(day))}, ${bucket.toLowerCase()}`;
-  const title = { number: formatRungTime(activity.elapsedSec), measure: label.name };
+  // Time spent doing it: pauses don't count, the same clock the phone's timer runs on.
+  const title = { number: formatRungTime(activity.movingSec), measure: label.name };
   const base = { title, filter: "Fitness", theme: "fitness", share: { caption_tips: [] } } as const;
   const timer = activity.timerSec === undefined ? {} : { timerMinutes: activity.timerSec / 60 };
   const hr = activity.heartRate;
@@ -93,7 +95,7 @@ export function buildRecordedCards(activity: RecordedActivity, context: Recorded
   } : {
     ...base, id: `activity:${activity.id}:activity_time`, kind: "activity_time",
     subtitle: activity.timerSec === undefined ? "timed with Murph" : `on a ${formatRungTime(activity.timerSec)} timer`,
-    source_note: recorded, chart: { type: "duration", minutes: activity.elapsedSec / 60, ...timer },
+    source_note: recorded, chart: { type: "duration", minutes: activity.movingSec / 60, ...timer },
   };
   return { suggestedTitle, candidates: [prepareRecordedCandidate(card, label.hidden)] };
 }

@@ -106,8 +106,8 @@ recording is disabled.
 | --- | --- |
 | `id`, `kind` | Client UUID and one of `sauna`, `cold_plunge`, `lift`, `other`, `run`, or `walk`. Run and walk currently produce timed cards. |
 | `startedAt` | ISO timestamp with an offset or UTC designator. The card discloses only the day in the member’s game-profile time zone and the part of day (night before 5:00, morning, afternoon from 12:00, evening from 17:00), never the start time. |
-| `elapsedSec`, `movingSec`, `timerSec?` | Whole seconds. Elapsed time and an optional timer must be positive and at most six hours. Moving time is between zero and elapsed time. |
-| `heartRate?` | Summary with `avgBpm`, `lowBpm`, and `peakBpm`, ordered low to average to peak within 30–230 bpm. For preview and post, also send `perMinute` with whole-number averages or `null` for gaps. Omit the series on a private save. |
+| `elapsedSec`, `movingSec`, `timerSec?` | Whole seconds, each positive and at most six hours. Elapsed runs from Start to Finish, pauses included. Moving time is the recording time with pauses cut out, at most the elapsed time. Cards show moving time, the same clock the phone's timer runs on. |
+| `heartRate?` | Summary with `avgBpm`, `lowBpm`, and `peakBpm`, ordered low to average to peak within 30–230 bpm. For preview and post, also send `perMinute`: one whole-number average per minute of moving time (within one of `ceil(movingSec / 60)`), or `null` for a minute without a reading. Omit the series on a private save. |
 
 The minute array has at most 360 entries. Its length may differ by one from elapsed
 minutes rounded up. Each reading must lie within the summary envelope. Raw samples,
