@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-26",
+  "order": 100,
+  "item": {
+    "id": "hospital-record-providers",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "See who processes your hospital records",
+    "summary": "Murph's provider list now names OpenAI as the company that helps organize the hospital records you connect and answer questions about them.",
+    "details": "It also explains that when Murph searches X, xAI receives the search question, which can include health details from your conversation.",
+    "relevanceTags": ["privacy", "medical-records"],
+    "sourcePullRequests": [5342],
+    "tryIt": {
+      "label": "Read the provider list",
+      "href": "/subprocessors"
+    }
+  }
+}

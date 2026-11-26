@@ -97,10 +97,11 @@ test("SubprocessorsPage uses affirmative model and search provider wording", asy
     markup,
     /Encrypted stored workspace data, transient execution content needed to run requested hosted workflows, execution metadata, runtime logs, and operational artifacts/u,
   );
-  assert.match(markup, /Configured AI model providers/);
+  assert.match(markup, />OpenAI<\/th><td[^>]*>[^<]*hosted assistant[^<]*hospital records you connect/u);
+  assert.match(markup, /No model training on Murph-managed health data or game content/u);
   assert.match(
     markup,
-    /No for Murph-managed health data\. Murph does not route health data to configured model providers unless no-training controls are in place/u,
+    />xAI<\/th><td[^>]*>Searches X for Murph\.<\/td><td[^>]*>The search question, which can include health details/u,
   );
   assert.match(markup, /Configured search providers/);
   assert.match(
