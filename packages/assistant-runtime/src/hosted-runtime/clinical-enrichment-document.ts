@@ -145,11 +145,7 @@ async function preparePdfDocument(
 ): Promise<PreparedDocumentPage> {
   const pdfPath = path.join(scratchRoot, "source.pdf");
   await writeFile(pdfPath, bytes, { mode: 0o600 });
-  const info = await runCommand("pdfinfo", [pdfPath], pdfCommandOptions(input.signal));
-  const totalPages = Number(/^Pages:\s+(\d+)\s*$/mu.exec(info.stdout)?.[1]);
-  if (!Number.isSafeInteger(totalPages) || totalPages < 1 || totalPages > MAX_PAGES) {
-    throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_LIMIT");
-  }
+  const totalPages = await readPdfPageCount(pdfPath, input.signal);
   assertRequestedPage(input.page, totalPages);
   const imagePath = await renderPdfPage(input, pdfPath, scratchRoot);
   const extractedText = await readPdfPageText(input, pdfPath);
@@ -159,6 +155,34 @@ async function preparePdfDocument(
     ...(extractedText ? { extractedText } : {}),
     renderedPages: [{ page: input.page, path: imagePath }],
   };
+}
+
+async function readPdfPageCount(pdfPath: string, signal: AbortSignal | null | undefined): Promise<number> {
+  const info = await runCommand("pdfinfo", [pdfPath], pdfCommandOptions(signal));
+  const totalPages = Number(/^Pages:\s+(\d+)\s*$/mu.exec(info.stdout)?.[1]);
+  if (!Number.isSafeInteger(totalPages) || totalPages < 1 || totalPages > MAX_PAGES) {
+    throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_LIMIT");
+  }
+  return totalPages;
+}
+
+/** The page count preparation reports, without rendering, so later pages can be extracted ahead. */
+export async function countClinicalEnrichmentDocumentPages(input: Omit<DocumentPreparationInput, "page">): Promise<number> {
+  const mediaType = input.mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (mediaType !== "application/pdf") return (await prepareClinicalEnrichmentDocument({ ...input, page: 1 }).then(async (prepared) => {
+    await prepared.cleanup();
+    return prepared;
+  })).totalPages;
+  const bytes = await withCanonicalWriteLock(input.vaultRoot, () => readBoundedSource(input.documentPath));
+  if (bytes.length > CLINICAL_DOCUMENT_MAX_BYTES) throw new ClinicalEnrichmentDocumentError("CLINICAL_ENRICHMENT_DOCUMENT_LIMIT");
+  const scratchRoot = await realpath(await mkdtemp(path.join(tmpdir(), "clinical-enrichment-count-")));
+  try {
+    const pdfPath = path.join(scratchRoot, "source.pdf");
+    await writeFile(pdfPath, bytes, { mode: 0o600 });
+    return await readPdfPageCount(pdfPath, input.signal);
+  } finally {
+    await rm(scratchRoot, { recursive: true, force: true });
+  }
 }
 
 async function renderPdfPage(input: DocumentPreparationInput, pdfPath: string, scratchRoot: string): Promise<string> {

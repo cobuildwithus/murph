@@ -1,10 +1,11 @@
 import type { ClientUnits } from "../../companion/client-info";
 import { invalidGameRequest } from "../../game/http/errors";
 import { formatRungTime } from "../../game/progress/format";
+import { activityNameTitle, activityNameWord } from "../activity-name";
 import { prepareRecordedCandidate } from "../card-options";
 import { routeCards } from "./route-cards";
 import { validateRecordedRoute } from "./recorded-route";
-import { formatNumber } from "./shared";
+import { formatDuration, formatNumber } from "./shared";
 import type { RecordedActivity, RecordedActivityKind } from "./types";
 
 const maxMinutes = 360;
@@ -49,9 +50,9 @@ export function validateRecordedActivity(activity: RecordedActivity): void {
 
 /** The sealed activity row and Settings export share this closed summary shape. */
 export function recordedActivitySummary(activity: RecordedActivity) {
-  const { id, kind, startedAt, elapsedSec, movingSec, timerSec, heartRate, route } = activity;
+  const { id, kind, name, startedAt, elapsedSec, movingSec, timerSec, heartRate, route } = activity;
   return {
-    id, kind, startedAt: new Date(startedAt).toISOString(), elapsedSec, movingSec,
+    id, kind, ...(name && { name }), startedAt: new Date(startedAt).toISOString(), elapsedSec, movingSec,
     ...(timerSec === undefined ? {} : { timerSec }),
     ...(heartRate && { heartRate: { avgBpm: heartRate.avgBpm, lowBpm: heartRate.lowBpm, peakBpm: heartRate.peakBpm } }),
     ...(route && { route: {
@@ -64,8 +65,12 @@ export function recordedActivitySummary(activity: RecordedActivity) {
 interface RecordedCardContext {
   day: string;
   hour: number;
-  previousKind?: RecordedActivityKind;
+  previous?: Pick<RecordedActivity, "kind" | "name">;
   units: ClientUnits;
+}
+
+function displayWord({ kind, name }: Pick<RecordedActivity, "kind" | "name">) {
+  return name === undefined ? activityLabels[kind].name : activityNameWord(name);
 }
 
 function minuteExtrema(series: readonly (number | null)[]) {
@@ -81,18 +86,23 @@ function minuteExtrema(series: readonly (number | null)[]) {
 
 export function buildRecordedCards(activity: RecordedActivity, context: RecordedCardContext) {
   validateRecordedActivity(activity);
-  const { day, hour, previousKind } = context;
+  const { day, hour, previous } = context;
   const label = activityLabels[activity.kind];
   const bucket = hour < 5 ? "Night" : hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
-  const name = label.name.charAt(0).toUpperCase() + label.name.slice(1);
-  const suggestedTitle = previousKind && previousKind !== activity.kind
-    ? `${name} after your ${activityLabels[previousKind].name}`
-    : `${bucket} ${label.name}`;
+  const word = displayWord(activity);
+  const previousWord = previous && displayWord(previous);
+  const suggestedTitle = previousWord && previousWord !== word
+    ? `${activityNameTitle(activity.name ?? word)} after your ${previousWord}`
+    : `${bucket} ${word}`;
   // Day and part of day only: the card never carries the start time.
   const recorded = `Recorded on ${dayLabel.format(new Date(day))}, ${bucket.toLowerCase()}`;
-  const cards = routeCards(activity, recorded, context.units);
+  const cards = routeCards(activity, recorded, context.units, word);
   // Time spent doing it: pauses don't count, the same clock the phone's timer runs on.
-  const title = { number: formatRungTime(activity.movingSec), measure: label.name };
+  // Named titles use compact hours. Keep legacy duration text stable for existing card revisions.
+  const number = activity.name && activity.movingSec >= 3600
+    ? formatDuration(Math.floor(activity.movingSec / 60))
+    : formatRungTime(activity.movingSec);
+  const title = { number, measure: word };
   const base = { title, filter: "Fitness", theme: "fitness", share: { caption_tips: [] } } as const;
   const timer = activity.timerSec === undefined ? {} : { timerMinutes: activity.timerSec / 60 };
   const hr = activity.heartRate;

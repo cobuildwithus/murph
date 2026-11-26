@@ -7,16 +7,16 @@ import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities, listMetricPoints } from "@murphai/query";
 import { minimizeClinicalDocumentImages } from "@murphai/vault-usecases/clinical-records";
-import { applyClinicalEnrichmentProposals, persistClinicalEnrichmentProposals, readClinicalEnrichmentStatus, readNextClinicalEnrichment } from "@murphai/vault-usecases/clinical-enrichment";
+import { applyClinicalEnrichmentProposals, persistClinicalEnrichmentProposals, planClinicalExtractionUnits, readClinicalEnrichmentStatus, readNextClinicalEnrichment, saveClinicalExtraction } from "@murphai/vault-usecases/clinical-enrichment";
 import { describe, expect, it, vi } from "vitest";
 
-import { prepareClinicalEnrichmentDocument } from "../src/hosted-runtime/clinical-enrichment-document.ts";
-import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { countClinicalEnrichmentDocumentPages, prepareClinicalEnrichmentDocument } from "../src/hosted-runtime/clinical-enrichment-document.ts";
+import type { HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 import { makeHostedClinicalEnrichmentWakeDue } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import { executeHostedClinicalEnrichmentWake } from "../src/hosted-runtime/events/clinical-enrichment.ts";
 import { readHostedSystemMailboxState, updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { prepareHostedSystemMailboxItemForCheckpoint, type HostedSystemMailboxRuntime } from "../src/hosted-runtime/system-mailbox.ts";
-import { importClinicalEnrichmentSource, OCCURRED_AT, SOURCE_TEXT } from "./clinical-enrichment-source.fixture.ts";
+import { importClinicalEnrichmentSource, OCCURRED_AT, runCursorClinicalEnrichment, SOURCE_TEXT } from "./clinical-enrichment-source.fixture.ts";
 import { createHostedRuntimeResolvedConfig, createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
 
 // Bootstrap/environment loading is unrelated to this deterministic data path.
@@ -94,9 +94,9 @@ describe("clinical enrichment import-to-query flow", () => {
           results: [{ analyte: "Glucose", value: 90, unit: "mg/dL" }],
         } }] };
       });
-      const input: HostedClinicalEnrichmentInput = { abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+      const input: HostedClinicalEnrichmentInput = { codexHome: null, env: {}, vaultRoot,
         memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current", onStateMutation() {}, executeExtraction };
-      expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+      expect(await runCursorClinicalEnrichment(input)).toBe("settled");
       // Retained image tags still leave visual coverage unresolved; supported text survives.
       expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1, held: 1 } });
       expect((await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).holdReasons)
@@ -109,6 +109,39 @@ describe("clinical enrichment import-to-query flow", () => {
     }
   });
 
+  it("drains a job's cached pages in order in one wake and keeps an interrupted drain due", async () => {
+    const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-drain-");
+    const { vaultRoot } = workspace;
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC", createdAt: OCCURRED_AT });
+      const at = (page: number) => `2020-03-1${page}T12:00:00Z`;
+      const text = [1, 2, 3].map((page) => `Synthetic page ${page}. Collected ${at(page)}. Serum glucose ${90 + page} mg/dL.`.padEnd(11_000, ".")).join("");
+      const job = await importClinicalEnrichmentSource(vaultRoot, undefined, { bytes: Buffer.from(text), mediaType: "text/plain" });
+      const units = await planClinicalExtractionUnits({ vaultRoot, limit: 10,
+        countPages: (document) => countClinicalEnrichmentDocumentPages({ vaultRoot, ...document }) });
+      expect(units.map((unit) => unit.page)).toEqual([1, 2, 3]);
+      for (const unit of units) {
+        await saveClinicalExtraction({ vaultRoot, unit, totalPages: 3, outputs: { labs: { status: "complete", records: [{
+          dateBasis: "document", dateEvidence: `Collected ${at(unit.page)}`, payload: { kind: "test", occurredAt: at(unit.page), title: `Synthetic glucose ${unit.page}`,
+            note: null, testName: "Glucose", specimenType: "serum", resultStatus: "normal", results: [{ analyte: "Glucose", value: 90 + unit.page, unit: "mg/dL" }] } }] },
+        measurements: empty, history: empty } });
+      }
+      const wake = (await readHostedSystemMailboxState(vaultRoot)).pending[0]!.wake;
+      if (wake.kind !== "clinical-records.enrichment-requested") throw new Error("Expected the clinical wake.");
+      // A cooperative yield after the first page stops the drain but leaves the wake due now.
+      let steps = 0;
+      const interrupted = await executeHostedClinicalEnrichmentWake({ wake, vaultRoot, shouldYield: () => steps++ > 0 });
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { pages: 1 } });
+      expect(Date.parse(interrupted.nextWakeAt ?? "")).toBeLessThanOrEqual(Date.now());
+      // The next wake applies the remaining cached pages back to back and finishes the job.
+      await executeHostedClinicalEnrichmentWake({ wake, vaultRoot });
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { pages: 3, created: 3 } });
+      expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value).sort()).toEqual([91, 92, 93]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("applies prepared work when mailbox order differs from the extraction queue", async () => {
     const workspace = await createHostedRuntimeWorkspace("clinical-enrichment-queue-order-");
     const { vaultRoot } = workspace;
@@ -117,9 +150,10 @@ describe("clinical enrichment import-to-query flow", () => {
       const prepared = await importClinicalEnrichmentSource(vaultRoot, {
         resourceType: "DocumentReference", status: "current", revision: "2020-03-12T12:00:00.000Z",
       });
+      // Distinct bytes: an identical document would reuse the ready job's extraction.
       const waiting = await importClinicalEnrichmentSource(vaultRoot, {
         resourceType: "DiagnosticReport", status: "final", revision: "2020-03-13T12:00:00.000Z",
-      });
+      }, { bytes: Buffer.from(`${SOURCE_TEXT} Second report.`), mediaType: "text/plain" });
       // The queues have independent durable order: application can encounter
       // an unextracted job before the extractor's prepared head.
       await updateHostedSystemMailboxState(vaultRoot, state => ({ pending: [...state.pending].reverse() }));
@@ -145,8 +179,9 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: prepared.jobId }))
         .toMatchObject({ counts: { created: 1, pages: 1 } });
       expect((await listMetricPoints(vaultRoot, { limit: 10 })).map(point => point.value)).toEqual([90]);
-      expect(await readNextClinicalEnrichment({ vaultRoot })).toEqual({ status: "advance", jobId: prepared.jobId });
-      expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ jobId: waiting.jobId });
+      // The same drain finished the prepared job; the waiting job is next.
+      expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: prepared.jobId })).toMatchObject({ status: "complete" });
+      expect(await readNextClinicalEnrichment({ vaultRoot })).toMatchObject({ status: "extract", jobId: waiting.jobId });
     } finally { await workspace.cleanup(); }
   });
 
@@ -174,11 +209,11 @@ describe("clinical enrichment import-to-query flow", () => {
         };
       });
       const input: HostedClinicalEnrichmentInput = {
-        abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+        codexHome: null, env: {}, vaultRoot,
         memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
       };
-      expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+      expect(await runCursorClinicalEnrichment(input)).toBe("settled");
       expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "prepared" });
       expect(await applyClinicalEnrichmentProposals({ vaultRoot, jobId: job.jobId })).toMatchObject({ counts: { created: 1 }, readback: { verifiedCount: 1 } });
@@ -190,8 +225,8 @@ describe("clinical enrichment import-to-query flow", () => {
       });
       expect(tests[0]?.attributes.evidence).toEqual([expect.not.objectContaining({ page: expect.anything() })]);
       expect((await listMetricPoints(vaultRoot, { limit: 10 })).map((point) => point.value)).toEqual([90]);
-      expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
-      expect(await runOneHostedClinicalEnrichment(input)).toBe("idle");
+      expect(await runCursorClinicalEnrichment(input)).toBe("settled");
+      expect(await runCursorClinicalEnrichment(input)).toBe("idle");
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { created: 1, documents: 1, pages: 1 } });
       expect(executeExtraction).toHaveBeenCalledOnce();
     } finally { await workspace.cleanup(); }
@@ -266,12 +301,12 @@ describe("clinical enrichment import-to-query flow", () => {
       const job = await importClinicalEnrichmentSource(vaultRoot, parent);
       const executeExtraction = vi.fn<NonNullable<HostedClinicalEnrichmentInput["executeExtraction"]>>(async () => empty);
       const input: HostedClinicalEnrichmentInput = {
-        abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+        codexHome: null, env: {}, vaultRoot,
         memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {}, async onWorkUpdated() {}, executeExtraction,
       };
-      await runOneHostedClinicalEnrichment(input);
-      await runOneHostedClinicalEnrichment(input);
+      await runCursorClinicalEnrichment(input);
+      await runCursorClinicalEnrichment(input);
       expect(executeExtraction).not.toHaveBeenCalled();
       expect(await listMetricPoints(vaultRoot, { limit: 10 })).toEqual([]);
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "blocked" });
@@ -305,19 +340,19 @@ describe("clinical enrichment import-to-query flow", () => {
         };
       });
       const runnerInput: HostedClinicalEnrichmentInput = {
-        abortSignal: new AbortController().signal, codexHome: null, env: {}, vaultRoot,
+        codexHome: null, env: {}, vaultRoot,
         memberId: "synthetic-member", resolveRuntimeAuthority: async () => "current",
         onStateMutation() {},
         async onWorkUpdated(jobId) { await makeHostedClinicalEnrichmentWakeDue({ vaultRoot, jobId }); },
         executeExtraction,
       };
-      expect(await runOneHostedClinicalEnrichment(runnerInput)).toBe("settled");
+      expect(await runCursorClinicalEnrichment(runnerInput)).toBe("settled");
       expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "prepared" });
       expect(await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 })).toEqual([]);
 
       // A new runner instance after restart finds frozen proposals without another model call.
-      expect(await runOneHostedClinicalEnrichment({ ...runnerInput, abortSignal: new AbortController().signal })).toBe("idle");
+      expect(await runCursorClinicalEnrichment(runnerInput)).toBe("idle");
       expect(executeExtraction).toHaveBeenCalledOnce();
       const queued = (await readHostedSystemMailboxState(vaultRoot)).pending[0]!;
       if (queued.wake.kind !== "clinical-records.enrichment-requested") throw new Error("Synthetic enrichment wake missing.");
@@ -326,8 +361,9 @@ describe("clinical enrichment import-to-query flow", () => {
       expect(await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 })).toEqual([]);
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "prepared" });
 
-      // The actual mailbox handler performs the separate canonical write once foreground yields.
-      expect(await prepareHostedSystemMailboxItemForCheckpoint(selection)).toMatchObject({ status: "preempted" });
+      // The actual mailbox handler performs the separate canonical write once foreground
+      // yields, and its cursor drain finishes the one-page job in the same pass.
+      expect(await prepareHostedSystemMailboxItemForCheckpoint(selection)).toMatchObject({ status: "processed" });
       // A replay after the private write recovers proof against the original run shard.
       const changeRun = { runId: job.retrievalJobId, generation: 2 };
       expect(await executeHostedClinicalEnrichmentWake({ vaultRoot, wake: { ...queued.wake, changeRun } }))
@@ -346,11 +382,9 @@ describe("clinical enrichment import-to-query flow", () => {
       })]));
       expect(digest(await readFile(path.join(vaultRoot, job.rawRef)))).toBe(job.sha256);
 
-      expect(await runOneHostedClinicalEnrichment(runnerInput)).toBe("settled");
-      expect(await runOneHostedClinicalEnrichment(runnerInput)).toBe("idle");
+      // The drain already finished the job and removed its pointer with the final apply.
+      expect(await runCursorClinicalEnrichment(runnerInput)).toBe("idle");
       expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId })).toMatchObject({ status: "complete", counts: { created: 1, documents: 1, pages: 1 } });
-      await makeHostedClinicalEnrichmentWakeDue({ vaultRoot, jobId: job.jobId });
-      expect(await prepareHostedSystemMailboxItemForCheckpoint(selection)).toMatchObject({ status: "processed" });
       expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
       expect(executeExtraction).toHaveBeenCalledOnce();
       expect(await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["test"], limit: 10 })).toHaveLength(1);

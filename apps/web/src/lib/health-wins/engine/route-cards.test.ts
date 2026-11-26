@@ -73,10 +73,11 @@ describe("recorded route cards", () => {
   });
 
   it("keeps the splits and drops the map when trimming left no path", () => {
-    const trimmed = buildRecordedCards({ ...run, route: { ...run.route!, paths: [] } }, { ...context, units: "metric" })
-      .candidates.map(previewRecordedCandidate);
-    expect(trimmed.map(card => card.kind)).toEqual(["activity_splits"]);
-    expect(trimmed[0]).toMatchObject({ subtitle: "fastest km 5:50", title: { number: "2.5 km", measure: "run" } });
+    for (const [name, measure] of [[undefined, "run"], ["Trail jog", "trail jog"]] as const) {
+      const trimmed = cards({ ...run, name, route: { ...route, paths: [] } });
+      expect(trimmed.map(card => card.kind)).toEqual(["activity_splits"]);
+      expect(trimmed[0]).toMatchObject({ subtitle: "fastest km 5:50", title: { number: "2.5 km", measure } });
+    }
   });
 
   it.each(["us", "uk"] as const)("presents distance and pace in %s units while preserving the recorded splits", units => {
@@ -118,18 +119,19 @@ describe("recorded route cards", () => {
     expect(splits.chart).toMatchObject({ fastest: null, splits: [{ seconds: 270, partial: true }] });
     expect(splits.subtitle).not.toContain("fastest");
     const morning = buildRecordedCards(activity, context);
-    const after = buildRecordedCards(activity, { ...context, previousKind: "sauna" });
+    const after = buildRecordedCards(activity, { ...context, previous: { kind: "sauna" } });
     expect(morning.suggestedTitle).toBe("Morning walk");
     expect(after.suggestedTitle).toBe("Walk after your sauna");
     expect(after.candidates).toEqual(morning.candidates);
   });
 
   it("keeps only the map when its numbers are hidden and discloses no values on the hidden splits and heart rate", () => {
-    const activity = { ...run, heartRate: {
+    const activity = { ...run, name: "Trail jog", heartRate: {
       avgBpm: 111, lowBpm: 101, peakBpm: 139, perMinute: Array.from({ length: 15 }, () => 111),
     } };
     const visible = cards(activity);
     expect(visible.map(card => card.kind)).toEqual(["activity_route", "activity_splits", "activity_heart_rate"]);
+    expect(visible.map(card => card.title.measure)).toEqual(["trail jog", "trail jog", "trail jog"]);
     // Heart rate lives only on its own card, so hiding or leaving out that card keeps it off the post.
     expect(JSON.stringify(visible[1])).not.toMatch(/bpm|\b111\b/u);
     const [map, splits, hr] = visible.map(card => card.change_options.find(option => option.id === "hide_numbers")?.spec);
@@ -137,7 +139,7 @@ describe("recorded route cards", () => {
     if (original.type !== "route_map") throw new Error("Expected route");
     expect(map?.chart).toEqual({ ...original, chips: [] });
     for (const spec of [map, splits, hr]) {
-      expect(spec?.title.number).toBe("");
+      expect(spec?.title).toEqual({ number: "", measure: "Went for a run" });
       expect(spec?.subtitle).toBe("Shared without numbers.");
     }
     expect(splits?.chart).toEqual({ type: "hidden" });

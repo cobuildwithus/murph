@@ -105,19 +105,21 @@ export function createHostedWorkspaceSystemWork(input: {
         : {}),
     }, !paused);
   };
+  // Clinical apply yields at its own receipt-capacity budget; every other route keeps the shared one.
+  const yieldsFor = (routeAction: HostedSystemMailboxRouteAction) => routeAction === "apply-clinical-enrichment"
+    ? input.runnerInput.shouldYieldClinicalApply ?? input.runnerInput.shouldYieldBackgroundMaintenance
+    : input.runnerInput.shouldYieldBackgroundMaintenance;
   const kick = (
     allowedRouteActions: readonly HostedSystemMailboxRouteAction[] =
       HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
   ): void => {
-    if (paused || input.preparation.signal?.aborted
-      || input.runnerInput.shouldYieldBackgroundMaintenance?.()) {
-      return;
-    }
+    if (paused || input.preparation.signal?.aborted) return;
     const signal = input.preparation.signal
       ? AbortSignal.any([input.preparation.signal, cancellation.signal])
       : cancellation.signal;
     for (const routeAction of HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS) {
-      if (!allowedRouteActions.includes(routeAction)) continue;
+      const shouldYieldBackgroundMaintenance = yieldsFor(routeAction);
+      if (!allowedRouteActions.includes(routeAction) || shouldYieldBackgroundMaintenance?.()) continue;
       const completion = (async () => {
         try {
           const { result: preparation } = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -130,13 +132,15 @@ export function createHostedWorkspaceSystemWork(input: {
               runtimeLogContext: input.runnerInput.runtimeLogContext,
               retainProcessedItemUntilRecorded: routeAction !== "apply-clinical-enrichment",
               shouldYieldDeviceImportPreparation: input.runnerInput.shouldYieldDeviceImportPreparation,
-              shouldYieldBackgroundMaintenance: input.runnerInput.shouldYieldBackgroundMaintenance,
+              shouldYieldBackgroundMaintenance,
               backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,
               signal,
             }),
           });
           if (!preparation) return;
           await completed(preparation);
+          // Several jobs' cached units can be due at once; apply them back to back.
+          if (routeAction === "apply-clinical-enrichment") kick([routeAction]);
         } catch (error) {
           input.onFailure(error, !paused);
         }

@@ -3344,6 +3344,17 @@ model HealthActivity {
   @@map("health_activity")
 }
 
+/// Shared recorder decisions keyed by a versioned HMAC of the activity name.
+model HealthActivityKindDecision {
+  key       String   @id
+  kind      String
+  route     Boolean
+  timer     Boolean
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("health_activity_kind_decision")
+}
+
 model HealthPostCheer {
   postId    String       @map("post_id") @db.Uuid
   memberId  String       @map("member_id")
