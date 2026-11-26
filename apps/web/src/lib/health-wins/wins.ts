@@ -17,13 +17,13 @@ import {
 } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import { rankHealthCards } from "./decisions";
-import { generateHealthWins } from "./engine";
+import { selectHealthWins } from "./engine";
 import { readHealthWinInputs } from "./inputs";
 import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v5";
+const DETECTOR_VERSION = "v7";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 
@@ -145,7 +145,7 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   const keep = observed?.day === today && observed.sourceRevision === sourceRevision && !options.refresh;
   let replacement: HealthWinSet | null = null;
   if (!keep) {
-    const generated = generateHealthWins(source.input);
+    const generated = selectHealthWins(source.input);
     if (!generated.length && !source.complete && observed) return present(auth, observed, options);
     await db.$transaction(tx => readAuthority(auth, tx));
     const ranked = await rankHealthCards(generated, options.signal);

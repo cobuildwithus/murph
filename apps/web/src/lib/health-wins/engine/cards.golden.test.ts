@@ -73,7 +73,7 @@ function syntheticInput(): HealthWinsInput {
       baselineMean: 74, interventionMean: 77.5, expectedDirection: "increase", adherence: { done: 6, target: 7 },
     }],
     games: [{
-      exercise: "squats", total: 74, unit: "reps",
+      exercise: "squats", total: 74, unit: "reps", latestDay: "2036-11-11",
       landmarksPassed: [{ id: "hollywood-sign", height: 45 }],
       next: { id: "christ-the-redeemer", height: 125, toGo: 51 },
       bestStreak: {
@@ -88,7 +88,7 @@ function syntheticInput(): HealthWinsInput {
         ],
       },
     }, {
-      exercise: "planks", total: 14, unit: "seconds", landmarksPassed: [], next: null, bestStreak: null,
+      exercise: "planks", total: 14, unit: "seconds", latestDay: "2036-10-22", landmarksPassed: [], next: null, bestStreak: null,
     }],
   };
 }

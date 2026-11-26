@@ -30,8 +30,9 @@ removes the measurements from the card, including tooltip values. A recording's
 route map stays visible until the member chooses **Hide the map**. If
 the suggestion set changes before posting, the composer asks the member to
 choose from the refreshed set. Later readings do not change published cards.
-The picker returns up to 24 eligible cards and balances the first 12 across
-available categories. A cumulative distance card includes the existing
+The picker shows up to 24 eligible cards, newest achievement first. Category
+filters keep this order. The engine balances categories when choosing the cards.
+A cumulative distance card includes the existing
 Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.

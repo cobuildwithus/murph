@@ -96,7 +96,8 @@ export function gameWinInputs(memberId: string, today: string, { facts, states, 
     } });
   }
 
-  const games = [...gamesByExercise.values()].map(({ game }) => game).sort((a, b) => a.exercise.localeCompare(b.exercise));
+  const games = [...gamesByExercise.values()].map(({ game, latest }) => ({ ...game, latestDay: latest }))
+    .sort((a, b) => a.exercise.localeCompare(b.exercise));
   // Only the opaque member-bound digest leaves the reader. Entry corrections, earned dates and saved choices affect it.
   const sourceRevision = createHostedOpaqueIdentifier("health-wins-games", JSON.stringify([memberId, games, gameStreak,
     context.measures.map(({ id, points, rungs }) => ({ id, points, rungs })).sort((a, b) => a.id.localeCompare(b.id)),

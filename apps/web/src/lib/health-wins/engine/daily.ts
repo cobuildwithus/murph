@@ -36,6 +36,13 @@ function monthIndex(date: string): number {
   return Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1;
 }
 
+function monthPeriodEnd(month: string, today: string): string {
+  if (today.startsWith(month)) return today;
+  const end = new Date(`${month}-01T00:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  return end.toISOString().slice(0, 10);
+}
+
 // Summing up to 31 observations can move an exact decimal tie by a few ULPs.
 function compareMonthlyValues(value: number, reference: number): number {
   const tolerance = Number.EPSILON * 32 * Math.max(1, Math.abs(value), Math.abs(reference));
@@ -84,7 +91,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     if (direction * compareMonthlyValues(current.value, baseline + direction * trendStep) >= 0) {
       const displayedDelta = roundMetricValue(metric, current.value) - roundMetricValue(metric, baseline);
       candidates.push({
-        date, effect, noise: Math.max(trendStep, mad(values)),
+        date, eventDate: today, effect, noise: Math.max(trendStep, mad(values)),
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
           title: { number: formatMetricValue(metric, displayedDelta, "delta"), measure: label },
@@ -108,7 +115,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     const effect = (current.value - median(previous)) * direction;
     if (comparison >= 0 && previous.some(value => compareMonthlyValues(current.value, value) !== 0)) {
       candidates.push({
-        date, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
+        date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
           title: { number: formatMetricValue(metric, current.value, "title"), measure: label },
@@ -157,6 +164,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
     candidates.push({
       metric: "distance_km",
       date: series.filter(point => point.date.startsWith(best.month)).at(-1)!.date,
+      eventDate: monthPeriodEnd(best.month, today),
       effect: best.value - median(others), noise: Math.max(1, mad(others)),
       card: {
         id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness",

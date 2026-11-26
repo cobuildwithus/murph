@@ -1,6 +1,6 @@
 # Health wins engine
 
-`generateHealthWins(input)` returns up to 24 ranked `CardSpec` objects for one member.
+`generateHealthWins(input)` returns up to 24 `CardSpec` objects for one member, newest achievement first.
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
@@ -15,6 +15,24 @@ The engine calculates distance trends in kilometres. The wins route presents the
 miles for US and UK requests and kilometres for metric requests. Selecting a trend
 preserves its displayed units on the post.
 Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
+
+## Suggestion order
+
+The engine selects up to 24 cards using the score and category rules below.
+After optional Decisions ranking, the picker sorts the entire selection by achievement
+day, newest first. Cards on the same day keep their prior rank. Filtering preserves
+that order. The sort date stays on the server.
+
+| Achievement | Day used for display order |
+| --- | --- |
+| Trend or best month | Last calendar day of the achievement month, capped at the member's current day for an ongoing month. |
+| Daily or game streak | Last day of the streak. |
+| Personal record | Day the record was set. |
+| Percentile | Latest reading used in the comparison. For labs, this is the draw day. |
+| Lab change or range | Day of the latest draw used for the card. |
+| Cumulative distance, threshold count or monthly sessions | Last day counted in the total. |
+| Game climb | Latest day contributing to the exercise total. An older summary with no contribution date uses its as-of day. |
+| Experiment | Final day of the intervention. |
 
 ## Inputs that affect interpretation
 
@@ -48,7 +66,7 @@ Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 | 15 | Name the highest passed skyline landmark from the Progress bank. Timed planks use the Progress plank ladder with passed rungs, the next rung and seconds to go. A best streak covers posting in every game and appears once. | [activities.test.ts](activities.test.ts) · game achievements |
 | 16 | Once three sessions of one type qualify in the current month, show their count, total time and longest session. | [activities.test.ts](activities.test.ts) · monthly sessions |
 | 17 | Exclude medications, genetics, conditions and weight, including private experiment overlaps. | [engine.test.ts](engine.test.ts) · admits only supported measures, [activities.test.ts](activities.test.ts) · withholds sensitive experiment topics |
-| 18 | Fill the first 12 places with up to three cards per filter, prioritizing daily trends, threshold counts, streaks, monthly bests and personal records in that order within a filter. A trend supersedes a best-month claim about the same monthly mean. Distance's best month uses the monthly total. Append the remaining distinct claims by score until the catalog reaches 24. Score uses effect divided by noise, plus recency decreasing from 1 to 0 over a year, plus 1 for a personal record. Card ID breaks ties. | [engine.test.ts](engine.test.ts) · prioritizes distinct daily claims, ranks by effect, balances twelve cards, caps a crowded filter, withholds conflicting snapshots |
+| 18 | Select up to 12 cards with up to three per filter, prioritizing daily trends, threshold counts, streaks, monthly bests and personal records in that order within a filter. A trend supersedes a best-month claim about the same monthly mean. Distance's best month uses the monthly total. Fill the remaining slots by score until the catalog reaches 24. Score uses effect divided by noise, plus recency decreasing from 1 to 0 over a year, plus 1 for a personal record. Card ID breaks score ties. | [engine.test.ts](engine.test.ts) · distinct daily claims, score, category balance, crowded selection, conflicting snapshots |
 
 Audit findings 1–2 exercise rule 6, 3 exercises rules 1 and 10, 4 exercises rules 3 and 11, 5 exercises rule 10, and 6 exercises rules 4 and 8. Findings 7–9 exercise rule 12, 10 and 12 exercise rule 13, and 11 exercises rule 14.
 

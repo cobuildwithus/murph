@@ -105,6 +105,8 @@ export interface Game {
   exercise: string;
   total: number;
   unit: string;
+  /** Latest contributing local day. Older aggregate-only summaries can omit it. */
+  latestDay?: string;
   /** Heights use feet from the Progress landmark bank. */
   landmarksPassed: readonly { id: string; height: number }[];
   /** Height is in feet. The remaining exercise amount uses the game's unit. */
@@ -185,7 +187,10 @@ export interface Candidate {
   card: DetectedCard;
   /** Daily metric behind a trend, threshold, streak, monthly best or record. */
   metric?: Metric;
+  /** Recency evidence used to select cards. */
   date: string;
+  /** Display ordering uses this day when it differs from selection recency. */
+  eventDate?: string;
   effect: number;
   noise: number;
 }

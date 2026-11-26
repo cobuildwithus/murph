@@ -68,28 +68,33 @@ it("uses one bounded Decisions call with fixed choices and orders only the suppl
     { type: "choice", name: "lead", probabilities: [{ value: "c1", probability: 0.9 }, { value: "c0", probability: 0.1 }] },
     { type: "predicate", name: "c1", probability: 0.8 }, { type: "predicate", name: "c0", probability: 0.9 },
   ] });
-  const options = [record, challenge], signal = new AbortController().signal;
+  const options = [record, challenge].map(card => ({ card, eventDate: "2032-05-17" }));
+  const signal = new AbortController().signal;
   expect(await rankHealthCards(options, signal)).toEqual([challenge, record]);
   expect(post).toHaveBeenCalledExactlyOnceWith("/decisions", expect.objectContaining({ timeout: 3000, maxRetries: 0, signal: expect.any(AbortSignal) }));
   const request = JSON.stringify(post.mock.calls[0][1].body);
   expect(request).toContain("personal_record");
-  expect(request).not.toMatch(/fixture-private|153|2031|deep sleep/u);
+  expect(request).not.toMatch(/fixture-private|153|2031|2032|deep sleep/u);
   post.mockResolvedValueOnce({ answers: [{ type: "choice", name: "lead", probabilities: [] }] });
-  expect(await rankHealthCards(options, signal)).toBe(options);
+  expect(await rankHealthCards(options, signal)).toEqual([record, challenge]);
   post.mockRejectedValueOnce(new Error("fixture timeout"));
-  expect(await rankHealthCards(options, signal)).toBe(options);
+  expect(await rankHealthCards(options, signal)).toEqual([record, challenge]);
 });
 
-it("keeps the engine's balanced first twelve when Decisions favors the rest of the catalog", async () => {
+it("sorts the whole catalog by date after Decisions and uses its order for same-day ties", async () => {
   vi.stubEnv("MURPH_HEALTH_WINS_RANKING", "true");
   vi.stubEnv("OPENAI_API_KEY", "fixture-key");
   const catalog = Array.from({ length: 24 }, (_, index) => ({ ...record, id: `sample-${index}` }));
+  // These two recent cards start on opposite sides of the balanced first twelve.
+  const selected = catalog.map((card, index) => ({
+    card, eventDate: index === 0 || index === 12 ? "2032-06-16" : "2032-06-09",
+  }));
   const probabilities = catalog.map((_, index) => ({ value: `c${index}`, probability: (index + 1) / 300 }));
   post.mockResolvedValueOnce({ answers: [
     { type: "choice", name: "lead", probabilities },
     ...probabilities.map(({ value }) => ({ type: "predicate", name: value, probability: 1 })),
   ] });
-  expect(await rankHealthCards(catalog, new AbortController().signal)).toEqual([
-    ...catalog.slice(0, 12).reverse(), ...catalog.slice(12).reverse(),
+  expect(await rankHealthCards(selected, new AbortController().signal)).toEqual([
+    catalog[0], catalog[12], ...catalog.slice(1, 12).reverse(), ...catalog.slice(13).reverse(),
   ]);
 });

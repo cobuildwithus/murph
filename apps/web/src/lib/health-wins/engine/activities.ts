@@ -233,7 +233,8 @@ function gameClimb(game: Game, name: string, today: string): Candidate | null {
   const amount = seconds === null ? gameAmount(total, unit, exercise, name)
     : seconds < 60 ? `${formatNumber(seconds, 0)} sec` : formatDuration(seconds / 60);
   return {
-    date: today, effect: 0, noise: 1,
+    date: today, eventDate: game.latestDay && isDate(game.latestDay) && game.latestDay <= today ? game.latestDay : undefined,
+    effect: 0, noise: 1,
     card: {
       kind: "game_climb", id: `game_climb:${exercise}`, filter: "Challenges",
       title: { number: amount, measure: climb.chart.type === "ladder" ? "planked" : name },

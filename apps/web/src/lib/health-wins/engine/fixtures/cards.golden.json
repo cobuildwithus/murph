@@ -99,174 +99,6 @@
     }
   },
   {
-    "id": "personal_record:steps:20360923",
-    "kind": "personal_record",
-    "filter": "Fitness",
-    "title": {
-      "number": "11,580",
-      "measure": "steps"
-    },
-    "subtitle": "on Sep 23, most this year",
-    "source_note": "Recorded on Sep 23. Based on 28 tracked days.",
-    "chart": {
-      "type": "record",
-      "unit": "steps",
-      "series": [
-        {
-          "date": "2036-06-01",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-02",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-03",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-04",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-05",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-06",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-07",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-08",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-09",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-10",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-11",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-12",
-          "value": 6300
-        },
-        {
-          "date": "2036-06-13",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-01",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-02",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-03",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-04",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-05",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-06",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-07",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-08",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-09",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-10",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-11",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-12",
-          "value": 6300
-        },
-        {
-          "date": "2036-07-13",
-          "value": 6300
-        },
-        {
-          "date": "2036-09-23",
-          "value": 11580
-        },
-        {
-          "date": "2036-11-06",
-          "value": 7300
-        }
-      ],
-      "highlight": {
-        "date": "2036-09-23",
-        "value": 11580,
-        "label": "Sep 23"
-      },
-      "pills": [
-        "Sep 23"
-      ]
-    },
-    "theme": "fitness",
-    "share": {
-      "caption_tips": []
-    }
-  },
-  {
-    "id": "lab-change-ldl-20361106",
-    "kind": "lab_change",
-    "filter": "Labs",
-    "title": {
-      "number": "−17 mg/dL",
-      "measure": "LDL"
-    },
-    "subtitle": "compared with the median of 2 prior draws",
-    "source_note": "Latest draw on Nov 6. Lab draws in mg/dL.",
-    "chart": {
-      "type": "lab_trend",
-      "unit": "mg/dL",
-      "baseline": {
-        "value": 123,
-        "draws": 2
-      },
-      "latest": {
-        "date": "2036-11-06",
-        "value": 106
-      }
-    },
-    "theme": "labs",
-    "share": {
-      "caption_tips": []
-    }
-  },
-  {
     "id": "percentile-rhr_bpm-20361116",
     "kind": "percentile",
     "filter": "Heart",
@@ -678,40 +510,35 @@
     }
   },
   {
-    "kind": "game_climb",
-    "id": "game_climb:planks",
-    "filter": "Challenges",
+    "kind": "sessions",
+    "id": "sessions:walk:2036-11",
+    "filter": "Fitness",
     "title": {
-      "number": "14 sec",
-      "measure": "planked"
+      "number": "3 walks",
+      "measure": "in November"
     },
-    "subtitle": "latest time milestone, Wright brothers",
+    "subtitle": "1h 17m of walking, the longest 35 min",
+    "source_note": "Session log · Nov 1 through Nov 18",
     "chart": {
-      "type": "ladder",
-      "exercise": "planks",
-      "total": 14,
-      "unit": "seconds",
-      "rungsPassed": [
+      "type": "sessions",
+      "sessionType": "walk",
+      "totalMinutes": 77,
+      "series": [
         {
-          "id": "bull-ride",
-          "name": "A full bull ride",
-          "seconds": 8
+          "date": "2036-11-02",
+          "minutes": 18
         },
         {
-          "id": "wright-first-flight",
-          "name": "Wright brothers",
-          "seconds": 12
+          "date": "2036-11-08",
+          "minutes": 24
+        },
+        {
+          "date": "2036-11-14",
+          "minutes": 35
         }
-      ],
-      "next": {
-        "id": "paper-plane",
-        "name": "The paper plane record",
-        "seconds": 31.2,
-        "toGo": 17.2
-      }
+      ]
     },
-    "source_note": "Game totals as of Nov 18",
-    "theme": "challenges",
+    "theme": "fitness",
     "share": {
       "caption_tips": []
     }
@@ -748,40 +575,6 @@
     },
     "source_note": "Game totals as of Nov 18",
     "theme": "challenges",
-    "share": {
-      "caption_tips": []
-    }
-  },
-  {
-    "kind": "sessions",
-    "id": "sessions:walk:2036-11",
-    "filter": "Fitness",
-    "title": {
-      "number": "3 walks",
-      "measure": "in November"
-    },
-    "subtitle": "1h 17m of walking, the longest 35 min",
-    "source_note": "Session log · Nov 1 through Nov 18",
-    "chart": {
-      "type": "sessions",
-      "sessionType": "walk",
-      "totalMinutes": 77,
-      "series": [
-        {
-          "date": "2036-11-02",
-          "minutes": 18
-        },
-        {
-          "date": "2036-11-08",
-          "minutes": 24
-        },
-        {
-          "date": "2036-11-14",
-          "minutes": 35
-        }
-      ]
-    },
-    "theme": "fitness",
     "share": {
       "caption_tips": []
     }
@@ -867,6 +660,102 @@
     }
   },
   {
+    "id": "cumulative:distance_km:2036",
+    "kind": "cumulative",
+    "filter": "Fitness",
+    "title": {
+      "number": "7",
+      "measure": "miles on foot"
+    },
+    "subtitle": "walking and running, this year",
+    "source_note": "Daily distance across 2 tracked days, using one provider per day.",
+    "chart": {
+      "type": "map",
+      "totalMiles": 6.710808876163207,
+      "days": 2,
+      "series": [
+        {
+          "date": "2036-11-06",
+          "miles": 3.3554044380816035
+        },
+        {
+          "date": "2036-11-09",
+          "miles": 3.3554044380816035
+        }
+      ]
+    },
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "lab-change-ldl-20361106",
+    "kind": "lab_change",
+    "filter": "Labs",
+    "title": {
+      "number": "−17 mg/dL",
+      "measure": "LDL"
+    },
+    "subtitle": "compared with the median of 2 prior draws",
+    "source_note": "Latest draw on Nov 6. Lab draws in mg/dL.",
+    "chart": {
+      "type": "lab_trend",
+      "unit": "mg/dL",
+      "baseline": {
+        "value": 123,
+        "draws": 2
+      },
+      "latest": {
+        "date": "2036-11-06",
+        "value": 106
+      }
+    },
+    "theme": "labs",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "game_climb",
+    "id": "game_climb:planks",
+    "filter": "Challenges",
+    "title": {
+      "number": "14 sec",
+      "measure": "planked"
+    },
+    "subtitle": "latest time milestone, Wright brothers",
+    "chart": {
+      "type": "ladder",
+      "exercise": "planks",
+      "total": 14,
+      "unit": "seconds",
+      "rungsPassed": [
+        {
+          "id": "bull-ride",
+          "name": "A full bull ride",
+          "seconds": 8
+        },
+        {
+          "id": "wright-first-flight",
+          "name": "Wright brothers",
+          "seconds": 12
+        }
+      ],
+      "next": {
+        "id": "paper-plane",
+        "name": "The paper plane record",
+        "seconds": 31.2,
+        "toGo": 17.2
+      }
+    },
+    "source_note": "Game totals as of Nov 18",
+    "theme": "challenges",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
     "kind": "experiment_result",
     "id": "experiment_result:pencil-puzzles:20361008:sleep_score",
     "filter": "Experiments",
@@ -907,28 +796,139 @@
     }
   },
   {
-    "id": "cumulative:distance_km:2036",
-    "kind": "cumulative",
+    "id": "personal_record:steps:20360923",
+    "kind": "personal_record",
     "filter": "Fitness",
     "title": {
-      "number": "7",
-      "measure": "miles on foot"
+      "number": "11,580",
+      "measure": "steps"
     },
-    "subtitle": "walking and running, this year",
-    "source_note": "Daily distance across 2 tracked days, using one provider per day.",
+    "subtitle": "on Sep 23, most this year",
+    "source_note": "Recorded on Sep 23. Based on 28 tracked days.",
     "chart": {
-      "type": "map",
-      "totalMiles": 6.710808876163207,
-      "days": 2,
+      "type": "record",
+      "unit": "steps",
       "series": [
         {
-          "date": "2036-11-06",
-          "miles": 3.3554044380816035
+          "date": "2036-06-01",
+          "value": 6300
         },
         {
-          "date": "2036-11-09",
-          "miles": 3.3554044380816035
+          "date": "2036-06-02",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-03",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-04",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-05",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-06",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-07",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-08",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-09",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-10",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-11",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-12",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-13",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-01",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-02",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-03",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-04",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-05",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-06",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-07",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-08",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-09",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-10",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-11",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-12",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-13",
+          "value": 6300
+        },
+        {
+          "date": "2036-09-23",
+          "value": 11580
+        },
+        {
+          "date": "2036-11-06",
+          "value": 7300
         }
+      ],
+      "highlight": {
+        "date": "2036-09-23",
+        "value": 11580,
+        "label": "Sep 23"
+      },
+      "pills": [
+        "Sep 23"
       ]
     },
     "theme": "fitness",

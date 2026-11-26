@@ -12,6 +12,11 @@ const dailyKindOrder: Partial<Record<CardKind, number>> = {
 
 type Scored = Candidate & { score: number };
 
+export interface SelectedHealthWin {
+  card: CardSpec;
+  eventDate: string;
+}
+
 function byScore(a: Scored, b: Scored): number {
   return b.score - a.score || (a.card.id < b.card.id ? -1 : a.card.id > b.card.id ? 1 : 0);
 }
@@ -31,7 +36,7 @@ function distinctClaims(group: Scored[]): Scored[] {
 }
 
 /** A full year of recency and a personal record are each worth one effect-to-noise unit. */
-export function rankCandidates(candidates: readonly Candidate[], today: string): CardSpec[] {
+export function rankCandidates(candidates: readonly Candidate[], today: string): SelectedHealthWin[] {
   const asOf = dayNumber(today);
   // Two different accounts of the same achievement cannot establish which card is true.
   const unique = new Map<string, Candidate | null>();
@@ -40,6 +45,9 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     const previous = unique.get(id);
     if (previous === undefined) unique.set(id, candidate);
     else if (previous && JSON.stringify(previous.card) !== JSON.stringify(candidate.card)) unique.set(id, null);
+    else if (previous && candidate.eventDate && candidate.eventDate > (previous.eventDate ?? "")) {
+      unique.set(id, { ...previous, eventDate: candidate.eventDate });
+    }
   }
   const groups = new Map<string, Scored[]>();
   for (const candidate of unique.values()) {
@@ -67,7 +75,13 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     counts.set(filter, (counts.get(filter) ?? 0) + 1);
   }
   const remaining = queues.flat().sort(byScore).slice(0, 24 - selected.length);
-  return [...selected, ...remaining].map(({ card }) => ({
-    ...card, theme: themes[card.filter], share: { caption_tips: [] },
+  return [...selected, ...remaining].map(({ card, date, eventDate }) => ({
+    card: { ...card, theme: themes[card.filter], share: { caption_tips: [] } },
+    eventDate: eventDate ?? date,
   }));
+}
+
+/** The stable sort keeps the existing rank for achievements on the same day. */
+export function newestHealthWinsFirst(ranked: readonly SelectedHealthWin[]): CardSpec[] {
+  return [...ranked].sort((a, b) => b.eventDate.localeCompare(a.eventDate)).map(({ card }) => card);
 }

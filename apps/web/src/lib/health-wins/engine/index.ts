@@ -4,7 +4,7 @@ import { cleanDaily } from "./daily-clean";
 import { defaultHealthWinRank } from "./default-rank";
 import { labCandidates } from "./labs";
 import { percentileCandidates } from "./percentiles";
-import { rankCandidates } from "./ranking";
+import { newestHealthWinsFirst, rankCandidates, type SelectedHealthWin } from "./ranking";
 import { isDate } from "./shared";
 import type { CardSpec, HealthWinsInput } from "./types";
 
@@ -16,8 +16,8 @@ export type {
   HealthWinRankResult, HealthWinsInput, LabDraw, Metric, RankMetric, Session, SessionType,
 } from "./types";
 
-/** Generate one member's ranked cards as of the supplied local calendar day. */
-export function generateHealthWins(input: HealthWinsInput): CardSpec[] {
+/** Select cards in engine rank order for the optional Decisions pass. */
+export function selectHealthWins(input: HealthWinsInput): SelectedHealthWin[] {
   const { today } = input.member;
   if (!isDate(today)) return [];
   const daily = cleanDaily(input.daily ?? [], today);
@@ -28,4 +28,9 @@ export function generateHealthWins(input: HealthWinsInput): CardSpec[] {
     ...labCandidates(input, rank),
     ...activityCandidates(input),
   ], today);
+}
+
+/** Generate one member's suggested cards, newest achievement first. */
+export function generateHealthWins(input: HealthWinsInput): CardSpec[] {
+  return newestHealthWinsFirst(selectHealthWins(input));
 }

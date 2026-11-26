@@ -6796,10 +6796,12 @@ Game inputs reuse Progress day, contribution, round-total, ladder and vault-run
 calculations. An over-limit game history withholds game cards to avoid
 presenting a partial lifetime total. Reading suggestions never settles an award.
 
-The pure engine ranks up to 24 eligible cards and balances the first 12 across
-available categories. With `MURPH_HEALTH_WINS_RANKING=true`,
+The pure engine selects up to 24 eligible cards, balancing categories for its
+first 12 selections. With `MURPH_HEALTH_WINS_RANKING=true`,
 Decisions receives one call with the fixed category and detector labels and a
-three-second deadline. Failures use the engine's order. A source failure can
+three-second deadline. Web sorts the selected cards by achievement day before
+caching them. Same-day cards keep their Decisions order when available or their
+engine order otherwise. A source failure can
 omit that source. An input timeout returns the last available set, or a retryable
 503 if the member has none. Loss of member authority ends the read.
 Native authentication and Health content share unwrapped control roots for one
