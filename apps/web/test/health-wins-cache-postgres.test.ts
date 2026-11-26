@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
+import { authLookupKey } from "../src/lib/better-auth/record-crypto";
 import { getPrisma } from "../src/lib/prisma";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { assertHealthSetCurrent, changeHealthWin, readHealthWins, resolveHealthCards } from "../src/lib/health-wins/wins";
@@ -54,7 +55,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     source.mockImplementation(async (_auth, today: string) => data(today));
     const first = await readHealthWins(auth, { signal });
     const candidateId = first.candidates[0].id;
-    expect((await readHealthWins(auth, { signal, refresh: true })).setRevision).toBe(first.setRevision);
+    expect((await readHealthWins(auth, { signal })).setRevision).toBe(first.setRevision);
     expect(source).toHaveBeenCalledTimes(1);
     const hidden = await changeHealthWin(auth, { setRevision: first.setRevision, candidateId, option: "hide_numbers" });
     expect(hidden.card).toMatchObject({ title: { number: "" }, chart: { type: "hidden" } });
@@ -72,6 +73,39 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     expect(replacement.setRevision).not.toBe(first.setRevision);
     await expect(db.$transaction(tx => assertHealthSetCurrent(tx, memberId, prepared.day, first.setRevision))).rejects.toMatchObject({ httpStatus: 409 });
     await expect(resolveHealthCards(auth, first.setRevision, [{ candidateId, option: "original" }])).rejects.toMatchObject({ httpStatus: 409 });
+  });
+
+  it("admits one explicit recomputation every 60 seconds per member, including concurrent refreshes", async ({ onTestFinished }) => {
+    vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 42).toString("base64url"));
+    const auth = await fixture(), other = await fixture();
+    const ids = [auth, other].map(({ member }) =>
+      `arl_${authLookupKey("verification", "rate-limit", `health-wins-refresh:member:${member.id}`)}`);
+    onTestFinished(async () => {
+      vi.unstubAllEnvs();
+      await db.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: ids } } });
+    });
+    const startedAt = Math.floor(Date.now() / 60_000) * 60_000 + 59_990;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    let total = 27;
+    source.mockImplementation(async (_auth, today: string) => data(today, total));
+    const first = await readHealthWins(auth, { signal });
+    total = 72;
+    const refresh = { signal, refresh: true };
+    const replies = await Promise.all([readHealthWins(auth, refresh), readHealthWins(auth, refresh)]);
+    const updated = await readHealthWins(auth, { signal });
+    expect(updated.setRevision).not.toBe(first.setRevision);
+    expect(updated.candidates[0].title.number).toBe("72");
+    expect(replies).toContainEqual(updated);
+    expect(source).toHaveBeenCalledTimes(2);
+
+    total = 84;
+    clock.mockReturnValue(startedAt + 59_999);
+    expect(await readHealthWins(auth, refresh)).toEqual(updated);
+    expect((await readHealthWins(other, refresh)).candidates[0].title.number).toBe("84");
+    expect(source).toHaveBeenCalledTimes(3);
+    clock.mockReturnValue(startedAt + 60_000);
+    expect((await readHealthWins(auth, refresh)).candidates[0].title.number).toBe("84");
+    expect(source).toHaveBeenCalledTimes(4);
   });
 
   it.each([null, "/api/game/v1/progress/art/map%3Av1%3Acard%3Afixture"])("freezes only available map art (%s)", async distanceArtUrl => {
