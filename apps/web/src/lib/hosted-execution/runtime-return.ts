@@ -1,3 +1,4 @@
+import { INACTIVITY_MS } from "./runtime-dormancy";
 import type { PrismaClient } from "@prisma/client";
 
 export async function recordSignedInRuntimeActivity(prisma: PrismaClient, memberId: string) {
@@ -13,6 +14,15 @@ export async function recordSignedInRuntimeActivity(prisma: PrismaClient, member
   } catch {
     console.warn("Member runtime activity could not be recorded or restored.");
   }
+}
+
+/** A group message wakes its room. Only its recorded sender can restore personal work. */
+export async function restoreRuntimeForGroupSender(prisma: PrismaClient, memberId: string) {
+  const member = await prisma.hostedMember.findUnique({
+    where: { id: memberId, runtimeDormantAt: { not: null }, runtimeLastInteractionAt: { gt: new Date(Date.now() - INACTIVITY_MS) } },
+    select: { runtimeDormantAt: true },
+  });
+  if (member?.runtimeDormantAt) await restoreDormantRuntime(prisma, memberId, member.runtimeDormantAt);
 }
 
 /** Restore this exact shutdown and give the sleeping scheduler a durable wake. */

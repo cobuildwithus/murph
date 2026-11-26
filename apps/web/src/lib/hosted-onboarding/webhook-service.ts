@@ -1029,6 +1029,7 @@ async function handleHostedOnboardingLinqWebhookInternal(input: {
     const wakeHandoffResult = await (async () => {
       try {
         return await maybeHandoffHostedExecutionWebhookWake({
+          prisma,
           webhookReceivedAt: input.webhookReceivedAt,
           ingressTypingAcceptedAt: instantStartTypingHint?.started,
           response: plan.response,
@@ -1323,6 +1324,7 @@ async function handleHostedLinqMessageEditWebhook(input: {
   });
   const wakeHandoff = editPlan.wakeHandoffs?.[0];
   const wakeHandoffResult = await maybeHandoffHostedExecutionWebhookWake({
+    prisma,
     webhookReceivedAt: input.webhookReceivedAt,
     response: editPlan.response,
     scheduleAfterResponse: input.scheduleAfterResponse,
@@ -2302,6 +2304,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
   try {
     await maybeHandoffHostedExecutionWebhookWake({
+      prisma,
       webhookReceivedAt: input.webhookReceivedAt,
       response: plan.response,
       scheduleAfterResponse: input.scheduleAfterResponse,

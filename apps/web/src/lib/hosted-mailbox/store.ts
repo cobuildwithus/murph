@@ -945,7 +945,7 @@ export async function appendPreparedHostedMailboxEnvelopeTx(input: {
       },
     });
   }
-  if (prepared.interactionMemberId) await recordRuntimeMemberInteraction(input.tx, prepared.interactionMemberId, prepared.occurredAt);
+  if (prepared.interactionMemberId) await recordRuntimeMemberInteraction(input.tx, prepared.interactionMemberId, prepared.occurredAt, prepared.userId);
   return { mailboxItemId };
 }
 
@@ -1030,7 +1030,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     userId: envelope.userId,
   });
   const memberId = result.inserted && interactionMemberId(envelope);
-  if (memberId) await recordRuntimeMemberInteraction(input.tx, memberId, new Date(envelope.occurredAt));
+  if (memberId) await recordRuntimeMemberInteraction(input.tx, memberId, new Date(envelope.occurredAt), envelope.userId);
   return result;
 }
 

@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
 
-const INACTIVITY_MS = 60 * 24 * 60 * 60_000;
+export const INACTIVITY_MS = 60 * 24 * 60 * 60_000;
 
 export function interactionMemberId(wake: HostedExecutionWake): string | null {
   if (wake.kind !== "conversation.message") return null;
@@ -17,14 +17,14 @@ export function interactionMemberId(wake: HostedExecutionWake): string | null {
 }
 
 export async function recordRuntimeMemberInteraction(
-  db: Pick<Prisma.TransactionClient, "hostedMember">, memberId: string, occurredAt = new Date(),
+  db: Pick<Prisma.TransactionClient, "hostedMember">, memberId: string, occurredAt = new Date(), mailboxOwnerId = memberId,
 ): Promise<void> {
   const now = Date.now();
   const at = new Date(Math.min(now, occurredAt.getTime()));
   if (at.getTime() <= now - INACTIVITY_MS) return;
   await db.hostedMember.updateMany({
     where: { id: memberId, OR: [{ runtimeLastInteractionAt: null }, { runtimeLastInteractionAt: { lt: at } }] },
-    data: { runtimeDormantAt: null, runtimeLastInteractionAt: at },
+    data: { runtimeLastInteractionAt: at, ...(mailboxOwnerId === memberId ? { runtimeDormantAt: null } : {}) },
   });
 }
 

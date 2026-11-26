@@ -1,3 +1,4 @@
+import { restoreRuntimeForGroupSender } from "@/src/lib/hosted-execution/runtime-return";
 import { runHostedPreferenceHandoffSweeper } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
 import { recordCompanionHeartbeat } from "@/src/lib/companion/presence";
 import { buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
@@ -86,6 +87,31 @@ describe.skipIf(!enabled)("Postgres mailbox sequence allocation", () => {
     const requestHandoff = vi.fn(async () => ({ signalAccepted: true as const, workflowId: "fixture-resumed-scheduler" }));
     await runHostedPreferenceHandoffSweeper({ now: new Date("2041-04-17T06:10:00Z"), requestHandoff });
     expect(requestHandoff).toHaveBeenCalledWith(expect.objectContaining({ expectedUserId: userId, mailboxItemId: item.id }));
+  });
+
+  it("keeps a group conversation in its room and restores its identified sender exactly once", async () => {
+    const sender = randomUUID();
+    const dormantAt = new Date(Date.now() - 1000);
+    await observer.hostedMember.create({ data: { id: sender, runtimeDormantAt: dormantAt } });
+    try {
+      const threadId = "-12345699";
+      const wake = buildHostedExecutionTelegramConversationMessageWake({
+        eventId: randomUUID(), userId, occurredAt: new Date().toISOString(), senderMemberId: sender,
+        routeAuthority: { channel: "telegram", containerMemberId: userId, threadId },
+        telegramMessage: { schema: "murph.hosted-telegram-message.v1", messageId: "2345", threadId, threadIsDirect: false },
+      });
+      const append = () => owner.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: wake }));
+      const first = await append();
+      expect(first.item.userId).toBe(userId);
+      expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: sender } })).runtimeDormantAt).toEqual(dormantAt);
+      await restoreRuntimeForGroupSender(observer, sender);
+      expect((await append()).duplicate).toBe(true);
+      await restoreRuntimeForGroupSender(observer, sender);
+      expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: sender } })).runtimeDormantAt).toBeNull();
+      expect(await observer.hostedMailboxItem.count({ where: { userId: sender, kind: "runtime.maintenance-requested" } })).toBe(1);
+    } finally {
+      await observer.hostedMember.delete({ where: { id: sender } });
+    }
   });
 
   function envelope(eventId: string) {

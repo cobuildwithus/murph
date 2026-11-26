@@ -1035,6 +1035,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
       },
       wakeHandoffs: [{
         conversationIsGroup: correctionWake.message.linqMessage.threadIsDirect === false,
+        ...(correctionWake.message.senderMemberId ? { groupSenderMemberId: correctionWake.message.senderMemberId } : {}),
         eventId: event.event_id,
         linqChatId: event.data.chat.id,
         mailboxItemId: replayEntry.itemId,
@@ -1217,6 +1218,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     },
     wakeHandoffs: [{
       conversationIsGroup: correctionWake.message.linqMessage.threadIsDirect === false,
+      ...(correctionWake.message.senderMemberId ? { groupSenderMemberId: correctionWake.message.senderMemberId } : {}),
       eventId: event.event_id,
       linqChatId: event.data.chat.id,
       mailboxItemId: mailboxAppend.item.id,
@@ -3675,6 +3677,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
         // signal path that repairs a missing workspace row.
         wakeHandoffs: [{
           conversationIsGroup: true,
+          ...(verifiedInboundParticipant ? { groupSenderMemberId: verifiedInboundParticipant.memberId } : {}),
           eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: existingMailboxItem.id, source: "linq", userId: input.route.containerMemberId,
         }],
         linqReadReceiptRouteAuthority: routeAuthority,
@@ -3799,6 +3802,7 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       },
       wakeHandoffs: [{
         conversationIsGroup: true,
+        ...(verifiedInboundParticipant ? { groupSenderMemberId: verifiedInboundParticipant.memberId } : {}),
         eventId: input.event.event_id, linqChatId: summary.chatId, mailboxItemId: mailboxAppend.item.id, source: "linq", userId: input.route.containerMemberId,
         wakeMailboxCheckpoint: { lane: mailboxAppend.item.lane, laneSeq: mailboxAppend.item.laneSeq },
       }],

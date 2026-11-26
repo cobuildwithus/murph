@@ -8,9 +8,8 @@ import {
 import {
   hostedThreadContainerParticipantAccessCutoff,
 } from "../hosted-groups/thread-container-participant-access";
-import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
+import { hostedRuntimeMemberEligibleSql, readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { activeHostedPersonAccessSql, strictHostedPersonAccessSql } from "../hosted-onboarding/member-access-projections";
-import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedPostCommitDeadline,
 } from "../hosted-onboarding/bounded-post-commit";
@@ -57,7 +56,7 @@ type HostedPreferenceHandoffSweepLogger = Pick<Console, "info" | "warn">;
 
 export async function runHostedPreferenceHandoffSweeper(input: {
   deadlineMs?: number;
-  hasActiveAccess?: typeof hasHostedRuntimeActiveAccess;
+  hasActiveAccess?: (memberId: string) => Promise<boolean>;
   handoffTimeoutMs?: number;
   handoffLimit?: number;
   logger?: HostedPreferenceHandoffSweepLogger;
@@ -81,7 +80,7 @@ export async function runHostedPreferenceHandoffSweeper(input: {
     now,
   });
   const uniqueCandidates = selectFirstCandidatePerUser(candidates);
-  const hasActiveAccess = input.hasActiveAccess ?? hasHostedRuntimeActiveAccess;
+  const hasActiveAccess = input.hasActiveAccess ?? ((memberId: string) => readActiveHostedMemberAccess({ memberId, forRuntimeStart: true }));
   const requestHandoff = input.requestHandoff ?? signalHostedMailboxAppendRuntime;
 
   let handoffAccepted = 0;
@@ -314,7 +313,7 @@ function createHostedPreferenceHandoffCandidateStore(
           ON "thread_container"."member_id" = "member"."id"
         LEFT JOIN "active_person_members" AS "active_owner"
           ON "active_owner"."id" = "thread_container"."owner_member_id"
-        WHERE ${hostedRuntimeMemberEligibleSql()}
+        WHERE "member"."runtime_dormant_at" IS NULL AND ${hostedRuntimeMemberEligibleSql()}
           AND (
             (
               "thread_container"."member_id" IS NULL

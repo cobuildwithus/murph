@@ -136,7 +136,10 @@ email aliases count as messages. After sign-in, authenticated browser use or a
 foreground companion heartbeat, Web clears the exact shutdown marker and
 appends its access-restoration maintenance item in one transaction. The
 post-commit signal wakes the scheduler. The mailbox handoff sweep retries
-undelivered signals. Background heartbeats and system mailbox items leave it alone.
+undelivered signals and excludes parked accounts before its batch limit.
+An attributed group message stays in the group mailbox. The webhook restores
+the sender’s personal scheduler separately using the same shutdown marker.
+Background heartbeats and system mailbox items leave dormancy alone.
 Accepted conversation receipts keep message replay from renewing activity.
 Existing accounts also use retained conversation, inbound Linq, foreground
 companion and session evidence. Expired or deleted historical browser sessions
