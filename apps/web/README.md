@@ -1021,13 +1021,14 @@ conservative conflicts; earlier bypasses do not suppress them. Platform DDoS
 mitigation outside the project configuration is not observable by this check.
 
 The Apple association route serves public JSON with a one-hour cache and no
-session or redirect. Only `G9DJH2XUMK.ai.withmurph.app` claims `/recap/*` and
-`/g/*` through `applinks.details[].appIDs` and `components`; referrals and all
-other paths remain Web links. The body is the same on every host. The proxy
+session or redirect. The production app `G9DJH2XUMK.ai.withmurph.app` claims
+`/recap/*`, `/g/*`, `/connect/?*` and `/wins/*` through
+`applinks.details[].appIDs` and `components`. The body is the same on every host. The proxy
 matcher excludes the route; Next's global security headers do not change its
 content type or cache policy. No i18n, redirect or trailing-slash override
 applies to its canonical URL. The existing `/recap/[gameId]` and `/g/[token]`
-pages remain the fallbacks when the app is not installed. App builds before the
+pages remain the fallbacks when the app is not installed. The win fallback
+renders the same generic handoff for every well-formed reference. App builds before the
 game (App Store 1.1.23 and earlier) also claim www and send every universal link
 to their Telegram handler, so an invite opened there lands in the app without
 the game; builds with the game route `/g/<token>` to the pending invite. The iOS

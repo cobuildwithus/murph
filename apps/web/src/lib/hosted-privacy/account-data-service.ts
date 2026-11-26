@@ -183,6 +183,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deleting the member cascades their daily sealed candidate sets.",
   },
   {
+    slug: "prisma.health_win_nudge",
+    label: "Health win text history",
+    deletion: "live-delete",
+    note: "Deleting the member cascades the opaque achievement digests and scheduling metadata. Settings exports omit this operational state.",
+  },
+  {
     slug: "prisma.health_post_attachment",
     label: "Health post photos",
     deletion: "live-delete",

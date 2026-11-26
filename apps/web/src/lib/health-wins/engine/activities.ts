@@ -131,6 +131,7 @@ function experimentCandidates(inputs: readonly Experiment[], today: string): Can
       : `${counted(adherence.done)} logged against a target of ${formatNumber(adherence.target, 0)}`;
     candidates.push({
       date: intervention.end, effect: 0, noise: 1,
+      achievement: { kind: "experiment_result", subject: slug, period: intervention.start },
       card: {
         kind: "experiment_result", id: `experiment_result:${slug}:${cardDateKey(intervention.start)}:${metric}`, filter: "Experiments",
         title: experimentHeadline(experiment, runningBlock),
@@ -311,6 +312,7 @@ function sessionCandidates(sessions: readonly Session[], today: string): Candida
     const { plural, activity } = sessionNames[type];
     candidates.push({
       date: series[series.length - 1].date, effect: 0, noise: 1,
+      achievement: { kind: "sessions", subject: type, period: month },
       card: {
         kind: "sessions", id: `sessions:${type}:${month}`, filter: "Fitness",
         title: { number: `${formatNumber(series.length, 0)} ${plural}`, measure: `in ${formatWinMonth(today)}` },

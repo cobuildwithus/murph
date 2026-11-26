@@ -2828,6 +2828,7 @@ fi
 
     assert.deepEqual(cronPaths, [
       "/api/internal/device-sync/apple-health-reopen-push/cron",
+      "/api/internal/health/win-texts/cron",
       "/api/internal/hosted-execution/product-feedback/digest/cron",
       "/api/internal/hosted-execution/retention/control-plane/cron",
       "/api/internal/hosted-execution/retention/external/cron",

@@ -92,6 +92,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
       const displayedDelta = roundMetricValue(metric, current.value) - roundMetricValue(metric, baseline);
       candidates.push({
         date, eventDate: today, effect, noise: Math.max(trendStep, mad(values)),
+        achievement: { kind: "trend_change", subject: metric, period: currentMonth },
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
           title: { number: formatMetricValue(metric, displayedDelta, "delta"), measure: label },
@@ -116,6 +117,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     if (comparison >= 0 && previous.some(value => compareMonthlyValues(current.value, value) !== 0)) {
       candidates.push({
         date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
+        achievement: { kind: "best_month", subject: metric, period: currentMonth },
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
           title: { number: formatMetricValue(metric, current.value, "title"), measure: label },
@@ -163,6 +165,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
   if (comparison >= 0 && others.some(value => compareMonthlyValues(best.value, value) > 0)) {
     candidates.push({
       metric: "distance_km",
+      achievement: { kind: "best_month", subject: "distance_km", period: best.month },
       date: series.filter(point => point.date.startsWith(best.month)).at(-1)!.date,
       eventDate: monthPeriodEnd(best.month, today),
       effect: best.value - median(others), noise: Math.max(1, mad(others)),
