@@ -3,10 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   classifyHostedClinicalPendingCheckpointWork,
   createHostedClinicalEnrichmentController,
-  HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS,
-  orderHostedClinicalUsageEffectsLast,
+  HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS,
   resolveHostedBackgroundReadCheckpointDeadline,
-  type HostedClinicalEnrichmentRunResult,
 } from "../src/hosted-runtime/clinical-enrichment-controller.ts";
 
 function deferred<T>() {
@@ -24,18 +22,15 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("clinical enrichment controller", () => {
-  it("lets finished pages share a checkpoint window but never delays other durable work", () => {
-    const pageUsage = { kind: "page-usage" };
-    const replyDelivery = { kind: "reply-delivery" };
-    const classify = (overrides: Partial<Parameters<typeof classifyHostedClinicalPendingCheckpointWork<object>>[0]>) =>
-      classifyHostedClinicalPendingCheckpointWork<object>({
-        canonicalReceiptCount: 0, canonicalReceiptLogNearlyFull: false, durableEffects: [],
-        durableFollowUpPending: false, isClinicalUsageEffect: (effect) => effect === pageUsage, ...overrides,
+  it("lets canonical receipts share a checkpoint window but never delays durable work", () => {
+    const classify = (overrides: Partial<Parameters<typeof classifyHostedClinicalPendingCheckpointWork>[0]>) =>
+      classifyHostedClinicalPendingCheckpointWork({
+        canonicalReceiptCount: 0, canonicalReceiptLogNearlyFull: false, durableEffectCount: 0, durableFollowUpPending: false, ...overrides,
       });
     expect(classify({})).toBe("none");
-    expect(classify({ canonicalReceiptCount: 2, durableEffects: [pageUsage, pageUsage] })).toBe("batchable");
-    expect(classify({ durableEffects: [pageUsage, replyDelivery] })).toBe("due");
-    expect(classify({ canonicalReceiptCount: 62, canonicalReceiptLogNearlyFull: true })).toBe("due");
+    expect(classify({ canonicalReceiptCount: 200 })).toBe("batchable");
+    expect(classify({ canonicalReceiptCount: 2, durableEffectCount: 1 })).toBe("due");
+    expect(classify({ canonicalReceiptCount: 504, canonicalReceiptLogNearlyFull: true })).toBe("due");
     expect(classify({ durableFollowUpPending: true })).toBe("due");
     const input = { assistantAskDeadline: null, clinicalDeadline: 125_000, pendingCheckpointWork: "none" as const };
     expect(resolveHostedBackgroundReadCheckpointDeadline(input)).toBe(125_000);
@@ -45,349 +40,256 @@ describe("clinical enrichment controller", () => {
       ...input, clinicalDeadline: null, assistantAskDeadline: 50_000, pendingCheckpointWork: "due",
     })).toBe(50_000);
   });
-  it("drains member-facing effects before batched page accounting, keeping each group's order", () => {
-    const effects = ["usage-1", "reply", "usage-2", "share"];
-    expect(orderHostedClinicalUsageEffectsLast(effects, (effect) => effect.startsWith("usage")))
-      .toEqual(["reply", "share", "usage-1", "usage-2"]);
-  });
-  it("does not defer checkpoints while discovering an empty queue", async () => {
-    const discovery = deferred<HostedClinicalEnrichmentRunResult>();
-    const controller = createHostedClinicalEnrichmentController({
-      runOne: () => discovery.promise,
+
+  it("runs up to its slot limit at once and refills a slot as each unit publishes", async () => {
+    const units = ["a", "b", "c", "d"];
+    const calls = new Map(units.map((unit) => [unit, deferred<string>()]));
+    const published: string[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      slots: 2,
+      keyOf: (unit) => unit,
+      plan: async (busy, limit) => units.filter((unit) => !busy.has(unit) && !published.includes(unit)).slice(0, limit),
+      run: async (unit) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        const result = await calls.get(unit)!.promise;
+        inFlight -= 1;
+        return result;
+      },
+      publish: async (outcome) => { published.push(outcome); },
+      onActivity: vi.fn(),
       onError: vi.fn(),
     });
     controller.kick();
-    expect(controller.activeDeadline()).toBeNull();
     await flushMicrotasks();
-    expect(controller.activeDeadline()).toBeNull();
-    discovery.resolve("idle");
-    await flushMicrotasks();
-    expect(controller.activeDeadline()).toBeNull();
-    await controller.closeAndRequeue();
-  });
-  it("bounds each page and every page since the checkpoint by one window", async () => {
-    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
-    const pages = [0, 1, 2].map(() => deferred<HostedClinicalEnrichmentRunResult>());
-    const runOne = vi.fn();
-    for (const page of pages) {
-      runOne.mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
-        started();
-        return page.promise;
-      });
-    }
-    runOne.mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-    try {
-      controller.kick();
-      await flushMicrotasks();
-      expect(controller.activeDeadline()).toBe(135_000);
-      clock.mockReturnValue(100_000);
-      pages[0]?.resolve("settled");
-      await flushMicrotasks();
-      expect(controller.activeDeadline()).toBe(225_000);
-      // The window opened by the first extraction still ends this page.
-      clock.mockReturnValue(290_000);
-      pages[1]?.resolve("settled");
-      await flushMicrotasks();
-      expect(controller.activeDeadline()).toBe(310_000);
-      pages[2]?.resolve("idle");
-      await controller.pauseAndRequeue();
-    } finally {
-      for (const page of pages) page.resolve("idle");
-      await controller.closeAndRequeue();
-      clock.mockRestore();
-    }
+    expect(inFlight).toBe(2);
+    expect(controller.hasOwnedWork()).toBe(true);
+    calls.get("a")!.resolve("a");
+    await vi.waitFor(() => expect(published).toEqual(["a"]));
+    await vi.waitFor(() => expect(inFlight).toBe(2));
+    for (const unit of ["b", "c", "d"]) calls.get(unit)!.resolve(unit);
+    await vi.waitFor(() => expect(published.sort()).toEqual(units));
+    expect(maxInFlight).toBe(2);
+    await vi.waitFor(() => expect(controller.hasOwnedWork()).toBe(false));
   });
 
-  it("batches finished pages until the next page could overrun the window", async () => {
-    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
-    const pages = [0, 1, 2].map(() => deferred<HostedClinicalEnrichmentRunResult>());
-    const runOne = vi.fn();
-    for (const page of pages) {
-      runOne.mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
-        started();
-        return page.promise;
-      });
-    }
-    runOne.mockResolvedValue("idle");
-    const onExtractionWindowReleased = vi.fn();
-    const controller = createHostedClinicalEnrichmentController({
-      runOne, onError: vi.fn(), onExtractionWindowReleased, pendingCheckpointWork: () => "batchable",
+  it("keeps provider calls running across a checkpoint and publishes only after resume", async () => {
+    const call = deferred<string>();
+    const run = vi.fn(async (_unit: string, signal: AbortSignal) => {
+      const result = await call.promise;
+      return signal.aborted ? "aborted" : result;
     });
-    try {
-      controller.kick();
-      await flushMicrotasks();
-      clock.mockReturnValue(100_000);
-      pages[0]?.resolve("settled");
-      await flushMicrotasks();
-      expect(runOne).toHaveBeenCalledTimes(2);
-      expect(onExtractionWindowReleased).not.toHaveBeenCalled();
-      // A page started now could run past the window, so the checkpoint goes first.
-      clock.mockReturnValue(200_000);
-      pages[1]?.resolve("settled");
-      await flushMicrotasks();
-      expect(runOne).toHaveBeenCalledTimes(2);
-      expect(controller.activeDeadline()).toBeNull();
-      expect(onExtractionWindowReleased).toHaveBeenCalledOnce();
-      await controller.pauseAndRequeue();
-      expect(controller.continueAfterCheckpoint(false)).toBe(true);
-      await controller.waitForExtraction();
-      expect(runOne).toHaveBeenCalledTimes(3);
-      expect(controller.activeDeadline()).toBe(325_000);
-    } finally {
-      for (const page of pages) page.resolve("idle");
-      await controller.closeAndRequeue();
-      clock.mockRestore();
-    }
-  });
-  it("keeps foreground work independent and coalesces kicks behind one clinical job", async () => {
-    const extraction = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn()
-      .mockImplementationOnce(() => extraction.promise)
-      .mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-
-    controller.kick();
-    controller.kick();
-    controller.kick();
-    let foregroundReplied = false;
-    await Promise.resolve().then(() => { foregroundReplied = true; });
-    expect(foregroundReplied).toBe(true);
-    expect(runOne).toHaveBeenCalledTimes(1);
-
-    extraction.resolve("settled");
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(2);
-    await controller.closeAndRequeue();
-  });
-
-  it("drains completed finite jobs but stops when the durable owner reports idle", async () => {
-    const runOne = vi.fn().mockResolvedValueOnce("settled").mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-    controller.kick();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(2);
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(2);
-    controller.kick();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(3);
-    await controller.closeAndRequeue();
-  });
-
-  it("aborts immediately, waits for exact child exit and durable requeue, then resumes", async () => {
-    const settlement = deferred<HostedClinicalEnrichmentRunResult>();
-    let childSignal: AbortSignal | undefined;
-    const runOne = vi.fn()
-      .mockImplementationOnce((signal: AbortSignal) => {
-        childSignal = signal;
-        return settlement.promise;
-      })
-      .mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-    controller.kick();
-    await flushMicrotasks();
-
-    controller.requestPauseAndRequeue();
-    expect(childSignal?.aborted).toBe(true);
-    let released = false;
-    const pause = controller.pauseAndRequeue().then(() => { released = true; });
-    controller.kick();
-    await flushMicrotasks();
-    expect(released).toBe(false);
-    expect(runOne).toHaveBeenCalledTimes(1);
-
-    settlement.resolve("idle");
-    await pause;
-    expect(released).toBe(true);
-    expect(runOne).toHaveBeenCalledTimes(1);
-    controller.resume();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(2);
-    expect(runOne.mock.calls[1]?.[0].aborted).toBe(false);
-    await controller.closeAndRequeue();
-  });
-
-  it("continues a page requeued by a checkpoint only within the continuation budget", async () => {
-    const clock = vi.spyOn(Date, "now").mockReturnValue(10_000);
-    const runOne = vi.fn((signal: AbortSignal, started: () => void) => {
-      started();
-      return new Promise<HostedClinicalEnrichmentRunResult>((resolve) => {
-        signal.addEventListener("abort", () => resolve("idle"), { once: true });
-      });
+    const published: string[] = [];
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      slots: 4,
+      keyOf: (unit) => unit,
+      plan: async () => (published.length || run.mock.calls.length ? [] : ["page"]),
+      run,
+      publish: async (outcome) => { published.push(outcome); },
+      onActivity: vi.fn(),
+      onError: vi.fn(),
     });
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-    try {
-      // Only a paused checkpoint boundary may hand work back to this invocation.
-      expect(controller.continueAfterCheckpoint(true)).toBe(false);
-      controller.kick();
-      await flushMicrotasks();
-      await controller.pauseAndRequeue();
-      clock.mockReturnValue(20_000);
-      expect(controller.continueAfterCheckpoint(false)).toBe(true);
-      await controller.waitForExtraction();
-      expect(runOne).toHaveBeenCalledTimes(2);
-      // Each continuation opens its own window instead of reusing the expired one.
-      expect(controller.activeDeadline()).toBe(145_000);
-      await controller.pauseAndRequeue();
-      clock.mockReturnValue(10_000 + HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS);
-      expect(controller.continueAfterCheckpoint(true)).toBe(false);
-      await flushMicrotasks();
-      expect(runOne).toHaveBeenCalledTimes(2);
-    } finally {
-      await controller.closeAndRequeue();
-      clock.mockRestore();
-    }
-  });
-
-  it("continues after a checkpoint only for requeued or durably due work", async () => {
-    const extraction = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn()
-      .mockResolvedValueOnce("idle")
-      .mockResolvedValueOnce("settled")
-      .mockImplementationOnce((_signal: AbortSignal, started: () => void) => {
-        started();
-        return extraction.promise;
-      })
-      .mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
     controller.kick();
-    await flushMicrotasks();
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
     await controller.pauseAndRequeue();
-    expect(controller.continueAfterCheckpoint(false)).toBe(false);
-    expect(controller.canContinueAfterCheckpoint(true)).toBe(true);
+    call.resolve("page");
     await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
-    expect(controller.continueAfterCheckpoint(true)).toBe(true);
-    // Discovery that settles hands off to the next page before extraction starts.
-    await controller.waitForExtraction();
-    expect(runOne).toHaveBeenCalledTimes(3);
-    expect(controller.activeDeadline()).not.toBeNull();
-    extraction.resolve("idle");
-    await controller.closeAndRequeue();
-    expect(controller.continueAfterCheckpoint(true)).toBe(false);
-    expect(runOne).toHaveBeenCalledTimes(3);
-  });
-
-  it("holds the next page until the checkpoint its finished page requires", async () => {
-    let checkpointWorkPending = false;
-    const page = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn()
-      .mockImplementationOnce(() => page.promise)
-      .mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({
-      runOne, onError: vi.fn(), pendingCheckpointWork: () => checkpointWorkPending ? "due" : "none",
-    });
-    controller.kick();
-    await flushMicrotasks();
-    // The finished page left work its checkpoint must publish now; its apply then kicks again.
-    checkpointWorkPending = true;
-    page.resolve("settled");
-    await flushMicrotasks();
-    controller.kick();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
-    await controller.pauseAndRequeue();
-    checkpointWorkPending = false;
+    // The checkpoint never aborts the call; its result waits for the boundary.
+    expect(run.mock.calls[0]![1].aborted).toBe(false);
+    expect(published).toEqual([]);
+    expect(controller.hasOwnedWork()).toBe(true);
+    expect(controller.canContinueAfterCheckpoint(false)).toBe(true);
     expect(controller.continueAfterCheckpoint(false)).toBe(true);
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(2);
-    await controller.closeAndRequeue();
+    await vi.waitFor(() => expect(published).toEqual(["page"]));
   });
 
-  it("does not hold work when no checkpoint is coming or no job has finished yet", async () => {
-    let checkpointWorkPending = true;
-    const runOne = vi.fn()
-      .mockResolvedValueOnce("idle")
-      .mockResolvedValueOnce("settled")
-      .mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({
-      runOne, onError: vi.fn(), pendingCheckpointWork: () => checkpointWorkPending ? "due" : "none",
+  it("joins a running publication before the checkpoint proceeds", async () => {
+    const write = deferred<void>();
+    const events: string[] = [];
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan: async () => (events.length ? [] : ["page"]),
+      run: async (unit) => unit,
+      publish: async () => { events.push("publish:start"); await write.promise; events.push("publish:end"); },
+      onActivity: vi.fn(),
+      onError: vi.fn(),
     });
-    // Work restored with the workspace does not hold the first job.
     controller.kick();
+    await vi.waitFor(() => expect(events).toEqual(["publish:start"]));
+    const boundary = controller.pauseAndRequeue().then(() => events.push("checkpoint"));
     await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
-    checkpointWorkPending = false;
+    expect(events).toEqual(["publish:start"]);
+    write.resolve();
+    await boundary;
+    expect(events).toEqual(["publish:start", "publish:end", "checkpoint"]);
+  });
+
+  it("aborts and joins provider calls on release and drops their held results", async () => {
+    const calls: { signal: AbortSignal; settle: () => void }[] = [];
+    const publish = vi.fn(async () => undefined);
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      slots: 3,
+      keyOf: (unit) => unit,
+      plan: async (busy, limit) => ["a", "b", "c"].filter((unit) => !busy.has(unit)).slice(0, limit),
+      run: (unit, signal) => new Promise<string>((resolve) => {
+        calls.push({ signal, settle: () => resolve(unit) });
+      }),
+      publish,
+      onActivity: vi.fn(),
+      onError: vi.fn(),
+    });
     controller.kick();
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    await controller.pauseAndRequeue();
+    calls[0]!.settle();
     await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledTimes(3);
+    let closed = false;
+    const release = controller.closeAndRequeue().then(() => { closed = true; });
+    await flushMicrotasks();
+    expect(calls.every((call) => call.signal.aborted)).toBe(true);
+    expect(closed).toBe(false);
+    calls[1]!.settle();
+    calls[2]!.settle();
+    await release;
+    expect(publish).not.toHaveBeenCalled();
+    expect(controller.hasOwnedWork()).toBe(false);
+    expect(controller.canContinueAfterCheckpoint(true)).toBe(false);
+  });
+
+  it("aborts provider calls on runtime abort", async () => {
+    const signals: AbortSignal[] = [];
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan: async () => (signals.length ? [] : ["page"]),
+      run: (unit, signal) => new Promise<string>((resolve) => {
+        signals.push(signal);
+        signal.addEventListener("abort", () => resolve(unit), { once: true });
+      }),
+      publish: vi.fn(async () => undefined),
+      onActivity: vi.fn(),
+      onError: vi.fn(),
+    });
+    controller.kick();
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    controller.requestPauseAndRequeue();
+    expect(signals[0]!.aborted).toBe(true);
     await controller.closeAndRequeue();
   });
 
-  it("stops continuing after two checkpoints in a row that never reach extraction", async () => {
-    const runOne = vi.fn().mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
-    await controller.pauseAndRequeue();
-    // The first continuation may only apply proposals the previous page froze.
-    for (let continuation = 0; continuation < 2; continuation += 1) {
-      expect(controller.continueAfterCheckpoint(true)).toBe(true);
-      await controller.waitForExtraction();
-      await controller.pauseAndRequeue();
+  it("holds the idle checkpoint for one window while it owns provider work", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    try {
+      const call = deferred<string>();
+      let planned = false;
+      const controller = createHostedClinicalEnrichmentController<string, string>({
+        keyOf: (unit) => unit,
+        plan: async () => (planned ? [] : (planned = true, ["page"])),
+        run: () => call.promise,
+        publish: async () => undefined,
+        onActivity: vi.fn(),
+        onError: vi.fn(),
+      });
+      expect(controller.activeDeadline()).toBeNull();
+      controller.kick();
+      await vi.waitFor(() => expect(controller.activeDeadline()).toBe(1_000 + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS));
+      call.resolve("page");
+      await vi.waitFor(() => expect(controller.hasOwnedWork()).toBe(false));
+      expect(controller.activeDeadline()).toBeNull();
+    } finally {
+      clock.mockRestore();
     }
-    expect(controller.continueAfterCheckpoint(true)).toBe(false);
-    expect(runOne).toHaveBeenCalledTimes(2);
-    await controller.closeAndRequeue();
   });
 
-  it("retains a paused pending kick without launching provider work", async () => {
-    const runOne = vi.fn().mockResolvedValue("idle");
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
+  it("continues while work is owned or due and keeps progressing, with no time cap", async () => {
+    const onActivity = vi.fn();
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan: async () => [],
+      run: async (unit) => unit,
+      publish: async () => undefined,
+      onActivity,
+      onError: vi.fn(),
+    });
+    await controller.pauseAndRequeue();
+    // Nothing owned, requested or due: release instead of a checkpoint loop.
+    expect(controller.canContinueAfterCheckpoint(false)).toBe(false);
+    expect(controller.continueAfterCheckpoint(true)).toBe(true);
+    expect(onActivity).toHaveBeenCalledOnce();
+    await controller.pauseAndRequeue();
+    expect(controller.continueAfterCheckpoint(true)).toBe(true);
+    await controller.pauseAndRequeue();
+    // Two continuations without a published result or committed apply.
+    expect(controller.canContinueAfterCheckpoint(true)).toBe(false);
+    // Committed apply progress resets the guard however long the import runs.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 24 * 60 * 60_000);
+    try {
+      controller.kick(true);
+      expect(controller.canContinueAfterCheckpoint(true)).toBe(true);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("lets a release decision wait for planning in progress", async () => {
+    const plan = deferred<string[]>();
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan: () => plan.promise,
+      run: async (unit) => unit,
+      publish: async () => undefined,
+      onActivity: vi.fn(),
+      onError: vi.fn(),
+    });
+    controller.kick();
+    let settled = false;
+    const settle = controller.settlePlanning().then(() => { settled = true; });
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+    expect(controller.hasOwnedWork()).toBe(true);
+    plan.resolve([]);
+    await settle;
+    expect(controller.hasOwnedWork()).toBe(false);
+  });
+
+  it("does not start new provider calls while paused, and resumes them after", async () => {
+    const run = vi.fn(async (unit: string) => unit);
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan: async () => (run.mock.calls.length ? [] : ["page"]),
+      run,
+      publish: async () => undefined,
+      onActivity: vi.fn(),
+      onError: vi.fn(),
+    });
     await controller.pauseAndRequeue();
     controller.kick();
     await flushMicrotasks();
-    expect(runOne).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(controller.canContinueAfterCheckpoint(false)).toBe(true);
     controller.resume();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
-    await controller.closeAndRequeue();
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
   });
 
-  it("closes permanently only after the owned job settles even when resume is requested", async () => {
-    const settlement = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn((signal: AbortSignal) => {
-      expect(signal.aborted).toBe(true);
-      return settlement.promise;
+  it("keeps a failed durable publication as a release barrier without retry spinning", async () => {
+    const failure = new Error("Synthetic durable write failure.");
+    const onError = vi.fn();
+    const plan = vi.fn(async () => ["page"]);
+    const controller = createHostedClinicalEnrichmentController<string, string>({
+      keyOf: (unit) => unit,
+      plan,
+      run: async (unit) => unit,
+      publish: async () => { throw failure; },
+      onActivity: vi.fn(),
+      onError,
     });
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError: vi.fn() });
     controller.kick();
-    let released = false;
-    const close = controller.closeAndRequeue().then(() => { released = true; });
-    controller.resume();
-    controller.kick();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
     await flushMicrotasks();
-    expect(released).toBe(false);
-
-    settlement.resolve("settled");
-    await close;
-    controller.resume();
-    controller.kick();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
-    await controller.closeAndRequeue();
-  });
-
-  it("preserves failed durable settlement as a release barrier without retry spinning", async () => {
-    const failure = new Error("Clinical job requeue did not persist.");
-    const extraction = deferred<HostedClinicalEnrichmentRunResult>();
-    const runOne = vi.fn(() => extraction.promise);
-    const onError = vi.fn(() => { throw new Error("Diagnostic callback failed."); });
-    const controller = createHostedClinicalEnrichmentController({ runOne, onError });
-    controller.kick();
-    await flushMicrotasks();
-    extraction.reject(failure);
-    await flushMicrotasks();
-    expect(onError).toHaveBeenCalledExactlyOnceWith(failure);
-
-    controller.kick();
-    controller.kick();
-    await flushMicrotasks();
-    expect(runOne).toHaveBeenCalledOnce();
+    expect(plan).toHaveBeenCalledOnce();
     await expect(controller.pauseAndRequeue()).rejects.toBe(failure);
-    expect(controller.continueAfterCheckpoint(true)).toBe(false);
-    await controller.waitForExtraction();
-    controller.resume();
+    expect(controller.canContinueAfterCheckpoint(true)).toBe(false);
     await expect(controller.closeAndRequeue()).rejects.toBe(failure);
-    expect(runOne).toHaveBeenCalledOnce();
   });
 });

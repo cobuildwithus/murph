@@ -18,6 +18,7 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_BYTES,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES,
+  hostedCanonicalWriteReceiptLogBlocksBackgroundWrites,
   omitHostedCanonicalWriteReceiptLogStatusFields,
   readHostedCanonicalWriteReceiptLog,
   readHostedCanonicalWriteReceiptLogEntries,
@@ -28,6 +29,18 @@ import {
 } from "./hosted-runtime-test-helpers.ts";
 
 const RECEIPT_LOG_SCHEMA = "murph.hosted-canonical-write-receipt-log.v1";
+
+test("background writes use the log's logical and metadata budgets past its first compaction boundary", () => {
+  const blocks = (entryCount: number, pendingReceiptBytes: number | null) =>
+    hostedCanonicalWriteReceiptLogBlocksBackgroundWrites({ entryCount, pendingReceiptBytes });
+  assert.equal(blocks(10, null), false);
+  // A restored log's metadata size is unknown, so the first boundary still holds.
+  assert.equal(blocks(HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES - 1, null), true);
+  assert.equal(blocks(HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES - 1, 64 * 1024), false);
+  assert.equal(blocks(400, 512 * 1024), false);
+  assert.equal(blocks(HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_TOTAL_ENTRIES - 8, 1024), true);
+  assert.equal(blocks(200, HOSTED_CANONICAL_WRITE_RECEIPT_COMPACTION_MAX_BYTES / 2), true);
+});
 
 test("hosted canonical receipt log accepts the final physical entry without compaction", async () => {
   const seeded = createSeededReceiptLog(
