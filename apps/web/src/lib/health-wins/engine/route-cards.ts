@@ -46,10 +46,10 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
     if (distanceM !== splitUnitMeters[unit]) return { label: distanceLabel(distanceM, unit), seconds, text, partial: true };
     return { label: `${unit === "mi" ? "Mile" : "Km"} ${index + 1}`, seconds, text };
   });
-  let fastest: number | null = null;
-  for (const [index, split] of splits.entries()) {
-    if (!split.partial && (fastest === null || split.seconds < splits[fastest].seconds)) fastest = index;
-  }
+  const fullSplits = splits.filter(split => !split.partial);
+  const fastest = fullSplits.length < 2 ? null : splits.indexOf(
+    fullSplits.reduce((best, split) => split.seconds < best.seconds ? split : best),
+  );
   const climb = formatHeight(route.climbM / 0.3048, units);
   const line = [duration, paceLabel, `${climb} up`];
   // No map when trimming left no path; the splits still tell the run.

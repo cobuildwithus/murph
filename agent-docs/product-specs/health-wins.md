@@ -262,7 +262,8 @@ generation. Previously painted keys continue to serve their immutable JPEGs.
 The `activity_splits` card's `splits` chart contains `unit` (`mi` or `km`), a formatted
 summary `line`, and `splits: [{label, seconds, text, partial?}]`. Each row's
 `text` gives its duration. `fastest` is the zero-based index of the quickest
-full split, first on ties, or `null` when the only split is partial. Distance and
+full split, first on ties. With fewer than two full splits, `fastest` is `null`
+and the subtitle shows moving time and average pace. Distance and
 pace in the summary use miles for `us` and `uk`, kilometres for `metric`.
 Climb uses feet for `us` and metres otherwise. Split labels retain the unit the phone
 used to cut the splits. For a single partial shorter than a kilometre, either unit
