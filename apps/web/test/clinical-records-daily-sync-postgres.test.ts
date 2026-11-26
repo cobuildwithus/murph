@@ -666,6 +666,9 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     try {
       await f.terminal(true);
       expect(await f.count()).toBe(1);
+      // The pre-generation route key identifies the run but cannot cover a provider attempt.
+      await client.$transaction(tx => notification.recordClinicalProviderAttempt(tx, f.memberId, clinicalChangeDeliveryKey(f.pointer.runId)));
+      expect((await f.runs())[0]?.notificationCoverage).toBe("published");
       const turnId = "turn_" + "a".repeat(32);
       const bind = (id: string, snapshot: string) => client.$transaction(tx =>
         bindClinicalRepliesToSnapshotTx(tx, f.memberId, snapshot, [{ runId: f.pointer.runId, turnId: id }]));

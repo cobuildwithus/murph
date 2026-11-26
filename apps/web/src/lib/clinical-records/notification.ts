@@ -298,16 +298,15 @@ export async function recordClinicalDispatchClaim(tx: Prisma.TransactionClient, 
 
 export async function recordClinicalProviderAttempt(tx: Prisma.TransactionClient, memberId: string, idempotencyKey: string | null) {
   const key = parseClinicalDeliveryKey(idempotencyKey);
-  if (!key) return;
-  if (key.turnId) {
-    const deferred = await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId,
-      notificationTurnId: key.turnId, notificationCoverage: "published", notificationDeferral: { in: ["window", "route"] } },
-      data: { notificationCoverage: "attempted" } });
-    if (deferred.count) return;
-  }
-  await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId, notificationTurnId: key.turnId,
-    notificationCoverage: "published" }, data: { notificationCoverage: "attempted", notificationDeferral: null,
-      notificationRetryAt: key.turnId ? new Date(Date.now() + 15 * 60_000) : null } });
+  if (!key?.turnId) return;
+  const where = { id: key.runId, memberId, notificationTurnId: key.turnId, notificationCoverage: "published" };
+  const deferred = await tx.clinicalRecordRetrievalRun.updateMany({
+    where: { ...where, notificationDeferral: { in: ["window", "route"] } },
+    data: { notificationCoverage: "attempted" },
+  });
+  if (deferred.count) return;
+  await tx.clinicalRecordRetrievalRun.updateMany({ where, data: { notificationCoverage: "attempted",
+    notificationDeferral: null, notificationRetryAt: new Date(Date.now() + 15 * 60_000) } });
 }
 
 /** Caller holds the member row lock. Proof, coverage and encrypted mailbox publication share its transaction. */
