@@ -2,15 +2,20 @@ import { setImmediate } from "node:timers/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import { initializeVault } from "@murphai/core";
 import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
+import { listMetricPoints } from "@murphai/query";
+import { readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
 import { expect, test, vi } from "vitest";
 import * as clinicalEnrichment from "../src/hosted-runtime/clinical-enrichment.ts";
+import type { HostedRuntimeUsageRecordPort } from "../src/hosted-runtime/platform.ts";
 import { createCoalescingRuntimeWakeSignal } from "../src/hosted-runtime.ts";
+import { importClinicalEnrichmentSource } from "./clinical-enrichment-source.fixture.ts";
 import {
   createWorkspaceRunRequest,
   TEST_NOW, TEST_USER_ID, createDeferred, createMailboxItem, createMailboxPort, createPlatform,
-  createSnapshotFixtureRef, createWorkspacePort, createWorkspaceRuntimeJobInput,
+  createSnapshotFixtureRef, createVaultSnapshotBundle, createWorkspacePort, createWorkspaceRuntimeJobInput,
   createWorkspaceState, removeTempRoot, runHostedWorkspaceRuntimeJobInProcess,
   withRealTimeout,
 } from "./hosted-runtime-workspace-entrypoint.harness.ts";
@@ -247,7 +252,12 @@ async function runClinicalPagesInvocation(input: {
   attemptId: string;
   events: string[];
   extracting(): boolean;
+  // Foreground passes wait for this, so the invocation cannot finish first.
+  foregroundHeldUntil?: Promise<void>;
   shutdownSignal?: AbortSignal;
+  // Restores this vault instead of bootstrapping an empty one.
+  snapshot?: Awaited<ReturnType<typeof createVaultSnapshotBundle>>;
+  usageRecordPort?: HostedRuntimeUsageRecordPort;
   vaultRoot: string;
 }) {
   return await withRealTimeout(runHostedWorkspaceRuntimeJobInProcess(
@@ -262,21 +272,29 @@ async function runClinicalPagesInvocation(input: {
         return { snapshotRef: createSnapshotFixtureRef({ hash: "c".repeat(64), size: 512 }) };
       },
       async importItem() { return { status: "imported" }; },
-      async runAssistantPhase() { return { progressed: false, nextWakeAt: null, nextWakeReason: null }; },
-      platform: createPlatform({
-        mailboxPort: createMailboxPort({ events: input.events, items: [] }),
-        workspacePort: createWorkspacePort({
-          events: input.events, checkpointRequests: [], workspace: createWorkspaceState({ version: "0" }),
-          checkpointWorkspace(request) {
-            return createWorkspaceState({
-              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
-              snapshotRef: request.snapshotRef,
-              nextWakeAt: request.nextWakeAt ?? null,
-              nextWakeReason: request.nextWakeReason ?? null,
-            });
-          },
+      async runAssistantPhase() {
+        await input.foregroundHeldUntil;
+        return { progressed: false, nextWakeAt: null, nextWakeReason: null };
+      },
+      platform: {
+        ...createPlatform({
+          artifactBytesByHash: new Map(input.snapshot ? [[input.snapshot.hash, input.snapshot.bytes]] : []),
+          mailboxPort: createMailboxPort({ events: input.events, items: [] }),
+          workspacePort: createWorkspacePort({
+            events: input.events, checkpointRequests: [],
+            workspace: createWorkspaceState({ version: "0", snapshotRef: input.snapshot?.snapshotRef ?? null }),
+            checkpointWorkspace(request) {
+              return createWorkspaceState({
+                version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                snapshotRef: request.snapshotRef,
+                nextWakeAt: request.nextWakeAt ?? null,
+                nextWakeReason: request.nextWakeReason ?? null,
+              });
+            },
+          }),
         }),
-      }),
+        ...(input.usageRecordPort ? { usageRecordPort: input.usageRecordPort } : {}),
+      },
     },
   ), 15_000, () => input.events.join(","));
 }
@@ -326,6 +344,84 @@ test("leaves later clinical pages to the durable successor once shutdown starts"
     ]);
   } finally {
     pages.runOne.mockRestore();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+test("batches real clinical page applies into the job's checkpoints", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-real-pages-"));
+  const events: string[] = [];
+  const glucose = [91, 92, 93];
+  const collectedAt = (page: number) => `2026-04-0${page}T12:00:00.000Z`;
+  const empty: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
+  const extractionStarted = createDeferred<void>();
+  let extracting = 0;
+  // Only the provider is synthetic. Rendering, proposals, mailbox apply and vault state are real.
+  const executeExtraction = vi.fn<NonNullable<clinicalEnrichment.HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
+    await request.beforeProviderEntry?.();
+    const page = request.textWindow?.index ?? 1;
+    extractionStarted.resolve();
+    extracting += 1;
+    await setImmediate().finally(() => { extracting -= 1; });
+    if (request.abortSignal?.aborted) {
+      events.push(`page-${page}:requeued`);
+      throw request.abortSignal.reason;
+    }
+    if (request.family !== "labs") return empty;
+    request.onProviderUsage?.({ stage: "answer", usage: {
+      occurredAt: TEST_NOW, provider: "codex-cli", providerRequestOrdinal: page, providerRequestOutcome: "succeeded",
+      usage: {
+        apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: null, inputTokens: 10, outputTokens: 2,
+        providerMetadataJson: null, providerName: "OpenAI", providerRequestId: null, rawUsageJson: null, reasoningTokens: null,
+        requestedModel: "gpt-synthetic", servedModel: "gpt-synthetic", tokenPricingBasis: "standard", totalTokens: 12,
+        turnProfileJson: null, usageExtractionSourcePath: "test.clinical-pages", usageExtractionVersion: "test-v1",
+      },
+    } });
+    events.push(`page-${page}:done`);
+    return { status: "complete", records: [{
+      dateBasis: "document", dateEvidence: `Collected ${collectedAt(page)}`, page, payload: {
+        kind: "test", occurredAt: collectedAt(page), title: `Synthetic glucose ${page}`, note: null, testName: "Glucose",
+        specimenType: "serum", resultStatus: "normal", results: [{ analyte: "Glucose", value: glucose[page - 1]!, unit: "mg/dL" }],
+      },
+    }] };
+  });
+  const actualRunOne = clinicalEnrichment.runOneHostedClinicalEnrichment;
+  const runOne = vi.spyOn(clinicalEnrichment, "runOneHostedClinicalEnrichment")
+    .mockImplementation((input) => actualRunOne({ ...input, executeExtraction }));
+  try {
+    await initializeVault({ vaultRoot, timezone: "UTC", createdAt: TEST_NOW });
+    // Text windows are 12,000 characters at an 11,000 character stride: three pages.
+    const text = glucose.map((value, index) =>
+      `Synthetic page ${index + 1}. Collected ${collectedAt(index + 1)}. Serum glucose ${value} mg/dL.`.padEnd(11_000, ".")).join("");
+    // Like production query-slices-v2 imports, the wake carries no change run.
+    const job = await importClinicalEnrichmentSource(vaultRoot, undefined, { bytes: Buffer.from(text), mediaType: "text/plain" });
+    await runClinicalPagesInvocation({
+      attemptId: "attempt_synthetic_clinical_real_pages", events, extracting: () => extracting > 0, vaultRoot,
+      // The startup page must own the invocation before an idle foreground pass can release it.
+      foregroundHeldUntil: extractionStarted.promise,
+      snapshot: await createVaultSnapshotBundle({ vaultRoot }),
+      usageRecordPort: { async recordUsage(record) {
+        events.push(`page-${record.providerRequestOrdinal}:usage`);
+        return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true };
+      } },
+    });
+    expect(await readClinicalEnrichmentStatus({ vaultRoot, jobId: job.jobId }), events.join(","))
+      .toMatchObject({ status: "complete", counts: { created: 3, held: 0, pages: 3 } });
+    const points = await listMetricPoints(vaultRoot, { limit: 10 });
+    expect(points.map((point) => point.value)).toEqual(expect.arrayContaining(glucose));
+    expect(points).toHaveLength(glucose.length);
+    expect(executeExtraction.mock.calls.map(([request]) => `${request.textWindow?.index}:${request.family}`))
+      .toEqual([1, 2, 3].flatMap((page) => ["labs", "measurements", "history"].map((family) => `${page}:${family}`)));
+    expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
+    // Mid-job applies leave only usage and receipts, so the pages share a
+    // snapshot. The job's final apply receipt is due work, and recording it
+    // needs a follow-up snapshot. Usage waits for the first.
+    expect(pageProgress(events)).toEqual([
+      "page-1:done", "page-2:done", "page-3:done",
+      "snapshot", "page-1:usage", "page-2:usage", "page-3:usage", "snapshot",
+    ]);
+  } finally {
+    runOne.mockRestore();
     await removeTempRoot(vaultRoot);
   }
 });
