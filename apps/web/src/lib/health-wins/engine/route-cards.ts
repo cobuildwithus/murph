@@ -7,8 +7,9 @@ import type { CardSpec, RecordedActivity } from "./types";
 
 type DistanceUnit = keyof typeof splitUnitMeters;
 type SplitRow = { label: string; seconds: number; text: string; partial?: true };
+type RouteStat = { label: string; value: string; unit?: string };
 export interface RouteCharts {
-  activity_route: ReturnType<typeof areaFrame> & { type: "route_map"; paths: string[]; chips: string[] };
+  activity_route: ReturnType<typeof areaFrame> & { type: "route_map"; paths: string[]; chips?: string[]; stats?: RouteStat[] };
   activity_splits: { type: "splits"; unit: DistanceUnit; line: string; splits: SplitRow[]; fastest: number | null };
 }
 
@@ -49,14 +50,26 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
   for (const [index, split] of splits.entries()) {
     if (!split.partial && (fastest === null || split.seconds < splits[fastest].seconds)) fastest = index;
   }
-  // No heart rate here: it has its own card, which the member can hide or leave out.
-  const line = [duration, paceLabel, `${formatHeight(route.climbM / 0.3048, units)} up`];
+  const climb = formatHeight(route.climbM / 0.3048, units);
+  const line = [duration, paceLabel, `${climb} up`];
   // No map when trimming left no path; the splits still tell the run.
-  const map: CardSpec[] = route.paths.length ? [{
-    ...base, id: `activity:${activity.id}:activity_route`, kind: "activity_route",
-    subtitle: `in ${duration}, ${paceLabel}`, source_note: recorded,
-    chart: { type: "route_map", paths: [...route.paths], ...areaFrame(route.paths), chips: [distance, `${pace} /${displayUnit}`] },
-  }] : [];
+  const map: CardSpec[] = [];
+  if (route.paths.length) {
+    const paceUnit = `/${displayUnit}`;
+    const stats: RouteStat[] = [
+      { label: "Distance", value: distance.split(" ")[0], unit: displayUnit },
+      { label: "Pace", value: pace, unit: paceUnit },
+      { label: "Time", value: duration },
+    ];
+    const [climbValue, climbUnit] = climb.split(" ");
+    if (Number.parseInt(climbValue, 10) > 0) stats.push({ label: "Climb", value: climbValue, unit: climbUnit });
+    if (activity.heartRate) stats.push({ label: "Heart rate", value: formatNumber(activity.heartRate.avgBpm), unit: "bpm avg" });
+    map.push({
+      ...base, id: `activity:${activity.id}:activity_route`, kind: "activity_route",
+      subtitle: `in ${duration}, ${paceLabel}`, source_note: recorded,
+      chart: { type: "route_map", paths: [...route.paths], ...areaFrame(route.paths), chips: [distance, `${pace} ${paceUnit}`], stats },
+    });
+  }
   return [...map, {
     ...base, id: `activity:${activity.id}:activity_splits`, kind: "activity_splits",
     subtitle: fastest === null ? `in ${duration}, ${paceLabel}` : `fastest ${unitName[unit]} ${splits[fastest].text}`,

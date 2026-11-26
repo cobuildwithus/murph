@@ -136,7 +136,7 @@ export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): C
   const safe = hidden(card, hiddenTitle);
   const withoutNumbers = card.kind === "activity_route"
     ? { ...safe, kind: card.kind, chart: {
-      type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art, chips: [],
+      type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art,
     } }
     : safe;
   const variants: CachedHealthCandidate["variants"] = [
@@ -166,8 +166,8 @@ export function previewHealthCandidate(candidate: CachedHealthCandidate, option 
 /** A preview can contain caller-chosen paths. Only a published card discloses the shared art handle. */
 function recordedPreviewDisplay<T extends FrozenHealthCard["spec"]>(spec: T) {
   if (spec.chart.type !== "route_map") return spec;
-  const { type, paths, frame, chips } = spec.chart;
-  return { ...spec, chart: { type, paths, frame, chips } };
+  const { type, paths, frame, chips, stats } = spec.chart;
+  return { ...spec, chart: { type, paths, frame, ...(chips && { chips }), ...(stats && { stats }) } };
 }
 
 /** Recorded previews have no stored set or change endpoint, so include each alternate display. */

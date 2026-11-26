@@ -15,6 +15,7 @@ export interface ActivityCharts {
     type: "two_bars";
     barWidth: "thin";
     metric: Metric;
+    label: string;
     unit: string;
     series: [ExperimentBar, ExperimentBar];
     adherence: Experiment["adherence"];
@@ -81,17 +82,17 @@ function experimentHeadline(experiment: Experiment, runningBlock: boolean) {
   return { number: timing?.[1] ?? experiment.title, measure: timing?.[2] ?? "" };
 }
 
-function experimentOutcome(metric: Metric, before: number, during: number): string | null {
+function experimentOutcome(metric: Metric, before: number, during: number) {
   const { label, direction, trendStep } = metricInfo(metric);
   const step = metric === "rhr_bpm" || metric === "sleep_score" ? 2 : trendStep ?? 1;
   const change = during - before;
   if (change * direction <= -step) return null;
   const subject = metric === "distance_km" ? "Distance on foot" : label[0].toUpperCase() + label.slice(1);
-  if (Math.abs(change) < step) {
-    return `${metric === "sleep_score" ? "Sleep" : subject} stayed about the same.`;
-  }
   const verb = metric === "steps" || metric === "floors" ? "were" : "was";
-  return `${subject} ${verb} ${during > before ? "higher" : "lower"} during the experiment.`;
+  const sentence = Math.abs(change) < step
+    ? `${metric === "sleep_score" ? "Sleep" : subject} stayed about the same.`
+    : `${subject} ${verb} ${during > before ? "higher" : "lower"} during the experiment.`;
+  return { label: metric === "rhr_bpm" ? "Resting heart rate" : subject, sentence };
 }
 
 function experimentCandidates(inputs: readonly Experiment[], today: string): Candidate[] {
@@ -134,10 +135,11 @@ function experimentCandidates(inputs: readonly Experiment[], today: string): Can
       card: {
         kind: "experiment_result", id: `experiment_result:${slug}:${cardDateKey(intervention.start)}:${metric}`, filter: "Experiments",
         title: experimentHeadline(experiment, runningBlock),
-        subtitle: `${outcome} ${progress}.${overlap ? ` Ran alongside ${overlap}.` : ""}`,
+        subtitle: `${outcome.sentence} ${progress}.${overlap ? ` Ran alongside ${overlap}.` : ""}`,
         source_note: `Experiment log · ${formatWinDate(baseline.start, today)} through ${formatWinDate(intervention.end, today)}`,
         chart: {
-          type: "two_bars", barWidth: "thin", metric, unit, expectedDirection, adherence: { done: adherence.done, target: adherence.target },
+          type: "two_bars", barWidth: "thin", metric, label: outcome.label,
+          unit, expectedDirection, adherence: { done: adherence.done, target: adherence.target },
           series: [
             { label: "Before", start: baseline.start, end: baseline.end, mean: baselineMean },
             { label: "During", start: intervention.start, end: intervention.end, mean: interventionMean },

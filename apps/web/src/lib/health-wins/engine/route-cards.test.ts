@@ -34,7 +34,12 @@ describe("recorded route cards", () => {
       kind: "activity_route", candidateId: `activity:${run.id}:activity_route`,
       title: { number: "2.5 km", measure: "run" }, subtitle: "in 15:00, 6:00 a km",
       source_note: "Recorded on Mar 12, morning",
-      chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"] },
+      chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"], stats: [
+        { label: "Distance", value: "2.5", unit: "km" },
+        { label: "Pace", value: "6:00", unit: "/km" },
+        { label: "Time", value: "15:00" },
+        { label: "Climb", value: "18", unit: "m" },
+      ] },
     });
     expect(splits).toMatchObject({
       kind: "activity_splits", title: map.title, subtitle: "fastest km 5:50",
@@ -57,7 +62,8 @@ describe("recorded route cards", () => {
       const frozen = resolveRecordedSelection(candidates, {
         candidateId: preview.candidateId, option: option.id, specRevision: option.specRevision,
       });
-      expect(frozen?.spec.chart).toMatchObject({ paths, art: { key: expect.stringMatching(/^area:v2:[\w-]{43}$/u) } });
+      const displayed = option.id === "original" ? preview : option.spec;
+      expect(frozen?.spec.chart).toEqual({ ...displayed?.chart, art: { key: expect.stringMatching(/^area:v2:[\w-]{43}$/u) } });
     }
   });
 
@@ -84,7 +90,12 @@ describe("recorded route cards", () => {
     const [map, splits] = cards(run, units);
     expect(map).toMatchObject({
       title: { number: "1.55 mi", measure: "run" }, subtitle: "in 15:00, 9:39 a mile",
-      chart: { chips: ["1.55 mi", "9:39 /mi"] },
+      chart: { chips: ["1.55 mi", "9:39 /mi"], stats: [
+        { label: "Distance", value: "1.55", unit: "mi" },
+        { label: "Pace", value: "9:39", unit: "/mi" },
+        { label: "Time", value: "15:00" },
+        { label: "Climb", value: units === "us" ? "59" : "18", unit: units === "us" ? "ft" : "m" },
+      ] },
     });
     expect(map.specRevision).not.toBe(metricMap.specRevision);
     if (splits.chart.type !== "splits" || metricSplits.chart.type !== "splits") throw new Error("Expected splits");
@@ -92,6 +103,20 @@ describe("recorded route cards", () => {
     expect(splits.chart.line).toContain(units === "us" ? "59 ft up" : "18 m up");
     expect(splits.chart.line).toContain("9:39 a mile");
     expect(splits.subtitle).toBe(metricSplits.subtitle);
+  });
+
+  it.each([0, 0.4])("omits a climb of %s metres and includes a summary-only heart rate", climbM => {
+    const result = cards({ ...run, elapsedSec: 4000, movingSec: 3725,
+      route: { ...route, climbM, distanceM: 5000, splits: Array.from({ length: 5 }, () => ({ distanceM: 1000, seconds: 745 })) },
+      heartRate: { lowBpm: 95, avgBpm: 127, peakBpm: 152 },
+    });
+    expect(result.map(card => card.kind)).toEqual(["activity_route", "activity_splits"]);
+    expect(result[0].chart).toMatchObject({ stats: [
+      { label: "Distance", value: "5", unit: "km" },
+      { label: "Pace", value: "12:25", unit: "/km" },
+      { label: "Time", value: "1:02:05" },
+      { label: "Heart rate", value: "127", unit: "bpm avg" },
+    ] });
   });
 
   it("recognizes mile splits on a metric client and ignores a partial and later ties for fastest", () => {
@@ -130,12 +155,15 @@ describe("recorded route cards", () => {
     } };
     const visible = cards(activity);
     expect(visible.map(card => card.kind)).toEqual(["activity_route", "activity_splits", "activity_heart_rate"]);
-    // Heart rate lives only on its own card, so hiding or leaving out that card keeps it off the post.
+    expect(visible[0].chart).toMatchObject({ stats: [
+      { label: "Distance" }, { label: "Pace" }, { label: "Time" }, { label: "Climb" },
+      { label: "Heart rate", value: "111", unit: "bpm avg" },
+    ] });
     expect(JSON.stringify(visible[1])).not.toMatch(/bpm|\b111\b/u);
     const [map, splits, hr] = visible.map(card => card.change_options.find(option => option.id === "hide_numbers")?.spec);
     const original = visible[0].chart;
     if (original.type !== "route_map") throw new Error("Expected route");
-    expect(map?.chart).toEqual({ ...original, chips: [] });
+    expect(map?.chart).toStrictEqual({ type: "route_map", paths, frame: original.frame });
     for (const spec of [map, splits, hr]) {
       expect(spec?.title.number).toBe("");
       expect(spec?.subtitle).toBe("Shared without numbers.");
