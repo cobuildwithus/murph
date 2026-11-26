@@ -27,6 +27,7 @@ export const HOSTED_LINQ_CHAT_HEALTH_PROJECTION_CHUNK_SIZE = 250;
 const HOSTED_LINQ_CHAT_HEALTH_CHUNK_LOCK_TIMEOUT_MS = 2_000;
 
 export type HostedLinqChatHealthSnapshot = {
+  isGroup?: boolean;
   service?: string;
   linqChatLookupKey: string;
   phoneNumberLookupKey: string | null;
@@ -650,6 +651,7 @@ export async function readHostedLinqChatHealth(input: {
     return null;
   }
   return {
+    ...(typeof state.isGroup === "boolean" ? { isGroup: state.isGroup } : {}),
     ...(typeof state.service === "string" ? { service: state.service } : {}),
     linqChatLookupKey: state.linqChatLookupKey,
     phoneNumberLookupKey: state.phoneNumberLookupKey,

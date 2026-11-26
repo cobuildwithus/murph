@@ -1344,41 +1344,67 @@ receipt for one job cannot block another job's prepared application. The
 extractor and mailbox may have different durable queue orders; exact-job claims
 and the existing canonical writer still own exclusion and mutation safety.
 
-A detached controller extracts one document page or structured resource at a
-time in one confined read-only model pass covering labs, measurements and
-history, with a 120-second provider timeout. Structured resources run GPT-6
-Luna. Document pages run GPT-6.1 Terra at low reasoning, on the Flex tier for a
-page's first attempt and the standard tier for a retry, because Luna dropped and
-inverted document history facts in live evaluation. Text and rendered PDF/image
-pages are untrusted source evidence. Foreground replies can proceed during
-extraction. The controller aborts and joins its exact owned children before
-snapshots, workspace release, fence loss or shutdown; cancellation leaves
-durable work available to retry.
+A detached controller runs up to sixteen extraction units at once: document
+pages and structured resources at or ahead of each pending job's cursor, in
+queue order with each cursor first. Each unit is one confined read-only model
+pass covering labs, measurements and history, with a 120-second provider
+timeout. Structured resources run GPT-6 Luna. Document pages run GPT-6.1 Terra
+at low reasoning, on the Flex tier for a unit's first attempt and the standard
+tier for a cursor retry, because Luna dropped and inverted document history
+facts in live evaluation. Text and rendered PDF/image pages are untrusted source
+evidence. Foreground replies can proceed during extraction.
+Planning reads job descriptions under the enrichment lock; attestation and
+page counting run outside it, and the existing extraction-cache key is the
+unit identity. A finished unit publishes in one short section: a
+write-if-absent cache entry that its save reattests, its wake made due, and a
+dirty notice. Its provider usage is recorded when the call ends, before that
+section, with deterministic usage ids. A failure settles against the job only
+while the job's cursor still points at that unit; a failed lookahead attempt
+stays outside the cursor's three-attempt budget and is left for the cursor.
+The job's apply wake is its only cursor owner: it settles holds and completion,
+promotes cached units through the shared acceptance that also clears retry
+state, and applies them one at a time, yielding between steps. A cursor waiting
+for the cache keeps its retry delay; an interrupted drain stays due. A wake
+held by an active claim when a result lands is delivered again once claims
+settle.
 A page's clinical change receipt digest binds its frozen proposal, so the
 accepted job is committed through the canonical write log before that receipt.
 Restore replays both in order and finishes an applied page through its saved
 receipt without extracting it again; an operational record that a canonical
-receipt binds always takes this path.
-Active extraction may defer an idle checkpoint for one five-minute window,
-opened by the first extraction after a checkpoint; no single page defers it for
-more than 125 seconds. Finished pages' own deferred usage and canonical
-receipts, which restore already replays from the receipt log, share that
-window's checkpoint. Any other durable effect, a follow-up checkpoint or a
-nearly full receipt log still voids the window. A finished page starts the next
-one only if it can finish inside the window, so no page starts just to be aborted.
+receipt binds always takes this path. A prepared cursor is never planned again,
+even when its cache entry was lost with a snapshot.
+A plain checkpoint does not abort provider calls. It holds publication from
+checkpoint start until the commit, effect transfer and dirty reset finish, and
+joins any section already running. Release, shutdown, owner handoff, abort and
+fence loss abort and join every call; their queued results are dropped and
+re-extracted later, which costs only those calls.
+Owned extraction may defer an idle checkpoint for one fifteen-minute window.
+Canonical receipts, which restore already replays from the receipt log, share
+that window's checkpoint. Any durable effect, a follow-up checkpoint or receipt-
+log capacity still voids it. Clinical apply yields for capacity at the log's
+logical-entry and receipt-metadata budgets rather than its first compaction
+boundary, because payload bytes are separate artifacts; a restored log of unknown
+metadata size keeps the first boundary, as every other background owner does.
 A job's runtime-local mailbox pointer with no outcome to publish is removed when
 its final apply commits. Losing that removal only reruns the apply, which
 finishes through its saved receipt, so a job end shares the window's checkpoint
 instead of forcing two of its own. A pointer carrying a change-proof record keeps
 the record-after-checkpoint path.
-After that checkpoint and its effect drain, an invocation whose only due work is
-requeued or due enrichment resumes the extractor and system work itself instead
-of returning to a restored successor, for at most ten minutes after the
-controller starts. Shutdown, owner handoff, abort, mailbox budget exhaustion or
-any other due wake keeps the checkpoint-only return, with extraction paused for
-the durable successor. If this invocation instead accepts another foreground
-pass after checkpointing, it resumes its paused extractor unless shutdown or
-owner handoff has started.
+After a checkpoint, an invocation with owned, requested or due enrichment
+continues it in this container while it progresses, with no time cap. Two
+continuations in a row without a published result or committed apply hand off
+to the durable successor. Another due wake runs here first through the same
+foreground pass a restored successor would start with. A release decision
+waits for planning in progress, so a quiet start never closes the extractor
+mid-plan. Shutdown, owner handoff, abort, an exhausted mailbox import budget
+(which could not admit member input) and a non-default processing mode keep the
+checkpoint-only return.
+A runner rollout sends SIGTERM and allows up to fifteen minutes before SIGKILL;
+the runtime then publishes an immediate final checkpoint that includes every
+saved cache entry and job cursor, aborts and joins its calls, and exits. Only
+calls in flight are extracted again. After a hard kill, everything applied is
+durable through the canonical write receipt log; unapplied cache entries are
+re-extracted, and usage rows were already recorded per call.
 
 Retained structured records use the same job after its attachments. The importer
 selects only source notes it successfully mapped; deterministic results and
@@ -6791,6 +6817,22 @@ One author-indexed query returns at most one matching digest per candidate (up t
 This filter leaves the stored set and its revision available to open composers.
 If the opaque-ID keyring is unavailable, Web skips the filter and logs the error class.
 
+For the win-text pilot, detectors identify achievements before card IDs and
+units change for display. Web seals the descriptor in the candidate wrapper.
+A successful composer read records its presentation and returns an opaque,
+member-bound `winRef` on eligible candidates. The landing page validates only
+the reference format. It has no data lookup.
+
+The minute sweep reads the same inputs and deterministic detector order.
+Only the composer publishes candidate sets. A row lock on `health_win_nudge`
+serializes presentations, local-day claims and the final diff with mailbox
+append. A crash consumes the claim. Web prepares encryption outside
+the transaction, queues one expiring exact-text wake, then signals the runtime.
+Signed Linq egress checks the evaluation start against the presentation
+watermark and rechecks current eligibility and the local dispatch window.
+Each outbox attempt obtains a fresh dispatch claim. Its question, trailing
+rich link and immediate plain-link fallback share that claim.
+
 To publish a card the client submits its candidate ID, option and opaque set
 revision. A superseded set returns 409. The post freezes each selected spec
 and its revision in one envelope. Removing numbers removes the underlying
@@ -6808,7 +6850,10 @@ allowlists. GPS routes also require the route-recording allowlist.
 Clients preview transient activity input, then submit their selected
 cards and revisions with the activity. Web hashes the canonical final card spec
 after applying the option and client units. A change requires a new preview.
-A committed retry returns the post receipt before rebuilding any cards.
+A committed retry returns the post receipt before activity-name admission or
+card rebuilding. Sealed summary reads check the stored name's type and length.
+Only new name choices, previews, private saves and new posts apply the current
+cleanup and refusal rules.
 The transaction binds the activity to a single post and preserves the member's
 selection order across recorded and suggested cards.
 
@@ -6838,11 +6883,13 @@ database transactions.
 | Table | Encrypted content | Approved operational metadata |
 | --- | --- | --- |
 | `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `posted_card_keys` holds opaque keyed digests of the author's member ID and each selected suggestion's candidate ID. Recorded activity cards have no digest. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
-| `health_activity` | `summary_encrypted` holds the activity kind, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
+| `health_activity` | `summary_encrypted` holds the activity kind, optional name, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
+| `health_activity_kind_decision` | None | Shared across members. `key` contains the prompt version, privacy key version and a purpose-specific HMAC of the NFKC-normalized, lowercased name. `kind`, `route` and `timer` hold the classifier's answer before member capability checks. `created_at` records insertion. The table excludes raw names, member references and fallback answers. |
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
-| `health_win_set` | `candidates_encrypted`, including unpublished card specs and options | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
+| `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private pilot achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
+| `health_win_nudge` | None | `member_id` owns the row. `seen_keys` holds lifetime member-bound keyed digests under a separate purpose from link references. `seen_version` identifies the keyring and achievement identity versions. `baseline_at` marks the first complete nonempty observation, `last_presented_at` fences pending delivery and `last_evaluated_day` claims a local day once. An incompatible version disables sending pending explicit handling. Account deletion cascades this operational state. |
 | `health_post_attachment` | `storage_key_encrypted` identifies the reserved Progress object. Its sealed JPEG bytes live in the object store. | `id` identifies the attachment, `member_id` owns it, nullable `post_id` binds it to a post, `status` tracks its lifecycle and `created_at` records admission. |
 
 Post and comment IDs bind a retry to its actor and target. Deletion keeps a

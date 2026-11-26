@@ -2,7 +2,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { encodePolyline } from "../../game/progress/route-geometry";
-import { generateHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
+import { addDays } from "../../game/time";
+import { detectHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
 import { buildRecordedCards } from "./recorded";
 import type { RecordedActivity } from "./types";
 
@@ -103,9 +104,9 @@ it("exports one synthetic card of every rendered shape", () => {
     startedAt: "2036-11-18T09:13:00Z", elapsedSec: 180, movingSec: 180, timerSec: 240,
   };
   const context = { day: "2036-11-18", hour: 9, units: "metric" } as const;
-  const timedCards = [recording, { ...recording, heartRate: {
+  const timed = [recording, { ...recording, heartRate: {
     lowBpm: 71, avgBpm: 85, peakBpm: 109, perMinute: [79, null, 99],
-  } }].flatMap(activity => buildRecordedCards(activity, context).candidates.map(candidate => candidate.variants[0].spec));
+  } }].flatMap(activity => buildRecordedCards(activity, context).candidates);
   const walk: RecordedActivity = {
     id: "238bba63-f944-4fe7-a508-295fe7789afa", kind: "walk",
     startedAt: "2037-03-12T14:09:00Z", elapsedSec: 810, movingSec: 750,
@@ -116,15 +117,84 @@ it("exports one synthetic card of every rendered shape", () => {
       paths: [encodePolyline([[-140, 0.0002], [-139.997, 0.0002], [-139.997, 0.0012]])],
     },
   };
-  const routeCards = buildRecordedCards(walk, { day: "2037-03-12", hour: 14, units: "metric" })
-    .candidates.map(candidate => candidate.variants[0].spec);
-  const cards = [...generateHealthWins(syntheticInput()), ...timedCards, ...routeCards];
+  const route = buildRecordedCards(walk, { day: "2037-03-12", hour: 14, units: "metric" }).candidates;
+  const recorded = [...timed, ...route];
+  for (const candidate of recorded) expect(candidate).not.toHaveProperty("achievement");
+  const detected = detectHealthWins(syntheticInput());
+  expect(Object.fromEntries(detected.achievements)).toEqual({
+    "trend_change:sleep_total_min:2036-11": { kind: "trend_change", subject: "sleep_total_min", period: "2036-11" },
+    "best_month:floors:2036-11": { kind: "best_month", subject: "floors", period: "2036-11" },
+    "personal_record:steps:20360923": { kind: "personal_record", subject: "steps", period: "2036-09-23" },
+    "lab-change-ldl-20361106": { kind: "lab_change", subject: "ldl", period: "2036-11-06" },
+    "threshold_count:sleep_total_min:2036-11": { kind: "threshold_count", subject: "sleep_total_min", period: "2036-11" },
+    "sessions:walk:2036-11": { kind: "sessions", subject: "walk", period: "2036-11" },
+    "experiment_result:pencil-puzzles:20361008:sleep_score": {
+      kind: "experiment_result", subject: "pencil-puzzles", period: "2036-10-08",
+    },
+  });
+  const cards = [...detected.cards, ...recorded.map(candidate => candidate.variants[0].spec)];
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }
   const json = JSON.stringify(cards, null, 2) + "\n";
   if (process.env.UPDATE_HEALTH_WINS_GOLDEN === "1") writeFileSync(goldenFile, json);
   expect(cards).toEqual(JSON.parse(readFileSync(goldenFile, "utf8")));
+});
+
+it("links a ranked lab draw and leaves a wearable percentile unlinked", () => {
+  const { member } = syntheticInput();
+  const { cards, achievements } = detectHealthWins({
+    member,
+    labs: [{ analyte: "hdl", value: 93, date: member.today, unit: "mg/dL" }],
+    daily: [{ metric: "vo2max", value: 55, date: member.today, provider: "garmin" }],
+    rank: () => ({
+      betterShare: 87, group: "Synthetic cohort", source: "Synthetic observations",
+      cuts: [{ percentile: 50, value: 47 }], lowerIsBetter: false,
+    }),
+  });
+  expect(cards.filter(card => card.kind === "percentile")).toHaveLength(2);
+  expect(Object.fromEntries(achievements)).toEqual({
+    "percentile-hdl-20361118": { kind: "lab_percentile", subject: "hdl", period: member.today },
+  });
+});
+
+it("identifies one experiment across cards for different measured outcomes", () => {
+  const { member, experiments } = syntheticInput();
+  const seed = experiments![0];
+  const { cards, achievements } = detectHealthWins({
+    member, experiments: [seed, { ...seed, metric: "steps", baselineMean: 5700, interventionMean: 6500 }],
+  });
+  const expected = { kind: "experiment_result", subject: seed.slug, period: seed.intervention.start };
+  expect(cards.map(card => achievements.get(card.id))).toEqual([expected, expected]);
+  expect(new Set(cards.map(card => card.id)).size).toBe(2);
+});
+
+it("keys the best distance month to the winning month in the history", () => {
+  const { member, daily } = syntheticInput();
+  const distances: DailySample[] = daily!.filter(row => row.metric === "floors").map(row => ({
+    ...row, metric: "distance_km", value: row.date.startsWith("2036-08") ? 9 : 3,
+  }));
+  const { cards, achievements } = detectHealthWins({ member, daily: distances });
+  const best = cards.find(card => card.kind === "best_month")!;
+  expect(achievements.get(best.id)).toEqual({ kind: "best_month", subject: "distance_km", period: "2036-08" });
+});
+
+it("keeps streaks unlinked as the observation window rolls or earlier nights arrive", () => {
+  const { member } = syntheticInput();
+  const daily: DailySample[] = Array.from({ length: 96 }, (_, index) => ({
+    metric: "sleep_total_min", date: addDays(member.today, index - 95), value: 495, provider: "garmin",
+  }));
+  const windows = [
+    { today: addDays(member.today, -1), nights: daily, expectedStart: addDays(member.today, -90) },
+    { today: member.today, nights: daily.slice(-30), expectedStart: addDays(member.today, -29) },
+    { today: member.today, nights: daily, expectedStart: addDays(member.today, -89) },
+  ];
+  for (const { today, nights, expectedStart } of windows) {
+    const { cards, achievements } = detectHealthWins({ member: { ...member, today }, daily: nights });
+    const streak = cards.find(card => card.kind === "streak");
+    expect(streak?.chart.highlight).toEqual({ start: expectedStart, end: today });
+    expect(achievements.has(streak!.id)).toBe(false);
+  }
 });
 
 it("uses ISO days and months for every chart date and human dates in copy", () => {

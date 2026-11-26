@@ -15,12 +15,16 @@ export function gameRecapAppUrl(gameId: string, env: GameEnv = process.env): str
   return gameAppUrl("recap", gameId, env);
 }
 
+export function healthWinAppUrl(ref: string, env: GameEnv = process.env): string {
+  return gameAppUrl("wins", ref, env);
+}
+
 /** The Murph app on a source's connect step: Apple Health, or a wearable that comes in through it. */
 export function connectSourceAppUrl(sourceId: string, env: GameEnv = process.env): string {
   return gameAppUrl("connect", sourceId, env);
 }
 
-function gameAppUrl(kind: "connect" | "invite" | "recap", id: string, env: GameEnv): string {
+function gameAppUrl(kind: "connect" | "invite" | "recap" | "wins", id: string, env: GameEnv): string {
   const configured = env.MURPH_GAME_APP_URL_SCHEME?.trim() ?? "";
   const scheme = /^[a-z][a-z0-9+.-]*$/iu.test(configured) ? configured : MURPH_APP_URL_SCHEME;
   return `${scheme}://${kind}/${encodeURIComponent(id)}`;

@@ -1,5 +1,5 @@
 import { dayNumber } from "./shared";
-import type { Candidate, CardKind, CardSpec, Filter } from "./types";
+import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthWinAchievement } from "./types";
 
 const themes = {
   Sleep: "sleep", Fitness: "fitness", Heart: "heart",
@@ -31,7 +31,7 @@ function distinctClaims(group: Scored[]): Scored[] {
 }
 
 /** A full year of recency and a personal record are each worth one effect-to-noise unit. */
-export function rankCandidates(candidates: readonly Candidate[], today: string): CardSpec[] {
+export function rankCandidates(candidates: readonly Candidate[], today: string): DetectedHealthWins {
   const asOf = dayNumber(today);
   // Two different accounts of the same achievement cannot establish which card is true.
   const unique = new Map<string, Candidate | null>();
@@ -74,7 +74,10 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     const firstForFilter = missingFilters.delete(candidate.card.filter);
     if (firstForFilter || selected.length < 24 - missingFilters.size) selected.push(candidate);
   }
-  return selected.map(({ card }) => ({
-    ...card, theme: themes[card.filter], share: { caption_tips: [] },
-  }));
+  const achievements = new Map<string, HealthWinAchievement>();
+  const cards = selected.map(({ card, achievement }) => {
+    if (achievement) achievements.set(card.id, achievement);
+    return { ...card, theme: themes[card.filter], share: { caption_tips: [] } };
+  });
+  return { cards, achievements };
 }

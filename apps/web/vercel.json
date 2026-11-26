@@ -9,6 +9,10 @@
   },
   "crons": [
     {
+      "path": "/api/internal/health/win-texts/cron",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/internal/hosted-onboarding/stripe/cron",
       "schedule": "* * * * *"
     },
