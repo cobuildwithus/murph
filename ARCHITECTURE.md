@@ -1344,15 +1344,22 @@ receipt for one job cannot block another job's prepared application. The
 extractor and mailbox may have different durable queue orders; exact-job claims
 and the existing canonical writer still own exclusion and mutation safety.
 
-A detached controller runs up to sixteen extraction units at once: document
+A detached controller runs up to sixteen extraction calls at once over document
 pages and structured resources at or ahead of each pending job's cursor, in
-queue order with each cursor first. Each unit is one confined read-only model
+queue order with each cursor first. Each call is one confined read-only model
 pass covering labs, measurements and history, with a 120-second provider
-timeout. Structured resources run GPT-6 Luna. Document pages run GPT-6.1 Terra
+timeout per page. Structured resources run GPT-6 Luna. Document pages run GPT-6.1 Terra
 at low reasoning, on the Flex tier for a unit's first attempt and the standard
 tier for a cursor retry, because Luna dropped and inverted document history
-facts in live evaluation. Text and rendered PDF/image pages are untrusted source
-evidence. Foreground replies can proceed during extraction.
+facts in live evaluation. Up to four consecutive first-attempt pages of one PDF
+share a call, because its fixed instructions are most of a single page's input;
+live Terra runs finished four dense pages and stopped early from six. Every
+record names one supplied page, and the runtime splits a finished group into its
+pages' cache entries, so cursor, cache, receipts and apply stay per page. A group
+that reports blocked, reaches the record limit, fails or cannot render writes
+nothing and its pages run alone for the rest of the invocation. Text and
+rendered PDF/image pages are untrusted source evidence. Foreground replies can
+proceed during extraction.
 Planning reads job descriptions under the enrichment lock; attestation and
 page counting run outside it, and the existing extraction-cache key is the
 unit identity. A finished unit publishes in one short section: a
