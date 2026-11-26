@@ -107,6 +107,11 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261126120000_health_post_card_keys",
+    // Earlier writers omit the keys and receive the same empty list as existing posts.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20261126060000_game_area_art_claims",
     // Zero released claims preserves existing fences. The status check only widens.
     new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
