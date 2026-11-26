@@ -16,8 +16,6 @@ import { readHostedConsentStatus } from "../legal/consent";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES } from "./client-contracts";
 import { clinicalProcessors, hasClinicalProcessorApprovals } from "./processor-registry";
 
-import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-
 type RunPointer = { memberId: string; runId: string; generation: number };
 
 /** Fingerprint the private recipient and the named notice versions approved at admission. */
@@ -32,7 +30,7 @@ async function readClinicalNotificationRun(tx: Prisma.TransactionClient, input: 
       connection: { requiresProcessorApprovals: true, refreshTokenEncrypted: { not: null }, patientIdEncrypted: { not: null } } },
     select: {
       status: true, completedAt: true, notificationTokenVersion: true, notificationRouteKey: true,
-      notificationSettingRevision: true, notificationCoverage: true, notificationTurnId: true, notificationSnapshotId: true,
+      notificationSettingRevision: true, notificationCoverage: true,
       connection: { select: { baselineTokenVersion: true, tokenVersion: true, status: true, disconnectedAt: true } },
     },
   });
@@ -102,7 +100,7 @@ async function readVerifiedClinicalRecipient(tx: Prisma.TransactionClient, membe
     select: { isGroup: true, phoneNumberLookupKey: true } });
   if (chat?.isGroup !== false || chat.phoneNumberLookupKey !== route.linqRecipientPhoneLookupKey) return null;
   return {
-    identity, mode: member.clinicalRecordMessageMode, revision: member.clinicalRecordMessageRevision,
+    identity, revision: member.clinicalRecordMessageRevision,
     chatLookupKey: route.linqChatLookupKey, routing: route,
     routeKey: clinicalNotificationRouteKey(identity.phoneLookupKey, route.linqRecipientPhoneLookupKey, route.linqChatLookupKey),
   };
@@ -143,43 +141,30 @@ export async function readClinicalWindowPhone(memberId: string) {
   return identity && readHostedMemberIdentityPhoneNumber(identity, prisma);
 }
 
-export async function readClinicalNotificationDecision(input: RunPointer & { savedReplyResult?: { turnId: string; status: "missing" | "drained" } }, now = new Date()): Promise<ClinicalNotificationDecision> {
+export async function readClinicalNotificationDecision(input: RunPointer, now = new Date()): Promise<ClinicalNotificationDecision> {
   const prisma = getPrisma();
-  const windowPhone = input.savedReplyResult ? null : await readClinicalWindowPhone(input.memberId);
+  const windowPhone = await readClinicalWindowPhone(input.memberId);
   const authority = await prisma.$transaction(async tx => {
     await lockHostedMemberRow(tx, input.memberId);
-    if (input.savedReplyResult) {
-      const missing = input.savedReplyResult.status === "missing";
-      await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: input.runId, memberId: input.memberId,
-        generation: input.generation, notificationTurnId: input.savedReplyResult.turnId,
-        notificationCoverage: { in: ["published", "attempted"] } },
-        data: { notificationCoverage: missing ? "lost" : "settled", notificationRetryAt: null, notificationDeferral: null } });
-      return null;
-    }
     const current = await acceptedClinicalOccurrence(tx, input, now);
     if (!current) {
       if (!await holdIfPhoneUnavailable(tx, input, now)) await closeUnauthorizedClinicalReply(tx, input);
       return null;
     }
-    if (await deferOutsideClinicalWindow(tx, input, current, windowPhone, now)) return null;
-    if (current.run.notificationCoverage === "published") {
-      // A port which loses the positive field cannot report a block. Arm one recovery wake before handing off.
-      await deferTransientClinicalReply(tx, input);
-    }
+    if (current.run.notificationCoverage === "attempted" || await deferOutsideClinicalWindow(tx, input, current, windowPhone, now)) return null;
+    // Arm one recovery wake in case the port loses the positive authorization.
+    await deferTransientClinicalReply(tx, input);
     return current;
   });
-  if (!authority || authority.run.notificationCoverage === "attempted" && !authority.run.notificationTurnId) return { mode: "off" };
+  if (!authority) return { mode: "off" };
   const threadId = await readHostedMemberHomeLinqChatId(authority.routing, prisma);
   if (!threadId || createHostedLinqChatLookupKey(threadId) !== authority.chatLookupKey) return { mode: "off" };
-  return authority.mode === "detail" && authority.run.notificationTurnId
-    ? { mode: "detail", threadId, savedTurnId: authority.run.notificationTurnId }
-    : { mode: authority.mode, threadId };
+  return { mode: "notice", threadId };
 }
 
-/** Generation and staging may precede publication. A provider request may only use the bound turn. */
 export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
   key: string; memberId: string; route: HostedExecutionResolvedLinqDeliveryRoute;
-  providerEntry?: boolean; windowPhone: string | null; now?: Date;
+  windowPhone: string | null; now?: Date;
 }) {
   const key = parseClinicalDeliveryKey(input.key);
   if (!key || input.route.targetKind !== "thread" || !input.route.threadIsDirect) return "clinical_authority_unavailable";
@@ -190,34 +175,10 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
     await closeUnauthorizedClinicalReply(tx, pointer);
     return "clinical_authority_unavailable";
   }
-  if (authority.mode !== key.mode || !matchesClinicalRoute(input.route, authority)) {
+  if (authority.run.notificationCoverage === "attempted" || !matchesClinicalRoute(input.route, authority)) {
     return "clinical_authority_unavailable";
   }
-  const block = clinicalCheckpointBlock(key, authority.run, input.providerEntry);
-  if (block) return block;
-  if (input.providerEntry && key.turnId && key.suffix !== ":bubble:0" && !key.suffix.startsWith(":bubble:0:")
-    && authority.run.notificationCoverage === "published") {
-    // A granted first text with no durable outcome may have disappeared before provider entry.
-    const root = input.key.slice(0, input.key.length - key.suffix.length);
-    const firstKeys = firstClinicalTextBubbleSuffixes.map(suffix => createHostedLinqDeliveryIdempotencyLookupKey(root + suffix)!);
-    if (await tx.hostedLinqDelivery.findFirst({ where: { idempotencyKey: { in: firstKeys } }, select: { id: true } })) {
-      await closeUnauthorizedClinicalReply(tx, pointer);
-      return "clinical_authority_unavailable";
-    }
-  }
   return await deferOutsideClinicalWindow(tx, pointer, authority, input.windowPhone, input.now ?? new Date()) ? "clinical_window_closed" : null;
-}
-
-function clinicalCheckpointBlock(key: NonNullable<ReturnType<typeof parseClinicalDeliveryKey>>,
-  run: { notificationCoverage: string | null; notificationTurnId: string | null }, providerEntry?: boolean) {
-  if (key.mode === "notice" && run.notificationCoverage === "attempted") return "clinical_authority_unavailable";
-  if (key.mode === "detail") {
-    const bound = run.notificationTurnId;
-    if (bound && bound !== key.turnId) return "clinical_authority_unavailable";
-    if (providerEntry && (!bound || !key.turnId)) return "clinical_checkpoint_pending";
-    if (!key.turnId && key.suffix) return "clinical_authority_unavailable";
-  }
-  return null;
 }
 
 async function deferOutsideClinicalWindow(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string },
@@ -239,9 +200,9 @@ function matchesClinicalRoute(route: HostedExecutionResolvedLinqDeliveryRoute, a
     && (!route.fromPhoneNumber || createHostedPhoneLookupKeyReadCandidates(route.fromPhoneNumber).includes(authority.routing.linqRecipientPhoneLookupKey!));
 }
 
-export async function deferClinicalReply(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }, next: Date | null) {
+async function deferClinicalReply(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }, next: Date | null) {
   await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: pointer.runId, memberId: pointer.memberId,
-    notificationCoverage: { in: ["published", "attempted"] } }, data: { notificationRetryAt: next, notificationDeferral: next === null ? "route" : "window" } });
+    notificationCoverage: "published" }, data: { notificationRetryAt: next, notificationDeferral: next === null ? "route" : "window" } });
 }
 
 async function closeUnauthorizedClinicalReply(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }) {
@@ -266,9 +227,9 @@ async function holdIfPhoneUnavailable(tx: Prisma.TransactionClient, pointer: { r
   return true;
 }
 
-export async function deferTransientClinicalReply(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }) {
+async function deferTransientClinicalReply(tx: Prisma.TransactionClient, pointer: { runId: string; memberId: string }) {
   await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: pointer.runId, memberId: pointer.memberId,
-    notificationCoverage: { in: ["published", "attempted"] }, notificationDeferral: null, notificationRetryAt: null },
+    notificationCoverage: "published", notificationDeferral: null, notificationRetryAt: null },
     data: { notificationDeferral: "transient", notificationRetryAt: new Date(Date.now() + 15 * 60_000) } });
 }
 
@@ -287,31 +248,12 @@ export async function recordClinicalPolicyBlock(tx: Prisma.TransactionClient, me
   else await closeUnauthorizedClinicalReply(tx, pointer);
 }
 
-const firstClinicalTextBubbleSuffixes = [":bubble:0", ":bubble:0:link", ":bubble:0:fallback", ":bubble:0:transcript"];
-
-export async function recordClinicalDispatchClaim(tx: Prisma.TransactionClient, memberId: string, deliveryKey: string, claimed: boolean) {
-  if (claimed && !deliveryKey.endsWith(":voice")) return;
-  const key = parseClinicalDeliveryKey(deliveryKey);
-  if (!claimed && key?.turnId && firstClinicalTextBubbleSuffixes.includes(key.suffix)) {
-    await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId, notificationTurnId: key.turnId,
-      notificationCoverage: "published" }, data: { notificationCoverage: "lost", notificationRetryAt: null, notificationDeferral: null } });
-    return;
-  }
-  await recordClinicalProviderAttempt(tx, memberId, deliveryKey);
-}
-
 export async function recordClinicalProviderAttempt(tx: Prisma.TransactionClient, memberId: string, idempotencyKey: string | null) {
   const key = parseClinicalDeliveryKey(idempotencyKey);
   if (!key) return;
-  if (key.turnId) {
-    const deferred = await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId,
-      notificationTurnId: key.turnId, notificationCoverage: "published", notificationDeferral: { in: ["window", "route"] } },
-      data: { notificationCoverage: "attempted" } });
-    if (deferred.count) return;
-  }
-  await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId, notificationTurnId: key.turnId,
+  await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId,
     notificationCoverage: "published" }, data: { notificationCoverage: "attempted", notificationDeferral: null,
-      notificationRetryAt: key.turnId ? new Date(Date.now() + 15 * 60_000) : null } });
+      notificationRetryAt: null } });
 }
 
 /** Caller holds the member row lock. Proof, coverage and encrypted mailbox publication share its transaction. */

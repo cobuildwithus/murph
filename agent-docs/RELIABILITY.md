@@ -3737,21 +3737,22 @@ Current product admission, delivery and native runtime safety rules remain.
 - App-started clinical authorizations have independent OAuth rows. Browser intent replacement targets only browser rows. Completion consumes before exchange, so a proven replay returns the current source list with a neutral outcome. Retention keeps the native row through the 15-minute completion proof lifetime. New app states identify their bridge even after retention deletes the row. The dual callback reader and scoped invalidation are the rollback floor after native writes begin.
 - A daily notification follows the originating run through terminal acceptance,
   later enrichment and queue cleanup. Under the member lock, its row can advance
-  from empty to proved and published. Private scheduling leaves coverage at published. Terminal proof can publish
+  from empty to proved and published. Private outbox staging leaves coverage at published. Terminal proof can publish
   directly. A conflicting mailbox key suppresses the notification permanently
   while the import commits its terminal outcome. A rejected enrichment proof
   leaves later pages free to run. A transient callback failure keeps the
   pointer on the next page, or retries the proof if the job has finished.
   Publication and encrypted mailbox append commit together. The
   existing handoff sweep recovers an unimported pointer after signal loss.
-  A private outbox intent or one-shot job uses a stable run identity and the
-  existing workspace checkpoint precedes the scheduling acknowledgement. A
-  successor daily generation leaves the earlier run eligible for its own late
-  proof. Reauthorization changes the credential epoch and invalidates it.
+  The private outbox deduplicates the notice by run. Web fences provider entry
+  and records attempted coverage. A newer eligible admission supersedes an
+  older unannounced run, and the notice expires 24 hours after acceptance.
+  Quiet hours defer the notice to a safe wake. Each attempt rechecks the
+  frozen route and current authority. Reauthorization invalidates the old epoch.
   Only a newly accepted complete outcome for all whole-history slices records
   a replacement ongoing grant's baseline epoch. Failed, partial, windowed and
   replayed outcomes cannot establish it. The expandable column starts empty.
-  The production daily sweep omits reader revisions and leaves every run on v2.
+  Web requires fresh authenticated evidence of runner and port revision 4 before pinning a run.
   A mixed deployment can continue ordinary retrieval without publishing a text.
 
 - Clinical Records retrieval is generation-fenced and page-idempotent. A

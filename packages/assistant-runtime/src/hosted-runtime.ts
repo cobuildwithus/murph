@@ -1400,7 +1400,7 @@ function readHostedSystemMailboxCheckpointPreparationRecordItem(
 
 function exactSystemMailboxDeliveryKey(item: HostedSystemMailboxCheckpointPreparationRecordItem): string {
   const wake = item.wake;
-  if (wake.kind === "clinical-records.change-recorded") return clinicalChangeDeliveryKey(wake.runId, "notice");
+  if (wake.kind === "clinical-records.change-recorded") return clinicalChangeDeliveryKey(wake.runId);
   return wake.kind === "assistant.notification.requested" ? wake.notification.deliveryIdempotencyKey ?? "" : "";
 }
 

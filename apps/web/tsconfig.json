@@ -229,9 +229,6 @@
       "@murphai/runtime-state/assistant-generated-deliveries": [
         "../../packages/runtime-state/src/assistant-generated-deliveries.ts"
       ],
-      "@murphai/runtime-state/assistant-ids": [
-        "../../packages/runtime-state/src/assistant-ids.ts"
-      ],
       "@murphai/runtime-state/cli-timing": [
         "../../packages/runtime-state/src/cli-timing.ts"
       ],

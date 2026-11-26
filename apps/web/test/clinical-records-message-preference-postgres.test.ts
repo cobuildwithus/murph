@@ -115,35 +115,27 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
   it("persists all transitions for a lapsed member, incrementing only on change", async () => {
     await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
     for (const [mode, revision] of [
-      ["notice", 0], ["off", 1], ["off", 1], ["notice", 2], ["detail", 3], ["detail", 3],
-      ["notice", 4], ["detail", 5], ["off", 6],
+      ["notice", 0], ["off", 1], ["off", 1], ["detail", 2], ["detail", 2], ["notice", 2], ["off", 3],
     ] as const) {
       const result = await postMode(mode);
       expect(result.status).toBe(200);
-      expect(await result.json()).toEqual({ messageMode: mode });
-      await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: mode, clinicalRecordMessageRevision: revision });
+      expect(await result.json()).toEqual({ messageMode: mode === "detail" ? "notice" : mode });
+      await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: mode === "detail" ? "notice" : mode, clinicalRecordMessageRevision: revision });
     }
-    const rejected = await postMode("detail");
-    expect(rejected.status).toBe(409);
-    expect((await rejected.json()).error.code).toBe("CLINICAL_RECORD_NOTICE_REQUIRED");
     expect((await postMode("unknown")).status).toBe(400);
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 6 });
-    const where = { memberId, scope: "feature.clinical-record-message-detail" };
-    await expect(getPrisma().hostedConsentEvent.findMany({ where, select: { metadataJson: true }, orderBy: { createdAt: "asc" } }))
-      .resolves.toEqual([{ metadataJson: { revision: 3 } }, { metadataJson: { revision: 5 } }]);
-    await expect(getPrisma().hostedConsentGrant.count({ where })).resolves.toBe(0);
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 3 });
   });
 
-  it("withdraws detail atomically and leaves it off across retries and reconsent", async () => {
+  it("withdraws notices atomically and leaves it off across retries and reconsent", async () => {
     const prisma = getPrisma();
     expect((await postMode("detail")).status).toBe(200);
     await withdrawHostedHealthDataConsent({ memberId, prisma });
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
     expect((await postMode("notice")).status).toBe(403);
     expect((await postMode("off")).status).toBe(200);
     await withdrawHostedHealthDataConsent({ memberId, prisma });
     await recordHostedLaunchRequiredConsent({ memberId, prisma, scope: "launch.health-data" });
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
   });
 
   it("rejects extra keys before changing the preference", async () => {
@@ -199,13 +191,13 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     ]));
     expect((await postMode("detail")).status).toBe(200);
     const projection = await read();
-    expect(projection).toMatchObject({ messageMode: "detail", canAdd: true });
+    expect(projection).toMatchObject({ messageMode: "notice", canAdd: true });
     const state = `crs_${"c".repeat(43)}`;
     const completionProof = buildHostedDeviceSyncAppCompletionProof({ memberId, sessionId: session.sessionId,
       state, provider: "clinical-records", now: new Date(Date.now() - 20 * 60_000) });
     const response = await complete(request("complete", "POST", { query: `state=${state}&error=access_denied`, completionProof }));
     expect(await response.json()).toEqual({ outcome: "expired", ...projection });
-    expect(await disconnect(once.id)).toMatchObject({ messageMode: "detail" });
+    expect(await disconnect(once.id)).toMatchObject({ messageMode: "notice" });
     const disconnected = await disconnect(daily.id);
     expect(disconnected).not.toHaveProperty("messageMode");
     expect(disconnected.sources).toHaveLength(2);

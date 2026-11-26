@@ -52,7 +52,6 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
     const result = await checkpointHostedRuntimeWorkspace({
       runtimeAuthority,
       expectedVersion: body.expectedWorkspaceVersion,
-      clinicalReplies: body.clinicalReplies,
       ...(body.handledConversationMailboxItemIds === undefined
         ? {}
         : {

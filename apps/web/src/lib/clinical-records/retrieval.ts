@@ -664,9 +664,7 @@ function publishTerminalChangeProof(tx: ClinicalRetrievalTx, input: { memberId: 
 }
 
 /** A delayed enrichment belongs to the original accepted run, even after a later daily admission. */
-export async function recordClinicalChangeProof(input: RunPointer & { kind?: "change-receipt" | "change-scheduled" }): Promise<void> {
-  // Older runners acknowledge a private checkpoint. It proves no provider attempt.
-  if (input.kind === "change-scheduled") return;
+export async function recordClinicalChangeProof(input: RunPointer): Promise<void> {
   const notification = await getPrisma().$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     return publishClinicalChangeTx(tx, input);

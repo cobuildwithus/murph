@@ -1,4 +1,3 @@
-import { clinicalReplyTurnKey } from '@murphai/hosted-execution/clinical-records-boundary'
 import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from '@murphai/runtime-state/assistant-ids'
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
 import { prepareRecapExecution } from './recap-execution.js'
@@ -1685,25 +1684,6 @@ function buildAssistantNotificationMessageInput(
   }
 }
 
-type DeliverNotificationBubble = ReturnType<typeof createAssistantRuntimeStateService>['outbox']['deliverMessage']
-
-function bindClinicalReplyDelivery(input: AssistantMessageInput, deliver: DeliverNotificationBubble): DeliverNotificationBubble {
-  if (!input.deliveryIdempotencyKey?.startsWith('clinical-change:')) return deliver
-  return async bubble => {
-    const target = input.threadId
-    const key = bubble.deliveryIdempotencyKey
-    const matches = target && key && bubble.channel === 'linq' && bubble.threadIsDirect && bubble.threadId === target
-      && !bubble.explicitTarget && bubble.bindingDelivery?.kind === 'thread' && bubble.bindingDelivery.target === target
-    const authority = matches ? await input.executionContext?.hosted?.resolveScheduledLinqRoute?.({
-      homeRouteFallbackAllowed: false, idempotencyKey: key, signal: input.abortSignal, target, targetKind: 'thread',
-    }) : null
-    if (!authority?.clinicalReplyAuthorized || authority.deliveryBlockCode || !authority.threadIsDirect || authority.target !== target) {
-      throw new VaultCliError('ASSISTANT_CLINICAL_REPLY_AUTHORITY_UNAVAILABLE', 'The clinical reply is no longer authorized.')
-    }
-    return deliver(bubble)
-  }
-}
-
 async function deliverAssistantNotificationMessage(input: {
   gameChatBootstrap?: AssistantNotificationInput['gameChatBootstrap']
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
@@ -1728,7 +1708,6 @@ async function deliverAssistantNotificationMessage(input: {
     })
   }
   const state = createAssistantRuntimeStateService(input.input.vault)
-  const deliverBubble = bindClinicalReplyDelivery(input.input, state.outbox.deliverMessage)
   const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     precedence: 'audience-first',
@@ -1778,8 +1757,7 @@ async function deliverAssistantNotificationMessage(input: {
     input: input.input,
     turnId: input.turnId,
   })
-  const baseKey = hostedDelivery.deliveryIdempotencyKey
-  const replyKey = baseKey?.startsWith('clinical-change:') ? clinicalReplyTurnKey(baseKey, input.turnId) : baseKey
+  const replyKey = hostedDelivery.deliveryIdempotencyKey
   const bubbleKeyPrefix = replyKey ?? input.dedupeToken
   const leading = await deliverAssistantNotificationLeadingBubbles({
     count: bubbles.length - 1,
@@ -1791,7 +1769,7 @@ async function deliverAssistantNotificationMessage(input: {
       })
       return toAssistantNotificationDeliveryOutcome({
         media: bubbleMedia[index]!,
-        outcome: await deliverBubble({
+        outcome: await state.outbox.deliverMessage({
           ...sharedFields,
           answeredMailboxItemIds: [],
           message: bubbles[index]!,
@@ -1816,7 +1794,7 @@ async function deliverAssistantNotificationMessage(input: {
   }
   const finalOutcome = toAssistantNotificationDeliveryOutcome({
     media: bubbleMedia.at(-1)!,
-    outcome: await deliverBubble({
+    outcome: await state.outbox.deliverMessage({
       ...sharedFields,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       followUpRequest: input.followUpRequest ?? undefined,

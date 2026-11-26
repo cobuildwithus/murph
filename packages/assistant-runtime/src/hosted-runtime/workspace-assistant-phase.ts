@@ -1927,7 +1927,6 @@ export async function runHostedWorkspaceAssistantPhase(
           return { ...authority, threadIsDirect: result.threadIsDirect };
         },
         resolveScheduledLinqRoute: async ({
-          idempotencyKey,
           fromPhoneNumber,
           homeRouteFallbackAllowed,
           signal,
@@ -1945,7 +1944,6 @@ export async function runHostedWorkspaceAssistantPhase(
           }
           const authority = await assertEngagement({
             authorityCheckOnly: true,
-            ...(idempotencyKey ? { idempotencyKey } : {}),
             ...(fromPhoneNumber ? { fromPhoneNumber } : {}),
             homeRouteFallbackAllowed,
             target,
@@ -1967,7 +1965,6 @@ export async function runHostedWorkspaceAssistantPhase(
             resolvedRoute.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
-            ...(authority.clinicalReplyAuthorized === true ? { clinicalReplyAuthorized: true } : {}),
             ...(authority.deliveryBlockCode
               ? { deliveryBlockCode: authority.deliveryBlockCode }
               : {}),

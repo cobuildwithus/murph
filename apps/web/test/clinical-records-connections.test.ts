@@ -31,7 +31,7 @@ vi.mock("@/src/lib/prisma", () => ({
     };
     return {
       clinicalRecordConnection,
-      hostedMember: { findUniqueOrThrow: vi.fn().mockResolvedValue({ clinicalRecordMessageMode: "detail" }) },
+      hostedMember: { findUniqueOrThrow: vi.fn().mockResolvedValue({ clinicalRecordMessageMode: "notice" }) },
       $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
         $queryRaw: vi.fn().mockResolvedValue([]),
         clinicalRecordConnection,
@@ -75,7 +75,7 @@ describe("Clinical Records connection lifecycle", () => {
     mocks.connectionFindMany.mockResolvedValue([row, { ...row, providerDirectoryEntryId: "epic-1001", retrievalRuns: [{ ...row.retrievalRuns[0], requests: [] }] }, ...Array(18).fill(row), { ...row, status: "disconnected", refreshTokenEncrypted: null }]);
     const response = await GET(new Request("https://app.example.test/api/clinical-records/companion/sources"));
     const body = await response.json();
-    expect(body.messageMode).toBe("detail");
+    expect(body.messageMode).toBe("notice");
     expect(body.canAdd).toBe(false);
     expect(body.sources[0]).toEqual({ id: "source-a", providerId: "epic-example", name: "Sample Portal",
       state: "getting_records", reason: null, lastImport: null, connectedAt: createdAt.toISOString(), lastCheckedAt: null,

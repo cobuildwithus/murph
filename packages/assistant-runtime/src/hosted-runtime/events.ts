@@ -163,16 +163,13 @@ async function executeClinicalChange(input: Parameters<typeof executeHostedMailb
   const port = input.runtime.platform.clinicalRecordsPort;
   if (!port?.readNotification) throw new Error("Clinical notification policy reader is unavailable.");
   const decision = await port.readNotification({ generation, runId }, { signal: input.signal });
-  const { queueClinicalChange } = await import("@murphai/assistant-engine/assistant-cron");
-  const queued = await queueClinicalChange({ decision, occurredAt, runId, vault: input.vaultRoot });
-  if (queued?.savedReplyResult) {
-    await port.readNotification({ generation, runId, savedReplyResult: queued.savedReplyResult }, { signal: input.signal });
-  }
-  if (!queued || queued.savedReplyResult) return { bootstrapResult: null,
+  const { queueClinicalNotice } = await import("@murphai/assistant-engine/assistant-outbox");
+  const intentId = await queueClinicalNotice({ decision, occurredAt, runId, vault: input.vaultRoot });
+  if (!intentId) return { bootstrapResult: null,
     ...createNoopMailboxEffect({ conversationMetrics: null, mailboxLane: "clinical-records" }) };
   return { bootstrapResult: null, ...createNoopMailboxEffect({
     conversationMetrics: null, mailboxLane: "clinical-records", nextWakeAt: occurredAt,
-    ...(queued.deliveryIntentIds?.length ? { deliveryIntentIds: queued.deliveryIntentIds } : {}),
+    deliveryIntentIds: [intentId],
   }) };
 }
 

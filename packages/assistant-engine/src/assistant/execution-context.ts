@@ -684,7 +684,6 @@ export interface AssistantHostedExecutionContext {
   publicInternetFetch?: typeof fetch | null
   releaseSha?: string | null
   resolveScheduledLinqRoute?(input: {
-    idempotencyKey?: string
     fromPhoneNumber?: string | null
     homeRouteFallbackAllowed: boolean
     signal?: AbortSignal | null
@@ -692,7 +691,6 @@ export interface AssistantHostedExecutionContext {
     targetKind: 'explicit' | 'thread'
   }): Promise<{
     conversationThreadId?: string | null
-    clinicalReplyAuthorized?: boolean
     deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null
     deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null
     target: string

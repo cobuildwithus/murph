@@ -2671,15 +2671,6 @@ describe("hosted runtime control contracts", () => {
     });
   });
 
-  it("accepts only opaque run and turn pointers in a clinical reply checkpoint", () => {
-    const reply = { runId: `crr_${"a".repeat(32)}`, turnId: `turn_${"b".repeat(32)}` };
-    const request = { attemptId: "synthetic", leaseGeneration: "1", expectedWorkspaceVersion: "1", reason: "idle_shutdown" };
-    expect(parseHostedWorkspaceCheckpointRequest({ ...request, clinicalReplies: [reply] }).clinicalReplies).toEqual([reply]);
-    for (const invalid of [{ ...reply, text: "synthetic" }, { ...reply, turnId: "invalid" }]) {
-      expect(() => parseHostedWorkspaceCheckpointRequest({ ...request, clinicalReplies: [invalid] })).toThrow();
-    }
-  });
-
   it("parses the optional workspace system progress projection atomically", () => {
     const activeProjection = {
       nextDefaultProcessingWakeAt: "2026-04-26T08:00:00.000Z",

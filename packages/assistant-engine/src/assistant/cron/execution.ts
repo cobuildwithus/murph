@@ -1,4 +1,3 @@
-import { clinicalChangeDeliveryKey, CLINICAL_TEXT_TRANSPORT_BLOCK } from '@murphai/hosted-execution/clinical-records-boundary'
 import { randomUUID } from 'node:crypto'
 import {
   parseAutomationSupportSeriesTag,
@@ -649,7 +648,6 @@ export async function executeClaimedAssistantCronJob(
       input.shouldYieldBackgroundMaintenance ?? null,
   })
   try {
-    const clinicalRoute = await assertClinicalCronTransport(claimedJob, input.executionContext, yieldCancellation.signal)
     if (yieldCancellation.signal.aborted) {
       if (yieldCancellation.yieldRequested()) {
         throw createAssistantCronBackgroundMaintenanceYieldError()
@@ -893,7 +891,7 @@ export async function executeClaimedAssistantCronJob(
             })
           }
           const authorizedDelivery = await resolveClaimedNotificationRoute({
-            clinicalRoute, maintenanceJob, managedOwnerAuthorization, target: claimedJob.target,
+            maintenanceJob, managedOwnerAuthorization, target: claimedJob.target,
             executionContext: input.executionContext, signal: yieldCancellation.signal,
           })
           const deliveryRoute = authorizedDelivery.route
@@ -923,7 +921,6 @@ export async function executeClaimedAssistantCronJob(
           const assertNotificationStillAuthorized = async (
             authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
           ): Promise<void> => {
-            await assertClinicalCronTransport(claimedJob, input.executionContext, yieldCancellation.signal)
             const authority = await resolveAssistantCronCanonicalSourceAuthority({
               job: input.job,
               now: new Date(),
@@ -1424,12 +1421,10 @@ function buildAssistantCronNotificationDeliveryInput(input: Pick<
       job: claimedJob,
       trigger: input.trigger,
     }),
-    deliveryIdempotencyKey: claimedJob.clinicalChange
-      ? clinicalChangeDeliveryKey(claimedJob.clinicalChange.runId, 'detail')
-      : buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
-          job: claimedJob,
-          trigger: input.trigger,
-        }),
+    deliveryIdempotencyKey: buildAssistantCronDeviceActivityDeliveryIdempotencyKey({
+      job: claimedJob,
+      trigger: input.trigger,
+    }),
     hostedDeliveryIdempotency: buildAssistantCronHostedDeliveryIdempotency({
       job: claimedJob,
       trigger: input.trigger,
@@ -2251,7 +2246,7 @@ function assistantCronGroupEmailAttemptFailed(
 function resolveAssistantCronNotificationResponsePolicy(
   job: ResolvedAssistantCronJob,
 ): { kind: 'require_send' } | null {
-  return job.job.clinicalChange || listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
+  return listAssistantCronNotificationTags(job).includes(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     ? { kind: 'require_send' }
     : null
 }
@@ -3005,15 +3000,14 @@ function assistantCronManagedOwnerAuthorizationMatches(
 }
 
 async function resolveClaimedNotificationRoute(input: {
-  clinicalRoute: Awaited<ReturnType<typeof assertClinicalCronTransport>>
   maintenanceJob: boolean
   managedOwnerAuthorization: Awaited<ReturnType<typeof resolveAssistantCronManagedOwnerAuthorization>>
   target: AssistantCronJob['target']
   executionContext: AssistantExecutionContext | null | undefined
   signal: AbortSignal
 }): Promise<AssistantCronAuthorizedNotificationDelivery> {
-  if (input.clinicalRoute || input.maintenanceJob) {
-    return { conversationThreadId: null, deliveryPosture: input.clinicalRoute?.deliveryPosture ?? null,
+  if (input.maintenanceJob) {
+    return { conversationThreadId: null, deliveryPosture: null,
       externalThreadRouteAuthority: null, route: resolveAssistantCronNotificationDeliveryRoute(input.target) }
   }
   if (input.managedOwnerAuthorization.kind === 'authorized') return input.managedOwnerAuthorization.authorizedDelivery
@@ -3176,21 +3170,6 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
 /** A gate stopped this run, so it is recorded as skipped rather than failed. */
 abstract class AssistantCronGateSkipError extends VaultCliError {
   abstract readonly skipReason: string
-}
-
-async function assertClinicalCronTransport(job: AssistantCronJob, context: AssistantExecutionContext | null | undefined, signal: AbortSignal) {
-  if (!job.clinicalChange) return
-  const resolve = context?.hosted?.resolveScheduledLinqRoute
-  if (job.target.channel === 'linq' && job.target.threadIsDirect && job.target.threadId && resolve) {
-    const authority = await resolve({
-      homeRouteFallbackAllowed: false, idempotencyKey: clinicalChangeDeliveryKey(job.clinicalChange.runId, 'detail'),
-      signal, target: job.target.threadId, targetKind: 'thread',
-    })
-    if (authority.deliveryBlockCode) throw new AssistantCronLinqHealthPreflightBlockedError(authority.deliveryBlockCode)
-    if (authority.clinicalReplyAuthorized && authority.threadIsDirect && authority.target === job.target.threadId) return authority
-  }
-  // Remain closed even with a stale reader that returns an ordinary allowed route.
-  throw new AssistantCronLinqHealthPreflightBlockedError(CLINICAL_TEXT_TRANSPORT_BLOCK)
 }
 
 class AssistantCronLinqHealthPreflightBlockedError extends AssistantCronGateSkipError {

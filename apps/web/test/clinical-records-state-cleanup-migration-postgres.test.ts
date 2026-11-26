@@ -55,6 +55,16 @@ describe.skipIf(!enabled)("clinical state cleanup migrations", () => {
         { id: "current", mode: "off", revision: 1 }, { id: "new", mode: "notice", revision: 0 },
         { id: "renewed", mode: "off", revision: 1 }, { id: "withdrawn", mode: "off", revision: 1 },
       ]);
+      await client.query("UPDATE hosted_member SET clinical_record_message_mode = 'detail' WHERE id = 'new'");
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261126150000_clinical_notice_only/migration.sql", import.meta.url,
+      ), "utf8"));
+      expect(await rows()).toEqual([
+        { id: "current", mode: "off", revision: 1 }, { id: "new", mode: "notice", revision: 1 },
+        { id: "renewed", mode: "off", revision: 1 }, { id: "withdrawn", mode: "off", revision: 1 },
+      ]);
+      await client.query("UPDATE hosted_member SET clinical_record_message_mode = 'detail' WHERE id = 'new'");
+      expect(await rows()).toContainEqual({ id: "new", mode: "notice", revision: 1 });
     } finally {
       try {
         await client.query("ROLLBACK");

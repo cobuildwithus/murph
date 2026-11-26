@@ -150,11 +150,9 @@ fields, counts and completion outcomes keep their meanings for shipped apps.
 
 One member setting covers all sources. Its default is `notice`. A member can
 choose `off` at any time, including after billing lapses. Turning texts back on
-starts at `notice`. The app asks for confirmation before explicitly requesting
-`detail`. Web returns HTTP 409 for `off` to `detail`. Every change advances
-the setting revision once, including a reset to `off` when health consent is
-withdrawn. Regranting consent leaves the setting off. This API only stores the
-choice. Notification delivery ships separately.
+stores `notice`. The companion route also accepts build 126’s legacy `detail`
+request and responds with `notice`. Each change advances the revision once.
+Withdrawing health consent turns notices off. Regranting consent leaves them off.
 
 Apply the schema expansion and historical withdrawal backfill first, then deploy
 the companion Web routes to all instances, then the app. Web resets the preference
@@ -619,7 +617,7 @@ on Web stops new pins while existing replies retain their readers.
 Under the member lock, a replacement connection needs a persistent grant,
 current OpenAI approval and a complete whole-history import in its current
 credential epoch. A successful full catch-up can establish a missing baseline.
-The baseline import itself stays silent. With notices or details enabled, Web
+The baseline import itself stays silent. With notices enabled, Web
 freezes the credential epoch, message revision, verified participant, assigned
 line, direct home chat and approved notice versions on the new receipt-required
 run. Member starts, off, legacy grants and older runs remain silent through late
@@ -628,27 +626,24 @@ enrichment. Web never upgrades a run after creation.
 A signed, write-fenced callback can attest a committed change for one run.
 Web accepts its terminal outcome before publishing a pointer. A private
 enrichment page can supply the first proof before or after that outcome.
-The run row retains publication through queue cleanup. Private scheduling leaves coverage open.
+The run row retains publication through queue cleanup. Staging the notice leaves coverage open.
 Missing and empty evidence leave the member's conversation alone.
 
 In notice mode the private runtime writes one ordinary proactive outbox intent.
 It renders “New records came in. Want me to go through them?” locally. The
 ordered system mailbox checkpoints and drains that intent without an AI turn
 or allowance.
-Off suppresses publication. Detail uses one scheduled turn with the private
-run receipt reference and the member’s explicit detail setting. Web binds the first durably saved private
-reply to the originating run. Replays drain that reply under the original
-bubble keys. A restore missing the bound reply ends silently. Only the newest
+Off suppresses publication. A member’s reply starts an ordinary conversation turn. Only the newest
 eligible run for a connection can deliver. Its notification expires 24 hours
 after the import is accepted.
 
-The owner withdrew the iMessage-only requirement. Notices and details may use
+Notices use
 the exact verified private thread frozen at admission, including when Linq
 selects RCS or SMS. No second consent step is required. A signed delivery
 receipt may carry the text through Web memory. Web verifies it and drops
 the text before persistence, logging, tracing or Temporal. Web excludes
 clinical deliveries from terminal retry before reading provider message parts.
-A definite terminal failure consumes an attempted occurrence. Admissions require revision 3 at Web, runner and port.
+A definite terminal failure consumes an attempted occurrence. Admissions require revision 4 at Web, runner and port.
 
 ### Bounded repeat import
 

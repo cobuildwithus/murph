@@ -186,7 +186,7 @@ describe.skipIf(!databaseUrl)("hosted consent PostgreSQL persistence", () => {
       await accept(f);
       const where = { id: f.memberId };
       const select = { clinicalRecordMessageMode: true, clinicalRecordMessageRevision: true };
-      await f.writer.hostedMember.update({ where, data: { clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 4 } });
+      await f.writer.hostedMember.update({ where, data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 4 } });
       await withdrawHostedHealthDataConsent({ memberId: f.memberId, prisma: f.writer });
       const expected = { clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 5 };
       await expect(f.observer.hostedMember.findUniqueOrThrow({ where, select })).resolves.toEqual(expected);

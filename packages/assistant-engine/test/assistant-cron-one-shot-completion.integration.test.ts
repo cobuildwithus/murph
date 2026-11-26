@@ -1,4 +1,4 @@
-import { cp, readFile, rm } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   initializeVault, patchAutomation, readAutomation, readScheduledLog,
@@ -14,7 +14,6 @@ import {
   resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection,
 } from '../src/assistant/cron/canonical-jobs.ts'
 import { readAssistantCronCanonicalRuntimeStore, writeAssistantCronCanonicalRuntimeStore } from '../src/assistant/cron/runtime-state.ts'
-import { queueClinicalChange } from '../src/assistant/cron/clinical-change.ts'
 import * as cronStore from '../src/assistant/cron/store.ts'
 import { reconcileAssistantCronDeliveryIntent } from '../src/assistant/cron/delivery-reconciliation.ts'
 import { getAssistantCronAutomationTimingProjection, processDueAssistantCronJobsLocal, runAssistantCronJobNow } from '../src/assistant/cron.ts'
@@ -137,58 +136,6 @@ async function expectTomorrow(context: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('one-shot completion against real registries', () => {
-  it.each(['complete', 'withdraw during generation', 'pause before save'] as const)('clinical detail reply and restored wake: %s', async scenario => {
-    const { parentRoot, vaultRoot: vault } = await createTempVaultContext('clinical-detail-')
-    roots.push(parentRoot)
-    await initializeVault({ vaultRoot: vault })
-    const threadId = 'synthetic-private-thread'
-    const input = { runId: 'synthetic-origin', occurredAt: today, decision: { mode: 'detail' as const, threadId }, vault }
-    await queueClinicalChange(input)
-    const [job] = (await cronStore.readAssistantCronStore(resolveAssistantStatePaths(vault))).jobs
-    let authorized = true
-    const context = { hosted: { ...executionContext.hosted, resolveScheduledLinqRoute: async () => ({
-      clinicalReplyAuthorized: authorized, target: threadId, threadIsDirect: true,
-    }) } }
-    const generate = boundary.provider.getMockImplementation()!
-    boundary.provider.mockImplementationOnce(async args => {
-      const result = await generate(args)
-      if (scenario !== 'complete') authorized = false
-      return result
-    })
-    boundary.deliver.mockResolvedValue({ kind: 'sent', deliveryError: null, session: null,
-      intent: { intentId: 'synthetic-outbox' }, delivery: { channel: 'linq', target: threadId,
-        targetKind: 'thread', providerMessageId: 'synthetic-message', providerThreadId: threadId, sentAt: today } })
-    const result = await runAssistantCronJobNow({ vault, job: job!.jobId, trigger: 'scheduled', executionContext: context })
-    expect(boundary.provider).toHaveBeenCalledOnce()
-    expect(boundary.provider.mock.calls[0]![0].input.prompt).toContain(job!.clinicalChange!.receiptRef)
-    if (scenario !== 'complete') {
-      expect(boundary.deliver).not.toHaveBeenCalled()
-      expect(result.run.outcome).toBe('skipped_gate')
-      if (scenario === 'pause before save') {
-        authorized = true
-        await queueClinicalChange(input)
-        const later = await runAssistantCronJobNow({ vault, job: job!.jobId, trigger: 'scheduled', executionContext: context })
-        expect(later.run.outcome).toBe('delivered')
-        expect(boundary.provider).toHaveBeenCalledTimes(2)
-        expect(boundary.deliver).toHaveBeenCalledTimes(1)
-      }
-      return
-    }
-    expect(result.run.outcome).toBe('delivered')
-    expect(boundary.deliver).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      channel: 'linq', bindingDelivery: { kind: 'thread', target: threadId },
-      deliveryIdempotencyKey: expect.stringMatching(/^clinical-change:v1:synthetic-origin:detail:turn_[a-f0-9]{32}$/u),
-    }))
-    const restored = path.join(parentRoot, 'restored')
-    await cp(vault, restored, { recursive: true })
-    await queueClinicalChange({ ...input, vault: restored, decision: { mode: 'off' } })
-    const store = await cronStore.readAssistantCronStore(resolveAssistantStatePaths(restored))
-    expect(store.jobs).toEqual([])
-    expect(await processDueAssistantCronJobsLocal({ vault: restored, executionContext: context, limit: 1 }))
-      .toEqual({ processed: 0, failed: 0, succeeded: 0 })
-    expect(boundary.provider).toHaveBeenCalledTimes(1)
-  })
-
   it('keeps a reschedule made inside inline delivery, then delivers the edited occurrence tomorrow', async () => {
     const context = await fixture()
     const deliver = boundary.deliver.getMockImplementation()!

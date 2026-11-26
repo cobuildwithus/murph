@@ -1679,20 +1679,6 @@ describe('channel helper seams', () => {
     })
   })
 
-  it('keeps native clinical voice and discards a transcript after an unconfirmed provider handoff', async () => {
-    const target = 'synthetic-direct'
-    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(Object.assign(new VaultCliError(
-      'ASSISTANT_DELIVERY_CONFIRMATION_PENDING', 'Synthetic uncertain handoff.'), { deliveryMayHaveSucceeded: true }))
-    const sendLinq = vi.fn()
-    await expect(ASSISTANT_CHANNEL_ADAPTERS.linq.send({
-      actorId: null, bindingDelivery: createAssistantBindingDelivery('thread', target), explicitTarget: null,
-      idempotencyKey: 'clinical-change:v1:synthetic:detail:turn_' + 'a'.repeat(32), identityId: null,
-      media: [createVoiceMemoMedia({ transcript: 'Synthetic audio caption.' })], message: '', replyToMessageId: null,
-    }, { sendLinqVoiceMemo, sendLinq })).rejects.toMatchObject({ deliveryMayHaveSucceeded: true })
-    expect(sendLinqVoiceMemo).toHaveBeenCalledOnce()
-    expect(sendLinq).not.toHaveBeenCalled()
-  })
-
   it('marks Linq media-only voice memo transport failures as ambiguous delivery', async () => {
     const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
       new VaultCliError(

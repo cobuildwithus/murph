@@ -1,10 +1,3 @@
-import { createPlatform as createSnapshotPlatform, createHostedWorkspaceRuntimeBridgeJobOptions, createWorkspaceReadResponse } from "./hosted-checkpoint-platform-fixture.ts";
-import { createCloudflareWorkspaceSnapshotPort } from "../src/runtime-platform/workspace-snapshot-port.ts";
-import { createAssistantOutboxIntent } from "@murphai/assistant-engine/assistant-outbox";
-import { initializeVault } from "@murphai/core";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
@@ -6841,74 +6834,6 @@ describe("handleRunnerOutboundRequest", () => {
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
     expect(runtimeResourceClient.recordHostedRuntimeOrphan).not.toHaveBeenCalled();
     expect(head).toHaveBeenCalledWith(objectKey);
-  });
-
-  it("publishes the saved clinical reply through the signed checkpoint port", async () => {
-    const port = Number(process.env.MURPH_TEST_CLINICAL_CHECKPOINT_PORT ?? 0);
-    const userId = process.env.MURPH_TEST_CLINICAL_CHECKPOINT_MEMBER ?? "member_123";
-    const runId = process.env.MURPH_TEST_CLINICAL_CHECKPOINT_RUN ?? "crr_" + "a".repeat(32);
-    const turnId = "turn_" + "e".repeat(32);
-    const identity = { userId, attemptId: process.env.MURPH_TEST_CLINICAL_CHECKPOINT_ATTEMPT ?? "attempt_1",
-      leaseGeneration: process.env.MURPH_TEST_CLINICAL_CHECKPOINT_GENERATION ?? "1",
-      workspaceVersion: process.env.MURPH_TEST_CLINICAL_CHECKPOINT_VERSION ?? "0" };
-    const runner = createWorkspaceVersionAwareUserRunner(identity);
-    const vault = await mkdtemp(join(tmpdir(), "clinical-archive-"));
-    try {
-      await initializeVault({ vaultRoot: vault, timezone: "UTC" });
-      const deliveryKey = "clinical-change:v1:" + runId + ":detail:" + turnId;
-      await createAssistantOutboxIntent({ vault, turnId, sessionId: "synthetic-session", channel: "linq",
-        threadId: "synthetic-private", threadIsDirect: true, message: "Synthetic reply for checkpoint verification.",
-        deliveryIdempotencyKey: deliveryKey, dedupeToken: deliveryKey });
-      const objects = new Map<string, Uint8Array>();
-      const platform = createSnapshotPlatform({ userId, putArtifact: async () => {}, uploadedObjects: objects,
-        readWorkspace: async () => createWorkspaceReadResponse({ version: identity.workspaceVersion }),
-        writeBrowserVaultReplica: async () => { throw new Error("Unexpected replica"); } });
-      const http = globalThis.fetch;
-      vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
-          if (isHostedWorkspaceReadFetch(args)) {
-            const read = createHostedWorkspaceReadResponse(null, identity.workspaceVersion);
-            return Response.json({ ...read, workspace: { ...read.workspace, userId } });
-          }
-          const signed = new Request(...args);
-          const body = await signed.text();
-          const parsed = JSON.parse(body);
-          expect(parsed.clinicalReplies).toEqual([{ runId, turnId }]);
-          expect(body).not.toContain("Synthetic reply for checkpoint verification.");
-          const url = new URL(signed.url);
-          if (port) return http("http://127.0.0.1:" + port + url.pathname + url.search, { method: "POST", headers: signed.headers, body });
-          const accepted = createHostedWorkspaceCheckpointResponseWithSnapshotRef("1", parsed.snapshotRef);
-          return Response.json({ ...accepted, workspace: { ...accepted.workspace, userId } });
-        });
-      const options = createHostedWorkspaceRuntimeBridgeJobOptions({ vaultRoot: vault, request: identity,
-        readCurrentLease: () => identity, runtime: {}, waitForBackgroundAssistantWork: async () => {},
-        platform: { ...platform, workspaceSnapshotPort: { ...platform.workspaceSnapshotPort,
-          async completeSnapshotSession(request) {
-            const ref = request.ref;
-            runner.workspaceSnapshotUploadSessions.set(ref.snapshotId, { ...createWorkspaceSnapshotUploadSession(ref),
-              ...identity, expectedWorkspaceVersion: identity.workspaceVersion });
-            const size = objects.get(ref.objectKey)!.byteLength;
-            const env = createRunnerOutboundEnv({ runtimeControl: { getByName: runner.getByName },
-              ...(port ? { HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: process.env.MURPH_TEST_CHECKPOINT_SIGNER } : {}),
-              BUNDLES: createWorkspaceSnapshotBucket(async key => ({ key, size }), async key => ({
-                checksums: createWorkspaceSnapshotHeadChecksums(ref), customMetadata: createWorkspaceSnapshotHeadMetadata(ref), key, size,
-              }), async () => {}),
-            });
-            const portOwner = createCloudflareWorkspaceSnapshotPort({ boundUserId: userId, timeoutMs: 10_000,
-              workspaceCheckpointBridge: { readCurrentLease: async () => identity },
-              fetchImpl: async (url, init) => {
-                const req = new Request(url, init);
-                req.headers.set(RUNNER_PROXY_TOKEN_HEADER, RUNNER_PROXY_TOKEN);
-                const response = await handleRunnerOutboundRequest(req, env, userId);
-                if (!response.ok) throw new Error("Synthetic checkpoint rejected with HTTP " + response.status);
-                return response;
-              } });
-            return portOwner.completeSnapshotSession(request);
-          },
-        } } });
-      const saved = await options.createCheckpointSnapshot({ nextWakeAt: null, nextWakeReason: null,
-        reason: "idle_shutdown", redactedStatus: null });
-      expect(saved.checkpoint?.checkpointed).toBe(true);
-    } finally { await rm(vault, { recursive: true, force: true }); }
   });
 
   it("retains the replaced successful workspace snapshot for delayed cleanup after checkpoint CAS", async () => {

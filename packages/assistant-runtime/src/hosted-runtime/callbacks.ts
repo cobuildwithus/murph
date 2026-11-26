@@ -5789,7 +5789,6 @@ function buildHostedVaultFileMediaIdentity(input: {
 }
 
 function hostedVoiceMemoKey(parent?: string | null, intentId?: string | null): string | null {
-  if (parent?.startsWith("clinical-change:")) return `${parent}:voice`;
   return intentId ? `linq-voice-memo:${intentId}` : null;
 }
 

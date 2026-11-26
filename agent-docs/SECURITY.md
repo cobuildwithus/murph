@@ -967,14 +967,8 @@ Existing product admission, delivery and runtime safety rules still apply.
   revision. The member lock fences admission. The private outbox requires explicit
   clinical authorization for its key and frozen private thread at preflight
   and provider entry. The manually deployed port must forward this decision.
-  The owner withdrew the iMessage-only requirement. Linq may
-  select iMessage, RCS or SMS. Notices omit the hospital name. The existing
-  explicit detail setting authorizes detail on that same thread.
-  A detail turn has the same shell and network reach as any scheduled turn,
-  bounded by the Worker’s existing messaging-operation check. The clinical
-  per-bubble checks cover the reply path only.
-  Admission attests the promoted release at that moment, and dispatch accepts that the instance serving a later bubble has no separate revision check.
-  Signed provider receipts can echo sent text, including clinical replies, through
+  Linq may select iMessage, RCS or SMS. The notice is fixed, omits the
+  hospital name and requires no model turn. Signed provider receipts can echo it through
   Web memory. Web verifies and reduces each receipt to operational metadata
   before persistence, logging, tracing or handoff. Ordinary diagnostics retain
   sanitized provider wording. The clinical template suppresses both receipt
@@ -1008,13 +1002,11 @@ Existing product admission, delivery and runtime safety rules still apply.
   query fingerprint; a cursor or claim from another scope or slice fails before
   provider egress.
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
-- Clinical processor grants use one app-only consent scope per named processor. The notice version must match the registry exactly. Keep these scopes outside generic legal acceptance and launch consent. Web checks replacement-profile starts and locked persistence, and reads the persisted profile during daily admission and page/document transport. Every named company must have a current grant before the next protected read. OpenAI alone requires individual approval. The approval screen lists xAI for X search, Google for video questions, ElevenLabs for voice messages and Mapbox for places and directions together as member-directed services. Hosting and delivery are service providers. Scheduled detail turns retain the ordinary helper permissions. Each outbound message requires separate authority for the frozen private recipient. The runner regression test checks fixed hosts and model selection against that table. Previously imported data remains available to vault-capable turns after withdrawal.
+- Clinical processor grants use one app-only consent scope per named processor. The notice version must match the registry exactly. Keep these scopes outside generic legal acceptance and launch consent. Web checks replacement-profile starts and locked persistence, and reads the persisted profile during daily admission and page/document transport. Every named company must have a current grant before the next protected read. OpenAI alone requires individual approval. The approval screen lists xAI for X search, Google for video questions, ElevenLabs for voice messages and Mapbox for places and directions together as member-directed services. Hosting and delivery are service providers. The fixed notice requires dispatch authority for the frozen private recipient. The runner regression test checks fixed hosts and model selection against that table. Previously imported data remains available to vault-capable turns after withdrawal.
 - Native Clinical Records binds the member, native session and SMART state in the app completion proof. The callback reads only the stored return target. The stateless bridge forwards the validated state and bounded code or error. Both approval and denial verify the proof before consuming state. Native persistence rechecks the credential, session, product admission, consent and consumed authorization under the member lock. Search text stays in POST bodies.
 - Clinical record text preferences belong to the member. Web rechecks the native
-  session under the member lock. Enabling notices or details requires product
-  access and current launch consent. A lapsed member can opt out. An explicit
-  change from notice to detail records the new revision in a consent audit
-  event. Only the member setting authorizes detail. Withdrawing health consent
+  session under the member lock. Enabling notices requires product access and
+  current launch consent. A lapsed member can opt out. Withdrawing health consent
   resets that setting and advances its revision in the grant transaction, even
   from an older Web writer. Reconsent does not enable texts.
 - Web authenticates each Epic token request with the registration bound to the

@@ -7562,7 +7562,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: async () => Response.json({ ok: true, clinicalReplyAuthorized: answer }),
     });
     const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
-      authorityCheckOnly: true, idempotencyKey: "clinical-change:v1:synthetic-run:detail", target: "synthetic-thread", targetKind: "thread",
+      authorityCheckOnly: true, idempotencyKey: "clinical-change:v1:synthetic-run:notice", target: "synthetic-thread", targetKind: "thread",
     });
     expect(result && result.clinicalReplyAuthorized).toBe(answer === true ? true : undefined);
   });

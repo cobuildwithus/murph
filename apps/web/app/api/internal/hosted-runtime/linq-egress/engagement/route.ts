@@ -690,14 +690,13 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
 async function authorizeClinicalDispatch(tx: Prisma.TransactionClient, userId: string, clinicalKey: string, windowPhone: string | null,
   finalAuthority: Awaited<ReturnType<typeof assertHostedLinqRecentInboundEngagementForRuntime>>,
   authorityCheckOnly: boolean, deliveryPurpose: unknown, intentId: string | null) {
-  const { clinicalEgressBlock, recordClinicalDispatchClaim } = await import("@/src/lib/clinical-records/notification");
+  const { clinicalEgressBlock, recordClinicalProviderAttempt } = await import("@/src/lib/clinical-records/notification");
   const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
-    windowPhone, route: finalAuthority.resolvedRoute, providerEntry: !authorityCheckOnly });
+    windowPhone, route: finalAuthority.resolvedRoute });
   const dispatch = deliveryBlockCode ? { progressUpdateSuppressed: false, providerDispatchClaimed: null }
     : await claimHostedLinqEngagementProviderDispatchTx({ assistantAskFallbackRequired: false, authorityCheckOnly,
       deliveryPurpose, idempotencyKey: clinicalKey, intentId, resolvedRoute: finalAuthority.resolvedRoute, tx });
-  // The native memo API has no replay key. This grant is its last provable handoff.
-  if (typeof dispatch.providerDispatchClaimed === "boolean") await recordClinicalDispatchClaim(tx, userId, clinicalKey, dispatch.providerDispatchClaimed);
+  if (dispatch.providerDispatchClaimed === false) await recordClinicalProviderAttempt(tx, userId, clinicalKey);
   return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
     clinicalReplyAuthorized: deliveryBlockCode === null, deliveryPosture: null, ackReaction: null, ...dispatch };
 }

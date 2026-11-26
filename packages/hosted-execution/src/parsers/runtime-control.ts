@@ -7741,18 +7741,6 @@ export function parseHostedWorkspaceReadResponse(
   };
 }
 
-function parseClinicalReplyCheckpoint(value: unknown) {
-  if (!Array.isArray(value) || value.length > 256) throw new ContractValidationError("Invalid clinical reply checkpoint.");
-  return value.map(entry => {
-    const row = requireObject(entry, "Clinical reply checkpoint");
-    if (Object.keys(row).length !== 2 || typeof row.runId !== "string" || !/^crr_[A-Za-z0-9_-]{32}$/u.test(row.runId)
-      || typeof row.turnId !== "string" || !/^turn_[a-f0-9]{32}$/u.test(row.turnId)) {
-      throw new ContractValidationError("Invalid clinical reply checkpoint pointer.");
-    }
-    return { runId: row.runId, turnId: row.turnId };
-  });
-}
-
 export function parseHostedWorkspaceCheckpointRequest(
   value: unknown,
 ): HostedWorkspaceCheckpointRequest {
@@ -7775,7 +7763,6 @@ export function parseHostedWorkspaceCheckpointRequest(
   }
 
   return {
-    ...(record.clinicalReplies === undefined ? {} : { clinicalReplies: parseClinicalReplyCheckpoint(record.clinicalReplies) }),
     attemptId: requireString(
       record.attemptId,
       "Hosted workspace checkpoint request attemptId",
