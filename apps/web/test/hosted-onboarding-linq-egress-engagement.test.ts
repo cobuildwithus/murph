@@ -1,3 +1,6 @@
+import * as winAuthority from "@/src/lib/browser-vault/authority";
+import { healthWinTextKeys } from "@/src/lib/health-wins/nudge-delivery";
+import { readHealthWinIdentities } from "@/src/lib/health-wins/achievement";
 import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { buildHostedExecutionLinqConversationMessageWake, buildHostedExecutionAssistantNotificationRequestedWake, createHostedExecutionPrivateAssistantAskCompletionDeliveryKey, buildHostedMemberChannelWelcomeDeliveryIdentity } from "@murphai/hosted-execution";
@@ -2818,6 +2821,66 @@ describe("hosted Linq egress authority", () => {
       .not.toHaveBeenCalled();
   });
 
+  describe("health win dispatch", () => {
+    const memberId = "member-1", day = "2032-05-08";
+    const { base } = healthWinTextKeys(memberId, day);
+    const at = new Date(`${day}T10:15:00Z`);
+    function prepare() {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(at);
+      vi.stubEnv("MURPH_GAME_ENABLED", "true");
+      vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+      vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", memberId);
+      const authority = vi.spyOn(winAuthority, "assertBrowserVaultMemberAuthority").mockResolvedValue(undefined);
+      onTestFinished(() => { vi.useRealTimers(); vi.unstubAllEnvs(); authority.mockRestore(); });
+      const prisma = createPrismaStub({ homeChatId: "chat-home" });
+      const startedAt = new Date(`${day}T10:02:00Z`);
+      prisma.hostedMailboxItem.findUnique.mockResolvedValue({ expiresAt: new Date(`${day}T13:30:00Z`), occurredAt: startedAt });
+      prisma.$queryRaw.mockResolvedValue([{ baselineAt: new Date("2032-05-06"), lastEvaluatedDay: day,
+        lastPresentedAt: new Date("2032-05-07"), seenVersion: readHealthWinIdentities(memberId, [], day)!.version }]);
+      mocks.getPrisma.mockReturnValue(prisma);
+      return { prisma, authority, startedAt };
+    }
+    const send = (key: string, authorityCheckOnly = false) => postHostedLinqEgressEngagement(routeAuthorityRequest({
+      authorityCheckOnly, target: "chat-home", idempotencyKey: key,
+    }));
+    it.each(["", ":link", ":fallback", ":link:fallback", ":bubble:0:link:fallback"])("admits a current provider request with suffix %s", async suffix => {
+      const { prisma } = prepare();
+      await setService(prisma, "iMessage");
+      const response = await send(base + suffix);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, providerDispatchClaimed: true });
+    });
+    async function setService(prisma: ReturnType<typeof createPrismaStub>, service: string | null, isGroup = false) {
+      const health = await prisma.hostedLinqChatHealth.findFirst();
+      prisma.hostedLinqChatHealth.findFirst.mockResolvedValue({ ...health, service, isGroup });
+    }
+    it.each(["group thread", "flag removed", "consent withdrawn", "dormant", "window ended", "next day", "new time zone", "post", "presentation", "SMS", "RCS", "unknown service"])("rejects queued text and link fallback after %s", async change => {
+      const { prisma, authority, startedAt } = prepare();
+      let service: string | null = "iMessage";
+      switch (change) {
+        case "flag removed": vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", ""); break;
+        case "consent withdrawn": authority.mockRejectedValue(hostedOnboardingError({ code: "CONSENT_REQUIRED", message: "Consent required.", httpStatus: 403 })); break;
+        case "dormant": prisma.hostedMember.findUnique.mockResolvedValue({ runtimeDormantAt: at }); break;
+        case "window ended": vi.setSystemTime(new Date(`${day}T13:30:00Z`)); break;
+        case "next day": vi.setSystemTime(new Date("2032-05-09T10:15:00Z")); break;
+        case "new time zone": prisma.gameProfile.findUnique.mockResolvedValue({ timeZone: "America/Los_Angeles" }); break;
+        case "post": prisma.healthPost.findFirst.mockResolvedValue({ id: "synthetic-post" }); break;
+        case "presentation": prisma.$queryRaw.mockResolvedValue([{ baselineAt: at, lastEvaluatedDay: day,
+          lastPresentedAt: startedAt, seenVersion: readHealthWinIdentities(memberId, [], day)!.version }]); break;
+        case "SMS": case "RCS": service = change; break;
+        case "unknown service": service = null; break;
+      }
+      await setService(prisma, service, change === "group thread");
+      for (const key of [base, `${base}:link`, `${base}:link:fallback`]) {
+        const response = await send(key);
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ error: { code: "HEALTH_WIN_TEXT_SUPERSEDED", retryable: false } });
+      }
+      expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
+    });
+  });
+
   it.each([
     { expectedStatus: 200, recovered: false, reminderAfterDays: undefined },
     { expectedStatus: 409, recovered: true, reminderAfterDays: undefined },
@@ -3182,6 +3245,8 @@ function createPrismaStub(input: {
     $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([]),
     game: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), findUnique: vi.fn().mockResolvedValue(null) },
+    gameProfile: { findUnique: vi.fn().mockResolvedValue({ timeZone: "UTC" }) },
+    healthPost: { findFirst: vi.fn().mockResolvedValue(null) },
     gameEntry: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     gameEvent: { findUnique: vi.fn().mockResolvedValue(null) },
     gameReport: { findMany: vi.fn().mockResolvedValue([]) },
@@ -3202,6 +3267,7 @@ function createPrismaStub(input: {
         : {
             accountGroupMemberships: [],
             billingStatus: "active",
+            runtimeDormantAt: null,
             suspendedAt: null,
             threadContainer: null,
           }),
@@ -3242,6 +3308,7 @@ function createPrismaStub(input: {
       }),
     },
     hostedMailboxItem: {
+      findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
     },

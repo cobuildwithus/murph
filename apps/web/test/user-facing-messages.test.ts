@@ -54,6 +54,7 @@ const USAGE_RECOVERY_SETTINGS_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
 const TEST_CONTEXT_BY_KEY = {
+  "linq.health_win": { winUrl: "https://www.withmurph.ai/wins/" + "a".repeat(43) },
   "linq.device_connection_check": {
     companionAppName: "WHOOP",
     deviceDisplayName: "WHOOP",
@@ -107,6 +108,15 @@ const TEST_CONTEXT_BY_KEY = {
 };
 
 describe("user-facing message variants", () => {
+  it("keeps the win question value-free and puts its first-party URL last", () => {
+    for (const text of collectRenderedTexts("linq.health_win")) {
+      const [question, ...tail] = text.split("\n");
+      expect(question).toMatch(/\?$/u);
+      expect(question!.length).toBeLessThanOrEqual(80);
+      expect(question).not.toMatch(/\d|—|\bSTOP\b|\p{Extended_Pictographic}/iu);
+      expect(tail).toEqual([TEST_CONTEXT_BY_KEY["linq.health_win"].winUrl]);
+    }
+  });
   it("offers WHOOP help without asserting a cause or requiring reconnect", () => {
     for (const text of collectRenderedTexts("linq.device_connection_check")) {
       expect(text).toContain("WHOOP");

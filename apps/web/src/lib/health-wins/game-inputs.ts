@@ -1,5 +1,4 @@
 import "server-only";
-import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { obligationDays } from "../game/board-streak";
 import { ladderRungs, roundTotals } from "../game/progress/achievements";
 import type { StoredAward } from "../game/progress/awards";
@@ -105,8 +104,7 @@ export function gameWinInputs(memberId: string, today: string, { facts, states, 
   return { games, gameStreak, sourceRevision, complete: true };
 }
 
-export async function readHealthWinGameInputs(auth: HostedNativeMemberAuth, today: string, runs: VaultRuns | null, clock = new Date(), signal?: AbortSignal) {
-  const memberId = auth.member.id;
+export async function readHealthWinGameInputs(memberId: string, today: string, runs: VaultRuns | null, clock = new Date(), signal?: AbortSignal) {
   const snapshot = await readGameSeriesFacts(memberId, clock, new ProgressReadTiming(), [RUN_MEASURE_ID], limits, signal);
   return gameWinInputs(memberId, today, snapshot, runs);
 }
