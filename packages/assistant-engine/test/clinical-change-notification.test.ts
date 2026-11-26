@@ -33,7 +33,7 @@ describe('daily hospital notification integration', () => {
       }
       if (mode === 'detail') {
         const job = jobs[0]!
-        expect(job).toMatchObject({ keepAfterRun: false, schedule: { kind: 'at' }, clinicalChange: { runId: input.runId } })
+        expect(job).toMatchObject({ keepAfterRun: true, schedule: { kind: 'at' }, clinicalChange: { runId: input.runId } })
         const resolveScheduledLinqRoute = vi.fn(async () => ({ target: threadId, threadIsDirect: true }))
         const result = await runAssistantCronJobNow({ vault, job: job.jobId, trigger: 'scheduled',
           executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } },

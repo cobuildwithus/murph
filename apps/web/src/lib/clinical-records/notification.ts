@@ -126,8 +126,8 @@ export async function readClinicalNotificationDecision(input: RunPointer): Promi
 export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
   key: string; memberId: string; route: HostedExecutionResolvedLinqDeliveryRoute;
 }) {
-  const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):(notice|detail)(?::bubble:[1-9][0-9]*)?$/u.exec(input.key);
-  if (!match || input.route.targetKind !== "thread" || !input.route.threadIsDirect) return "clinical_authority_unavailable";
+  const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):(notice|detail)((?::bubble:(?:0|[1-9][0-9]*))?(?::(?:voice|transcript))?)$/u.exec(input.key);
+  if (!match || (match[2] === "notice" && match[3]) || input.route.targetKind !== "thread" || !input.route.threadIsDirect) return "clinical_authority_unavailable";
   const authority = acceptedClinicalOccurrence(await readClinicalNotificationAuthority(tx, { memberId: input.memberId, runId: match[1]! }));
   if (!authority || authority.mode !== match[2]
     || createHostedLinqChatLookupKey(input.route.target) !== authority.chatLookupKey) return "clinical_authority_unavailable";

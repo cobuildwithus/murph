@@ -74,6 +74,7 @@ export interface AssistantEmailDeliverySummary {
 }
 
 export interface LinqRuntimeDependencies {
+  clinicalReplyTarget?: string
   appCardCapabilityFetchImplementation?: LinqFetch
   appCardTextFallbackFetchImplementation?: LinqFetch
   env?: NodeJS.ProcessEnv

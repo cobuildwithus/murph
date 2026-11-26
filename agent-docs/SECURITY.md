@@ -941,12 +941,15 @@ Existing product admission, delivery and runtime safety rules still apply.
   admission. The route fingerprint includes the named approval notice versions.
   The production sweep supplies no compatible reader evidence. Its runs carry
   no notification authority, even after a full baseline import.
-  Web and the private runtime currently block every clinical dispatch.
-  The activation PR must enforce the agreed route before opening either gate.
+  Web denies every clinical dispatch. The private outbox requires explicit
+  clinical authorization for its key and frozen private thread at preflight
+  and provider entry. The manually deployed port must forward this decision.
   The owner withdrew the iMessage-only requirement. Linq may
   select iMessage, RCS or SMS. Notices omit the hospital name. The existing
-  explicit detail setting authorizes detail on that same thread. Each
-  outbound effect must use the current authority for its run and recipient.
+  explicit detail setting authorizes detail on that same thread.
+  A detail turn has the same shell and network reach as any scheduled turn,
+  bounded by the Worker’s existing messaging-operation check. The clinical
+  per-bubble checks cover the reply path only.
   Signed provider receipts can echo sent text, including clinical replies, through
   Web memory. Web verifies and reduces each receipt to operational metadata
   before persistence, logging, tracing or handoff. Ordinary diagnostics retain

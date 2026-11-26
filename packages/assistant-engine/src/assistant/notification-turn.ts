@@ -1,3 +1,4 @@
+import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from '@murphai/runtime-state/assistant-ids'
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
 import { prepareRecapExecution } from './recap-execution.js'
 import { isAssistantProviderCapacityError } from './automation/auto-reply-retry.js'
@@ -83,7 +84,6 @@ import type {
   ResolvedAssistantSession,
 } from './service-contracts.js'
 import {
-  buildAssistantReplyBubbleDeliveryIdempotencyKey,
   dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
   resolveAssistantCurrentAudienceDeliveryFields,
@@ -1684,6 +1684,25 @@ function buildAssistantNotificationMessageInput(
   }
 }
 
+type DeliverNotificationBubble = ReturnType<typeof createAssistantRuntimeStateService>['outbox']['deliverMessage']
+
+function bindClinicalReplyDelivery(input: AssistantMessageInput, deliver: DeliverNotificationBubble): DeliverNotificationBubble {
+  if (!input.deliveryIdempotencyKey?.startsWith('clinical-change:')) return deliver
+  return async bubble => {
+    const target = input.threadId
+    const key = bubble.deliveryIdempotencyKey
+    const matches = target && key && bubble.channel === 'linq' && bubble.threadIsDirect && bubble.threadId === target
+      && !bubble.explicitTarget && bubble.bindingDelivery?.kind === 'thread' && bubble.bindingDelivery.target === target
+    const authority = matches ? await input.executionContext?.hosted?.resolveScheduledLinqRoute?.({
+      homeRouteFallbackAllowed: false, idempotencyKey: key, signal: input.abortSignal, target, targetKind: 'thread',
+    }) : null
+    if (!authority?.clinicalReplyAuthorized || authority.deliveryBlockCode || !authority.threadIsDirect || authority.target !== target) {
+      throw new VaultCliError('ASSISTANT_CLINICAL_REPLY_AUTHORITY_UNAVAILABLE', 'The clinical reply is no longer authorized.')
+    }
+    return deliver(bubble)
+  }
+}
+
 async function deliverAssistantNotificationMessage(input: {
   gameChatBootstrap?: AssistantNotificationInput['gameChatBootstrap']
   followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
@@ -1708,6 +1727,7 @@ async function deliverAssistantNotificationMessage(input: {
     })
   }
   const state = createAssistantRuntimeStateService(input.input.vault)
+  const deliverBubble = bindClinicalReplyDelivery(input.input, state.outbox.deliverMessage)
   const deliveryFieldsBase = resolveAssistantCurrentAudienceDeliveryFields({
     input: input.input,
     precedence: 'audience-first',
@@ -1768,7 +1788,7 @@ async function deliverAssistantNotificationMessage(input: {
       })
       return toAssistantNotificationDeliveryOutcome({
         media: bubbleMedia[index]!,
-        outcome: await state.outbox.deliverMessage({
+        outcome: await deliverBubble({
           ...sharedFields,
           answeredMailboxItemIds: [],
           message: bubbles[index]!,
@@ -1793,7 +1813,7 @@ async function deliverAssistantNotificationMessage(input: {
   }
   const finalOutcome = toAssistantNotificationDeliveryOutcome({
     media: bubbleMedia.at(-1)!,
-    outcome: await state.outbox.deliverMessage({
+    outcome: await deliverBubble({
       ...sharedFields,
       answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
       followUpRequest: input.followUpRequest ?? undefined,

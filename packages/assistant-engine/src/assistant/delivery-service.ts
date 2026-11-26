@@ -1,3 +1,4 @@
+import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from '@murphai/runtime-state/assistant-ids'
 import {
   reportHostedAssistantPersistenceTiming,
   type HostedAssistantPersistenceTiming,
@@ -327,16 +328,6 @@ export async function deliverAssistantReply(input: {
     turnId: input.turnId,
   })
   return { ...finalOutcome, media: bubbleMedia.flat() }
-}
-
-export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {
-  deliveryIdempotencyKey?: string | null
-  index: number
-  turnId: string
-}): string {
-  const explicitKey = normalizeNullableString(input.deliveryIdempotencyKey)
-  const prefix = explicitKey ?? `assistant-bubble:${input.turnId}`
-  return `${prefix}:bubble:${input.index}`
 }
 
 export async function deliverAssistantReaction(input: {

@@ -425,9 +425,10 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 The production daily sweep creates silent imports. Its locked writer requires
 the deployed runner and port revisions before it can freeze a verified
-participant, assigned line and private chat for a new run. Web and the private
-runtime block all clinical sends at this head. After
-activation, clinical texts may go to the exact verified private Murph thread
+participant, assigned line and private chat for a new run. Web denies clinical
+egress. The runtime requires an explicit clinical decision and uses the
+ordinary provider entry fence on the exact thread. A restored notice drains
+only its own keyed outbox intent. After activation, texts may go to the thread
 frozen at daily admission. The owner withdrew the iMessage-only requirement. Linq may
 select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
 requires the member’s existing explicit detail setting. Each attempt, including

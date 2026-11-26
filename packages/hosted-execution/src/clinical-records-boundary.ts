@@ -254,3 +254,7 @@ function parseOutcomeStatus(
 // Linq selects a service per plain-text send. Neither a chat projection nor
 // preferred_service guarantees that the provider will reject an SMS downgrade.
 export const CLINICAL_TEXT_TRANSPORT_BLOCK = "clinical_imessage_only_unavailable";
+
+export function clinicalChangeDeliveryKey(runId: string, mode: "notice" | "detail"): string {
+  return `clinical-change:v1:${runId}:${mode}`;
+}
