@@ -19,6 +19,7 @@ import { openHealthTexts, sealHealthTexts } from "./crypto";
 import { rankHealthCards } from "./decisions";
 import { generateHealthWins } from "./engine";
 import { readHealthWinInputs } from "./inputs";
+import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
@@ -70,8 +71,24 @@ async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal
   signal.throwIfAborted();
   const candidates = (await openSet(row, signal)).map(candidate =>
     previewHealthCandidate(units === "metric" ? candidate : candidate.miles ?? candidate));
-  await getPrisma().$transaction(tx => readAuthority(auth, tx));
-  return { day: row.day, setRevision: row.revision, candidates };
+  const memberId = auth.member.id;
+  const keys = postedCardKeys(memberId, candidates.map(card => card.id));
+  const posted = await getPrisma().$transaction(async tx => {
+    await readAuthority(auth, tx);
+    if (!keys.size) return [];
+    return tx.$queryRaw<{ key: string }[]>`
+      SELECT DISTINCT card.key
+      FROM health_post CROSS JOIN LATERAL unnest(posted_card_keys) AS card(key)
+      WHERE author_member_id = ${memberId} AND deleted_at IS NULL
+        AND card.key IN (${Prisma.join([...keys.values()])})
+    `;
+  });
+  const shared = new Set(posted.map(card => card.key));
+  const suggestions = candidates.filter(card => {
+    const key = keys.get(card.id);
+    return key === undefined || !shared.has(key);
+  });
+  return { day: row.day, setRevision: row.revision, candidates: suggestions };
 }
 
 // Stop source work at the budget, then drain the request-scoped replica/crypto work

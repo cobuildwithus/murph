@@ -6,6 +6,9 @@ Murph prepares cards from a member’s own health and game data. The suggestions
 are private until the member chooses what to post. In the native composer the
 member can pick several cards, choose an available variation, add a caption or
 attach a photo. A member with no eligible cards can still share a caption or photo.
+Once shared, a card leaves that member’s suggestions. It can return when the
+member removes it from their last post containing it or deletes that post.
+A new period of the same achievement remains eligible for its own card.
 
 Each card describes the measure, time period and source. Wearable comparisons
 use comparable readings, and percentile cards require a sourced reference
