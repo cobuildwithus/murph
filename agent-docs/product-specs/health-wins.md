@@ -192,7 +192,7 @@ for their own posts. A cumulative distance card’s map chart may contain
 
 ## Rollout
 
-The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
+The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Each allowlist takes member IDs, or `*` for every member. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
 final route privacy transform before enabling this subset. After strict request
