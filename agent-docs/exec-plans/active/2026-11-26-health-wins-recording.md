@@ -91,3 +91,13 @@ for a withdrawn member without a retained vault replica. The activity migration 
 to a fresh database and account deletion removed its saved rows. The focused Web suites,
 typecheck and Prisma validation passed. The companion rollout and session projection
 work remain open.
+
+## GPS Web handoff
+
+Route-enabled members can preview and publish a run or walk map, splits and
+available heart rate. The Companion API section of the product spec defines
+the submit, private-save and card-option shapes for iOS. A local PostgreSQL
+run verified the partner's number-free map, a private save followed by a
+splits-only post, a stale preview conflict and post replay after disabling
+route recording. The server emits a public tile key for the map. Companion
+capture and rendering, painting and session counting have separate owners.

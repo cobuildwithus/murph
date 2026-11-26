@@ -23,7 +23,8 @@ comparisons are available. Lab percentile labels stop at “Top 5%” because th
 reference groups have few observations beyond that point. See the [source and method notes](../../apps/web/src/lib/game/progress/lab-norms.md).
 
 The member previews the exact version they will share. **Hide my numbers**
-removes the measurements from the card, including its chart and tooltips. If
+removes the measurements from the card, including tooltip values. A recording's
+route map stays visible until the member chooses **Hide the map**. If
 the suggestion set changes before posting, the composer asks the member to
 choose from the refreshed set. Later readings do not change published cards.
 The picker returns up to 24 eligible cards and balances the first 12 across
@@ -32,7 +33,7 @@ Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
 
-## Recording a timed activity
+## Recording an activity
 
 Members with timed recording enabled can save a session privately or share selected cards
 with the usual post audience. Saving retains the summary for the member's Settings export,
@@ -44,6 +45,11 @@ heart-rate card shows them with gaps for missing readings. The markers identify 
 minute positions. The subtitle identifies the peak individual reading.
 **Hide my numbers** replaces the chart, duration and measurements with a kind-specific
 session label. The post uses the selected version even if later recordings change.
+
+With route recording enabled, a run or walk can also show a map and a split
+table. The map shows only the paths the phone prepared for sharing. Distance
+and pace use moving time and moving distance, including parts hidden on the map.
+The member can post the splits and heart-rate cards independently of the map.
 
 ## Who can see it
 
@@ -79,7 +85,8 @@ All paths below are relative to `/api/game/v1/health` and require member
 authentication. The client reads the optional `flags.health_feed` from game
 Home and shows the feed only when it is true. A disabled route returns 404.
 Responses use `private, no-store`. Game Home and the Health wins feed add a top-level
-`record: {timed: true, route: false}` for members on both the feed and recording allowlists.
+`record: {timed: true, route: boolean}` for members on both the feed and recording allowlists.
+Only members also on the route allowlist receive `route: true`.
 A missing capability keeps the recorder hidden. The recording endpoints return 404 when
 recording is disabled.
 
@@ -88,7 +95,7 @@ recording is disabled.
 | `GET wins` | Returns `{day, setRevision, candidates}`. Use `?refresh=1` to request a refresh. A timeout can return a previous day's set. Use the returned day and revision together. |
 | `POST wins/{candidateId}/change` | Send `{setRevision, option}` using an ID from the candidate's `change_options`. Returns `{card}` for preview. |
 | `PUT photos/{id}` | Upload a JPEG up to 2 MiB and 2048 pixels per side under a client-generated UUID. Each member can have 20 unpublished uploads. A new upload over the limit returns 409. Use the returned `attachmentId` at publication. `DELETE` discards an unpublished upload. `GET` reads an authorized published photo. |
-| `POST activities/cards` | Send `{activity}` to preview without saving. Returns `{suggestedTitle, cards}`. Each card includes the flat spec, `candidateId`, `specRevision` and `change_options`. Each option carries its own revision. An alternate option also includes its exact display spec. |
+| `POST activities/cards` | Send `{activity}` to preview without saving. Returns `{suggestedTitle, cards}`. Each card includes the flat spec, `candidateId`, `specRevision` and `change_options`. Each option carries its own revision. Alternate options include the exact display spec, or `null` for map removal. |
 | `PUT activities/{id}` | Send `{activity}` with the matching UUID and summary fields only. Returns `{id}`. Repeating the same save returns the same receipt. Reusing the UUID for a different summary returns 409. |
 | `POST posts` | Send a client UUID in `id` and at least one of `caption`, `cards` or `attachmentId`. Send up to 12 distinct picks in display order. For suggested cards, include `setRevision` and send `{candidateId, option}`. For recorded cards, include the previewed `activity` and send `{candidateId, option, specRevision}` for the chosen option. The two kinds of pick can be interleaved. Send `original` for the unmodified card. Returns `{id, version}`. Retry with the same UUID. |
 | `GET / PATCH / DELETE posts/{id}` | GET returns `{post}`. PATCH takes `expectedVersion`. On an ordinary post send a caption or replacement selection. On a recording post, edit the caption, send `removeCardIds` to remove specific frozen cards, or send `cards: []` to clear the selection. Keep at least a caption, card or photo. It returns `{id, version}`. A revision conflict returns 409. DELETE returns 204. |
@@ -104,15 +111,65 @@ recording is disabled.
 
 | Field | Meaning |
 | --- | --- |
-| `id`, `kind` | Client UUID and one of `sauna`, `cold_plunge`, `lift`, `other`, `run`, or `walk`. Run and walk currently produce timed cards. |
+| `id`, `kind` | Client UUID and one of `sauna`, `cold_plunge`, `lift`, `other`, `run`, or `walk`. A run or walk without a route uses the timed card builder. |
 | `startedAt` | ISO timestamp with an offset or UTC designator. The card discloses only the day in the member’s game-profile time zone and the part of day (night before 5:00, morning, afternoon from 12:00, evening from 17:00), never the start time. |
 | `elapsedSec`, `movingSec`, `timerSec?` | Whole seconds, each positive and at most six hours. Elapsed runs from Start to Finish, pauses included. Moving time is the recording time with pauses cut out, at most the elapsed time. Cards show moving time, the same clock the phone's timer runs on. |
 | `heartRate?` | Summary with `avgBpm`, `lowBpm`, and `peakBpm`, ordered low to average to peak within 30–230 bpm. For preview and post, also send `perMinute`: one whole-number average per minute of moving time (within one of `ceil(movingSec / 60)`), or `null` for a minute without a reading. Omit the series on a private save. |
+| `route?` | Available only for `run` and `walk`. Preview and post accept the route below. On a private save, send the same summary fields and omit `paths`. |
 
-The minute array has at most 360 entries. Its length may differ by one from elapsed
-minutes rounded up. Each reading must lie within the summary envelope. Raw samples,
-fixes, routes and other extra fields are rejected. All recording JSON shares the
+The minute array has at most 360 entries. Each reading must lie within the
+summary envelope. Raw samples, GPS fixes and extra fields are rejected at every
+level. All recording JSON shares the
 32 KiB request limit. The client supplies presentation units via `X-Murph-Client-Units`.
+
+### Route recording
+
+`POST activities/cards` and `POST posts` accept the following closed object in `activity.route`.
+
+```ts
+{
+  distanceM: number,
+  climbM: number,
+  splits: { distanceM: number, seconds: number }[],
+  paths: string[]
+}
+```
+
+- `distanceM` is the phone's moving distance in metres, greater than zero and at most 100,000. `climbM` is from zero through 3,000 metres.
+- Send one to 100 splits in recording order. Full splits use one unit throughout, either 1,000 metres or 1,609.344 metres. Only the last may be shorter. Each duration is a positive whole number of seconds. Split distances must total within 1% of `distanceM`, and durations must total at most `movingSec + 1`.
+- Send one to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. Omit `route` when no shareable path remains.
+- Each path may cover at most `distanceM` plus the larger of 16 metres and 1% of `distanceM`. The diagonal of the bounding box across all paths must fit within `distanceM`. Average moving pace must be 150–1,200 seconds per kilometre for runs or 300–2,400 for walks, inclusive.
+
+The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`,
+`art: {key}`, and `chips: [distance, pace]` (two display strings). The frame covers
+three by two Web Mercator tiles. The art key `area:v1:{z}/{x}/{y}` identifies its
+northwest tile. Zoom 15 is the smallest geographic frame. Larger routes use a
+coarser zoom. A date-line crossing can have an east bound above 180 degrees so
+the frame stays continuous. Latitudes beyond the Mercator limit project to the
+outermost tile row. Use the native map when the area has no painting.
+
+The `activity_splits` card's `splits` chart contains `unit` (`mi` or `km`), a formatted
+summary `line`, and `splits: [{label, seconds, text, partial?}]`. Each row's
+`text` gives its duration. `fastest` is the zero-based index of the quickest
+full split, first on ties, or `null` when the only split is partial. Distance and
+pace in the summary use miles for `us` and `uk`, kilometres for `metric`.
+Climb uses feet for `us` and metres otherwise. Split labels retain the unit the phone
+used to cut the splits. For a single partial shorter than a kilometre, either unit
+could have been used, so its label uses the request units.
+
+`hide_numbers` keeps the route map with empty chips and removes the measurements
+from the title and subtitle. On the splits and heart-rate cards, the option
+replaces the numeric chart. To share a number-free set, select this option on
+each included card. Only the route card offers `hide_map`. Its change option
+carries `spec: null` and the SHA-256 revision of JSON `null`. Posting that
+option removes the entire card, including paths, frame and art key. Other picks
+retain their order. At least one remaining card, a caption or a photo is required.
+
+A private save accepts `route: {distanceM, climbM, splits}` with the same split
+pairs as the preview. The sealed row and Settings export retain only
+`{distanceM, climbM, splitSec}`, with one duration in seconds per split.
+
+### Publishing a recording
 
 A recorded candidate ID has the form `activity:<uuid>:<card-kind>`. Use the chosen
 option's SHA-256 revision when posting. If the rebuilt spec differs, the server returns
@@ -133,7 +190,11 @@ for their own posts. A cumulative distance card’s map chart may contain
 ## Rollout
 
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
-`MURPH_HEALTH_RECORD_MEMBER_IDS`. Deploy the Progress
+`MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
+`MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
+final route privacy transform before enabling this subset. After strict request
+parsing, a new route-bearing request from a member without route recording returns 404. An already committed
+post ID replays for its author after the recording flags turn off. Deploy the Progress
 media worker that accepts health-post envelopes and the Web server that
 purges them during account deletion before enabling uploads. Both capabilities
 must remain available as long as health photos exist.
