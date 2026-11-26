@@ -188,8 +188,8 @@ function plankClimb(seconds: number): Climb {
   const last = rungsPassed.at(-1);
   const next = rungs[rungsPassed.length];
   let subtitle = last
-    ? `your latest time milestone, ${last.name.replace(/^(The|A) /u, article => article.toLowerCase())}`
-    : "your time planked so far";
+    ? `latest time milestone, ${last.name.replace(/^(The|A) /u, article => article.toLowerCase())}`
+    : "time planked so far";
   if (next?.id === "sunlight-earth" && seconds >= next.seconds * 0.9) {
     subtitle = "nearly as long as sunlight takes to reach Earth";
   } else if (last?.id === "sunlight-earth") {
@@ -209,7 +209,7 @@ function skylineClimb(game: Game): Climb | null {
   const highest = landmarksPassed.reduce<(typeof landmarksPassed)[number] | null>(
     (best, row) => !best || row.height > best.height ? row : best, null);
   const place = highest && heightLandmarks.get(highest.id);
-  let subtitle = "your game total so far";
+  let subtitle = "game total so far";
   if (place) {
     const takesArticle = /(?:Sign|Building|Monument|Needle|Arch|[Tt]owers?|Matterhorn|Taj Mahal)$|^(?:Great Pyramid|Statue of Liberty)/u;
     const article = takesArticle.test(place.name) ? "the " : "";
@@ -264,7 +264,7 @@ function gameStreak(bestStreak: GameStreak, today: string): Candidate | null {
     card: {
       kind: "game_streak", id: "game_streak", filter: "Challenges",
       title: { number: formatNumber(days, 0), measure: days === 1 ? "day" : "days" },
-      subtitle: "posted in every game, your best run",
+      subtitle: "posted in every game, best run yet",
       source_note: `Game streak log · ${formatWinDate(start, today)} through ${formatWinDate(end, today)}`,
       chart: {
         type: "week_dots", days, start, end, missedOn,
