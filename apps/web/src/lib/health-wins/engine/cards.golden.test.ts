@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 
+import { encodePolyline } from "../../game/progress/route-geometry";
 import { generateHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
 import { buildRecordedCards } from "./recorded";
 import type { RecordedActivity } from "./types";
@@ -22,6 +23,8 @@ const chartsByKind = {
   sessions: ["sessions"],
   activity_heart_rate: ["heart_rate"],
   activity_time: ["duration"],
+  activity_route: ["route_map"],
+  activity_splits: ["splits"],
 } satisfies { [K in CardKind]: Extract<CardSpec, { kind: K }>["chart"]["type"][] };
 
 function syntheticInput(): HealthWinsInput {
@@ -98,7 +101,19 @@ it("exports one synthetic card of every rendered shape", () => {
   const timedCards = [recording, { ...recording, heartRate: {
     lowBpm: 71, avgBpm: 85, peakBpm: 109, perMinute: [79, null, 99],
   } }].flatMap(activity => buildRecordedCards(activity, context).candidates.map(candidate => candidate.variants[0].spec));
-  const cards = [...generateHealthWins(syntheticInput()), ...timedCards];
+  const walk: RecordedActivity = {
+    id: "238bba63-f944-4fe7-a508-295fe7789afa", kind: "walk",
+    startedAt: "2037-03-12T14:09:00Z", elapsedSec: 810, movingSec: 750,
+    route: {
+      distanceM: 1250, climbM: 16,
+      splits: [{ distanceM: 1000, seconds: 600 }, { distanceM: 250, seconds: 150 }],
+      // A synthetic grid in open ocean.
+      paths: [encodePolyline([[-140, 0.0002], [-139.997, 0.0002], [-139.997, 0.0012]])],
+    },
+  };
+  const routeCards = buildRecordedCards(walk, { day: "2037-03-12", hour: 14, units: "metric" })
+    .candidates.map(candidate => candidate.variants[0].spec);
+  const cards = [...generateHealthWins(syntheticInput()), ...timedCards, ...routeCards];
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }

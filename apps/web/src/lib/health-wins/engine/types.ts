@@ -5,8 +5,19 @@ import type { ActivityCharts } from "./activities";
 import type { DailyCharts } from "./daily";
 import type { LabCharts } from "./labs";
 import type { PercentileCharts } from "./percentiles";
+import type { RouteCharts } from "./route-cards";
 
 export type RecordedActivityKind = "sauna" | "cold_plunge" | "lift" | "other" | "run" | "walk";
+
+export interface RecordedRouteSummary {
+  distanceM: number;
+  climbM: number;
+  splits: { distanceM: number; seconds: number }[];
+}
+
+export interface RecordedRoute extends RecordedRouteSummary {
+  paths: string[];
+}
 
 export interface RecordedActivitySummary {
   id: string;
@@ -16,10 +27,12 @@ export interface RecordedActivitySummary {
   movingSec: number;
   timerSec?: number;
   heartRate?: { avgBpm: number; lowBpm: number; peakBpm: number };
+  route?: RecordedRouteSummary;
 }
 
 export interface RecordedActivity extends RecordedActivitySummary {
   heartRate?: NonNullable<RecordedActivitySummary["heartRate"]> & { perMinute?: (number | null)[] };
+  route?: RecordedRouteSummary & { paths?: string[] };
 }
 
 type MinuteReading = { minute: number; bpm: number };
@@ -145,7 +158,7 @@ export interface HealthWinsInput {
 }
 
 export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments";
-type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts;
+type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts & RouteCharts;
 export type CardKind = keyof Charts;
 
 type DetectedCard = {

@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
 import type { CardSpec } from "./engine";
 import { formatWinMonth } from "./engine/shared";
 
-type Option = "original" | "hide_numbers" | "hours";
+type Option = "original" | "hide_numbers" | "hide_map" | "hours";
 const labels: Record<Option, string> = {
   original: "Original card",
   hide_numbers: "Hide my numbers",
+  hide_map: "Hide the map",
   hours: "Show hours",
 };
 
@@ -67,14 +69,20 @@ export interface FrozenHealthCard {
 }
 
 interface Variant {
-  option: Option;
+  option: Exclude<Option, "hide_map">;
   specRevision: string;
   spec: FrozenHealthCard["spec"];
 }
 
+interface MapRemoval {
+  option: "hide_map";
+  specRevision: string;
+  spec: null;
+}
+
 export interface CachedHealthCandidate {
   id: string;
-  variants: Variant[];
+  variants: [Variant, ...(Variant | MapRemoval)[]];
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
@@ -84,7 +92,7 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
     const card = engineCard.kind === "cumulative" && distanceArtUrl
       ? { ...engineCard, id, chart: { ...engineCard.chart, art: { url: distanceArtUrl } } }
       : { ...engineCard, id };
-    const variants: Variant[] = [{ option: "original", specRevision: randomUUID(), spec: card }];
+    const variants: CachedHealthCandidate["variants"] = [{ option: "original", specRevision: randomUUID(), spec: card }];
     const converted = hoursCard(card);
     if (converted) variants.push({ option: "hours", specRevision: randomUUID(), spec: converted });
     variants.push({ option: "hide_numbers", specRevision: randomUUID(), spec: hidden(card) });
@@ -93,19 +101,27 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
-function recordedVariant(option: Option, spec: FrozenHealthCard["spec"]): Variant {
+function recordedSpecRevision(spec: FrozenHealthCard["spec"] | null): string {
   const canonical = JSON.stringify(spec, (_key, value: unknown) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
     return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
   });
-  return { option, spec, specRevision: createHash("sha256").update(canonical).digest("hex") };
+  return createHash("sha256").update(canonical).digest("hex");
 }
 
 export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): CachedHealthCandidate {
-  return { id: card.id, variants: [
-    recordedVariant("original", card),
-    recordedVariant("hide_numbers", hidden(card, hiddenTitle)),
-  ] };
+  const safe = hidden(card, hiddenTitle);
+  const withoutNumbers = card.kind === "activity_route"
+    ? { ...safe, kind: card.kind, subtitle: "shared without numbers", chart: {
+      type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art, chips: [],
+    } }
+    : card.kind === "activity_splits" ? { ...safe, subtitle: "shared without numbers" } : safe;
+  const variants: CachedHealthCandidate["variants"] = [
+    { option: "original", spec: card, specRevision: recordedSpecRevision(card) },
+    { option: "hide_numbers", spec: withoutNumbers, specRevision: recordedSpecRevision(withoutNumbers) },
+  ];
+  if (card.kind === "activity_route") variants.push({ option: "hide_map", spec: null, specRevision: recordedSpecRevision(null) });
+  return { id: card.id, variants };
 }
 
 export interface HealthCardSelection { candidateId: string; option: string; specRevision?: string }
@@ -118,6 +134,7 @@ function chooseVariant(candidate: CachedHealthCandidate, option: string) {
 
 export function previewHealthCandidate(candidate: CachedHealthCandidate, option = "original") {
   const { spec, specRevision } = chooseVariant(candidate, option);
+  if (spec === null) throw invalidGameRequest("This option removes the card.");
   return { ...spec, specRevision,
     change_options: candidate.variants.map(item => ({ id: item.option, label: labels[item.option] })),
     caption_tips: spec.share.caption_tips.length ? spec.share.caption_tips : ["What helped you get here?", "How did it feel?"] };
@@ -142,8 +159,16 @@ export function freezeHealthSelections(candidates: CachedHealthCandidate[], sele
   if (selections.length > 12 || new Set(selections.map(item => item.candidateId)).size !== selections.length) {
     throw invalidGameRequest("Choose up to twelve different cards.");
   }
-  return selections.map(({ candidateId, option }) => {
+  return selections.flatMap(({ candidateId, option }) => {
     const { spec, specRevision } = chooseVariant(findCandidate(candidates, candidateId), option);
-    return { id: candidateId, specRevision, spec };
+    return spec === null ? [] : [{ id: candidateId, specRevision, spec }];
   });
+}
+
+export function resolveRecordedSelection(candidates: readonly CachedHealthCandidate[], pick: HealthCardSelection): FrozenHealthCard | null {
+  const variant = candidates.find(card => card.id === pick.candidateId)?.variants.find(item => item.option === pick.option);
+  if (!variant || pick.specRevision !== variant.specRevision) throw hostedOnboardingError({
+    code: "HEALTH_ACTIVITY_CARD_CHANGED", httpStatus: 409, message: "Preview the activity again before posting.",
+  });
+  return variant.spec === null ? null : { id: pick.candidateId, specRevision: variant.specRevision, spec: variant.spec };
 }

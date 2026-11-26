@@ -8,7 +8,7 @@ import { invalidGameRequest } from "../game/http/errors";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { findVisibleHealthPost } from "./audience";
-import type { CachedHealthCandidate, FrozenHealthCard, HealthCardSelection } from "./card-options";
+import { type CachedHealthCandidate, type FrozenHealthCard, type HealthCardSelection, resolveRecordedSelection } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import type { RecordedActivity } from "./engine/types";
 import { assertHealthRecordEnabled } from "./flag";
@@ -43,12 +43,8 @@ async function resolvePostCards(auth: Auth, input: Content, candidates: readonly
       if (!frozen) throw invalidGameRequest("Choose a card from this set.");
       return frozen;
     }
-    const variant = candidates.find(card => card.id === pick.candidateId)?.variants.find(item => item.option === pick.option);
-    if (!variant || pick.specRevision !== variant.specRevision) throw hostedOnboardingError({
-      code: "HEALTH_ACTIVITY_CARD_CHANGED", httpStatus: 409, message: "Preview the activity again before posting.",
-    });
-    return { id: pick.candidateId, specRevision: variant.specRevision, spec: variant.spec };
-  });
+    return resolveRecordedSelection(candidates, pick);
+  }).filter(card => card !== null);
   return { cards, day: wins?.day };
 }
 
@@ -89,12 +85,12 @@ export async function createHealthPost(
       return replayPost(current, memberId);
     });
   }
-  if (!input.caption?.trim() && !input.cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
-  await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   // After the replay branch, so a committed post still returns its receipt if the flag is turned off.
-  if (input.activity) assertHealthRecordEnabled(memberId);
+  if (input.activity) assertHealthRecordEnabled(memberId, input.activity.route ? "route" : "timed");
+  await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
   const { cards, day } = await resolvePostCards(auth, input, recording?.candidates);
+  if (!input.caption?.trim() && !cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   const data = await sealPostContent(memberId, id, input.caption, cards);
   return db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);

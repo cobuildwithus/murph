@@ -915,5 +915,73 @@
       },
       "timerMinutes": 4
     }
+  },
+  {
+    "title": {
+      "number": "1.25 km",
+      "measure": "walk"
+    },
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:238bba63-f944-4fe7-a508-295fe7789afa:activity_route",
+    "kind": "activity_route",
+    "subtitle": "in 12:30, 10:00 a km",
+    "source_note": "Recorded on Mar 12, afternoon",
+    "chart": {
+      "type": "route_map",
+      "paths": [
+        "g@~vnuY?wQgE?"
+      ],
+      "frame": {
+        "west": -140.020751953125,
+        "south": 0,
+        "east": -139.98779296875,
+        "north": 0.021972655711432625
+      },
+      "art": {
+        "key": "area:v1:15/3639/16382"
+      },
+      "chips": [
+        "1.25 km",
+        "10:00 /km"
+      ]
+    }
+  },
+  {
+    "title": {
+      "number": "1.25 km",
+      "measure": "walk"
+    },
+    "filter": "Fitness",
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    },
+    "id": "activity:238bba63-f944-4fe7-a508-295fe7789afa:activity_splits",
+    "kind": "activity_splits",
+    "subtitle": "fastest km 10:00",
+    "source_note": "Recorded on Mar 12, afternoon. Splits by km.",
+    "chart": {
+      "type": "splits",
+      "unit": "km",
+      "line": "12:30 · 10:00 a km · 16 m up",
+      "splits": [
+        {
+          "label": "Km 1",
+          "seconds": 600,
+          "text": "10:00"
+        },
+        {
+          "label": "0.25 km",
+          "seconds": 150,
+          "text": "2:30",
+          "partial": true
+        }
+      ],
+      "fastest": 0
+    }
   }
 ]

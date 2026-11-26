@@ -29,16 +29,17 @@ is in; the media route itself stays post-to-unlock.
 ## Recorded Health wins
 
 Raw heart-rate samples (1 Hz) and GPS fixes stay on the phone. The recording API
-accepts up to 360 per-minute heart-rate averages for stateless preview and
-explicit card publication. The only durable server copy of that display series
-is inside a selected, sealed health post card. A hidden-number card omits the
-series and its extrema. The private activity row stores only the sealed summary.
-Keep bodies and decrypted data out of logs and telemetry.
+accepts up to 360 per-minute heart-rate averages and, on a route-enabled run or
+walk, trimmed route paths for stateless preview and explicit card publication.
+Only a selected, sealed health post card may persist those paths or that series.
+The private activity row and its Settings export hold the summary alone. Keep
+request bodies, map coordinates, area keys and decrypted data out of logs and telemetry.
 
-The same card-only storage rule applies to trimmed, simplified paths when route
-sharing ships. The phone must enforce end trimming and its optional private zone
-on the final path. A server distance or size check establishes plausibility only.
-Timed recording rejects route data.
+The phone owns route privacy. It trims both ends and enforces any private zone
+on every final segment after simplification, rounding and point capping. Web
+checks the shape, grid, size and plausibility of the submitted route.
+**Hide my numbers** removes measurements and keeps the map. **Hide the map**
+omits the entire route card, including its paths, frame and public-area key.
 
 ## Typed-word game ideas
 

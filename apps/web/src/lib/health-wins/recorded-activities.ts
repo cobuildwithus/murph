@@ -72,7 +72,7 @@ async function sealSummary(memberId: string, day: string, activity: RecordedActi
 async function assertSameSummary(prior: SealedSummary & { deletedAt: Date | null }, memberId: string, activity: RecordedActivity) {
   if (prior.deletedAt || prior.memberId !== memberId) throw conflict();
   const [saved] = await openRecordedActivitySummaries([prior]);
-  if (JSON.stringify(recordedActivitySummary(saved)) !== JSON.stringify(recordedActivitySummary(activity))) throw conflict();
+  if (JSON.stringify(saved) !== JSON.stringify(recordedActivitySummary(activity))) throw conflict();
 }
 
 /** Bind the posted cards to the same immutable summary as a previous private save. */

@@ -8,5 +8,6 @@ import { jsonOk } from "@/src/lib/hosted-onboarding/http";
 export const POST = withHealthRoute(async (request, auth) => {
   assertHealthRecordEnabled(auth.member.id);
   const { activity } = await readHealthBody(request, previewActivityBody);
+  if (activity.route) assertHealthRecordEnabled(auth.member.id, "route");
   return jsonOk(await previewRecordedActivity(auth, activity, clientUnits(request)));
 });

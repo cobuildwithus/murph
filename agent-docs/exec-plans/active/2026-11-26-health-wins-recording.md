@@ -67,7 +67,9 @@ GPS capture, map rendering, splits and painting have separate rollout gates.
    binding, mixed card order, edits, disabled capabilities, audience, export and deletion.
    Pre-recording clients can read frozen titles and subtitles. New clients need the
    capability before issuing writes. Keep the export-capable server as the rollback
-   floor while recordings exist.
+   floor while recordings exist. Once any saved summary carries a route, route-capable
+   Web is the floor: older Web parses sealed summaries strictly and would fail Settings
+   export, same-day previews and save replays for that member.
 4. Deliver the companion recorder, protected draft recovery and timed composer separately.
    Reuse the query-owned session reconciliation for saved summaries. Introduce the GPS
    capability only after server route validation and the client's privacy transform are
@@ -91,3 +93,13 @@ for a withdrawn member without a retained vault replica. The activity migration 
 to a fresh database and account deletion removed its saved rows. The focused Web suites,
 typecheck and Prisma validation passed. The companion rollout and session projection
 work remain open.
+
+## GPS Web handoff
+
+Route-enabled members can preview and publish a run or walk map, splits and
+available heart rate. The Companion API section of the product spec defines
+the submit, private-save and card-option shapes for iOS. A local PostgreSQL
+run verified the partner's number-free map, a private save followed by a
+splits-only post, a stale preview conflict and post replay after disabling
+route recording. The server emits a public tile key for the map. Companion
+capture and rendering, painting and session counting have separate owners.

@@ -13,12 +13,13 @@ export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env
 }
 
 export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {
-  const allowed = (env.MURPH_HEALTH_RECORD_MEMBER_IDS ?? "").split(",").some(entry => entry.trim() === memberId);
-  return allowed && isHealthFeedEnabled(memberId, env) ? { timed: true, route: false } as const : undefined;
+  const includesMember = (ids: string | undefined) => ids?.split(",").some(entry => entry.trim() === memberId) ?? false;
+  if (!includesMember(env.MURPH_HEALTH_RECORD_MEMBER_IDS) || !isHealthFeedEnabled(memberId, env)) return undefined;
+  return { timed: true, route: includesMember(env.MURPH_HEALTH_ROUTE_MEMBER_IDS) } as const;
 }
 
-export function assertHealthRecordEnabled(memberId: string): void {
-  if (!healthRecordCapability(memberId)) throw gameNotFound();
+export function assertHealthRecordEnabled(memberId: string, capability: "timed" | "route" = "timed"): void {
+  if (!healthRecordCapability(memberId)?.[capability]) throw gameNotFound();
 }
 
 export function assertHealthFeedEnabled(memberId: string): void {

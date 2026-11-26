@@ -2,9 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
+import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import { getPrisma } from "@/src/lib/prisma";
 import { openHealthTexts } from "@/src/lib/health-wins/crypto";
-import { buildRecordedCards, recordedActivitySummary } from "@/src/lib/health-wins/engine/recorded";
+import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
 import { openRecordedActivitySummaries } from "@/src/lib/health-wins/recorded-summary";
 import { previewRecordedActivity, saveRecordedActivity } from "@/src/lib/health-wins/recorded-activities";
 import { uploadHealthPhoto } from "@/src/lib/health-wins/media";
@@ -157,6 +158,55 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(state.resolve).not.toHaveBeenCalled();
   });
 
+  it("binds the private route summary and freezes only the cards retained after hiding the map", async () => {
+    const owner = await member(), db = getPrisma(), memberId = owner.member.id;
+    await db.gameProfile.create({ data: { memberId, timeZone: "UTC", firstNameEncrypted: "fixture-name" } });
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", memberId);
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", memberId);
+    const summary = {
+      id: randomUUID(), kind: "run" as const, startedAt: "2036-01-15T17:30:00.000Z", elapsedSec: 660, movingSec: 635,
+      route: { distanceM: 2000, climbM: 11, splits: [{ distanceM: 1000, seconds: 310 }, { distanceM: 1000, seconds: 325 }] },
+    };
+    const paths = [encodePolyline([[-133, -38], [-133.001, -38.001]])];
+    const activity = { ...summary, route: { ...summary.route, paths } };
+    const preview = await previewRecordedActivity(owner, activity, "metric");
+    const map = preview.cards.find(card => card.kind === "activity_route")!;
+    const splits = preview.cards.find(card => card.kind === "activity_splits")!;
+    const removal = map.change_options.find(option => option.id === "hide_map")!;
+    const hideMap = { candidateId: map.candidateId, option: removal.id, specRevision: removal.specRevision };
+    const showSplits = { candidateId: splits.candidateId, option: "original", specRevision: splits.specRevision };
+    const id = randomUUID();
+    const body = { id, activity, cards: [hideMap, showSplits] };
+
+    await saveRecordedActivity(owner, summary);
+    const saved = await db.healthActivity.findUniqueOrThrow({ where: { id: activity.id } });
+    expect(await openRecordedActivitySummaries([saved])).toEqual([
+      { ...summary, route: { distanceM: 2000, climbM: 11, splitSec: [310, 325] } },
+    ]);
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");
+    await expect(createHealthPost(owner, body, "metric")).rejects.toMatchObject({ httpStatus: 404 });
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", memberId);
+    const stalePick = { ...hideMap, specRevision: map.specRevision };
+    await expect(createHealthPost(owner, { ...body, cards: [stalePick, showSplits] }, "metric"))
+      .rejects.toMatchObject({ httpStatus: 409, code: "HEALTH_ACTIVITY_CARD_CHANGED" });
+    await expect(createHealthPost(owner, { ...body, cards: [hideMap] }, "metric")).rejects.toMatchObject({ httpStatus: 400 });
+    expect(await db.healthPost.count({ where: { id } })).toBe(0);
+    expect(await createHealthPost(owner, body, "metric")).toEqual({ id, version: 1 });
+
+    const post = await db.healthPost.findUniqueOrThrow({ where: { id } });
+    expect(post.cardsEncrypted).toHaveLength(1);
+    const [card] = await openHealthTexts([{ memberId, table: "health_post", rowId: id, field: "card:0", value: post.cardsEncrypted[0]! }]);
+    expect(JSON.parse(card!)).toMatchObject({ id: splits.candidateId, spec: { kind: "activity_splits" } });
+    expect(card).not.toContain("paths");
+    expect(card).not.toContain("area:v1:");
+    expect(await db.healthActivity.findUniqueOrThrow({ where: { id: activity.id } }))
+      .toMatchObject({ summaryEncrypted: saved.summaryEncrypted, postId: id });
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");
+    expect(await createHealthPost(owner, { ...body, cards: [stalePick] }, "us")).toEqual({ id, version: 1 });
+  });
+
   it("applies one competing edit and permits a consent-withdrawn owner to retire their post and its children", async () => {
     const owner = await member(), friend = await member(), db = getPrisma();
     const post = await createHealthPost(owner, { id: randomUUID(), caption: "Fixture words" });
@@ -251,8 +301,9 @@ describe.skipIf(!enabled)("health write transactions", () => {
       await db.gameProfile.create({ data: { memberId, firstNameEncrypted: "fixture-label", timeZone: "America/Chicago" } });
     }
     const first = { id: randomUUID(), kind: "walk", startedAt: "2034-06-03T02:36:00.000Z", elapsedSec: 510, movingSec: 480 } as const;
-    const activity = { id: randomUUID(), kind: "lift" as const, startedAt: "2034-06-03T03:11:00.000Z", elapsedSec: 180, movingSec: 165,
-      heartRate: { avgBpm: 94, lowBpm: 69, peakBpm: 137, perMinute: [77, null, 104] } };
+    const summary = { id: randomUUID(), kind: "lift" as const, startedAt: "2034-06-03T03:11:00.000Z", elapsedSec: 180, movingSec: 165,
+      heartRate: { avgBpm: 94, lowBpm: 69, peakBpm: 137 } };
+    const activity = { ...summary, heartRate: { ...summary.heartRate, perMinute: [77, null, 104] } };
     const before = await previewRecordedActivity(owner, activity, "us");
     expect(before.cards).toHaveLength(1);
     expect(await db.healthActivity.count({ where: { memberId: owner.member.id } })).toBe(0);
@@ -263,7 +314,6 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(after.cards).toEqual(before.cards);
     expect(await db.healthActivity.count({ where: { memberId: owner.member.id } })).toBe(1);
 
-    const summary = recordedActivitySummary(activity);
     const receipt = await saveRecordedActivity(owner, summary);
     expect(receipt).toEqual({ id: activity.id });
     const row = await db.healthActivity.findUniqueOrThrow({ where: receipt });

@@ -17,6 +17,7 @@ import { DELETE as unhide, PUT as hide } from "../app/api/game/v1/health/hides/[
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
 import * as board from "../src/lib/game/board";
 import * as gameCrypto from "../src/lib/game/crypto";
+import { encodePolyline } from "../src/lib/game/progress/route-geometry";
 import * as crypto from "../src/lib/health-wins/crypto";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { getPrisma } from "../src/lib/prisma";
@@ -159,6 +160,43 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await read()).toEqual({ people: [{ memberId: commenter.id, firstName: null, avatarUrl: null }] });
     expect((await unhide(viewer.request("hides/" + commenter.id, "DELETE"), memberContext(commenter.id))).status).toBe(200);
     expect(await read()).toEqual({ people: [] });
+  });
+
+  it("advertises route recording to the author and shares the number-free map with a partner", async () => {
+    const author = await person(), partner = await person();
+    await pair(author, partner);
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", [author.id, partner.id].join(","));
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", author.id);
+    const readFeed = async (viewer: Person) => (await feed(viewer.request("feed"))).json();
+    expect((await readFeed(author)).record).toEqual({ timed: true, route: true });
+    expect((await readFeed(partner)).record).toEqual({ timed: true, route: false });
+
+    const paths = [encodePolyline([[-141.2, -32.4], [-141.199, -32.4]])];
+    const activity = {
+      id: randomUUID(), kind: "walk", startedAt: "2032-04-12T19:18:00Z", movingSec: 622, elapsedSec: 637,
+      route: { distanceM: 1000, climbM: 6, splits: [{ distanceM: 1000, seconds: 622 }], paths },
+    };
+    const preview = await previewActivity(author.request("activities/cards", "POST", { activity }));
+    expect(preview.status).toBe(200);
+    const { cards } = await preview.json();
+    const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
+    const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
+    const id = randomUUID();
+    const pick = { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision };
+    const publish = (specRevision = pick.specRevision) =>
+      post(author.request("posts", "POST", { id, activity, cards: [{ ...pick, specRevision }] }));
+    const stale = await publish("a".repeat(64));
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe("HEALTH_ACTIVITY_CARD_CHANGED");
+    const receipt = await publish();
+    expect(receipt.status).toBe(200);
+    vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");
+    expect((await previewActivity(author.request("activities/cards", "POST", { activity }))).status).toBe(404);
+    expect(await (await publish()).json()).toEqual(await receipt.json());
+    const shared = await readPost(partner, id);
+    expect(shared.status).toBe(200);
+    expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision, spec: choice.spec }]);
+    expect(choice.spec.chart).toEqual({ ...map.chart, paths, chips: [] });
   });
 
   it("shows a frozen recorded chart to existing game partners and closes it after consent withdrawal", async () => {

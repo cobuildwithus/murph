@@ -15,6 +15,14 @@ const card = z.strictObject({ candidateId, option, specRevision: z.union([uuid, 
 const bpm = z.number().min(30).max(230);
 const seconds = z.number().int().nonnegative().max(6 * 60 * 60);
 const heartRateSummary = z.strictObject({ avgBpm: bpm, lowBpm: bpm, peakBpm: bpm });
+const routeTotals = z.strictObject({
+  distanceM: z.number().positive().max(100_000),
+  climbM: z.number().nonnegative().max(3000),
+});
+const splitSeconds = z.number().int().positive();
+const routeSummary = routeTotals.extend({
+  splits: z.array(z.strictObject({ distanceM: z.number().positive(), seconds: splitSeconds })).min(1).max(100),
+});
 const activitySummary = z.strictObject({
   id: uuid,
   kind: z.enum(["sauna", "cold_plunge", "lift", "other", "run", "walk"]),
@@ -23,9 +31,14 @@ const activitySummary = z.strictObject({
   movingSec: seconds,
   timerSec: seconds.positive().optional(),
   heartRate: heartRateSummary.optional(),
+  route: routeSummary.optional(),
 });
 const activityWithDisplay = activitySummary.extend({
   heartRate: heartRateSummary.extend({ perMinute: z.array(bpm.int().nullable()).max(360) }).optional(),
+  route: routeSummary.extend({ paths: z.array(z.string().min(1)).max(8) }).optional(),
+});
+export const sealedActivitySummary = activitySummary.extend({
+  route: routeTotals.extend({ splitSec: z.array(splitSeconds).min(1).max(100) }).optional(),
 });
 
 export const previewActivityBody = z.strictObject({ activity: activityWithDisplay });

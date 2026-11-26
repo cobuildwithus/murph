@@ -428,11 +428,14 @@ describe("weekly game routes", () => {
       const read = async () => (await routes.home.GET(new Request(`${BASE}/home`))).json();
       vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "synthetic-other");
       vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", initial.me.memberId);
+      vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");
       const disabled = await read();
       expect(disabled).not.toHaveProperty("flags");
       expect(disabled).not.toHaveProperty("record");
       vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", `synthetic-other, ${initial.me.memberId}`);
       expect(await read()).toMatchObject({ flags: { health_feed: true }, record: { timed: true, route: false } });
+      vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", initial.me.memberId);
+      expect((await read()).record).toEqual({ timed: true, route: true });
       vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", "synthetic-other");
       const feedOnly = await read();
       expect(feedOnly.flags.health_feed).toBe(true);
