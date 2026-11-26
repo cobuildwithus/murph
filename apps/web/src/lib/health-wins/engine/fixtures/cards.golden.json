@@ -1,0 +1,867 @@
+[
+  {
+    "id": "trend_change:sleep_total_min:2036-11",
+    "kind": "trend_change",
+    "filter": "Sleep",
+    "title": {
+      "number": "+57 min",
+      "measure": "sleep"
+    },
+    "subtitle": "a night, vs your usual",
+    "source_note": "16 tracked days this month. Your usual is the median of the previous three monthly averages.",
+    "chart": {
+      "type": "trend",
+      "unit": "min",
+      "series": [
+        {
+          "month": "2036-08",
+          "days": 16,
+          "value": 433
+        },
+        {
+          "month": "2036-09",
+          "days": 16,
+          "value": 433
+        },
+        {
+          "month": "2036-10",
+          "days": 16,
+          "value": 433
+        },
+        {
+          "month": "2036-11",
+          "days": 16,
+          "value": 489.6875
+        }
+      ],
+      "baseline": 433,
+      "delta": 56.6875,
+      "pills": [
+        "Usual 7h 13m",
+        "Nov 8h 10m"
+      ]
+    },
+    "theme": "sleep",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "best_month:floors:2036-11",
+    "kind": "best_month",
+    "filter": "Fitness",
+    "title": {
+      "number": "14",
+      "measure": "floors"
+    },
+    "subtitle": "November, your best month this year",
+    "source_note": "16 tracked days this month so far. Compared across 6 qualifying monthly averages.",
+    "chart": {
+      "type": "monthly_bars",
+      "unit": "floors",
+      "series": [
+        {
+          "month": "2036-06",
+          "days": 16,
+          "value": 9
+        },
+        {
+          "month": "2036-07",
+          "days": 16,
+          "value": 10
+        },
+        {
+          "month": "2036-08",
+          "days": 16,
+          "value": 11
+        },
+        {
+          "month": "2036-09",
+          "days": 16,
+          "value": 12
+        },
+        {
+          "month": "2036-10",
+          "days": 16,
+          "value": 13
+        },
+        {
+          "month": "2036-11",
+          "days": 16,
+          "value": 14
+        }
+      ],
+      "highlight": "2036-11"
+    },
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "personal_record:steps:20360923",
+    "kind": "personal_record",
+    "filter": "Fitness",
+    "title": {
+      "number": "11,580",
+      "measure": "steps"
+    },
+    "subtitle": "on Sep 23, your most this year",
+    "source_note": "Recorded on Sep 23. Based on 2 tracked days.",
+    "chart": {
+      "type": "record",
+      "unit": "steps",
+      "series": [
+        {
+          "date": "Sep 23",
+          "value": 11580
+        },
+        {
+          "date": "Nov 6",
+          "value": 7300
+        }
+      ],
+      "highlight": {
+        "date": "Sep 23",
+        "value": 11580,
+        "label": "Sep 23"
+      },
+      "pills": [
+        "Sep 23"
+      ]
+    },
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "lab-change-ldl-20361106",
+    "kind": "lab_change",
+    "filter": "Labs",
+    "title": {
+      "number": "−17 mg/dL",
+      "measure": "LDL"
+    },
+    "subtitle": "compared with the median of 2 prior draws",
+    "source_note": "Latest draw on Nov 6. Lab draws in mg/dL.",
+    "chart": {
+      "type": "lab_trend",
+      "unit": "mg/dL",
+      "baseline": {
+        "value": 123,
+        "draws": 2
+      },
+      "latest": {
+        "date": "Nov 6",
+        "value": 106
+      }
+    },
+    "theme": "labs",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "percentile-rhr_bpm-20361116",
+    "kind": "percentile",
+    "filter": "Heart",
+    "title": {
+      "number": "Top 17%",
+      "measure": "RHR"
+    },
+    "subtitle": "for women in their 30s",
+    "source_note": "Mean of 12 recorded days in the 14 days through Nov 18. Synthetic resting heart rate reference",
+    "chart": {
+      "type": "percentile",
+      "value": 54,
+      "unit": "bpm",
+      "group": "Women 30 to 39",
+      "cuts": [
+        {
+          "percentile": 10,
+          "value": 51
+        },
+        {
+          "percentile": 50,
+          "value": 63
+        },
+        {
+          "percentile": 90,
+          "value": 75
+        }
+      ],
+      "topPercent": 17,
+      "lowerIsBetter": true
+    },
+    "theme": "heart",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "threshold_count:sleep_total_min:2036-11",
+    "kind": "threshold_count",
+    "filter": "Sleep",
+    "title": {
+      "number": "15 of 16 nights",
+      "measure": "8+ hours"
+    },
+    "subtitle": "in November so far",
+    "source_note": "Based on 16 tracked nights.",
+    "chart": {
+      "type": "bars",
+      "unit": "min",
+      "threshold": 480,
+      "series": [
+        {
+          "date": "Nov 1",
+          "value": 455,
+          "passing": false
+        },
+        {
+          "date": "Nov 2",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 3",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 4",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 5",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 6",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 7",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 8",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 9",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 10",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 11",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 12",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 13",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 14",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 15",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 16",
+          "value": 492,
+          "passing": true
+        }
+      ],
+      "pills": [
+        "8 hours"
+      ]
+    },
+    "theme": "sleep",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "streak:sleep_total_min:20361116",
+    "kind": "streak",
+    "filter": "Sleep",
+    "title": {
+      "number": "15 nights",
+      "measure": "8+ hours"
+    },
+    "subtitle": "in a row, Nov 2 to 16",
+    "source_note": "Longest recorded run in the last 90 days, ending Nov 16.",
+    "chart": {
+      "type": "bars",
+      "unit": "min",
+      "threshold": 480,
+      "series": [
+        {
+          "date": "Sep 1",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 2",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 3",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 4",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 5",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 6",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 7",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 8",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 9",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 10",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 11",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 12",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 13",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 14",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Sep 15",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Sep 16",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 1",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 2",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 3",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 4",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 5",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 6",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 7",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 8",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 9",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 10",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 11",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 12",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 13",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 14",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Oct 15",
+          "value": 425,
+          "passing": false
+        },
+        {
+          "date": "Oct 16",
+          "value": 441,
+          "passing": false
+        },
+        {
+          "date": "Nov 1",
+          "value": 455,
+          "passing": false
+        },
+        {
+          "date": "Nov 2",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 3",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 4",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 5",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 6",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 7",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 8",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 9",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 10",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 11",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 12",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 13",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 14",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 15",
+          "value": 492,
+          "passing": true
+        },
+        {
+          "date": "Nov 16",
+          "value": 492,
+          "passing": true
+        }
+      ],
+      "pills": [
+        "8 hours"
+      ],
+      "highlight": {
+        "start": "Nov 2",
+        "end": "Nov 16"
+      }
+    },
+    "theme": "sleep",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "game_climb",
+    "id": "game_climb:planks",
+    "filter": "Challenges",
+    "title": {
+      "number": "14 sec",
+      "measure": "planked"
+    },
+    "subtitle": "your latest time milestone, Wright brothers",
+    "chart": {
+      "type": "ladder",
+      "exercise": "planks",
+      "total": 14,
+      "unit": "seconds",
+      "rungsPassed": [
+        {
+          "id": "bull-ride",
+          "name": "A full bull ride",
+          "seconds": 8
+        },
+        {
+          "id": "wright-first-flight",
+          "name": "Wright brothers",
+          "seconds": 12
+        }
+      ],
+      "next": {
+        "id": "paper-plane",
+        "name": "The paper plane record",
+        "seconds": 31.2,
+        "toGo": 17.2
+      }
+    },
+    "source_note": "Game totals as of Nov 18",
+    "theme": "challenges",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "game_climb",
+    "id": "game_climb:squats",
+    "filter": "Challenges",
+    "title": {
+      "number": "74",
+      "measure": "squats"
+    },
+    "subtitle": "enough to climb the Hollywood Sign",
+    "chart": {
+      "type": "skyline",
+      "exercise": "squats",
+      "unit": "reps",
+      "total": 74,
+      "landmarksPassed": [
+        {
+          "id": "hollywood-sign",
+          "name": "Hollywood Sign",
+          "height": 45,
+          "heightUnit": "ft"
+        }
+      ],
+      "next": {
+        "id": "christ-the-redeemer",
+        "name": "Christ the Redeemer",
+        "height": 125,
+        "heightUnit": "ft",
+        "toGo": 51
+      }
+    },
+    "source_note": "Game totals as of Nov 18",
+    "theme": "challenges",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "sessions",
+    "id": "sessions:walk:2036-11",
+    "filter": "Fitness",
+    "title": {
+      "number": "3 walks",
+      "measure": "in November"
+    },
+    "subtitle": "1h 17m of walking, the longest 35 min",
+    "source_note": "Session log · Nov 1 through Nov 18",
+    "chart": {
+      "type": "sessions",
+      "sessionType": "walk",
+      "totalMinutes": 77,
+      "series": [
+        {
+          "date": "Nov 2",
+          "minutes": 18
+        },
+        {
+          "date": "Nov 8",
+          "minutes": 24
+        },
+        {
+          "date": "Nov 14",
+          "minutes": 35
+        }
+      ]
+    },
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "game_streak",
+    "id": "game_streak",
+    "filter": "Challenges",
+    "title": {
+      "number": "3",
+      "measure": "days"
+    },
+    "subtitle": "posted in every game, your best run",
+    "source_note": "Game streak log · Nov 7 through Nov 11",
+    "chart": {
+      "type": "week_dots",
+      "days": 3,
+      "start": "Nov 7",
+      "end": "Nov 11",
+      "missedOn": "Nov 12",
+      "calendar": [
+        {
+          "date": "Nov 3",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 4",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 5",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 6",
+          "state": "missed"
+        },
+        {
+          "date": "Nov 7",
+          "state": "posted"
+        },
+        {
+          "date": "Nov 8",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 9",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 10",
+          "state": "posted"
+        },
+        {
+          "date": "Nov 11",
+          "state": "posted"
+        },
+        {
+          "date": "Nov 12",
+          "state": "missed"
+        },
+        {
+          "date": "Nov 13",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 14",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 15",
+          "state": "no_game"
+        },
+        {
+          "date": "Nov 16",
+          "state": "no_game"
+        }
+      ]
+    },
+    "theme": "challenges",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "kind": "experiment_result",
+    "id": "experiment_result:pencil-puzzles:20361008:sleep_score",
+    "filter": "Experiments",
+    "title": {
+      "number": "Pencil puzzles",
+      "measure": "before dinner"
+    },
+    "subtitle": "Sleep score was higher during the experiment. 6 of 7 logged.",
+    "source_note": "Experiment log · Oct 1 through Oct 14",
+    "chart": {
+      "type": "two_bars",
+      "barWidth": "thin",
+      "metric": "sleep_score",
+      "unit": "points",
+      "expectedDirection": "increase",
+      "adherence": {
+        "done": 6,
+        "target": 7
+      },
+      "series": [
+        {
+          "label": "Before",
+          "start": "Oct 1",
+          "end": "Oct 7",
+          "mean": 74
+        },
+        {
+          "label": "During",
+          "start": "Oct 8",
+          "end": "Oct 14",
+          "mean": 77.5
+        }
+      ]
+    },
+    "theme": "experiments",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "cumulative:distance_km:2036",
+    "kind": "cumulative",
+    "filter": "Fitness",
+    "title": {
+      "number": "7",
+      "measure": "miles on foot"
+    },
+    "subtitle": "walking and running, this year",
+    "source_note": "Daily distance across 2 tracked days, using one provider per day.",
+    "chart": {
+      "type": "map",
+      "totalMiles": 6.710808876163207,
+      "days": 2,
+      "series": [
+        {
+          "date": "Nov 6",
+          "miles": 3.3554044380816035
+        },
+        {
+          "date": "Nov 9",
+          "miles": 3.3554044380816035
+        }
+      ]
+    },
+    "theme": "fitness",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "lab-range-glucose-20351218",
+    "kind": "lab_range",
+    "filter": "Labs",
+    "title": {
+      "number": "93 mg/dL",
+      "measure": "glucose"
+    },
+    "subtitle": "within 72–98 mg/dL",
+    "source_note": "Reporting laboratory reference range. Draw on Dec 18, 2035.",
+    "chart": {
+      "type": "gauge",
+      "value": 93,
+      "unit": "mg/dL",
+      "range": {
+        "low": {
+          "value": 72,
+          "inclusive": true
+        },
+        "high": {
+          "value": 98,
+          "inclusive": true
+        },
+        "source": "Reporting laboratory reference range"
+      },
+      "date": "Dec 18, 2035"
+    },
+    "theme": "labs",
+    "share": {
+      "caption_tips": []
+    }
+  }
+]

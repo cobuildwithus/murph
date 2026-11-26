@@ -1,8 +1,11 @@
+import type { ProjectedActivitySession } from "./activity-sessions.ts";
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
+  BloodTestFastingStatus,
   ExperimentOutcome,
   MemoryDemographics,
   CompanionMealsProjection,
+  TestResultStatus,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -126,6 +129,9 @@ export interface BrowserVaultLabResultRow {
   biomarkerKey: string | null;
   comparator: MetricComparator | null;
   date: string;
+  /** Opaque identity shared by results from one canonical test. Legacy rows have no draw identity. */
+  drawId: string | null;
+  fastingStatus: BloodTestFastingStatus;
   flag: string | null;
   id: string;
   labName: string | null;
@@ -133,6 +139,7 @@ export interface BrowserVaultLabResultRow {
   normalizedUnit: string | null;
   normalizedValue: number | null;
   observedAt: string;
+  parentResultStatus: TestResultStatus;
   referenceRange: BrowserVaultLabResultReferenceRange | null;
   rowSchema: "murph.browser-vault.lab-result-row.v1";
   sourceLabel: string | null;
@@ -267,6 +274,8 @@ export interface BrowserVaultReplica {
   meals?: CompanionMealsProjection;
   /** Absent on replicas built before run days shipped: unknown, never zero. */
   runs?: CompanionRunsProjection;
+  /** Completed sessions after reconciling mirrored workout sources. Absent in older replicas. */
+  activitySessions?: ProjectedActivitySession[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -293,6 +302,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "activitySessions"
   | "runs"
   | "schema"
   | "searchRows"

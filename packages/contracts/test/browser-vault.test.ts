@@ -9,8 +9,8 @@ import {
   isBrowserVaultMetricBucketId,
 } from "../src/browser-vault.ts";
 
-test("browser vault generation rebuilds replicas with height and weight of any age", () => {
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 19);
+test("browser vault generation rebuilds replicas with lab draw context", () => {
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 20);
 });
 
 test("browser vault owns one fixed 32-bucket lowercase hexadecimal namespace", () => {

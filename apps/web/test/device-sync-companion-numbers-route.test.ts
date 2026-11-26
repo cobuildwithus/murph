@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CloudflareHostedControlBrowserVaultReplicaNotFoundError } from "@murphai/cloudflare-hosted-control/client";
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { normalizeMetricValue, type MetricPoint } from "@murphai/health-metrics";
 import { createBrowserVaultMetricSelectionRows } from "@murphai/query/browser-replica";
@@ -33,7 +34,7 @@ import { readCompanionHealthSeries, readSavedCompanionBody } from "../src/lib/de
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
-  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: 19,
+  byteLength: 128, dataVersion: "d".repeat(64), generatedAt: savedAt, generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   keyId: "browser-vault-replica:d", objectKey: "users/browser-vault-replicas/opaque/replica.json",
   replicaSchema: "murph.browser-vault-replica", runtimeRootKeyId: "udrk:runtime:test-root",
   schema: "murph.hosted-browser-vault-replica-ref.v1", sourceBundleHash: "a".repeat(64),
@@ -68,7 +69,7 @@ function fixture(metricRows?: BrowserVaultMetricRow[]): BrowserVaultReplica {
   return {
     displayName: "Ava",
     assistantSummary: { highlights: [], latestDate: through }, entities: [],
-    generatedAt: savedAt, generation: 19, labResultRows: [],
+    generatedAt: savedAt, generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION, labResultRows: [],
     meals: { schemaVersion: 1, timeZone: "America/New_York", days: [] },
     metricGoalProgressRows: [], metricSelectionRows: [],
     metricRows: metricRows ?? [

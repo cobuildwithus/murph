@@ -80,7 +80,7 @@ export function requireProgressPicUpload(envelope: string, hash: string): Sealed
   if (!/^[a-f0-9]{64}$/u.test(hash)) throw new ContractValidationError("Sealed media hash is invalid.");
   if (new TextEncoder().encode(envelope).length > 3 * 1024 * 1024) throw new RequestBodyTooLargeError(3 * 1024 * 1024, "Sealed media is too large.");
   const parsed = parseHostedSecureBoxEnvelope(JSON.parse(envelope));
-  if (parsed.lane !== "hosted-member-private-field" || parsed.scope !== "game-progress") throw new ContractValidationError("Sealed media scope is invalid.");
+  if (parsed.lane !== "hosted-member-private-field" || (parsed.scope !== "game-progress" && parsed.scope !== "health-post")) throw new ContractValidationError("Sealed media scope is invalid.");
   return { envelope: JSON.stringify(parsed), hash };
 }
 

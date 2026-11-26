@@ -118,3 +118,25 @@ test("Running adds a timed logged run that is separate from the day's watch runs
   delete log.attributes.workout;
   assert.deepEqual((await runDays([watch, log])).runs?.days, [{ date, km: 5 }]);
 });
+
+test("completed session minutes survive the core round trip and mirrored imports count once", async () => {
+  const date = "2026-11-15";
+  const duplicate = { dataOrigin: { aggregatorProvider: "junction", originConfidence: "high",
+    sourceInstanceId: "watch-copy", sourceProviderSlug: "garmin", sourceType: "watch", version: 1 } };
+  const replica = await runDays([
+    watchRun("evt_course", date, "10", 6.8), watchRun("evt_import", date, "10", 6.8, "junction", duplicate),
+    loggedRun("evt_indoor", "2026-11-13", 1.9, "walk"),
+    { ...session("evt_completed", "2026-11-16", { interventionType: "dry-sauna", sessionStatus: "completed",
+      durationMinutes: 13 }), kind: "intervention_session" },
+    { ...session("evt_skipped", "2026-11-16", { interventionType: "dry-sauna", sessionStatus: "missed",
+      durationMinutes: 13 }), kind: "intervention_session" },
+    session("evt_live", date, { activityType: "run", durationMinutes: 12, workout: { sourceApp: "murph-live" } }),
+  ]);
+  const { core } = await splitBrowserVaultReplica(replica);
+  assert.deepEqual(assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(core)).activitySessions, [
+    { date: "2026-11-13", minutes: 30, type: "walk" }, { date, minutes: 40, type: "run" },
+    { date: "2026-11-16", minutes: 13, type: "sauna" },
+  ]);
+  const { activitySessions: _sessions, ...older } = core;
+  assert.equal(parseBrowserVaultCoreShard(older).activitySessions, undefined);
+});

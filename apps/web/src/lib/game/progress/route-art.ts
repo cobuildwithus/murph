@@ -6,9 +6,24 @@ import { artState, ensureArt, readArtRows, type ArtJob, type ArtState } from './
 import { makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from './place-art-make';
 import { cutPolyline, decodePolyline } from './route-geometry';
 import { routeMapLink } from './route-progress';
-import { patchMeasureState, type BeforeProgressMutation, type MeasureState, type RouteLeg } from './state';
+import { patchMeasureState, readMeasureStates, type BeforeProgressMutation, type MeasureState, type RouteLeg } from './state';
 
 type Shown = { id: string; route: Route | null };
+
+/** A shared card freezes the immutable painting. The live map link follows the requesting member's route. */
+export async function readPaintedRouteArt(memberId: string, measures: readonly string[], signal: AbortSignal) {
+  const states = await readMeasureStates(memberId, measures, signal);
+  const keys = measures.flatMap(id => {
+    const leg = states.get(id)?.legs?.at(-1);
+    return leg && mapPaintable(leg) ? [mapKey(leg.polyline, 'card')] : [];
+  });
+  const rows = await readArtRows(keys);
+  for (const key of keys) {
+    const art = artState(rows.get(key), 'map');
+    if (art?.state === 'ready') return art.path;
+  }
+  return null;
+}
 
 function current(measures: readonly Shown[], states: ReadonlyMap<string, MeasureState>) {
   return measures.flatMap(measure => {

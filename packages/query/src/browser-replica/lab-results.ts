@@ -1,3 +1,4 @@
+import { BLOOD_TEST_FASTING_STATUSES, TEST_RESULT_STATUSES } from "@murphai/contracts/constants";
 import {
   normalizeMetricKey,
   normalizeUnit,
@@ -6,6 +7,7 @@ import {
 } from "@murphai/health-metrics";
 
 import type { CanonicalEntity } from "../canonical-entities.ts";
+import { fnv1a64Hex } from "../metrics/fnv1a64.ts";
 import type {
   BrowserVaultLabResultFilters,
   BrowserVaultLabResultReferenceRange,
@@ -14,6 +16,14 @@ import type {
 } from "./shared.ts";
 
 export const BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA = "murph.browser-vault.lab-result-row.v1" as const;
+
+export function labFastingStatus(value: unknown): BrowserVaultLabResultRow["fastingStatus"] {
+  return BLOOD_TEST_FASTING_STATUSES.find((status) => status === value) ?? "unknown";
+}
+
+export function labParentResultStatus(value: unknown): BrowserVaultLabResultRow["parentResultStatus"] {
+  return TEST_RESULT_STATUSES.find((status) => status === value) ?? "unknown";
+}
 
 export function toBrowserVaultLabResultRows(input: {
   entities: readonly CanonicalEntity[];
@@ -55,6 +65,8 @@ export function toBrowserVaultLabResultRows(input: {
       biomarkerKey: readOptionalString(point.biomarkerKey),
       comparator: point.comparator,
       date: point.effectiveDate,
+      drawId: `draw:${fnv1a64Hex(test.entityId)}`,
+      fastingStatus: labFastingStatus(test.attributes.fastingStatus),
       flag: readOptionalString(point.context.flag),
       id: `lab-result-row:${point.id}`,
       labName: readOptionalString(point.provenance.labName)
@@ -63,6 +75,7 @@ export function toBrowserVaultLabResultRows(input: {
       normalizedUnit,
       normalizedValue,
       observedAt: point.observedAt,
+      parentResultStatus: labParentResultStatus(test.attributes.resultStatus),
       referenceRange: readReferenceRange(point.context.referenceRange),
       rowSchema: BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA,
       sourceLabel: readOptionalString(point.provenance.sourceLabel),

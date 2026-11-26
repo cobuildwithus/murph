@@ -423,6 +423,14 @@ describe("weekly game routes", () => {
 
   describe("App Review Home refresh", () => {
     const initial = { canStartGames: true, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } };
+    it("advertises health_feed only to the allowlisted Home member", async () => {
+      mocks.readHome.mockResolvedValue(initial);
+      const read = async () => (await routes.home.GET(new Request(`${BASE}/home`))).json();
+      vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "synthetic-other");
+      expect(await read()).not.toHaveProperty("flags");
+      vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", `synthetic-other, ${initial.me.memberId}`);
+      expect(await read()).toMatchObject({ flags: { health_feed: true } });
+    });
     it("reads Home inside the request's root unwrap cache", async () => {
       mocks.readHome.mockImplementationOnce(() => {
         expect(getHostedDomainRootUnwrapCache()).toBeDefined();

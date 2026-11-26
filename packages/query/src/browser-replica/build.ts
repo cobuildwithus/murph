@@ -4,6 +4,7 @@ import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSch
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { buildCompanionMealsProjection } from "./meals.ts";
+import { projectActivitySessions } from "./activity-sessions.ts";
 import { buildCompanionRunsProjection } from "./runs.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
@@ -131,6 +132,7 @@ export async function createBrowserVaultReplica(
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
     ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
+    activitySessions: projectActivitySessions(defaultProjectedVault, wearableDataset, today),
     runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, today),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&

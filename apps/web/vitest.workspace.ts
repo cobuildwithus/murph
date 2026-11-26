@@ -39,7 +39,7 @@ function hostedWebPattern(pattern: string): string {
   return path.join(appDir, "test", pattern);
 }
 
-function createHostedWebProject(name: string, fileNames: readonly string[]) {
+function createHostedWebProject(name: string, include: string[]) {
   return defineProject({
     resolve: {
       alias: hostedWebAliases,
@@ -50,7 +50,7 @@ function createHostedWebProject(name: string, fileNames: readonly string[]) {
       environment: "node",
       globalSetup: [murphVitestTempGlobalSetup],
       ...hostedWebVitestConcurrency,
-      include: fileNames.map(hostedWebPattern),
+      include,
       setupFiles: [
         path.join(appDir, "test", "setup-env.ts"),
       ],
@@ -58,9 +58,14 @@ function createHostedWebProject(name: string, fileNames: readonly string[]) {
   });
 }
 
-export const hostedWebVitestProjects = hostedWebVitestProjectSpecs.map(
-  ({ fileNames, name }) => createHostedWebProject(name, fileNames),
-);
+export const hostedWebVitestProjects = [
+  ...hostedWebVitestProjectSpecs.map(
+    ({ fileNames, name }) => createHostedWebProject(name, fileNames.map(hostedWebPattern)),
+  ),
+  createHostedWebProject("hosted-web-health-wins", [
+    path.join(appDir, "src/lib/health-wins/**/*.test.ts"),
+  ]),
+];
 
 function isHostedWebPrismaClientGenerated(): boolean {
   try {

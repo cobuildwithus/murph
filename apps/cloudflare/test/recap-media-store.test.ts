@@ -95,7 +95,8 @@ describe("Progress sealed storage", () => {
     return { request, url: new URL(request.url), environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
       env: { ...createHostedExecutionTestEnv(), BUNDLES: bucket, RUNNER_CONTAINER: unused, RUNNER_CONTAINER_SMOKE: unused } };
   }
-  it('serves the dedicated HTTP contract only for the bound owner and Progress crypto scope', async () => {
+  it.each(['game-progress', 'health-post'])('serves the dedicated HTTP contract for the bound owner and %s scope', async scope => {
+    const scopedEnvelope = JSON.stringify({ ...JSON.parse(envelope), scope });
     const bucket = new ConditionalBucket();
     const stage = recapMediaRoutes.find(route => route.name === 'progressPicStage')!;
     const read = recapMediaRoutes.find(route => route.name === 'progressPicRead')!;
@@ -106,10 +107,10 @@ describe("Progress sealed storage", () => {
     }
     expect((await stage.handle(context(bucket, 'POST', 'member_ava', JSON.stringify({ ...JSON.parse(envelope), scope: 'weekly-game' })), params)).status).toBe(400);
     expect(bucket.objects.size).toBe(0);
-    expect((await stage.handle(context(bucket, 'POST', 'member_ava', envelope), params)).status).toBe(200);
+    expect((await stage.handle(context(bucket, 'POST', 'member_ava', scopedEnvelope), params)).status).toBe(200);
     const response = await read.handle(context(bucket, 'GET', 'member_ava', undefined), params);
     expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('private, no-store');
-    expect(await response.json()).toEqual({ envelope, hash: 'a'.repeat(64) });
+    expect(await response.json()).toEqual({ envelope: scopedEnvelope, hash: 'a'.repeat(64) });
   });
   it.each([false, true])("permanently retires before/after upload (%s)", async uploadFirst => {
     const bucket = new ConditionalBucket(), userId = "synthetic-owner";

@@ -1878,7 +1878,7 @@ function buildMeasurementMetricCandidates(
   });
 }
 
-function buildActivitySessionCandidate(
+export function buildActivitySessionCandidate(
   entity: CanonicalEntity,
   provider: string,
   externalRef: WearableExternalRef | null,

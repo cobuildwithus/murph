@@ -75,12 +75,14 @@ export async function settleAwards(memberId: string, candidates: readonly Candid
 }
 
 /** Newest first; after authority filtering, only the first visible award is gold. */
-export async function readAwards(memberId: string): Promise<StoredAward[]> {
+export async function readAwards(memberId: string, maxRows?: number, signal?: AbortSignal): Promise<StoredAward[]> {
   const rows = await getPrisma().gameProgressAward.findMany({ where: { memberId },
+    ...(maxRows !== undefined && { take: maxRows + 1 }),
     orderBy: [{ earnedOn: "desc" }, { createdAt: "desc" }, { lookup: "desc" }],
     select: { lookup: true, dataEncrypted: true, earnedOn: true, createdAt: true, seenAt: true },
   });
-  const data = await openProgressMany<Candidate>(rows.map(row => ({ memberId, table: "game_progress_award", rowId: row.lookup, field: "data", value: row.dataEncrypted })));
+  if (maxRows !== undefined && rows.length > maxRows) throw new Error("Game series exceeds its award budget.");
+  const data = await openProgressMany<Candidate>(rows.map(row => ({ memberId, table: "game_progress_award", rowId: row.lookup, field: "data", value: row.dataEncrypted })), false, signal);
   return rows.flatMap((row, index) => retiredAward(data[index]) ? []
     : [{ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt,
       ...(data[index].measureId === "run.meters" && data[index].data.health === true && !data[index].data.gameEarnedOn

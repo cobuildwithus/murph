@@ -104,6 +104,7 @@ import {
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
+import { deleteHealthAttachmentsForAccount } from "../health-wins/media";
 import { deleteProgressPicsForAccount } from "../game/progress/pics";
 import { deleteProgressSharesForAccount, deleteSharePhotosForAccount } from "../game/progress/share-cleanup";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "../game/account-deletion";
@@ -139,6 +140,42 @@ export interface HostedAccountDataStoreCoverageEntry {
 }
 
 export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
+  {
+    slug: "prisma.health_post",
+    label: "Health feed posts",
+    deletion: "live-delete",
+    note: "Deleting the author cascades their posts, including sealed captions and frozen cards.",
+  },
+  {
+    slug: "prisma.health_post_comment",
+    label: "Health feed comments",
+    deletion: "live-delete",
+    note: "Deleting the comment author or the parent post cascades the comment, including private replies and replay tombstones.",
+  },
+  {
+    slug: "prisma.health_post_cheer",
+    label: "Health feed cheers",
+    deletion: "live-delete",
+    note: "Deleting the cheering member or the parent post cascades the cheer.",
+  },
+  {
+    slug: "prisma.health_feed_hide",
+    label: "Health feed hides",
+    deletion: "live-delete",
+    note: "A hide cascades when either member leaves.",
+  },
+  {
+    slug: "prisma.health_win_set",
+    label: "Health win suggestions",
+    deletion: "live-delete",
+    note: "Deleting the member cascades their daily sealed candidate sets.",
+  },
+  {
+    slug: "prisma.health_post_attachment",
+    label: "Health post photos",
+    deletion: "live-delete",
+    note: "After account suspension, tombstones every registered photo in the sealed Progress store before removing the ownership row or the member’s encryption keys. Cleanup retries retain the encrypted object key.",
+  },
   {
     slug: "prisma.game_progress_share",
     label: "Private Progress share pictures",
@@ -1115,6 +1152,7 @@ async function deleteHostedAccountDataInternal(input: {
     });
   }
 
+  await deleteHealthAttachmentsForAccount(deletionMemberIds, input.prisma);
   await deleteProgressSharesForAccount(deletionMemberIds, input.prisma);
   await deleteSharePhotosForAccount(deletionMemberIds, input.prisma);
   await deleteProgressPicsForAccount(deletionMemberIds, input.prisma);

@@ -36,7 +36,11 @@ export default defineProject({
     globalSetup: [murphVitestTempGlobalSetup],
     ...resolveMurphVitestConcurrency(),
     maxWorkers: resolveMurphAppVitestMaxWorkers(),
-    include: ["apps/web/test/**/*.test.ts", "apps/web/test/**/*.test.tsx"],
+    include: [
+      "apps/web/test/**/*.test.ts",
+      "apps/web/test/**/*.test.tsx",
+      "apps/web/src/lib/health-wins/**/*.test.ts",
+    ],
     setupFiles: [path.join(appDir, "test", "setup-env.ts")],
   },
 });

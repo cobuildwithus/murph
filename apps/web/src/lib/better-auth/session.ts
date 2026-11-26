@@ -54,19 +54,30 @@ export async function readHostedAuthSession(input: {
   } };
 }
 
-// The reader already authenticated every field. Exact snapshot comparison
-// rechecks revocation, renewal and tampering without a provider/KMS call under
-// locks. Changed ciphertext requires a fresh read, never a blind re-seal.
-export async function assertHostedAuthSessionCurrentTx(input: {
+interface SessionRecheck {
   credential: string; memberId: string; sessionId: string; proof: HostedAuthSessionProof;
   prisma: Prisma.TransactionClient; now?: Date;
-}): Promise<void> {
+}
+
+export function assertHostedAuthSessionCurrentTx(input: SessionRecheck): Promise<void> {
+  return recheckSession(input, "write");
+}
+
+export function assertHostedAuthSessionCurrentForRead(input: SessionRecheck): Promise<void> {
+  return recheckSession(input, "read");
+}
+
+// The reader already authenticated every field. Comparing the snapshot needs no
+// provider call. Only a pending mutation needs to fence changes until commit.
+async function recheckSession(input: SessionRecheck, access: "read" | "write"): Promise<void> {
   const { proof } = input;
   if (proof.row.model !== "session" || proof.row.id !== input.sessionId || proof.row.memberId !== input.memberId
     || proof.expiresAt <= (input.now ?? new Date())
     || !timingSafeEqual(proof.credentialDigest, credentialDigest(input.credential))) throw authRequired();
-  await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000, noKeyUpdate: true });
-  await input.prisma.$queryRaw`SELECT id FROM hosted_auth_record WHERE model = 'session' AND id = ${input.sessionId} FOR UPDATE`;
+  if (access === "write") {
+    await lockHostedMemberRow(input.prisma, input.memberId, { timeoutMs: 5_000, noKeyUpdate: true });
+    await input.prisma.$queryRaw`SELECT id FROM hosted_auth_record WHERE model = 'session' AND id = ${input.sessionId} FOR UPDATE`;
+  }
   const [row, member] = await Promise.all([
     input.prisma.hostedAuthRecord.findUnique({ where: { model_id: { model: "session", id: input.sessionId } } }),
     readHostedMemberCoreState({ memberId: input.memberId, prisma: input.prisma }),

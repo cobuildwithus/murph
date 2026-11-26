@@ -4,7 +4,7 @@ import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-s
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { classifyHostedNativeCredential } from "./transport";
 import { requireHostedBetterAuthConfig } from "./config";
-import { assertHostedAuthSessionCurrentTx, readHostedAuthSession, type HostedAuthSessionProof } from "./session";
+import { assertHostedAuthSessionCurrentForRead, assertHostedAuthSessionCurrentTx, readHostedAuthSession, type HostedAuthSessionProof } from "./session";
 
 export type HostedNativeMemberAuthStage = "identity_token_verification";
 export interface HostedNativeMemberAuthOptions {
@@ -38,4 +38,8 @@ export async function readHostedNativeMemberAuth(request: Request, prisma: Prism
 // initial admission cannot authorize a credential revoked during external work.
 export async function assertHostedNativeMemberAuthCurrentTx(auth: HostedNativeMemberAuth, prisma: Prisma.TransactionClient): Promise<void> {
   await assertHostedAuthSessionCurrentTx({ ...auth, memberId: auth.member.id, prisma });
+}
+
+export async function assertHostedNativeMemberAuthCurrentForRead(auth: HostedNativeMemberAuth, prisma: Prisma.TransactionClient): Promise<void> {
+  await assertHostedAuthSessionCurrentForRead({ ...auth, memberId: auth.member.id, prisma });
 }

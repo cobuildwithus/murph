@@ -6,8 +6,8 @@ import { gameHttpError } from "../http/errors";
 import { getPrisma } from "../../prisma";
 import type { Medal, Moment, Progress } from "./contract";
 import { readAwards, settleAwards, markAwardsSeen, withGameEarnedDay, type StoredAward } from "./awards";
-import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
-import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
+import { ACHIEVEMENTS, HEALTH } from "./registry";
+import { achievementContext, measureLadder, projection, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, describeMeasure, scheduleInference, type MeasureSeries, type TodayCheckIn } from "./series";
 import { countRunsFromJoin, hasHealthAuthority, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
@@ -24,17 +24,7 @@ import { attachRouteArt } from "./route-art";
 // Charts start the day someone started the app, and Oct 1, 2026 for anyone on it before then.
 const CHARTS_FROM = "2026-10-01";
 
-export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
-  return { measures: measures.map(measure => {
-    const points = cumulativePoints(measure.amounts);
-    const total = points.at(-1)?.[1] ?? 0;
-    return { id: measure.id, unit: measure.unit, noun: measure.unit === "days" ? measure.label.toLowerCase() : measure.noun, pending: measure.pending, points,
-      rungs: measureRungs(measure, states.get(measure.id) ?? {}),
-      legs: states.get(measure.id)?.legs ?? [],
-      rounds: roundValues(total, measure).filter(at => at <= total),
-    };
-  }) };
-}
+export { achievementContext } from "./goals";
 
 function gameCandidates(snapshot: Awaited<ReturnType<typeof readOwnSeries>>) {
   const evaluate = (measures: MeasureSeries[]) => {

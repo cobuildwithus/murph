@@ -17,7 +17,9 @@ vi.mock("@/src/lib/device-sync/companion-numbers", async importOriginal => ({
 vi.mock("@/src/lib/game/progress/crypto", () => ({ openProgressMany: mocks.open,
   progressLookup: (_member: string, _purpose: string, parts: string[]) => parts.join(":") }));
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolve, previewRoute: async (from: string, to: string) => ({ leg: await mocks.resolve(from, to), query: { from, to }, fixed: null }), PlaceNotFound: class PlaceNotFound extends Error { constructor(readonly typed: string) { super(typed); } } }));
-vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
+vi.mock("@/src/lib/game/progress/state", async original => ({
+  ...await original<typeof import("@/src/lib/game/progress/state")>(), patchMeasureState: mocks.patch,
+}));
 vi.mock("@/src/lib/game/progress/awards", () => ({ readAwards: mocks.awards, settleAwards: mocks.settle }));
 vi.mock("@/src/lib/game/progress/route-art", () => ({ attachRouteArt: mocks.art }));
 
