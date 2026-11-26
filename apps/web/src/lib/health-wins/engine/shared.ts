@@ -67,8 +67,3 @@ export function formatDuration(minutes: number): string {
   const remainder = rounded % 60;
   return remainder ? `${formatNumber(hours, 0)}h ${remainder}m` : `${formatNumber(hours, 0)}h`;
 }
-
-export function formatLabValue(value: number, unit: string): string {
-  const number = value > 0 && value < 0.05 ? "<0.1" : formatNumber(value);
-  return unit === "%" ? `${number}%` : `${number} ${unit}`;
-}

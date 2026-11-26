@@ -28,31 +28,36 @@ function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
   };
 }
 
-const hundredthsOfHour = (minutes: number) => Math.round(minutes * 100 / 60);
-const hours = (minutes: number) => hundredthsOfHour(minutes) / 100;
+type TrendCard = Extract<CardSpec, { kind: "trend_change" }>;
+
+function convertTrend(card: TrendCard, unit: "hr" | "mi", convert: (value: number) => number): TrendCard | null {
+  const chart = card.chart;
+  const series = chart.series.map(point => ({ ...point, value: convert(point.value) }));
+  const latest = series.at(-1);
+  if (!latest) return null;
+  const baseline = convert(chart.baseline);
+  const usualTenths = Math.round(baseline * 10), currentTenths = Math.round(latest.value * 10);
+  const deltaTenths = currentTenths - usualTenths;
+  return {
+    ...card, title: { ...card.title, number: `${deltaTenths < 0 ? "−" : "+"}${formatNumber(Math.abs(deltaTenths) / 10)} ${unit}` },
+    chart: { ...chart, unit, baseline, delta: convert(chart.delta), series,
+      pills: [`Usual ${formatNumber(usualTenths / 10)} ${unit}`, `${formatWinMonth(latest.month, "short")} ${formatNumber(currentTenths / 10)} ${unit}`] },
+  };
+}
 
 function hoursCard(card: CardSpec): CardSpec | null {
   if (card.kind === "trend_change" && card.chart.unit === "min") {
-    const chart = card.chart;
-    const latest = chart.series.at(-1);
-    if (!latest) return null;
-    const displayedDelta = hundredthsOfHour(latest.value) - hundredthsOfHour(chart.baseline);
-    return {
-      ...card, title: { ...card.title, number: `${displayedDelta < 0 ? "−" : "+"}${Math.abs(displayedDelta) / 100} hr` },
-      chart: { ...chart, unit: "hr", baseline: chart.baseline / 60, delta: chart.delta / 60,
-        series: chart.series.map(point => ({ ...point, value: point.value / 60 })),
-        pills: [`Usual ${hours(chart.baseline)} hr`, `${formatWinMonth(latest.month, "short")} ${hours(latest.value)} hr`] },
-    };
+    return convertTrend(card, "hr", minutes => minutes / 60);
   }
   if (card.kind === "best_month" && card.chart.unit === "min") {
     const chart = card.chart, highlighted = chart.series.find(point => point.month === chart.highlight);
     if (!highlighted) return null;
-    return { ...card, title: { ...card.title, number: `${hours(highlighted.value)} hr` },
+    return { ...card, title: { ...card.title, number: `${formatNumber(highlighted.value / 60)} hr` },
       chart: { ...chart, unit: "hr", series: chart.series.map(point => ({ ...point, value: point.value / 60 })) } };
   }
   if (card.kind === "personal_record" && card.chart.unit === "min") {
     const chart = card.chart;
-    return { ...card, title: { ...card.title, number: `${hours(chart.highlight.value)} hr` },
+    return { ...card, title: { ...card.title, number: `${formatNumber(chart.highlight.value / 60)} hr` },
       chart: { ...chart, unit: "hr", highlight: { ...chart.highlight, value: chart.highlight.value / 60 },
         series: chart.series.map(point => ({ ...point, value: point.value / 60 })) } };
   }
@@ -93,20 +98,9 @@ export interface CachedHealthCandidate extends CandidateDisplay {
 export function withDistanceTrendUnits(candidate: CachedHealthCandidate): CachedHealthCandidate {
   const original = candidate.variants[0].spec;
   if (candidate.miles || original.kind !== "trend_change" || original.chart.type !== "trend" || original.chart.unit !== "km") return candidate;
-  const chart = original.chart;
-  const series = chart.series.map(point => ({ ...point, value: milesFromKm(point.value) }));
-  const latest = series.at(-1);
-  if (!latest) return candidate;
-  const baseline = milesFromKm(chart.baseline);
-  const usualTenths = Math.round(baseline * 10), currentTenths = Math.round(latest.value * 10);
-  const deltaTenths = currentTenths - usualTenths;
   const id = createHash("sha256").update(`miles:${candidate.id}`).digest("base64url");
-  const card: CardSpec = {
-    ...original, id, kind: original.kind,
-    title: { ...original.title, number: `${deltaTenths < 0 ? "−" : "+"}${formatNumber(Math.abs(deltaTenths) / 10)} mi` },
-    chart: { ...chart, unit: "mi", baseline, delta: milesFromKm(chart.delta), series,
-      pills: [`Usual ${formatNumber(usualTenths / 10)} mi`, `${formatWinMonth(latest.month, "short")} ${formatNumber(currentTenths / 10)} mi`] },
-  };
+  const card = convertTrend({ ...original, id, kind: original.kind, chart: original.chart }, "mi", milesFromKm);
+  if (!card) return candidate;
   const safe = hidden(card);
   return { ...candidate, miles: { id, variants: [
     { option: "original", spec: card, specRevision: specDigest(card) },

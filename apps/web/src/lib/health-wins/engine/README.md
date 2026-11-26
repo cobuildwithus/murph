@@ -4,6 +4,8 @@
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
+Display A1c readings with one decimal and express changes in percentage points.
+The hours option rounds duration labels to the nearest tenth of an hour.
 The function runs in memory and leaves the supplied arrays untouched.
 
 Chart data uses `YYYY-MM-DD` for days and `YYYY-MM` for months. Copy displays

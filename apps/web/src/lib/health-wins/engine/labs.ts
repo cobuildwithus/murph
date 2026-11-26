@@ -1,7 +1,7 @@
 import { REVIEWED_BIOMARKER_FALLBACK_RANGES } from "@murphai/health-metrics";
 import type { LabNormMetric } from "../../game/progress/norms";
 import { percentileCandidate } from "./percentiles";
-import { cardDateKey, cardText, formatLabValue, formatNumber, formatWinDate, isDate, labUnitKey, mad, median } from "./shared";
+import { cardDateKey, cardText, formatNumber, formatWinDate, isDate, labUnitKey, mad, median } from "./shared";
 import type { Analyte, Candidate, HealthWinRank, HealthWinsInput, LabDraw } from "./types";
 
 interface Bound { value: number; inclusive: boolean }
@@ -81,10 +81,21 @@ function includesValue(range: Interval, value: number): boolean {
     && (!range.high || value < range.high.value || (value === range.high.value && range.high.inclusive));
 }
 
+function labNumber(value: number, unit: string): string {
+  if (value > 0 && value < 0.05) return "<0.1";
+  return unit === "%" ? value.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : formatNumber(value);
+}
+
+function formatLabValue(value: number, unit: string): string {
+  const number = labNumber(value, unit);
+  if (unit === "%") return `${number}%`;
+  return `${number} ${unit === "points" && number === "1" ? "point" : unit}`;
+}
+
 function intervalSubtitle({ low, high }: Interval, unit: string): string {
   // Keep exact bounds in the gauge when rounding them would change the stated range.
   if ([low, high].some(bound => bound && !Number.isInteger(bound.value * 10))) return "within the reference range";
-  if (low && high) return `within ${formatNumber(low.value)}–${formatLabValue(high.value, unit)}`;
+  if (low && high) return `within ${labNumber(low.value, unit)}–${formatLabValue(high.value, unit)}`;
   if (low) return `${low.inclusive ? "at or above" : "above"} ${formatLabValue(low.value, unit)}`;
   return `${high!.inclusive ? "at or below" : "below"} ${formatLabValue(high!.value, unit)}`;
 }
@@ -109,7 +120,7 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
     date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
     card: {
       id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs",
-      title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, latest.unit === "%" ? "pp" : latest.unit)}`, measure: rule.label },
+      title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, rule.unit === "%" ? "points" : latest.unit)}`, measure: rule.label },
       subtitle: `compared with the median of ${values.length} prior draws`,
       source_note: `Latest draw on ${dateLabel}. ${fastingKnown ? "Fasting draws" : "Lab draws"} in ${latest.unit}.`,
       chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },

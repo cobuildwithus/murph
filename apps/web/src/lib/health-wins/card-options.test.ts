@@ -20,24 +20,33 @@ it("converts a duration's title, chart and highlight together and freezes the pr
   const [candidate] = prepareHealthCandidates("member-fixture", [record]);
   const preview = previewHealthCandidate(candidate, "hours");
   const [saved] = freezeHealthSelections([candidate], [{ candidateId: candidate.id, option: "hours" }]);
-  expect(preview.title.number).toBe("2.55 hr");
+  expect(preview.title.number).toBe("2.6 hr");
   expect(saved.specRevision).toBe(preview.specRevision);
   expect(saved.spec.chart).toEqual({ type: "record", unit: "hr", series: [{ date: "2031-04-07", value: 2.55 }],
     highlight: { date: "2031-04-07", value: 2.55, label: "Apr 7, 2031" }, pills: ["Apr 7, 2031"] });
   expect(previewHealthCandidate(candidate).chart).toEqual(record.chart);
 });
 
-it("converts engine duration pills using their original minute observations", () => {
-  const trend: CardSpec = { ...record, kind: "trend_change", title: { number: "+36 min", measure: "sleep" },
-    chart: { type: "trend", unit: "min", baseline: 375.12, delta: 36.22,
-      series: [{ month: "2031-03", value: 375.12, days: 22 }, { month: "2031-04", value: 411.34, days: 18 }],
-      pills: ["Usual 6h 15m", "Apr 6h 51m"] } };
+it("subtracts the displayed tenths of an hour for trend titles and keeps the measured chart values", () => {
+  const trend: CardSpec = { ...record, kind: "trend_change", title: { number: "+40 min", measure: "sleep" },
+    chart: { type: "trend", unit: "min", baseline: 375.12, delta: 39.42,
+      series: [{ month: "2031-03", value: 375.12, days: 22 }, { month: "2031-04", value: 414.54, days: 18 }],
+      pills: ["Usual 6h 15m", "Apr 6h 55m"] } };
   const [candidate] = prepareHealthCandidates("member-fixture", [trend]);
   const converted = previewHealthCandidate(candidate, "hours");
-  expect(converted.title.number).toBe("+0.61 hr");
-  expect(converted.chart).toMatchObject({ unit: "hr", baseline: 375.12 / 60, delta: 36.22 / 60,
-    series: [{ value: 375.12 / 60 }, { value: 411.34 / 60 }], pills: ["Usual 6.25 hr", "Apr 6.86 hr"] });
+  expect(converted.title.number).toBe("+0.6 hr");
+  expect(converted.chart).toMatchObject({ unit: "hr", baseline: 375.12 / 60, delta: 39.42 / 60,
+    series: [{ value: 375.12 / 60 }, { value: 414.54 / 60 }], pills: ["Usual 6.3 hr", "Apr 6.9 hr"] });
   expect(previewHealthCandidate(candidate).chart).toEqual(trend.chart);
+});
+
+it("rounds the best month's hours headline to the nearest tenth", () => {
+  const best: CardSpec = { ...record, kind: "best_month", chart: { type: "monthly_bars", unit: "min",
+    highlight: "2031-04", series: [{ month: "2031-04", value: 105.8, days: 23 }] } };
+  const [candidate] = prepareHealthCandidates("member-fixture", [best]);
+  expect(previewHealthCandidate(candidate, "hours")).toMatchObject({
+    title: { number: "1.8 hr" }, chart: { unit: "hr", series: [{ value: 105.8 / 60 }] },
+  });
 });
 
 it("removes every value-bearing field, including the engine id, raw arrays, source notes and tips", () => {
