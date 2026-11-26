@@ -611,10 +611,10 @@ no receipt contents.
 
 ### Daily record texts
 
-The production daily sweep continues to create silent v2 retrievals. Web's
-daily admission requires compatible runner and Cloudflare port revisions before
-it can pin a new run. The production caller supplies neither revision during
-this rollout.
+The production daily sweep reads the promoted runner and serving port revisions
+over the authenticated control channel. Missing, mixed or old readers keep
+ordinary daily imports silent. Setting `CLINICAL_DAILY_NOTICE_ADMISSION_PAUSED=1`
+on Web stops new pins while existing replies retain their readers.
 
 Under the member lock, a replacement connection needs a persistent grant,
 current OpenAI approval and a complete whole-history import in its current
@@ -636,9 +636,9 @@ It renders “New records came in. Want me to go through them?” locally. The
 ordered system mailbox checkpoints and drains that intent without an AI turn
 or allowance.
 Off suppresses publication. Detail uses one scheduled turn with the private
-run receipt reference and the member’s explicit detail setting. The private
-cron store retains its completed job so a restored pointer cannot queue a
-second turn. Web keeps delivery closed pending activation.
+run receipt reference and the member’s explicit detail setting. Web binds the first durably saved private
+reply to the originating run. Replays drain that reply under the original
+bubble keys. A restore missing the bound reply ends silently.
 
 The owner withdrew the iMessage-only requirement. Notices and details may use
 the exact verified private thread frozen at admission, including when Linq
@@ -646,8 +646,7 @@ selects RCS or SMS. No second consent step is required. A signed delivery
 receipt may carry the text through Web memory. Web verifies it and drops
 the text before persistence, logging, tracing or Temporal. Web excludes
 clinical deliveries from terminal retry before reading provider message parts.
-A definite terminal failure consumes an attempted occurrence. Daily admission
-remains disabled through the reader rollout.
+A definite terminal failure consumes an attempted occurrence. Admissions require revision 3 at Web, runner and port.
 
 ### Bounded repeat import
 

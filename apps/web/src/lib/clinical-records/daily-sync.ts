@@ -1,4 +1,6 @@
 import "server-only";
+import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
+import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 import { freezeClinicalDailyNotification, type ClinicalDailyNoticeReaders } from "./notification";
 import { hasClinicalProcessorApprovals } from "./processor-registry";
 
@@ -25,21 +27,22 @@ export const CLINICAL_DAILY_ADMISSION_RETRY_MS = 14 * 60_000;
 export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?: number } = {}) {
   const now = input.now ?? new Date();
   const stop = abortAtHostedRecoveryDeadline(input.deadlineMs ?? Date.now() + HOSTED_RECOVERY_BUDGET_MS);
+  let failed = await resumeDueClinicalNotifications(now, stop);
   const candidates = await getPrisma().clinicalRecordConnection.findMany({
     where: { member: { suspendedAt: null }, status: { in: ["active", "error"] }, nextSyncAt: { lte: now },
       refreshTokenEncrypted: { not: null } },
     orderBy: [{ nextSyncAt: "asc" }, { id: "asc" }], take: 20,
     select: { id: true, memberId: true },
   });
+  const readers = candidates.length ? await readServingReaders() : undefined;
   let checked = 0;
   let queued = 0;
-  let failed = 0;
   for (const candidate of candidates) {
     if (stop.aborted) break; // Unstarted rows stay due.
     checked++;
     let retryMs = CLINICAL_DAILY_SYNC_MS;
     try {
-      if (await admitClinicalDailySync({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now })) {
+      if (await admitWithServingReaders({ abortSignal: stop, connectionId: candidate.id, memberId: candidate.memberId, now }, readers)) {
         queued++;
         continue; // Admission committed its own date.
       }
@@ -57,10 +60,59 @@ export async function runClinicalDailySyncSweep(input: { now?: Date; deadlineMs?
   return { checked, queued, failed };
 }
 
-export async function admitClinicalDailySync(input: {
-  abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date;
-  noticeReaders?: ClinicalDailyNoticeReaders;
-}): Promise<boolean> {
+async function resumeDueClinicalNotifications(now: Date, stop: AbortSignal) {
+  const prisma = getPrisma();
+  const due = await prisma.clinicalRecordRetrievalRun.findMany({ where: { notificationRetryAt: { lte: now } },
+    select: { id: true, memberId: true, generation: true, notificationRetryAt: true, notificationDeferral: true },
+    orderBy: [{ notificationRetryAt: "asc" }, { id: "asc" }], take: 20 });
+  let failures = 0;
+  for (const run of due) {
+    if (stop.aborted) break;
+    try {
+      await runWithHostedDomainRootUnwrapCache(async () => {
+        const root = await unwrapHostedDomainRootForWeb({ domain: getHostedCryptoDomainForLane("mailbox-payload"),
+          prisma, retainFailureInScopedCache: true, signal: stop, userId: run.memberId });
+        root.rootKey.fill(0);
+        const wake = await prisma.$transaction(async tx => {
+          await lockHostedMemberRow(tx, run.memberId, { timeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS });
+          const claimed = await tx.clinicalRecordRetrievalRun.updateMany({
+            where: { id: run.id, notificationRetryAt: run.notificationRetryAt },
+            data: { notificationRetryAt: null, notificationDeferral: run.notificationDeferral === "transient" ? "retried" : null } });
+          if (!claimed.count) return null;
+          const { item } = await appendHostedMailboxEnvelopeTx({ tx, envelope: { kind: "clinical-records.change-recorded",
+            eventId: `clinical-resume:v1:${run.id}:${run.notificationRetryAt!.getTime()}`, runId: run.id,
+            userId: run.memberId, generation: run.generation, occurredAt: now.toISOString() } });
+          return { userId: run.memberId, id: item.id, lane: item.lane, laneSeq: item.laneSeq };
+        }, HOSTED_RECOVERY_TRANSACTION_OPTIONS);
+        if (wake) await signalClinicalRetrievalWake(wake, stop);
+      });
+    } catch {
+      if (stop.aborted) break;
+      failures++;
+      await prisma.clinicalRecordRetrievalRun.updateMany({ where: { id: run.id, notificationRetryAt: run.notificationRetryAt },
+        data: { notificationRetryAt: new Date(now.getTime() + CLINICAL_DAILY_ADMISSION_RETRY_MS) } });
+    }
+  }
+  return failures;
+}
+
+type DailyAdmission = { abortSignal?: AbortSignal; connectionId: string; memberId: string; now: Date };
+
+async function readServingReaders() {
+  try {
+    const observedAt = Date.now();
+    const readers = await readHostedExecutionControlClientIfConfigured(2000)?.readClinicalNoticeReaders();
+    return readers && { ...readers, observedAt };
+  } catch {
+    return undefined; // Unavailable evidence must never prevent ordinary retrieval.
+  }
+}
+
+export async function admitClinicalDailySync(input: DailyAdmission): Promise<boolean> {
+  return admitWithServingReaders(input, await readServingReaders());
+}
+
+async function admitWithServingReaders(input: DailyAdmission, readers?: ClinicalDailyNoticeReaders): Promise<boolean> {
   if (!await readClinicalTransportAccess({ memberId: input.memberId })) return false;
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
@@ -108,11 +160,12 @@ export async function admitClinicalDailySync(input: {
         } });
         return null;
       }
+      await revisitDeferredReply(tx, connection, input.now);
       const runId = `crr_${randomBytes(24).toString("base64url")}`;
       await tx.clinicalRecordConnection.update({ where: { id: connection.id }, data: {
         retrievalGeneration: generation, status: "active", nextSyncAt: new Date(input.now.getTime() + CLINICAL_DAILY_SYNC_MS),
       } });
-      const notification = await freezeClinicalDailyNotification(tx, connection, grantedScopesJson, input.noticeReaders);
+      const notification = await freezeClinicalDailyNotification(tx, connection, grantedScopesJson, readers);
       await tx.clinicalRecordRetrievalRun.create({ data: {
         id: runId, memberId: input.memberId, connectionId: connection.id, generation,
         createdAt: input.now, status: "queued", retrievalProtocol: "query-slices-v2", retrievalPlanJson,
@@ -131,4 +184,11 @@ function hasDueClinicalGrant(connection: {
 }, now: Date) {
   return ["active", "error"].includes(connection.status) && Boolean(connection.refreshTokenEncrypted)
     && Boolean(connection.patientIdEncrypted) && connection.nextSyncAt !== null && connection.nextSyncAt <= now;
+}
+
+async function revisitDeferredReply(tx: import("@prisma/client").Prisma.TransactionClient, connection: { id: string; memberId: string }, now: Date) {
+  // Revisit one still-blocked handoff on a new hospital check, without a polling timer.
+  const held = await tx.clinicalRecordRetrievalRun.findFirst({ where: { memberId: connection.memberId,
+    connectionId: connection.id, notificationDeferral: "retried", notificationRetryAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+  if (held) await tx.clinicalRecordRetrievalRun.update({ where: { id: held.id }, data: { notificationRetryAt: now } });
 }

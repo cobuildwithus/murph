@@ -165,11 +165,14 @@ async function executeClinicalChange(input: Parameters<typeof executeHostedMailb
   const decision = await port.readNotification({ generation, runId }, { signal: input.signal });
   const { queueClinicalChange } = await import("@murphai/assistant-engine/assistant-cron");
   const queued = await queueClinicalChange({ decision, occurredAt, runId, vault: input.vaultRoot });
-  if (!queued) return { bootstrapResult: null,
+  if (queued?.savedReplyResult) {
+    await port.readNotification({ generation, runId, savedReplyResult: queued.savedReplyResult }, { signal: input.signal });
+  }
+  if (!queued || queued.savedReplyResult) return { bootstrapResult: null,
     ...createNoopMailboxEffect({ conversationMetrics: null, mailboxLane: "clinical-records" }) };
   return { bootstrapResult: null, ...createNoopMailboxEffect({
     conversationMetrics: null, mailboxLane: "clinical-records", nextWakeAt: occurredAt,
-    ...(queued.intentId ? { deliveryIntentIds: [queued.intentId] } : {}),
+    ...(queued.deliveryIntentIds?.length ? { deliveryIntentIds: queued.deliveryIntentIds } : {}),
   }) };
 }
 

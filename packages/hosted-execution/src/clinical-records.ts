@@ -111,12 +111,14 @@ export const hostedClinicalRecordsReadRunRequestSchema = z.object({
 
 export const clinicalNotificationRequestSchema = hostedClinicalRecordsReadRunRequestSchema.extend({
   purpose: z.literal("notification"),
+  savedReplyResult: z.object({ turnId: z.string().regex(/^turn_[a-f0-9]{32}$/u),
+    status: z.enum(["missing", "drained"]) }).strict().optional(),
 }).strict();
 
 export const clinicalNotificationDecisionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("off") }).strict(),
   z.object({ mode: z.literal("notice"), threadId: z.string().min(1).max(256) }).strict(),
-  z.object({ mode: z.literal("detail"), threadId: z.string().min(1).max(256) }).strict(),
+  z.object({ mode: z.literal("detail"), savedTurnId: z.string().regex(/^turn_[a-f0-9]{32}$/u).optional(), threadId: z.string().min(1).max(256) }).strict(),
 ]);
 export type ClinicalNotificationDecision = z.infer<typeof clinicalNotificationDecisionSchema>;
 

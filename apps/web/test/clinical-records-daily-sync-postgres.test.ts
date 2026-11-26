@@ -1,3 +1,10 @@
+import { incrementHostedLinqInboundDailyState } from "@/src/lib/hosted-onboarding/linq-daily-state";
+import * as callbackAuth from "@/src/lib/hosted-execution/cloudflare-callback-auth";
+import { POST as authorizeEgress } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
+import { POST as recordOutcome } from "../app/api/internal/hosted-runtime/linq-egress/delivery/route";
+import { bindClinicalRepliesToSnapshotTx } from "@/src/lib/hosted-workspace/runtime-publication";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import * as control from "@/src/lib/hosted-execution/control";
 import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from "@murphai/runtime-state/assistant-ids";
 import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
@@ -10,7 +17,7 @@ import { clinicalProcessors, clinicalProcessorScope } from "@/src/lib/clinical-r
 import { sealClinicalConnectionFhirBaseUrl, sealClinicalConnectionSecret } from "@/src/lib/clinical-records/secrets";
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import { buildHostedMemberIdentityPrivateColumns, buildHostedMemberRoutingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
-import { createHostedLinqChatLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { createHostedLinqChatLookupKey, createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { clinicalEgressBlock, readClinicalNotificationAuthority, readClinicalNotificationDecision } from "@/src/lib/clinical-records/notification";
 import { fetchClinicalRetrievalPage, recordClinicalChangeProof, recordClinicalRetrievalOutcome, readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
@@ -54,9 +61,10 @@ if (enabled) {
     || !/^\/murph_test(?:_[a-z0-9_]+)?$/u.test(url.pathname)) throw new Error("Clinical proof requires a local murph_test database.");
 }
 const now = new Date("2026-11-01T12:00:00Z");
+const openWindow = new Date("2026-11-01T19:00:00Z");
 const daily = 24 * 60 * 60_000;
 const retry = 14 * 60_000;
-const currentReaders = { runner: 2, cloudflarePort: 2 };
+const currentReaders = { runner: 3, cloudflarePort: 3 };
 const emptyCounts = { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
   rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 };
 
@@ -104,21 +112,29 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   }
 
   async function notificationFixture(mode: "notice" | "detail" | "off" = "notice", {
-    replacement = true, readers = currentReaders, verified = true, group = false,
-    baselineStatus = "completed", scheduledSweep = false,
-  }: { replacement?: boolean; readers?: typeof currentReaders; verified?: boolean; group?: boolean;
-    baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean } = {}) {
+    replacement = true, readers = currentReaders, verified = true, group = false, phone = "+12025550137",
+    baselineStatus = "completed", scheduledSweep = false, admissionsPaused = false,
+  }: { replacement?: boolean; readers?: typeof currentReaders; verified?: boolean; group?: boolean; phone?: string;
+    baselineStatus?: "completed" | "partial" | "failed"; scheduledSweep?: boolean; admissionsPaused?: boolean } = {}) {
+    if (admissionsPaused) vi.stubEnv("CLINICAL_DAILY_NOTICE_ADMISSION_PAUSED", "1");
+    vi.spyOn(control, "readHostedExecutionControlClientIfConfigured").mockReturnValue(createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test", getBearerToken: async () => "synthetic",
+      fetchImpl: async (url, init) => {
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer synthetic");
+        return Response.json({ ...readers, version: "synthetic-release", nonce: new URL(String(url)).searchParams.get("nonce") });
+      },
+    }));
     const f = await fixture({ openBaseline: true, replacement });
     const { memberId, connectionId } = f;
     const [baseline] = await client.clinicalRecordRetrievalRun.findMany({ where: { connectionId }, take: 1 });
     const threadId = `chat-${memberId}`;
     const chat = createHostedLinqChatLookupKey(threadId)!;
     await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "control", prisma: client, reason: "synthetic-test", userId: memberId });
-    const identity = await buildHostedMemberIdentityPrivateColumns({ memberId, phoneNumber: "+12025550137", signupPhoneNumber: null, prisma: client });
-    const routing = await buildHostedMemberRoutingPrivateColumns({ memberId, linqChatId: threadId, linqRecipientPhone: null,
+    const identity = await buildHostedMemberIdentityPrivateColumns({ memberId, phoneNumber: phone, signupPhoneNumber: null, prisma: client });
+    const routing = await buildHostedMemberRoutingPrivateColumns({ memberId, linqChatId: threadId, linqRecipientPhone: "+12025550143",
       pendingLinqChatId: null, pendingLinqRecipientPhone: null, telegramThreadId: null, telegramUserId: null, prisma: client });
-    const participant = `participant-${memberId}`;
-    const line = `line-${memberId}`;
+    const participant = createHostedPhoneLookupKey(phone)!;
+    const line = createHostedPhoneLookupKey("+12025550143")!;
     await client.hostedMember.update({ where: { id: memberId }, data: {
       clinicalRecordMessageMode: mode,
       identity: { create: { ...identity, phoneNumberVerifiedAt: verified ? now : null, phoneLookupKey: participant } },
@@ -130,6 +146,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       line: { create: { phoneNumberLookupKey: line, phoneNumberHint: "synthetic" } },
     } });
     const cleanup = async () => {
+      await client.hostedLinqDelivery.deleteMany({ where: { linqChatLookupKey: chat } });
       await client.hostedLinqChatHealth.delete({ where: { linqChatLookupKey: chat } });
       await client.hostedLinqLine.delete({ where: { phoneNumberLookupKey: line } });
     };
@@ -152,7 +169,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     expect((await f.row()).baselineTokenVersion).toBe(replacement && baselineStatus === "completed" ? 1 : null);
     const due = (await f.row()).nextSyncAt!;
     if (scheduledSweep) expect(await runClinicalDailySyncSweep({ now: due })).toMatchObject({ queued: 1 });
-    else expect(await admitClinicalDailySync({ memberId, connectionId, now: due, noticeReaders: readers })).toBe(true);
+    else expect(await admitClinicalDailySync({ memberId, connectionId, now: due })).toBe(true);
     const [run] = await f.runs();
     const pointer = { memberId, runId: run!.id, generation: run!.generation };
     const count = () => client.hostedMailboxItem.count({ where: { userId: memberId, kind: "clinical-records.change-recorded" } });
@@ -178,12 +195,12 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await f.terminal();
       expect(await f.count()).toBe(mode === "notice" ? 1 : 0);
       expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId,
-        now: (await f.row()).nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+        now: (await f.row()).nextSyncAt! })).toBe(true);
       expect(await f.runs()).toHaveLength(2);
       await Promise.all([recordClinicalChangeProof(f.pointer), recordClinicalChangeProof(f.pointer)]);
       expect((await f.authority())?.mode ?? "off").toBe(mode);
       expect(await f.count()).toBe(mode === "off" ? 0 : 1);
-      expect(await readClinicalNotificationDecision(f.pointer)).toEqual(mode === "off" ? { mode } : { mode, threadId: f.threadId });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual(mode === "off" ? { mode } : { mode, threadId: f.threadId });
       const beforeCheckpoint = await f.runs();
       await recordClinicalChangeProof({ ...f.pointer, kind: "change-scheduled" });
       expect(await f.runs()).toEqual(beforeCheckpoint);
@@ -198,7 +215,8 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
   });
 
   it.each([
-    ["production sweep", { scheduledSweep: true }],
+    ["mixed-version production sweep", { scheduledSweep: true, readers: { runner: 2, cloudflarePort: 3 } }],
+    ["admissions paused", { admissionsPaused: true }],
     ["old runner", { readers: { ...currentReaders, runner: 1 } }],
     ["old port", { readers: { ...currentReaders, cloudflarePort: 1 } }],
     ["legacy client", { replacement: false }],
@@ -214,7 +232,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await f.terminal();
       await recordClinicalChangeProof(f.pointer);
       expect(await f.count()).toBe(0);
-      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
     } finally { await f.cleanup(); }
   });
 
@@ -241,7 +259,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     const f = await notificationFixture();
     try {
       await f.terminal(true);
-      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "notice", threadId: f.threadId });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "notice", threadId: f.threadId });
       const auth = await nativeAuth(f.memberId);
       const fhirBaseUrl = "https://portal.example.test/fhir";
       const patientId = "synthetic-patient";
@@ -272,7 +290,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       const renewed = await f.row();
       expect(renewed).toMatchObject({ tokenVersion: tokenVersion + 1, baselineTokenVersion: tokenVersion, requiresProcessorApprovals: true });
       expect(renewed.refreshTokenEncrypted).toBeTruthy();
-      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
       const baseline = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
         where: { connectionId_generation: { connectionId: f.connectionId, generation: renewed.retrievalGeneration } },
       });
@@ -280,7 +298,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { runId: baseline.id, generation: baseline.generation,
         status: "partial", retrievalProtocol: "query-slices-v2", counts: emptyCounts,
         retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) } });
-      expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId, noticeReaders: currentReaders, now: (await f.row()).nextSyncAt! })).toBe(true);
+      expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId, now: (await f.row()).nextSyncAt! })).toBe(true);
       expect(await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
         where: { connectionId_generation: { connectionId: f.connectionId, generation: baseline.generation + 1 } },
       })).toMatchObject({ notificationTokenVersion: null, retrievalProtocol: "query-slices-v2" });
@@ -302,6 +320,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
           : setClinicalProcessorApproval(auth, processor, processor.version, false);
         // The member lock must keep the concurrent policy writer behind the still-uninserted pin.
         await vi.waitFor(async () => {
+          await args[0].$executeRaw`SELECT pg_stat_clear_snapshot()`;
           const [row] = await args[0].$queryRaw<{ waiting: boolean }[]>`
             SELECT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
               AND pg_backend_pid() = ANY(pg_blocking_pids(pid))) AS waiting`;
@@ -310,7 +329,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
         return pin;
       });
       expect(await admitClinicalDailySync({ memberId: f.memberId, connectionId: f.connectionId,
-        now: (await f.row()).nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+        now: (await f.row()).nextSyncAt! })).toBe(true);
       await change;
       const run = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
         where: { connectionId_generation: { connectionId: f.connectionId, generation: f.pointer.generation + 1 } },
@@ -322,7 +341,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await recordClinicalRetrievalOutcome({ memberId: f.memberId, request: { runId: run.id, generation: run.generation,
         counts: emptyCounts, retrievalProtocol: "query-slices-receipts-v3", status: "completed", hasChangeReceipt: true,
         retrievalSlices: plan.slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) } });
-      expect(await readClinicalNotificationDecision(pointer)).toEqual({ mode: "off" });
+      expect(await readClinicalNotificationDecision(pointer, openWindow)).toEqual({ mode: "off" });
       expect(await f.count()).toBe(0);
     } finally { await change; await f.cleanup(); }
   });
@@ -345,7 +364,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
         const connection = await f.row();
         expect(connection.baselineTokenVersion).toBe(generation === 7 ? connection.tokenVersion : null);
         expect(await admitClinicalDailySync({ connectionId: f.connectionId, memberId: f.memberId,
-          now: connection.nextSyncAt!, noticeReaders: currentReaders })).toBe(true);
+          now: connection.nextSyncAt! })).toBe(true);
         await recordClinicalChangeProof({ memberId: f.memberId, ...pointer });
         expect(await f.count()).toBe(0);
       }
@@ -370,19 +389,130 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
     } finally { await f.cleanup(); }
   });
 
+  it.each(["notice", "detail"] as const)("resumes a quiet %s once at its safe wake", async mode => {
+    const f = await notificationFixture(mode, { scheduledSweep: true });
+    try {
+      await f.terminal(true);
+      const quiet = new Date("2026-11-01T06:00:00Z");
+      expect(await readClinicalNotificationDecision(f.pointer, quiet)).toEqual({ mode: "off" });
+      const [held] = await f.runs();
+      expect(held).toMatchObject({ notificationCoverage: "published", notificationDeferral: "window",
+        notificationRetryAt: new Date("2026-11-01T16:00:00Z") });
+      const previous = await f.count();
+      await runClinicalDailySyncSweep({ now: quiet });
+      expect(await f.count()).toBe(previous);
+      await runClinicalDailySyncSweep({ now: openWindow });
+      await runClinicalDailySyncSweep({ now: openWindow });
+      expect(await f.count()).toBe(previous + 1);
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode, threadId: f.threadId });
+    } finally { await f.cleanup(); }
+  });
+
+  it.each(["notice", "detail", "voice"] as const)("defers a blocked %s, grants once, and covers its terminal provider attempt", async kind => {
+    const mode = kind === "voice" ? "detail" : kind;
+    const f = await notificationFixture(mode);
+    try {
+      await f.terminal(true);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(openWindow);
+      vi.spyOn(callbackAuth, "requireHostedCloudflareCallbackRequest").mockResolvedValue(f.memberId);
+      const turnId = "turn_" + "3".repeat(32);
+      if (mode === "detail") await client.$transaction(tx =>
+        bindClinicalRepliesToSnapshotTx(tx, f.memberId, "synthetic-saved-reply", [{ runId: f.pointer.runId, turnId }]));
+      let idempotencyKey = clinicalChangeDeliveryKey(f.pointer.runId, mode) + (mode === "detail" ? ":" + turnId + ":bubble:0" : "");
+      if (kind === "voice") idempotencyKey += ":voice";
+      const request = (body: Record<string, unknown>) => new Request("https://web.example.test", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const check = async (authorityCheckOnly: boolean) => (await authorizeEgress(request({ idempotencyKey,
+        intentId: "synthetic-intent", target: f.threadId, targetKind: "thread", homeRouteFallbackAllowed: false,
+        answeredMailboxItemIds: [], authorityCheckOnly }))).json();
+      const where = { phoneNumberLookupKey: createHostedPhoneLookupKey("+12025550143")! };
+      await client.hostedLinqLine.update({ where, data: { egressPolicy: "disabled" } });
+      expect(await check(false)).toMatchObject({ deliveryBlockCode: "operator_disabled" });
+      expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "published", notificationRetryAt: expect.any(Date) });
+      await client.hostedLinqLine.update({ where, data: { egressPolicy: "enabled" } });
+      expect(await check(true)).toMatchObject({ deliveryBlockCode: "automation_engagement_paused" });
+      await incrementHostedLinqInboundDailyState({ memberId: f.memberId, occurredAt: openWindow, prisma: client });
+      expect(await check(true)).toMatchObject({ clinicalReplyAuthorized: true });
+      expect(await check(false)).toMatchObject({ clinicalReplyAuthorized: true, providerDispatchClaimed: true });
+      expect((await f.runs())[0]?.notificationCoverage).toBe(kind === "voice" ? "attempted" : "published");
+      if (kind === "voice") {
+        // Lose the native response after its real Web grant. Only the following text can enter again.
+        expect((await check(false)).providerDispatchClaimed).toBe(false);
+        idempotencyKey = clinicalChangeDeliveryKey(f.pointer.runId, mode) + ":" + turnId + ":bubble:1";
+        expect((await check(false)).providerDispatchClaimed).toBe(true);
+      }
+      const receipt = await recordOutcome(request({ idempotencyKey, intentId: "synthetic-intent", targetKind: "thread",
+        threadIsDirect: true, target: f.threadId, attemptedAt: openWindow.toISOString(), failedAt: openWindow.toISOString(),
+        failureCode: "synthetic_terminal", providerThreadId: f.threadId }));
+      expect(receipt.status).toBe(200);
+      expect((await f.runs())[0]?.notificationCoverage).toBe("attempted");
+      expect((await check(false)).providerDispatchClaimed).not.toBe(true);
+    } finally { vi.useRealTimers(); await f.cleanup(); }
+  });
+
+  it("silently closes an older snapshot only for the exact missing bound turn", async () => {
+    const f = await notificationFixture("detail");
+    try {
+      await f.terminal(true);
+      const turnId = "turn_" + "c".repeat(32);
+      await client.$transaction(tx => bindClinicalRepliesToSnapshotTx(tx, f.memberId, "synthetic-snapshot", [{ runId: f.pointer.runId, turnId }]));
+      const missing = (id: string) => readClinicalNotificationDecision({ ...f.pointer, savedReplyResult: { turnId: id, status: "missing" } }, openWindow);
+      await missing("turn_" + "d".repeat(32));
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toMatchObject({ mode: "detail", savedTurnId: turnId });
+      expect(await missing(turnId)).toEqual({ mode: "off" });
+      expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "lost", notificationRetryAt: null });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
+    } finally { await f.cleanup(); }
+  });
+
+  it("holds a verified region with no supported window without arming another wake", async () => {
+    const f = await notificationFixture("notice", { phone: "+99900000137" });
+    try {
+      await f.terminal(true);
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
+      expect((await f.runs())[0]).toMatchObject({ notificationRetryAt: null, notificationDeferral: "route", notificationCoverage: "published" });
+      const count = await f.count();
+      await runClinicalDailySyncSweep({ now: openWindow });
+      expect(await f.count()).toBe(count);
+    } finally { await f.cleanup(); }
+  });
+
+  it("waits for renewed verification without a timer", async () => {
+    const f = await notificationFixture();
+    try {
+      await f.terminal(true);
+      await client.hostedMemberIdentity.update({ where: { memberId: f.memberId }, data: { phoneNumberVerifiedAt: null } });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
+      expect((await f.runs())[0]).toMatchObject({ notificationCoverage: "published", notificationDeferral: "route", notificationRetryAt: null });
+      await client.hostedMemberIdentity.update({ where: { memberId: f.memberId }, data: { phoneNumberVerifiedAt: openWindow } });
+      expect((await f.runs())[0]?.notificationRetryAt).toBeInstanceOf(Date);
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "notice", threadId: f.threadId });
+    } finally { await f.cleanup(); }
+  });
+
   it("checks the exact recipient and current revision on successive detail bubbles", async () => {
     const f = await notificationFixture("detail");
     try {
       await f.terminal(true);
       expect(await f.count()).toBe(1);
-      const attempt = (bubble: number, thread = f.threadId) => client.$transaction(tx => clinicalEgressBlock(tx, {
-        key: buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: clinicalChangeDeliveryKey(f.pointer.runId, "detail"),
-          index: bubble, turnId: "synthetic-turn" }), memberId: f.memberId,
+      const turnId = "turn_" + "a".repeat(32);
+      const bind = (id: string, snapshot: string) => client.$transaction(tx =>
+        bindClinicalRepliesToSnapshotTx(tx, f.memberId, snapshot, [{ runId: f.pointer.runId, turnId: id }]));
+      await bind(turnId, "snapshot-synthetic");
+      const otherTurn = "turn_" + "b".repeat(32);
+      await bind(otherTurn, "snapshot-second");
+      expect((await f.runs())[0]).toMatchObject({ notificationTurnId: turnId, notificationSnapshotId: "snapshot-synthetic" });
+      const attempt = (bubble: number, thread = f.threadId, generationTurn = turnId) => client.$transaction(tx => clinicalEgressBlock(tx, {
+        windowPhone: "+12025550137",
+        key: buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: clinicalChangeDeliveryKey(f.pointer.runId, "detail") + ":" + generationTurn,
+          index: bubble, turnId }), memberId: f.memberId, providerEntry: true, now: new Date("2026-11-01T19:00:00Z"),
         route: { conversationThreadId: thread, target: thread,
-          directRecipientPhoneNumber: "+12025550109", fromPhoneNumber: null, targetKind: "thread", threadIsDirect: true },
+          directRecipientPhoneNumber: "+12025550137", fromPhoneNumber: null, targetKind: "thread", threadIsDirect: true },
       }));
-      expect(await attempt(0)).toBe("clinical_imessage_only_unavailable");
-      expect(await attempt(1)).toBe("clinical_imessage_only_unavailable");
+      expect(await attempt(0)).toBeNull();
+      expect(await attempt(1)).toBeNull();
+      expect(await attempt(3, f.threadId, otherTurn)).toBe("clinical_authority_unavailable");
       expect(await attempt(1, "alternate-synthetic-thread")).toBe("clinical_authority_unavailable");
       await client.hostedMember.update({ where: { id: f.memberId },
         data: { clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: { increment: 1 } } });
@@ -480,11 +610,12 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
         where: { memberId_scope: { memberId: f.memberId, scope: clinicalProcessorScope(clinicalProcessors[0]!) } },
         data: { status: "revoked" },
       });
-      expect(await readClinicalNotificationDecision(f.pointer)).toEqual({ mode: "off" });
+      expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
       expect(await client.$transaction(tx => clinicalEgressBlock(tx, {
+        windowPhone: "+12025550137",
         memberId: f.memberId, key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:2`,
         route: { conversationThreadId: f.threadId, target: f.threadId, targetKind: "thread", threadIsDirect: true,
-          fromPhoneNumber: null, directRecipientPhoneNumber: "+12025550109" },
+          fromPhoneNumber: null, directRecipientPhoneNumber: "+12025550137" },
       }))).toBe("clinical_authority_unavailable");
     } finally { await f.cleanup(); }
   });

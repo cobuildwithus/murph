@@ -112,7 +112,7 @@ describe("hosted device-sync scheduled wake sweep route", () => {
 
   it("keeps reader revision claims from the sweep body out of daily admission", async () => {
     const request = new Request("https://join.example.test/api/internal/device-sync/recovery-sweep", {
-      method: "POST", body: JSON.stringify({ noticeReaders: { runner: 2, cloudflarePort: 2 } }),
+      method: "POST", body: JSON.stringify({ noticeReaders: { runner: 3, cloudflarePort: 3 } }),
     });
     expect((await route.POST(request)).status).toBe(200);
     expect(mocks.runClinicalDailySyncSweep).toHaveBeenCalledExactlyOnceWith({ deadlineMs: expect.any(Number) });

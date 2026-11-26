@@ -7,12 +7,38 @@ import { sendAssistantNotificationLocal } from '../src/assistant-service.js'
 import { runAssistantCronJobNow } from '../src/assistant/cron.ts'
 import { queueClinicalChange } from '../src/assistant/cron/clinical-change.ts'
 import { readAssistantCronStore } from '../src/assistant/cron/store.ts'
-import { listAssistantOutboxIntents, sendAssistantOutboxDispatchMessage } from '../src/assistant/outbox.ts'
+import { createAssistantOutboxIntent, listAssistantOutboxIntents, sendAssistantOutboxDispatchMessage } from '../src/assistant/outbox.ts'
+import { pruneAssistantGeneratedDeliveryResidue } from '../src/assistant/runtime-residue.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 
 vi.mock('../src/assistant-service.js', () => ({ sendAssistantNotificationLocal: vi.fn() }))
 
 describe('daily hospital notification integration', () => {
+  it('selects the checkpointed reply on restore and discards a longer second generation', async () => {
+    const vault = await mkdtemp(path.join(tmpdir(), 'clinical-saved-'))
+    try {
+      await initializeVault({ vaultRoot: vault })
+      const runId = 'crr_' + 'q'.repeat(32)
+      const savedTurnId = 'turn_' + '1'.repeat(32)
+      const occurredAt = new Date().toISOString()
+      const decision = { mode: 'detail' as const, threadId: 'synthetic-private', savedTurnId }
+      const replay = () => queueClinicalChange({ vault, runId, occurredAt, decision })
+      expect(await replay()).toMatchObject({ savedReplyResult: { turnId: savedTurnId, status: 'missing' } })
+      const stage = (turnId: string, suffix: string) => {
+        const key = 'clinical-change:v1:' + runId + ':detail:' + turnId + suffix
+        return createAssistantOutboxIntent({ vault, channel: 'linq', threadId: decision.threadId, threadIsDirect: true,
+          turnId, sessionId: 'synthetic-session', dedupeToken: key, deliveryIdempotencyKey: key, message: 'Synthetic reply.' })
+      }
+      const first = await stage(savedTurnId, ':bubble:0')
+      expect((await pruneAssistantGeneratedDeliveryResidue({ vault })).clinicalReplies).toBeUndefined()
+      const final = await stage(savedTurnId, '')
+      expect((await pruneAssistantGeneratedDeliveryResidue({ vault })).clinicalReplies).toEqual([{ runId, turnId: savedTurnId }])
+      for (const suffix of [':bubble:0', ':bubble:1', '']) await stage('turn_' + '2'.repeat(32), suffix)
+      expect(await replay()).toMatchObject({ deliveryIntentIds: [first.intentId, final.intentId] })
+      expect((await readAssistantCronStore(resolveAssistantStatePaths(vault))).jobs).toEqual([])
+    } finally { await rm(vault, { recursive: true, force: true }) }
+  })
+
   it.each(['notice', 'detail', 'off'] as const)('daily clinical notification journey %s', async mode => {
     const vault = await mkdtemp(path.join(tmpdir(), 'clinical-notice-journey-'))
     try {
@@ -33,7 +59,7 @@ describe('daily hospital notification integration', () => {
       }
       if (mode === 'detail') {
         const job = jobs[0]!
-        expect(job).toMatchObject({ keepAfterRun: true, schedule: { kind: 'at' }, clinicalChange: { runId: input.runId } })
+        expect(job).toMatchObject({ keepAfterRun: false, schedule: { kind: 'at' }, clinicalChange: { runId: input.runId } })
         const resolveScheduledLinqRoute = vi.fn(async () => ({ target: threadId, threadIsDirect: true }))
         const result = await runAssistantCronJobNow({ vault, job: job.jobId, trigger: 'scheduled',
           executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], resolveScheduledLinqRoute } },

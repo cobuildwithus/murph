@@ -423,18 +423,19 @@ bridge's original provider; standalone imports retain their supplied provider.
 
 ## Daily hospital record texts
 
-The production daily sweep creates silent imports. Its locked writer requires
-the deployed runner and port revisions before it can freeze a verified
-participant, assigned line and private chat for a new run. Web denies clinical
-egress. The runtime requires an explicit clinical decision and uses the
-ordinary provider entry fence on the exact thread. A restored notice drains
-only its own keyed outbox intent. After activation, texts may go to the thread
-frozen at daily admission. The owner withdrew the iMessage-only requirement. Linq may
-select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
+Daily admission freezes the verified participant, assigned line and private chat
+only after Web verifies serving revision 3 for the runner and port. At provider
+entry Web authorizes only that run and exact private thread. Every bubble of a
+detail reply must belong to the turn bound by the encrypted checkpoint. Linq
+may select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
 requires the member’s existing explicit detail setting. Each attempt, including
 a retry or another bubble, must recheck the run, preference, named approvals,
 private recipient, proactive pause, line health and recipient-region window.
 A group, replacement thread or different channel cannot receive the text.
+Detail uses the ordinary native voice memo. If Web granted its dispatch and
+the runner lost the result, the outbox abandons the ambiguous memo and the
+run counts as attempted. Other saved bubbles still require their own keys and
+fresh authorization. A transcript fallback is safe after a definite rejection.
 
 Linq can echo the sent text in a signed outbound receipt. Web verifies the body
 in memory and discards echoed text before persistence, logging, tracing or

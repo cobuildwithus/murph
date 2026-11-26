@@ -1,3 +1,4 @@
+import { CLINICAL_DAILY_NOTICE_REVISION } from "@murphai/hosted-execution/clinical-records-boundary";
 import { isDeployAdmissionModel, isDeployAdmissionTier } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
@@ -618,6 +619,7 @@ export async function startHostedContainerEntrypoint(input: {
           conversationWarmActivityCompletedAtEpochMs: conversationActivityReceivedAtEpochMs,
           heavyRuntimeHydrationCompletedAtEpochMs,
           heavyRuntimeHydrationStatus,
+          clinicalNoticeRevision: CLINICAL_DAILY_NOTICE_REVISION,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           hostedWorkerReleaseId,

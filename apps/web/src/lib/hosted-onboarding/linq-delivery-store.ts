@@ -3258,6 +3258,10 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(
     return { claimed: false, id: input.delivery.id, outcome: "incompatible" };
   }
 
+  // A prior clinical grant may already have sent a native memo. An uncorrelated failure
+  // or restored outbox can never reclaim that bubble, even without a provider message ID.
+  if (input.delivery.template === CLINICAL_LINQ_DELIVERY_TEMPLATE) return { claimed: false, id: input.delivery.id };
+
   if (input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
     && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE) {
     return claimHostedLinqInstantFirstTurnDeliveryTx(input);

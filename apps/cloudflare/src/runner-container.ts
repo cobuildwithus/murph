@@ -701,7 +701,7 @@ export class RunnerContainer extends Container {
     recheck?: true;
   }): Promise<{
     prepared: true;
-    runnerImage: { bundleFingerprint: string; sourceFingerprint: string };
+    runnerImage: { bundleFingerprint: string; sourceFingerprint: string; clinicalNoticeRevision?: number };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;
@@ -956,7 +956,7 @@ export class RunnerContainer extends Container {
       releaseId: string;
       region: HostedRunnerRegion;
     },
-  ): { bundleFingerprint: string; sourceFingerprint: string } {
+  ): { bundleFingerprint: string; sourceFingerprint: string; clinicalNoticeRevision?: number } {
     // Pristine inventory still requires configured image identity. Admission of
     // complete image pairs belongs to the same owner as ordinary runner health.
     readRunnerSlotRequiredEnvironmentString(
@@ -995,7 +995,7 @@ export class RunnerContainer extends Container {
         `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
       );
     }
-    return { bundleFingerprint, sourceFingerprint };
+    return { bundleFingerprint, sourceFingerprint, ...(typeof payload.clinicalNoticeRevision === "number" ? { clinicalNoticeRevision: payload.clinicalNoticeRevision } : {}) };
   }
 
   private async recordRuntimeFailureBeforeStop(request: { userId: string; attemptId: string; leaseGeneration: string }, error: unknown): Promise<void> {
@@ -4973,7 +4973,7 @@ function isRunnerContainerCount(value: unknown): value is number {
 
 function readHostedRunnerExpectedBundleIdentity(
   environment: RunnerContainerEnvironmentSource,
-): { bundleFingerprint: string; sourceFingerprint: string } | null {
+): { bundleFingerprint: string; sourceFingerprint: string; clinicalNoticeRevision?: number } | null {
   const bundleFingerprint = readOptionalEnvironmentString(
     environment.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT,
   );

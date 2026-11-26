@@ -1,3 +1,4 @@
+import { CLINICAL_REPLY_DEFERRED } from '@murphai/hosted-execution/clinical-records-boundary'
 import {
   assistantChannelDeliverySchema,
   assistantOutboxIntentSchema,
@@ -1540,6 +1541,7 @@ function shouldPrepareClaimAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
   now: Date,
 ): boolean {
+  if (intent.lastError?.code === CLINICAL_REPLY_DEFERRED) return false
   if (intent.status === 'pending') {
     return true
   }

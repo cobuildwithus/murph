@@ -939,9 +939,9 @@ Existing product admission, delivery and runtime safety rules still apply.
   epoch, product access, health consent, named approvals, preference revision,
   and the verified participant, assigned line and direct thread frozen at
   admission. The route fingerprint includes the named approval notice versions.
-  The production sweep supplies no compatible reader evidence. Its runs carry
-  no notification authority, even after a full baseline import.
-  Web denies every clinical dispatch. The private outbox requires explicit
+  The production sweep authenticates to the configured Worker using Vercel OIDC
+  over HTTPS and verifies the fresh nonce, promoted image evidence and port
+  revision. The member lock fences admission. The private outbox requires explicit
   clinical authorization for its key and frozen private thread at preflight
   and provider entry. The manually deployed port must forward this decision.
   The owner withdrew the iMessage-only requirement. Linq may

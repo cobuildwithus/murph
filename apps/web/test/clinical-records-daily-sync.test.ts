@@ -51,7 +51,7 @@ function fixture() {
     }),
   };
   const create = vi.fn();
-  const tx = { clinicalRecordConnection: connection, clinicalRecordRetrievalRun: { create } };
+  const tx = { clinicalRecordConnection: connection, clinicalRecordRetrievalRun: { create, findMany: async () => [], findFirst: async () => null } };
   const prisma = { ...tx, $transaction: async <T>(fn: (value: typeof tx) => Promise<T>) => fn(tx) };
   mocks.prisma.mockReturnValue(prisma);
   return { row, connection, create };
