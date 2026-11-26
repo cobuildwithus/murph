@@ -100,8 +100,8 @@ export function buildRecordedCards(activity: RecordedActivity, context: Recorded
   const extrema = minuteExtrema(series ?? []);
   if (hr && series && extrema) cards.push({
     ...base, id: `activity:${activity.id}:activity_heart_rate`, kind: "activity_heart_rate",
-    // The subtitle reports the highest single reading; the line shows minute averages, so the note says so.
-    subtitle: `heart rate peaked at ${formatNumber(hr.peakBpm)}`,
+    // One peak on the card: the subtitle names the line's highest minute, the same number its marker shows.
+    subtitle: `heart rate peaked at ${formatNumber(extrema.peak.bpm)}`,
     source_note: `${recorded}. The line shows each minute's average.`,
     chart: { type: "heart_rate", perMinute: [...series], ...extrema, ...timer },
   });
