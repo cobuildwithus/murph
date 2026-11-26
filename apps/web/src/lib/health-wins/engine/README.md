@@ -28,7 +28,7 @@ Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 | --- | --- | --- |
 | 1 | Choose one provider per metric and day. A recorded zero occupies its day. | [daily-clean.test.ts](daily-clean.test.ts) · selects one provider, keeps one whole steps total |
 | 2 | Apply inclusive hard bounds before selecting a valid day. | [daily-clean.test.ts](daily-clean.test.ts) · includes the limits |
-| 3 | Drop physiological points strictly beyond six median absolute deviations. With zero deviation only the median survives. Activity volume retains valid peaks. | [daily-clean.test.ts](daily-clean.test.ts) · drops physiological points, retains a large activity day |
+| 3 | Compare each physiological reading with observations up to 45 calendar days before and after it. Drop readings more than six median absolute deviations from that window's median. With zero deviation only the median survives. Activity volume retains valid peaks. | [daily-clean.test.ts](daily-clean.test.ts) · preserves a sustained rise, trims an isolated long night |
 | 4 | Exclude nights under three hours from the count denominator and chart. A missing night interrupts a consecutive run. | [daily-achievements.test.ts](daily-achievements.test.ts) · omits partial nights |
 | 5 | Monthly means need 15 days in a completed month or 14 in the current month. Source notes give the coverage. | [daily.test.ts](daily.test.ts) · requires 15 days, labels partial coverage |
 | 6 | Compare the current mean with the median of the previous three calendar-month means. Require a full favorable metric step. The title subtracts the two values displayed in the pills. | [daily.test.ts](daily.test.ts) · trend_change |

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { dailyAchievements } from "./daily-achievements";
 import { cleanDaily } from "./daily-clean";
 import type { DailySample, Metric } from "./types";
 
@@ -7,6 +8,14 @@ const today = "2032-03-25";
 
 function point(metric: Metric, provider: string, day: number, value: number): DailySample {
   return { metric, provider, date: `2032-03-${String(day).padStart(2, "0")}`, value };
+}
+
+function history(metric: Metric, days: number, valueAt: (i: number) => number): DailySample[] {
+  return Array.from({ length: days }, (_, i) => {
+    const date = new Date(today);
+    date.setUTCDate(date.getUTCDate() - (days - 1 - i));
+    return { metric, provider: "garmin", date: date.toISOString().slice(0, 10), value: valueAt(i) };
+  });
 }
 
 describe("daily data quality", () => {
@@ -60,6 +69,36 @@ describe("daily data quality", () => {
     expect(cleanDaily(rows, today).map(row => row.value)).toEqual(values.slice(0, -1));
     const flat = [base, base, base, base + 1].map((value, index) => point(metric, "garmin", index + 1, value));
     expect(cleanDaily(flat, today)).toEqual(flat.slice(0, -1));
+  });
+
+  it("preserves a sustained rise in sleep duration in both the monthly count and the streak", () => {
+    const daily = history("sleep_total_min", 365, i => i < 340 ? 410 + (i * 11) % 51 : 495 + (i * 7) % 31);
+    const cards = dailyAchievements("sleep_total_min", cleanDaily(daily, today), today).map(({ card }) => card);
+    expect(cards.find(card => card.kind === "threshold_count")?.title.number).toBe("25 of 25 nights");
+    expect(cards.find(card => card.kind === "streak")?.chart.highlight).toEqual({
+      start: "2032-03-01", end: today,
+    });
+  });
+
+  it("keeps a gradual decline in resting heart rate after a long steady baseline", () => {
+    const rows = history("rhr_bpm", 365, i => {
+      const trainingWeeks = Math.max(0, Math.floor((i - 245) / 7));
+      return 70 + (i % 3) - trainingWeeks;
+    });
+    expect(cleanDaily(rows, today)).toEqual(rows);
+  });
+
+  it("trims an isolated long night in a steady month", () => {
+    const rows = history("sleep_total_min", 30, i => i === 14 ? 795 : 433 + (i % 9));
+    expect(cleanDaily(rows, today)).toEqual(rows.filter((_, i) => i !== 14));
+  });
+
+  it("includes observations exactly 45 calendar days away in either direction", () => {
+    const rows = history("rhr_bpm", 93, i => i === 46 ? 90 : 60);
+    const middle = rows[46];
+    expect(cleanDaily([rows[1], middle, rows[91]], today)).not.toContainEqual(middle);
+    expect(cleanDaily([rows[0], middle, rows[91]], today)).toContainEqual(middle);
+    expect(cleanDaily([rows[1], middle, rows[92]], today)).toContainEqual(middle);
   });
 
   it.each<[Metric, number[]]>([
