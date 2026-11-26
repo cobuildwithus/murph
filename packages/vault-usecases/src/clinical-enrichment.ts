@@ -229,10 +229,7 @@ async function prepareCurrentClinicalDocument(
   const cached = await readOptional(extractionCachePath(vaultRoot, job.source.sha256, job.source.mediaType, job.page, attested.parent.clinicalOccurredAt));
   const proposal = jobSchema.shape.prepared.safeParse(cached);
   if (proposal.success && proposal.data && proposal.data.page === job.page) {
-    job.prepared = proposal.data;
-    job.schema = "murph.clinical-enrichment.v3";
-    job.totalPages = proposal.data.totalPages;
-    job.status = "prepared";
+    acceptClinicalProposal(job, proposal.data);
     await saveJob(vaultRoot, job);
     return { status: "apply", jobId: job.jobId };
   }
@@ -258,10 +255,7 @@ async function prepareCurrentClinicalResource(vaultRoot: string, job: Job, manif
   const cache = await readOptional(extractionCachePath(vaultRoot, resource.sha256, job.source.mediaType, 1, attested.parent.clinicalOccurredAt));
   const proposal = jobSchema.shape.prepared.safeParse(cache);
   if (proposal.success && proposal.data?.page === 1 && proposal.data.totalPages === 1) {
-    job.prepared = proposal.data;
-    job.schema = "murph.clinical-enrichment.v3";
-    job.totalPages = 1;
-    job.status = "prepared";
+    acceptClinicalProposal(job, proposal.data);
     await saveJob(vaultRoot, job);
     return { status: "apply", jobId: job.jobId };
   }
@@ -280,29 +274,200 @@ export async function persistClinicalEnrichmentProposals(input: { vaultRoot: str
     const attested = await attestSource(input.vaultRoot, job);
     if (!attested.parent.eligible) throw new Error("Clinical document parent is not eligible for proposals.");
     if (input.sourceSha256 !== attested.storedSha256) throw new Error("Clinical enrichment proposal source changed.");
-    const outputs = outputsSchema.parse(Object.fromEntries(families.map((family) => [family, clinicalDocumentExtractionOutputSchemaForFamily(family).parse(input.outputs[family])])));
-    for (const output of Object.values(outputs)) {
-      if (output.records.length === CLINICAL_DOCUMENT_EXTRACTION_MAX_RECORDS) {
-        output.status = "blocked";
-        output.reason = "Extraction reached its record limit; additional source facts may remain.";
-      }
-    }
-    // Older strict readers cannot apply typed clinical notes. Preserve legacy
-    // frozen proposals, but mark newly produced checkpoints with their reader floor.
-    job.schema = "murph.clinical-enrichment.v3";
-    if (job.source.resource && (input.page !== 1 || input.totalPages !== 1)) throw new Error("Clinical resource must be a single extraction unit.");
-    if (input.page > input.totalPages || families.some((family) => outputs[family].records.some((record) => record.page !== undefined && record.page !== input.page))) throw new Error("Clinical enrichment proposals reference an unprocessed page.");
     if (job.totalPages !== undefined && job.totalPages !== input.totalPages) throw new Error("Clinical enrichment document page count changed.");
-    if (Buffer.byteLength(JSON.stringify(outputs), "utf8") > 4 * 1024 * 1024) throw new Error("Clinical enrichment proposals exceed the byte limit.");
-    job.totalPages = input.totalPages;
-    job.failures = 0;
-    delete job.nextAttemptAt;
-    job.prepared = { page: input.page, totalPages: input.totalPages, outputs };
-    job.status = "prepared";
+    const prepared = validateClinicalProposal({ resource: Boolean(job.source.resource), page: input.page, totalPages: input.totalPages, outputs: input.outputs });
+    acceptClinicalProposal(job, prepared);
     await saveJob(input.vaultRoot, job);
     const cachePath = extractionCachePath(input.vaultRoot, job.source.resource?.sha256 ?? job.source.sha256, job.source.mediaType, input.page, attested.parent.clinicalOccurredAt);
     await mkdir(path.dirname(cachePath), { recursive: true, mode: 0o700 });
     await writeJsonFileAtomic(cachePath, job.prepared, { mode: 0o600 });
+  });
+}
+
+type ClinicalPreparedProposal = NonNullable<Job["prepared"]>;
+
+/** One acceptance for fresh and cached proposals: it also clears the retry state. */
+function acceptClinicalProposal(job: Job, prepared: ClinicalPreparedProposal) {
+  // Older strict readers cannot apply typed clinical notes. Preserve legacy
+  // frozen proposals, but mark newly produced checkpoints with their reader floor.
+  job.schema = "murph.clinical-enrichment.v3";
+  job.totalPages = prepared.totalPages;
+  job.failures = 0;
+  delete job.nextAttemptAt;
+  job.prepared = prepared;
+  job.status = "prepared";
+}
+
+function validateClinicalProposal(input: { resource: boolean; page: number; totalPages: number; outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput> }): ClinicalPreparedProposal {
+  const outputs = outputsSchema.parse(Object.fromEntries(families.map((family) => [family, clinicalDocumentExtractionOutputSchemaForFamily(family).parse(input.outputs[family])])));
+  for (const output of Object.values(outputs)) {
+    if (output.records.length === CLINICAL_DOCUMENT_EXTRACTION_MAX_RECORDS) {
+      output.status = "blocked";
+      output.reason = "Extraction reached its record limit; additional source facts may remain.";
+    }
+  }
+  if (input.resource && (input.page !== 1 || input.totalPages !== 1)) throw new Error("Clinical resource must be a single extraction unit.");
+  if (input.page > input.totalPages || families.some((family) => outputs[family].records.some((record) => record.page !== undefined && record.page !== input.page))) throw new Error("Clinical enrichment proposals reference an unprocessed page.");
+  if (Buffer.byteLength(JSON.stringify(outputs), "utf8") > 4 * 1024 * 1024) throw new Error("Clinical enrichment proposals exceed the byte limit.");
+  return { page: input.page, totalPages: input.totalPages, outputs };
+}
+
+/** One extraction at or ahead of a job's cursor. `key` is its extraction-cache identity. */
+export interface ClinicalExtractionUnit {
+  key: string;
+  jobId: string;
+  /** The job's current page when planned; a scheduling hint, rechecked when a failure settles. */
+  cursor: boolean;
+  cursorRef: string;
+  locator: { attachmentIndex: number } | { resourceIndex: number };
+  /** The manifest attachment or resource digest that keys the cache. */
+  cacheSha256: string;
+  page: number;
+  failures: number;
+  source: ClinicalEnrichmentSource;
+  documentPath: string;
+  timeZone: string;
+  extractedText?: string;
+}
+
+const cursorRefOf = (attachmentIndex: number, resourceIndex: number | undefined, page: number) => `${attachmentIndex}:${resourceIndex ?? 0}:${page}`;
+
+/**
+ * Lists uncached extraction units in queue order, each job's cursor first.
+ * Only job descriptions are read under the enrichment lock; attestation and
+ * page counting run outside it, and every save attests its unit again.
+ */
+export async function planClinicalExtractionUnits(input: {
+  vaultRoot: string;
+  limit: number;
+  now?: Date;
+  exclude?(unit: ClinicalExtractionUnit): boolean;
+  countPages(document: { documentPath: string; mediaType: string }): Promise<number>;
+}): Promise<ClinicalExtractionUnit[]> {
+  const now = (input.now ?? new Date()).getTime();
+  const jobs = await locked(input.vaultRoot, async () => {
+    const index = await readIndex(input.vaultRoot);
+    const pending = await Promise.all(index.pending.map((jobId) => readJob(input.vaultRoot, jobId).catch(() => null)));
+    return pending.filter((job): job is Job => job !== null && (job.status === "pending" || job.status === "prepared")
+      && !(job.nextAttemptAt && Date.parse(job.nextAttemptAt) > now));
+  });
+  if (jobs.length === 0) return [];
+  const { timezone } = vaultMetadataSchema.parse(await readVaultMetadataSource(input.vaultRoot));
+  const units: ClinicalExtractionUnit[] = [];
+  for (const job of jobs) {
+    for await (const unit of planClinicalJobUnits(input, job, timezone)) {
+      if (input.exclude?.(unit)) continue;
+      units.push(unit);
+      if (units.length >= input.limit) return units;
+    }
+  }
+  return units;
+}
+
+async function* planClinicalJobUnits(
+  input: Parameters<typeof planClinicalExtractionUnits>[0],
+  job: Job,
+  timeZone: string,
+): AsyncGenerator<ClinicalExtractionUnit> {
+  const manifest = await readJobManifest(input.vaultRoot, job).catch(() => null);
+  if (!manifest) return;
+  const attachmentCount = "documentAttachments" in manifest ? manifest.documentAttachments?.length ?? 0 : 0;
+  for (let attachmentIndex = job.attachmentIndex; attachmentIndex < attachmentCount; attachmentIndex++) {
+    yield* planClinicalDocumentUnits(input, job, manifest, attachmentIndex, timeZone);
+  }
+  for (let resourceIndex = job.resourceIndex ?? 0; resourceIndex < (job.structuredSources?.length ?? 0); resourceIndex++) {
+    const locator = { resourceIndex };
+    const attested = await attestClinicalUnitSource(input.vaultRoot, job, manifest, locator).catch(() => null);
+    if (!attested?.parent.eligible) continue;
+    const cursor = job.attachmentIndex >= attachmentCount && resourceIndex === (job.resourceIndex ?? 0);
+    if (cursor && job.status === "prepared") continue;
+    const unit = await unplannedClinicalUnit(input.vaultRoot, job, attested, { locator, page: 1, timeZone, cursor, attachmentCount });
+    if (unit) yield unit;
+  }
+}
+
+async function* planClinicalDocumentUnits(
+  input: Parameters<typeof planClinicalExtractionUnits>[0],
+  job: Job,
+  manifest: z.infer<typeof clinicalRawManifestSchema>,
+  attachmentIndex: number,
+  timeZone: string,
+): AsyncGenerator<ClinicalExtractionUnit> {
+  const locator = { attachmentIndex };
+  const attested = await attestClinicalUnitSource(input.vaultRoot, job, manifest, locator).catch(() => null);
+  if (!attested?.parent.eligible) return;
+  const current = attachmentIndex === job.attachmentIndex;
+  // An uncountable document still offers its current page, whose preparation settles it.
+  const totalPages = (current ? job.totalPages : undefined)
+    ?? await input.countPages({ documentPath: attested.documentPath, mediaType: attested.source.mediaType }).catch(() => current ? job.page : 0);
+  // A prepared cursor page is frozen in the job itself, even when its cache entry was lost.
+  const firstPage = current ? job.page + (job.status === "prepared" ? 1 : 0) : 1;
+  for (let page = firstPage; page <= totalPages; page++) {
+    const unit = await unplannedClinicalUnit(input.vaultRoot, job, attested, { locator, page, timeZone, cursor: current && page === job.page });
+    if (unit) yield unit;
+  }
+}
+
+async function unplannedClinicalUnit(
+  vaultRoot: string,
+  job: Job,
+  attested: Awaited<ReturnType<typeof attestClinicalUnitSource>>,
+  unit: { locator: ClinicalExtractionUnit["locator"]; page: number; timeZone: string; cursor: boolean; attachmentCount?: number },
+): Promise<ClinicalExtractionUnit | null> {
+  const cachePath = extractionCachePath(vaultRoot, attested.cacheSha256, attested.source.mediaType, unit.page, attested.parent.clinicalOccurredAt);
+  if (await stat(cachePath).then(() => true, () => false)) return null;
+  const cursorRef = "resourceIndex" in unit.locator
+    ? cursorRefOf(unit.attachmentCount ?? 0, unit.locator.resourceIndex, 1)
+    : cursorRefOf(unit.locator.attachmentIndex, job.resourceIndex, unit.page);
+  return {
+    key: path.relative(rootPath(vaultRoot), cachePath), jobId: job.jobId, cursor: unit.cursor, cursorRef, locator: unit.locator,
+    cacheSha256: attested.cacheSha256, page: unit.page, failures: unit.cursor ? job.failures : 0,
+    source: { rawRef: attested.source.rawRef, sha256: attested.storedSha256, mediaType: attested.source.mediaType, ...(attested.source.resource ? { resource: attested.source.resource } : {}),
+      clinicalOccurredAt: attested.parent.clinicalOccurredAt, recordedAt: attested.parent.retrievedAt },
+    documentPath: attested.documentPath, timeZone: unit.timeZone, ...(attested.resourceText !== undefined ? { extractedText: attested.resourceText } : {}),
+  };
+}
+
+/** Attests one attachment or structured resource of a job, at or ahead of its cursor. */
+async function attestClinicalUnitSource(vaultRoot: string, job: Job, manifest: z.infer<typeof clinicalRawManifestSchema>, locator: ClinicalExtractionUnit["locator"]) {
+  if ("resourceIndex" in locator) {
+    const resource = job.structuredSources?.[locator.resourceIndex];
+    if (!resource) throw new Error("Clinical resource is not part of this job.");
+    const attested = await attestClinicalStructuredSource({ vaultRoot, manifestPath: job.root.manifestPath, manifest, source: resource });
+    return { ...attested, cacheSha256: resource.sha256, storedSha256: attested.source.sha256, resourceText: attested.extractedText };
+  }
+  const attachment = "documentAttachments" in manifest ? manifest.documentAttachments?.[locator.attachmentIndex] : undefined;
+  if (attachment?.status !== "downloaded") throw new Error("Clinical document is not downloaded.");
+  const source = sourceSchema.parse({ rawRef: path.posix.join(path.posix.dirname(job.root.manifestPath), attachment.relativePath), sha256: attachment.sha256, mediaType: attachment.mediaType, byteLength: attachment.byteLength });
+  const attested = await attestSource(vaultRoot, { ...job, attachmentIndex: locator.attachmentIndex, source });
+  return { ...attested, source, cacheSha256: attachment.sha256, resourceText: undefined };
+}
+
+/**
+ * Saves one validated extraction to the cache, never replacing an existing
+ * entry. The job's apply wake promotes it when the cursor reaches it.
+ */
+export async function saveClinicalExtraction(input: {
+  vaultRoot: string;
+  unit: ClinicalExtractionUnit;
+  totalPages: number;
+  outputs: Record<(typeof families)[number], ClinicalDocumentExtractionOutput>;
+}): Promise<"saved" | "existing" | "stale"> {
+  return locked(input.vaultRoot, async () => {
+    const job = await readJob(input.vaultRoot, input.unit.jobId);
+    if (job.status !== "pending" && job.status !== "prepared") return "stale";
+    const attested = await readJobManifest(input.vaultRoot, job)
+      .then((manifest) => attestClinicalUnitSource(input.vaultRoot, job, manifest, input.unit.locator)).catch(() => null);
+    if (!attested?.parent.eligible || attested.storedSha256 !== input.unit.source.sha256) return "stale";
+    const cachePath = extractionCachePath(input.vaultRoot, attested.cacheSha256, attested.source.mediaType, input.unit.page, attested.parent.clinicalOccurredAt);
+    if (path.relative(rootPath(input.vaultRoot), cachePath) !== input.unit.key) return "stale";
+    const current = "attachmentIndex" in input.unit.locator && input.unit.locator.attachmentIndex === job.attachmentIndex;
+    if (current && job.totalPages !== undefined && job.totalPages !== input.totalPages) return "stale";
+    if (await readOptional(cachePath) !== null) return "existing";
+    const prepared = validateClinicalProposal({ resource: Boolean(attested.source.resource), page: input.unit.page, totalPages: input.totalPages, outputs: input.outputs });
+    await mkdir(path.dirname(cachePath), { recursive: true, mode: 0o700 });
+    await writeJsonFileAtomic(cachePath, prepared, { mode: 0o600 });
+    return "saved";
   });
 }
 
@@ -706,9 +871,15 @@ export async function readClinicalEnrichmentStatus(input: { vaultRoot: string; j
   return { status: job.status, counts: job.counts, nextAttemptAt: job.nextAttemptAt, reason: job.reason, holdReasons: job.holdReasons };
 }
 
-export async function deferClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string; nextAttemptAt: string }) {
+/** A failure settles only while the job's cursor still points at the failed unit. */
+function cursorMoved(job: Job, cursorRef: string | undefined): boolean {
+  return cursorRef !== undefined && (job.status !== "pending" || cursorRefOf(job.attachmentIndex, job.resourceIndex, job.page) !== cursorRef);
+}
+
+export async function deferClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string; nextAttemptAt: string; cursorRef?: string }) {
   return locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
+    if (cursorMoved(job, input.cursorRef)) return { status: job.status, nextAttemptAt: job.nextAttemptAt };
     if (job.status !== "pending") throw new Error("Only unprepared clinical enrichment can defer extraction.");
     job.failures++;
     job.reason = input.reason;
@@ -734,10 +905,10 @@ function holdCurrentSource(job: Job, reason: string, structured?: boolean) {
   delete job.nextAttemptAt;
 }
 
-export async function blockClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string }): Promise<void> {
+export async function blockClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string; cursorRef?: string }): Promise<void> {
   await locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
-    if (job.status === "complete") return;
+    if (job.status === "complete" || cursorMoved(job, input.cursorRef)) return;
     if (job.status === "prepared") throw new Error("Accepted clinical enrichment proposals must be applied before blocking.");
     job.reason = input.reason;
     holdCurrentSource(job, input.reason);

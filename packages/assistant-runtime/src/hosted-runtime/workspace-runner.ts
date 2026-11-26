@@ -389,8 +389,6 @@ export interface HostedWorkspaceDurableCheckpointEffectResult {
 
 export interface HostedWorkspaceDurableCheckpointEffectContext {
   signal?: AbortSignal | null;
-  /** Aborts only when a foreground wake should run first; shutdown never sets it. */
-  wakeInterruptionSignal?: AbortSignal | null;
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
 }
 
@@ -478,7 +476,7 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
   materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
-  onCanonicalWriteReceiptLogUpdated?: ((entryCount: number) => void) | null;
+  onCanonicalWriteReceiptLogUpdated?: ((entryCount: number, pendingReceiptBytes: number) => void) | null;
   trackDeferredUsageCapture?: ((capture: HostedWorkspaceRunnerDeferredUsageCapture) => void) | null;
   trackLocalWorkspaceMutationCompletion?: ((completion: Promise<void> | null) => void) | null;
   withCanonicalWritePersistence?: (<T>(run: () => Promise<T>) => Promise<T>) | null;
@@ -490,6 +488,8 @@ export interface HostedWorkspaceRunnerInput {
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   shouldYieldDeviceImportPreparation?: (() => boolean) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  /** Clinical apply's own receipt-capacity yield; other background owners keep the one above. */
+  shouldYieldClinicalApply?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
@@ -3194,6 +3194,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.input.onCanonicalWriteReceiptLogUpdated?.(
             receiptLogUpdate.entryCount,
+            receiptLogUpdate.pendingReceiptBytes,
           );
         } else {
           const checkpointRedactedStatus =
@@ -3232,6 +3233,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.input.onCanonicalWriteReceiptLogUpdated?.(
             receiptLogUpdate.entryCount,
+            receiptLogUpdate.pendingReceiptBytes,
           );
         }
         await writeHostedForegroundCheckpointDeferredLog({

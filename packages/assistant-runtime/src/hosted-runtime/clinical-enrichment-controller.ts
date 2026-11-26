@@ -1,39 +1,23 @@
-export type HostedClinicalEnrichmentRunResult = "idle" | "settled";
-
-/** One invocation may act as its own clinical successor for this long. */
-export const HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS = 10 * 60_000;
-/** Finished pages share one checkpoint opened by the first extraction after it. */
-export const HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS = 5 * 60_000;
-/** One page's provider deadline plus settling; no page defers a checkpoint longer. */
-export const HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS = 125_000;
+/** Extraction units in flight at once; the provider, not the container, bounds throughput. */
+export const HOSTED_CLINICAL_ENRICHMENT_SLOTS = 16;
+/** Owned extraction may defer an idle checkpoint this long; due work still voids the window. */
+export const HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS = 15 * 60_000;
 
 /**
  * What the runtime's next checkpoint must publish. `batchable` is only
- * finished pages' deferred usage plus canonical receipts, which restore already
- * replays from the receipt log; anything else is `due`.
+ * canonical receipts, which restore already replays from the receipt log;
+ * any durable effect or follow-up is `due`.
  */
 export type HostedClinicalPendingCheckpointWork = "none" | "batchable" | "due";
 
-export function classifyHostedClinicalPendingCheckpointWork<Effect>(input: {
+export function classifyHostedClinicalPendingCheckpointWork(input: {
   canonicalReceiptCount: number;
   canonicalReceiptLogNearlyFull: boolean;
-  durableEffects: readonly Effect[];
+  durableEffectCount: number;
   durableFollowUpPending: boolean;
-  isClinicalUsageEffect(effect: Effect): boolean;
 }): HostedClinicalPendingCheckpointWork {
-  if (input.durableFollowUpPending || input.canonicalReceiptLogNearlyFull
-    || !input.durableEffects.every((effect) => input.isClinicalUsageEffect(effect))) {
-    return "due";
-  }
-  return input.durableEffects.length > 0 || input.canonicalReceiptCount > 0 ? "batchable" : "none";
-}
-
-/** Member-facing durable effects drain before batched clinical page accounting. */
-export function orderHostedClinicalUsageEffectsLast<Effect>(
-  effects: readonly Effect[],
-  isClinicalUsageEffect: (effect: Effect) => boolean,
-): Effect[] {
-  return [...effects.filter((effect) => !isClinicalUsageEffect(effect)), ...effects.filter(isClinicalUsageEffect)];
+  if (input.durableFollowUpPending || input.canonicalReceiptLogNearlyFull || input.durableEffectCount > 0) return "due";
+  return input.canonicalReceiptCount > 0 ? "batchable" : "none";
 }
 
 export function resolveHostedBackgroundReadCheckpointDeadline(input: {
@@ -47,167 +31,183 @@ export function resolveHostedBackgroundReadCheckpointDeadline(input: {
 
 export interface HostedClinicalEnrichmentController {
   activeDeadline(): number | null;
-  kick(): void;
+  /** True while a provider call, its queued or running publication, or planning is owned. */
+  hasOwnedWork(): boolean;
+  /** Plans and starts free slots; `progressed` marks committed apply progress. */
+  kick(progressed?: boolean): void;
+  /** Runtime abort: cancel every provider call. */
   requestPauseAndRequeue(): void;
+  /**
+   * Checkpoint boundary: hold result publication and join running ones.
+   * Provider calls keep running; their results publish after resume.
+   */
   pauseAndRequeue(): Promise<void>;
   resume(): void;
-  /** True while paused at a checkpoint with requeued or durably due work and budget left. */
+  /** Resolves once planning in progress settles; a release decision waits for it. */
+  settlePlanning(): Promise<void>;
+  /** True while paused at a checkpoint with owned, requested or durably due work that keeps progressing. */
   canContinueAfterCheckpoint(durableWorkDue: boolean): boolean;
-  /**
-   * After a published checkpoint, resume that work instead of leaving it to a
-   * restored successor. Returns false when canContinueAfterCheckpoint would.
-   */
+  /** After a published checkpoint, resume that work instead of leaving it to a restored successor. */
   continueAfterCheckpoint(durableWorkDue: boolean): boolean;
-  /** Resolves once the current job reaches extraction or no job is running. */
-  waitForExtraction(): Promise<void>;
+  /** Release: abort and join provider calls; queued publications are dropped. */
   closeAndRequeue(): Promise<void>;
 }
 
-export interface HostedClinicalEnrichmentControllerInput {
-  /**
-   * Own one durable clinical job through proposal persistence or requeue.
-   * Await every exact read-only child before returning, including on abort.
-   * Return idle after a deferred retry; settled means another job may be ready.
-   * An uncaught failure leaves workspace release unsafe.
-   */
-  runOne(signal: AbortSignal, onExtractionStarted: () => void): Promise<HostedClinicalEnrichmentRunResult>;
+export interface HostedClinicalEnrichmentControllerInput<Unit, Outcome> {
+  slots?: number;
+  keyOf(unit: Unit): string;
+  /** Up to `limit` units whose keys are not in flight. Planning never writes. */
+  plan(inFlight: ReadonlySet<string>, limit: number): Promise<Unit[]>;
+  /** Provider work only. It must settle after abort and never publish state itself. */
+  run(unit: Unit, signal: AbortSignal): Promise<Outcome>;
+  /** One short critical section: save or settle, wake, usage and dirty notification. */
+  publish(outcome: Outcome): Promise<void>;
+  /** Owned work keeps the invocation alive until its results publish. */
+  onActivity(): void;
   onError(error: unknown): void;
-  /**
-   * Work the runtime's next checkpoint must publish. After a finished page,
-   * `due` work, or `batchable` work once another page would overrun the
-   * checkpoint window, holds the next page: that checkpoint would abort it.
-   */
-  pendingCheckpointWork?(): HostedClinicalPendingCheckpointWork;
-  /**
-   * The controller went idle inside an open extraction window. The runtime's
-   * checkpoint wait may still hold the last page's deadline.
-   */
-  onExtractionWindowReleased?(): void;
 }
 
 /** Keeps provider work separate from the runtime's tracked canonical mutations. */
-export function createHostedClinicalEnrichmentController(
-  input: HostedClinicalEnrichmentControllerInput,
+export function createHostedClinicalEnrichmentController<Unit, Outcome>(
+  input: HostedClinicalEnrichmentControllerInput<Unit, Outcome>,
 ): HostedClinicalEnrichmentController {
-  let active: {
-    abortController: AbortController;
-    completion: Promise<HostedClinicalEnrichmentRunResult>;
-    deadline: number | null;
-    started: Promise<void>;
-  } | null = null;
+  const slotLimit = input.slots ?? HOSTED_CLINICAL_ENRICHMENT_SLOTS;
+  const slots = new Map<string, AbortController>();
+  const running = new Set<Promise<void>>();
+  const publishing = new Set<Promise<void>>();
+  let heldPublications: (() => void)[] = [];
+  let planning: Promise<void> | null = null;
   let paused = false;
   let closed = false;
   let kickRequested = false;
+  // A failed durable write is an ownership barrier: release must fail and nothing continues.
+  let failure: { error: unknown } | null = null;
   let windowDeadline: number | null = null;
-  const continuationDeadline = Date.now() + HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS;
-  // One continuation may only apply the previous page. Two in a row without
-  // extraction mean the work cannot progress here, so the durable successor's
-  // pacing takes over instead of a checkpoint loop.
-  let continuationsWithoutExtraction = 0;
-  // Startup kicks run even when restored work awaits a checkpoint; once a job
-  // has finished, its own checkpoint work may hold the next one until then.
-  let jobFinishedSinceCheckpoint = false;
+  // Work continues in this invocation while it progresses. Two continuations in
+  // a row without a published result or committed apply mean it cannot progress
+  // here, so the durable successor takes over.
+  let continuationsWithoutProgress = 0;
 
-  const holdsNextJobForCheckpoint = (): boolean => {
-    if (!jobFinishedSinceCheckpoint) return false;
-    const pending = input.pendingCheckpointWork?.() ?? "none";
-    return pending === "due" || (pending === "batchable"
-      && (windowDeadline === null || Date.now() + HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS > windowDeadline));
+  const fail = (error: unknown) => {
+    failure ??= { error };
+    input.onError(error);
+  };
+  const hasOwnedWork = () => slots.size > 0 || publishing.size > 0 || heldPublications.length > 0 || planning !== null;
+
+  const publishWhenOpen = async (outcome: Outcome): Promise<void> => {
+    while (paused && !closed) await new Promise<void>((resolve) => { heldPublications.push(resolve); });
+    if (closed) return;
+    const publication = input.publish(outcome);
+    publishing.add(publication);
+    try {
+      await publication;
+      continuationsWithoutProgress = 0;
+    } finally {
+      publishing.delete(publication);
+    }
   };
 
-  const kick = (): void => {
-    if (closed) return;
-    if (paused || active || holdsNextJobForCheckpoint()) {
+  const start = (unit: Unit): void => {
+    const key = input.keyOf(unit);
+    const abortController = new AbortController();
+    slots.set(key, abortController);
+    windowDeadline ??= Date.now() + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS;
+    input.onActivity();
+    const done: Promise<void> = input.run(unit, abortController.signal)
+      .then(publishWhenOpen)
+      .catch(fail)
+      .finally(() => {
+        slots.delete(key);
+        running.delete(done);
+        fill();
+      });
+    running.add(done);
+  };
+
+  const fill = (): void => {
+    if (closed || failure) return;
+    if (paused || planning) {
       kickRequested = true;
       return;
     }
+    const free = slotLimit - slots.size;
+    if (free <= 0) return;
     kickRequested = false;
-    const abortController = new AbortController();
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => { markStarted = resolve; });
-    const completion = Promise.resolve().then(() => input.runOne(abortController.signal, () => {
-      if (active !== owned || paused || closed) return;
-      windowDeadline ??= Date.now() + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS;
-      owned.deadline = Math.min(windowDeadline, Date.now() + HOSTED_CLINICAL_ENRICHMENT_PAGE_WINDOW_MS);
-      continuationsWithoutExtraction = 0;
-      markStarted();
-    }));
-    // Queue discovery is ordinary bounded I/O, not provider work. An empty
-    // queue must never extend the runtime's idle checkpoint window.
-    const owned = { abortController, completion, deadline: null as number | null, started };
-    active = owned;
-    void completion.then(
-      (result) => {
-        if (active !== owned) return;
-        active = null;
-        jobFinishedSinceCheckpoint = true;
-        // Cancellation leaves durable work pending even if runOne returns idle.
-        kickRequested ||= result === "settled" || abortController.signal.aborted;
-        if (paused || closed) return;
-        if (kickRequested) kick();
-        if (!active && windowDeadline !== null) input.onExtractionWindowReleased?.();
-      },
-      (error: unknown) => {
-        // Keep the rejected promise: release must fail if child exit, proposal
-        // persistence or cancellation requeue could not be proved.
-        try {
-          input.onError(error);
-        } catch {
-          // Diagnostics cannot replace the original workspace-release failure.
+    const current: Promise<void> = input.plan(new Set(slots.keys()), free)
+      .then((units) => {
+        for (const unit of units) {
+          if (closed || paused || failure || slots.size >= slotLimit) return;
+          if (!slots.has(input.keyOf(unit))) start(unit);
         }
-      },
-    );
+      })
+      // Planning only reads; a boundary that interrupted it plans again on resume.
+      .catch((error: unknown) => { if (!closed && !paused) input.onError(error); })
+      .finally(() => {
+        planning = null;
+        if (kickRequested) fill();
+      });
+    planning = current;
   };
 
-  const requestPauseAndRequeue = (): void => {
-    paused = true;
-    active?.abortController.abort(
-      new DOMException("Clinical enrichment paused at a workspace boundary.", "AbortError"),
-    );
+  const abortAll = () => {
+    for (const abortController of slots.values()) {
+      abortController.abort(new DOMException("Clinical enrichment paused at a workspace boundary.", "AbortError"));
+    }
   };
 
-  const quiesce = async (): Promise<void> => {
-    requestPauseAndRequeue();
-    const owned = active;
-    if (owned) await owned.completion;
-    windowDeadline = null;
-    jobFinishedSinceCheckpoint = false;
+  const resume = (): void => {
+    if (closed || !paused) return;
+    paused = false;
+    if (hasOwnedWork()) windowDeadline = Date.now() + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS;
+    const held = heldPublications;
+    heldPublications = [];
+    for (const release of held) release();
+    fill();
   };
 
-  // A failed job stays active as the release barrier and never continues.
   const canContinueAfterCheckpoint = (durableWorkDue: boolean): boolean =>
-    !closed && paused && !active && (kickRequested || durableWorkDue)
-    && continuationsWithoutExtraction < 2 && Date.now() < continuationDeadline;
+    !closed && !failure && paused && (hasOwnedWork() || kickRequested || durableWorkDue)
+    && continuationsWithoutProgress < 2;
 
   return {
-    activeDeadline: () => active?.deadline ?? null,
-    kick,
-    requestPauseAndRequeue,
-    pauseAndRequeue: quiesce,
-    resume() {
-      if (closed || !paused) return;
-      paused = false;
-      if (kickRequested) kick();
+    activeDeadline: () => (slots.size > 0 || publishing.size > 0 ? windowDeadline : null),
+    hasOwnedWork,
+    kick(progressed = false) {
+      if (progressed) continuationsWithoutProgress = 0;
+      fill();
+    },
+    requestPauseAndRequeue() {
+      paused = true;
+      abortAll();
+    },
+    async pauseAndRequeue() {
+      paused = true;
+      windowDeadline = null;
+      await Promise.allSettled([...publishing]);
+      if (failure) throw failure.error;
+    },
+    resume,
+    async settlePlanning() {
+      while (planning) await planning;
     },
     canContinueAfterCheckpoint,
     continueAfterCheckpoint(durableWorkDue) {
       if (!canContinueAfterCheckpoint(durableWorkDue)) return false;
-      continuationsWithoutExtraction += 1;
-      paused = false;
-      kick();
+      continuationsWithoutProgress += 1;
+      resume();
+      input.onActivity();
       return true;
-    },
-    async waitForExtraction() {
-      for (let owned = active; owned && owned.deadline === null; owned = active) {
-        await Promise.race([owned.started, owned.completion.then(() => undefined, () => undefined)]);
-        // A settled job has already handed off to its successor, if any.
-        if (active === owned) return;
-      }
     },
     async closeAndRequeue() {
       closed = true;
+      paused = true;
       kickRequested = false;
-      await quiesce();
+      abortAll();
+      const held = heldPublications;
+      heldPublications = [];
+      for (const release of held) release();
+      await Promise.allSettled([...running, ...(planning ? [planning] : [])]);
+      if (failure) throw failure.error;
     },
   };
 }

@@ -8,7 +8,7 @@ import { applyHostedCanonicalWriteReceipt, importEventBatch, initializeVault, wi
 import { listCanonicalEntities } from "@murphai/query";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { applyClinicalEnrichmentProposals, blockClinicalEnrichment, deferClinicalEnrichment, enqueueClinicalEnrichment, persistClinicalEnrichmentProposals, readClinicalEnrichmentStatus, readNextClinicalEnrichment } from "../src/clinical-enrichment.js";
+import { applyClinicalEnrichmentProposals, blockClinicalEnrichment, deferClinicalEnrichment, enqueueClinicalEnrichment, persistClinicalEnrichmentProposals, planClinicalExtractionUnits, readClinicalEnrichmentStatus, readNextClinicalEnrichment, saveClinicalExtraction } from "../src/clinical-enrichment.js";
 
 const roots: string[] = [];
 const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -495,5 +495,73 @@ describe("clinical document enrichment durable application", () => {
     expect(result.canonical).toBeNull();
     expect(result.counts).toMatchObject({ created: 0, existing: 1, held: 0, pages: 1 });
     expect(await listCanonicalEntities(input.vaultRoot, { family: "event", kinds: ["measurement"], limit: 10 })).toHaveLength(1);
+  });
+});
+
+describe("clinical extraction lookahead", () => {
+  const vitals = (page: number) => ({ labs: empty, history: empty,
+    measurements: { status: "complete" as const, records: [{ dateBasis: "document" as const, dateEvidence: occurredAt, page, payload: measurement() }] } });
+  const plan = (input: Awaited<ReturnType<typeof fixture>>, extra: Partial<Parameters<typeof planClinicalExtractionUnits>[0]> = {}) =>
+    planClinicalExtractionUnits({ vaultRoot: input.vaultRoot, limit: 10, countPages: async () => 3, ...extra });
+
+  it("plans the cursor first, then later pages, skipping cached and excluded units", async () => {
+    const input = await fixture();
+    const units = await plan(input);
+    expect(units.map((unit) => [unit.page, unit.cursor, unit.cursorRef, unit.failures])).toEqual([[1, true, "0:0:1", 0], [2, false, "0:0:2", 0], [3, false, "0:0:3", 0]]);
+    expect(units.every((unit) => unit.jobId === input.jobId && unit.source.sha256 === input.sha256)).toBe(true);
+    expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: units[1]!, totalPages: 3, outputs: vitals(2) })).toBe("saved");
+    expect((await plan(input)).map((unit) => unit.page)).toEqual([1, 3]);
+    expect((await plan(input, { exclude: (unit) => unit.cursor })).map((unit) => unit.page)).toEqual([3]);
+    expect((await plan(input, { limit: 1 })).map((unit) => unit.page)).toEqual([1]);
+  });
+
+  it("saves write-if-absent and the cursor promotes cached pages in order with retry state cleared", async () => {
+    const input = await fixture();
+    const units = await plan(input);
+    for (const unit of units.reverse()) {
+      expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit, totalPages: 3, outputs: vitals(unit.page) })).toBe("saved");
+    }
+    expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: units[0]!, totalPages: 3, outputs: vitals(units[0]!.page) })).toBe("existing");
+    // A failed earlier attempt leaves a retry on the job; accepting the cached page clears it.
+    expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "apply" });
+    for (const page of [1, 2, 3]) {
+      if (page > 1) expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "apply" });
+      await applyClinicalEnrichmentProposals(input);
+    }
+    expect(await readClinicalEnrichmentStatus(input)).toMatchObject({ status: "pending", counts: { pages: 3 }, nextAttemptAt: undefined });
+    expect(await plan(input)).toEqual([]);
+  });
+
+  it("clears a deferred cursor's retry when its cached proposal is accepted", async () => {
+    const input = await fixture();
+    const [cursor] = await plan(input);
+    expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "extract", failures: 0 });
+    await deferClinicalEnrichment({ ...input, reason: "Synthetic retry.", nextAttemptAt: "2026-07-10T12:01:00.000Z", cursorRef: cursor!.cursorRef });
+    // The deferred job plans nothing until its retry time.
+    expect(await plan(input, { now: new Date("2026-07-10T12:00:30.000Z") })).toEqual([]);
+    expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: cursor!, totalPages: 3, outputs: vitals(1) })).toBe("saved");
+    expect(await readNextClinicalEnrichment({ ...input, now: new Date("2026-07-10T12:02:00.000Z") })).toMatchObject({ status: "apply" });
+    expect(await readClinicalEnrichmentStatus(input)).toMatchObject({ status: "prepared", nextAttemptAt: undefined });
+    // A prepared cursor page is frozen in the job; only later pages are planned.
+    expect((await plan(input)).map((unit) => unit.page)).toEqual([2, 3]);
+  });
+
+  it("settles a failure only while the job's cursor still points at that unit", async () => {
+    const input = await fixture();
+    const [cursor, ahead] = await plan(input);
+    expect(await readNextClinicalEnrichment(input)).toMatchObject({ status: "extract" });
+    const deferral = { ...input, reason: "Synthetic retry.", nextAttemptAt: "2026-07-10T12:01:00.000Z" };
+    expect(await deferClinicalEnrichment({ ...deferral, cursorRef: ahead!.cursorRef })).toMatchObject({ status: "pending", nextAttemptAt: undefined });
+    await blockClinicalEnrichment({ ...input, reason: "Synthetic unsupported.", cursorRef: ahead!.cursorRef });
+    expect(await readClinicalEnrichmentStatus(input)).toMatchObject({ status: "pending", counts: { held: 0 } });
+    expect(await deferClinicalEnrichment({ ...deferral, cursorRef: cursor!.cursorRef })).toMatchObject({ nextAttemptAt: deferral.nextAttemptAt });
+  });
+
+  it("refuses a save whose unit no longer matches its attested source", async () => {
+    const input = await fixture();
+    const [cursor] = await plan(input);
+    expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: { ...cursor!, key: "forged/1.json" }, totalPages: 3, outputs: vitals(1) })).toBe("stale");
+    expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: { ...cursor!, source: { ...cursor!.source, sha256: "f".repeat(64) } }, totalPages: 3, outputs: vitals(1) })).toBe("stale");
+    expect((await plan(input)).map((unit) => unit.page)).toEqual([1, 2, 3]);
   });
 });
