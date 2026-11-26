@@ -36,6 +36,7 @@ import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 
 import { startNativeAuthorization, completeNativeAuthorization } from "@/src/lib/clinical-records/control-plane";
+import { renewClinicalAccess } from "@/src/lib/clinical-records/persistent-access";
 import * as directory from "@/src/lib/clinical-records/provider-directory-store";
 import * as smart from "@/src/lib/clinical-records/smart";
 import * as notification from "@/src/lib/clinical-records/notification";
@@ -282,7 +283,8 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       const fhirBaseUrl = "https://portal.example.test/fhir";
       const patientId = "synthetic-patient";
       const { providerDirectoryEntryId, tokenVersion } = await f.row();
-      vi.spyOn(directory, "resolveClinicalProviderDirectoryEntry").mockReturnValue({
+      vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
+      const entry = vi.spyOn(directory, "resolveClinicalProviderDirectoryEntry").mockReturnValue({
         id: providerDirectoryEntryId, aliases: [], brandName: "Synthetic hospital", facilities: [], fhirBaseUrl,
         clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", policyId: "synthetic-policy",
         requestedBaseScopes: ["openid", "fhirUser", "launch/patient"], resourceTypes: ["Patient", "DocumentReference"], sourceSystem: "epic-fhir",
@@ -303,11 +305,22 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
           tokenVersion, field: "patientBinding", value: hashClinicalFhirPatientId(patientId) }),
       } });
       const start = await startNativeAuthorization({ auth, appReturn: "ios", origin: "https://app.example.test", providerDirectoryEntryId });
+      entry.mockReturnValue(null);
+      vi.stubEnv("EPIC_SMART_NON_PRODUCTION_CLIENT_ID", "synthetic-public");
       const state = new URL(start.authorizationUrl).searchParams.get("state")!;
       expect(await completeNativeAuthorization(auth, new URLSearchParams({ state, code: "synthetic-code" }), start.completionProof)).toBe("connected");
       const renewed = await f.row();
       expect(renewed).toMatchObject({ tokenVersion: tokenVersion + 1, baselineTokenVersion: tokenVersion, requiresProcessorApprovals: true });
       expect(renewed.refreshTokenEncrypted).toBeTruthy();
+      await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { accessTokenExpiresAt: new Date(0) } });
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+        access_token: "rotated-access", token_type: "Bearer", expires_in: 3600, patient: patientId,
+      }));
+      await expect(renewClinicalAccess({ connectionId: f.connectionId, memberId: f.memberId,
+        generation: renewed.retrievalGeneration, fetchImpl })).resolves.toBe("rotated-access");
+      expect(String(fetchImpl.mock.calls[0]![0])).toBe(fhirBaseUrl + "/token");
+      expect(new URLSearchParams(String(fetchImpl.mock.calls[0]![1]?.body)).has("client_assertion")).toBe(true);
+      expect(entry).toHaveBeenCalledTimes(1);
       expect(await readClinicalNotificationDecision(f.pointer, openWindow)).toEqual({ mode: "off" });
       const baseline = await client.clinicalRecordRetrievalRun.findUniqueOrThrow({
         where: { connectionId_generation: { connectionId: f.connectionId, generation: renewed.retrievalGeneration } },

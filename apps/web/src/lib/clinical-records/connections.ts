@@ -77,7 +77,7 @@ export async function listClinicalRecordConnectionsForMember(
           }
         : null,
       providerDirectoryEntryId: connection.providerDirectoryEntryId,
-      sourceSystem: requireEpicSourceSystem(connection.sourceSystem),
+      sourceSystem: connection.sourceSystem,
       status: requireKnownStatus(
         connection.status,
         CLINICAL_RECORD_CONNECTION_STATUSES,
@@ -159,13 +159,6 @@ function requireKnownStatus<Status extends string>(
   const match = allowed.find((candidate) => candidate === value);
   if (!match) throw new TypeError(`Stored Clinical Records ${label} status is invalid.`);
   return match;
-}
-
-function requireEpicSourceSystem(value: string): "epic-fhir" {
-  if (value !== "epic-fhir") {
-    throw new TypeError("Stored Clinical Records source system is invalid.");
-  }
-  return value;
 }
 
 function connectionNotFoundError() {

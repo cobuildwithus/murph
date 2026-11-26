@@ -1,0 +1,50 @@
+name: Refresh clinical provider directory
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clinical-provider-directory-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: main
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @murphai/clinical-records... run build
+      - name: Build the directory from the public Epic bundle
+        run: |
+          set -o pipefail
+          curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
+            --max-time 300 --max-filesize 268435456 https://open.epic.com/Endpoints/Brands |
+            pnpm --dir apps/web clinical-records:providers:import -- --input -
+      - name: Publish changed data for directory review
+        run: |
+          file=apps/web/src/lib/clinical-records/provider-directory.v2.json
+          git diff --quiet -- "$file" && exit 0
+          branch="records/epic-directory-$(git hash-object "$file")"
+          existing=$(git ls-remote --heads origin "refs/heads/$branch")
+          if [[ -z "$existing" ]]; then
+            git switch -c "$branch"
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -- "$file"
+            git commit -m 'Refresh the public Epic provider directory'
+            git push origin "$branch"
+          fi
+          echo "[Review the directory update]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch?expand=1)" >> "$GITHUB_STEP_SUMMARY"

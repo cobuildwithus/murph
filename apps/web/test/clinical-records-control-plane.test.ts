@@ -60,7 +60,8 @@ vi.mock("@/src/lib/clinical-records/secrets", () => ({
   sealClinicalOauthVerifier: mocks.sealClinicalOauthVerifier,
   toClinicalJsonArray: (values: readonly string[]) => [...values],
 }));
-vi.mock("@/src/lib/clinical-records/smart", () => ({
+vi.mock("@/src/lib/clinical-records/smart", async importOriginal => ({
+  ...await importOriginal<typeof import("@/src/lib/clinical-records/smart")>(),
   buildSmartAuthorizationUrl: mocks.buildSmartAuthorizationUrl,
   createSmartPkce: mocks.createSmartPkce,
   createSmartState: mocks.createSmartState,
@@ -483,6 +484,31 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
       auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),
     }));
+  });
+
+  it.each(["moved", "foreign-token", "retired"])("uses the original bound profile when the directory or registration is %s", async change => {
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
+    vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "epic-client-id");
+    const harness = createHarness(null, change === "foreign-token" ? { tokenEndpoint: "https://elsewhere.example.test/token" } : {});
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+      request: new Request("https://app.example.test/start", { method: "POST" }) });
+    mocks.openClinicalOauthVerifier.mockResolvedValue(mocks.sealClinicalOauthVerifier.mock.lastCall![0].value);
+    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...provider, fhirBaseUrl: "https://moved.example.test/fhir" });
+    if (change === "retired") vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "replacement");
+    if (change !== "moved") {
+      await expect(finishAuthorization()).rejects.toThrow();
+      expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+      return;
+    }
+    vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({
+      [PROVIDER_ID]: { clientId: "epic-client-id", clientSecret: "synthetic-only" },
+    }));
+    await finishAuthorization();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+      auth: { method: "public", clientId: "epic-client-id" }, tokenEndpoint: "https://fhir.example.test/oauth2/token",
+    }));
+    expect(mocks.sealClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith(expect.objectContaining({ value: provider.fhirBaseUrl }));
   });
 
   it("services the stored public session after switching the active client", async () => {

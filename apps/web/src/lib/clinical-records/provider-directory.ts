@@ -1,6 +1,7 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   ClinicalProviderFacilityContract,
+  ClinicalMatchedFacility,
   ClinicalProviderSearchResultContract,
 } from "./client-contracts";
 import {
@@ -24,7 +25,10 @@ export type ClinicalProviderClientIdEnvironmentKey =
   | "EPIC_SMART_CLIENT_ID"
   | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
 
-export type ClinicalProviderFacility = ClinicalProviderFacilityContract;
+export interface ClinicalProviderFacility extends ClinicalMatchedFacility {
+  aliases?: readonly string[];
+  upstreamId?: string;
+}
 
 export interface ClinicalProviderDirectoryEntry {
   aliases: readonly string[];
@@ -64,6 +68,7 @@ export function buildEpicProviderDirectoryEntryId(brandIdentifier: string): stri
 export function searchClinicalProviderDirectorySnapshot(
   directory: ClinicalProviderDirectory,
   input: {
+    grouped?: boolean;
     city?: string | null;
     query?: string | null;
     state?: string | null;
@@ -78,18 +83,40 @@ export function searchClinicalProviderDirectorySnapshot(
   const scored = directory.entries
     .map((entry) => ({ entry, score: scoreDirectoryEntry({ city, entry, query, state }) }))
     .filter((candidate) => candidate.score > 0 || (!query && !city && !state))
-    .sort((left, right) => right.score - left.score || left.entry.brandName.localeCompare(right.entry.brandName))
-    .slice(0, MAX_PROVIDER_RESULTS);
+    .sort((left, right) => right.score - left.score || left.entry.brandName.localeCompare(right.entry.brandName));
+  const results: ClinicalProviderSearchResult[] = [];
+  const byBase = new Map<string, ClinicalProviderSearchResult>();
+  for (const { entry } of scored) {
+    if (input.grouped && byBase.has(entry.fhirBaseUrl)) continue;
+    const ranked = rankFacilities({ city, entry, query, state }).slice(0, 8);
+    const best = ranked[0];
+    const result: ClinicalProviderSearchResult = {
+      brandName: entry.brandName, id: entry.id, sourceSystem: entry.sourceSystem,
+      facilities: ranked.map(publicFacility),
+      ...(input.grouped ? { matchedFacility: best ? { ...publicFacility(best),
+        ...(best.street?.length ? { street: best.street } : {}) } : null } : {}),
+    };
+    results.push(result);
+    byBase.set(entry.fhirBaseUrl, result);
+    if (results.length === MAX_PROVIDER_RESULTS) break;
+  }
+  if (input.grouped) {
+    for (const entry of directory.entries) {
+      const group = byBase.get(entry.fhirBaseUrl);
+      if (!group || group.id === entry.id || group.brandName === entry.brandName) continue;
+      const places = group.sharedPlaces ?? [];
+      if (places.length < 8 && !places.includes(entry.brandName)) group.sharedPlaces = [...places, entry.brandName];
+    }
+  }
+  return { directoryVersion: directory.version, providers: results };
+}
 
-  return {
-    directoryVersion: directory.version,
-    providers: scored.map(({ entry }) => ({
-      brandName: entry.brandName,
-      facilities: rankFacilities({ city, entry, query, state }).slice(0, 8),
-      id: entry.id,
-      sourceSystem: entry.sourceSystem,
-    })),
-  };
+function publicFacility({ city, name, postalCode, state }: ClinicalProviderFacility): ClinicalProviderFacilityContract {
+  return { city, name, postalCode, state };
+}
+
+function facilityFields(facility: ClinicalProviderFacility) {
+  return [facility.name, facility.city, facility.state, facility.postalCode, ...facility.aliases ?? [], ...facility.street ?? []];
 }
 
 function rankFacilities(input: {
@@ -100,7 +127,7 @@ function rankFacilities(input: {
 }): ClinicalProviderFacility[] {
   return input.entry.facilities
     .map((facility, index) => {
-      const fields = [facility.name, facility.city, facility.state, facility.postalCode]
+      const fields = facilityFields(facility)
         .map(normalizeSearchText);
       let score = 0;
       if (input.query && fields.some((field) => field.includes(input.query))) score += 100;
@@ -215,16 +242,22 @@ function parseLocationTuple(
   entryIndex: number,
   locationIndex: number,
 ): ClinicalProviderFacility {
-  if (!Array.isArray(value) || value.length !== 4) {
+  if (!Array.isArray(value) || (value.length !== 4 && value.length !== 7)) {
     throw new TypeError(
       `Clinical provider directory entry ${entryIndex} location ${locationIndex} is invalid.`,
     );
   }
+  if (value.length === 7 && (!Array.isArray(value[4]) || value[4].length > 4)) throw new RangeError("Invalid street lines.");
   return {
     name: optionalBoundedString(value[0], 180),
     city: optionalBoundedString(value[1], 120),
     state: optionalBoundedString(value[2], 80),
     postalCode: optionalBoundedString(value[3], 24),
+    ...(value.length === 7 ? {
+      street: requireArray(value[4], "facility street").map(line => requireBoundedString(line, "street line", 180)),
+      aliases: parseUniqueStrings(value[5], "facility aliases", 20, 120),
+      upstreamId: requireBoundedString(value[6], "upstream facility id", 240),
+    } : {}),
   };
 }
 
@@ -267,7 +300,7 @@ function scoreDirectoryEntry(input: {
       && (brand.includes(input.query) || aliases.some((alias) => alias.includes(input.query)))
     ) score += 35;
     if (input.entry.facilities.some((facility) =>
-      [facility.name, facility.city, facility.state, facility.postalCode]
+      facilityFields(facility)
         .some((field) => searchTextContainsEveryToken(field ?? "", input.query))
     )) score += 30;
     if (
@@ -276,10 +309,7 @@ function scoreDirectoryEntry(input: {
         searchTextContainsEveryToken(
           [
             identitySearchText,
-            facility.name,
-            facility.city,
-            facility.state,
-            facility.postalCode,
+            ...facilityFields(facility),
           ].join(" "),
           input.query,
         )

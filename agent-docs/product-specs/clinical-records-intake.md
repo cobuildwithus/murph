@@ -272,6 +272,22 @@ stable brand identifier, not an endpoint URL. All published facility tuples
 are retained so city/facility matches beyond the first visible results remain
 discoverable.
 
+Search returns the highest-ranked facility with its name, city, state, postal
+code and any available street lines. Extended location tuples retain the
+upstream organization identity, local aliases and street lines. The reader
+also accepts the original four fields. The companion projects the place into
+its existing display string. Browsers request grouped results with the
+`X-Clinical-Directory-Version: 2` header. Older requests keep the original
+exact provider and facility shapes.
+
+Each grouped result uses the best matching directory ID for the portal and
+lists up to eight other brand names on the same canonical FHIR base. A bounded
+member-scoped lookup compares the base against the member’s remaining
+connections and names a possible existing source. Search cannot establish
+the patient, client or acquisition authority before sign-in, so the choice
+remains available. Grant and canonical record identities keep their existing
+owners.
+
 The connect page searches after two typed characters and a 300 ms pause. A
 query change cancels the previous request and clears obsolete results; manual
 search, keyboard navigation, clear, and retry remain available. Selecting a
@@ -291,7 +307,9 @@ folder, with provenance in `sources-square.json`. The companion routes prefer
 it and fall back to the wide PNG; the web pages keep the wide wordmarks. The
 square set is produced offline and the refresh script does not rewrite it.
 
-Refresh the artifact from the repository root with:
+A weekly GitHub Actions build publishes changed directory data to a content-addressed branch.
+Open its comparison link from the job summary to review endpoint changes, removals and the source hash before merging it.
+To build the same artifact manually from the repository root:
 
 ```bash
 curl --fail --location --silent --show-error \
@@ -677,7 +695,7 @@ See [Epic's CarePlan specification](https://fhir.epic.com/Specifications?api=106
 
 ## Epic client authentication and sandbox proof
 
-The directory selects the registration environment. The existing automatic client ID selects new starts. Hospital-approved providers use the separate approved registration and skip the Basic map. For other providers, selecting the public ID starts with the organization's Basic credentials when available, including when the Basic and public IDs are the same. Selecting the asymmetric ID starts with the signer. Callback authentication uses the OAuth session’s client ID. Renewal uses the encrypted grant’s client ID and token endpoint. A stored ID that matches the organization's Basic credentials uses Basic authentication. A selected asymmetric ID must be distinct from the public, hospital-approved and applicable Basic IDs. Signer failure stops the request before token egress.
+The directory selects the registration environment. The existing automatic client ID selects new starts. Hospital-approved providers use the separate approved registration and skip the Basic map. For other providers, selecting the public ID starts with the organization's Basic credentials when available, including when the Basic and public IDs are the same. Selecting the asymmetric ID starts with the signer. New starts bind the production or sandbox registration, authentication method, hospital-approved policy, original FHIR base, brand label and permitted families inside the encrypted verifier. The callback validates the saved base hash and token origin before exchange. Renewable grants carry the registration profile inside the existing encrypted refresh payload. Renewal checks the saved token endpoint against the encrypted connection base. A missing registration or mismatched method fails before egress. Historical callbacks retain the directory and base-hash check. Historical grants retain Epic client-ID resolution using the original fixed sandbox namespace and per-brand Basic lookup. A selected asymmetric ID must be distinct from the public, hospital-approved and applicable Basic IDs. Signer failure stops the request before token egress.
 
 | Web configuration | Production | Sandbox |
 | --- | --- | --- |
@@ -687,6 +705,8 @@ The directory selects the registration environment. The existing automatic clien
 | **Secret**, RSA private key in PEM format | `EPIC_SMART_PRIVATE_KEY_PEM` | `EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM` |
 
 Until the public ID is pinned, Web treats the active ID as public. Staging a distinct asymmetric ID leaves existing public and Basic starts available. Switching the selector before setting either pin looks identical to changing the legacy public ID. Web derives the signing kid from the one matching RSA public key in that environment’s committed set. Signing material belongs in hosted secrets. The local proof reads the sandbox PEM by path.
+
+Deploy Web with `CLINICAL_RECORDS_WRITE_GRANT_PROFILES` unset, allowing every callback and refresh worker to read both shapes. Once traffic is on compatible readers, set it to `1` for new starts. The writer can be disabled again. Keep the compatible reader and registered credentials while bound callbacks or grants exist. Publish refreshed location tuples only after the compatible artifact reader is deployed.
 
 **Register the sandbox-only draft.** Choose Patients, incoming OAuth 2.0, standalone SMART v1, FHIR R4 and S256 PKCE. Select USCDI v3 automatic distribution and the 44 APIs with `automaticDistribution: true` in `epic-registration.v1.json`. Check **Is Confidential Client**, **Requires Persistent Access**, **Uses Rolling Refresh Tokens** and **Can Have Indefinite Access**. Choose asymmetric JWT authentication with the app-level non-production JWK Set URL. Available durations depend on MyChart configuration. Register the non-production JWK Set URL at a stable anonymously accessible HTTPS staging origin under `/.well-known/epic/sandbox.jwks.json`. Register the exact sandbox redirect `https://127.0.0.1:8443/callback`. Save and mark Ready for Sandbox.
 

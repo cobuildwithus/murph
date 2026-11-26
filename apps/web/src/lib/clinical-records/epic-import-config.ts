@@ -1,5 +1,6 @@
 import "server-only";
 
+import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/epic/production.jwks.json";
 import sandboxSet from "../../../public/.well-known/epic/sandbox.jwks.json";
 import { epicAssertionSigner, type EpicClientAuth } from "./epic-client-auth";
@@ -19,7 +20,15 @@ export function epicImportQueryEnabled(providerId: string, queryScopeId: string)
 
 type StoredRegistration = { clientId: string; grant: "callback" | "refresh" };
 
-function readRegistrations(provider: ClinicalProviderDirectoryEntry) {
+export const epicProfileSchema = z.object({
+  environment: z.enum(["production", "sandbox"]),
+  method: z.enum(["public", "basic", "private_key_jwt"]),
+  hospitalApproved: z.boolean(),
+}).strict();
+export type EpicProfile = z.infer<typeof epicProfileSchema>;
+type RegistrationOwner = Pick<ClinicalProviderDirectoryEntry, "id" | "clientIdEnvironmentKey">;
+
+function readRegistrations(provider: RegistrationOwner) {
   const production = provider.clientIdEnvironmentKey === "EPIC_SMART_CLIENT_ID";
   const prefix = production ? "EPIC_SMART_" : "EPIC_SMART_NON_PRODUCTION_";
   const activeId = process.env[provider.clientIdEnvironmentKey]?.trim();
@@ -73,8 +82,25 @@ export function resolveEpicClient(provider: ClinicalProviderDirectoryEntry, stor
   const registrations = readRegistrations(provider);
   const auth = resolveAuth(registrations, stored);
   const hospitalApprovedImports = registrations.approved && auth.clientId === registrations.approvedId;
-  return { auth, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
+  const profile: EpicProfile = { environment: registrations.production ? "production" : "sandbox",
+    method: auth.method, hospitalApproved: hospitalApprovedImports };
+  return { auth, profile, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
     : provider.resourceTypes.filter(type => EPIC_AUTOMATIC_RESOURCE_TYPES.includes(type)) };
+}
+
+/** Historical Epic artifacts had one fixed sandbox entry and production brands. */
+export function resolveSavedEpicAuth(providerId: string, stored: StoredRegistration, profile?: EpicProfile) {
+  const sandbox = profile ? profile.environment === "sandbox" : providerId === "epic-sandbox";
+  const ids = readRegistrations({ id: providerId, clientIdEnvironmentKey:
+    sandbox ? "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" : "EPIC_SMART_CLIENT_ID" });
+  if (profile?.method === "public" && !ids.approved && !profile.hospitalApproved && stored.clientId === ids.publicId
+    && stored.clientId !== ids.asymmetricId && stored.clientId !== ids.approvedId) {
+    return { method: "public", clientId: stored.clientId } as const;
+  }
+  const auth = resolveAuth(ids, stored);
+  if (profile && (auth.method !== profile.method ||
+    profile.hospitalApproved !== (ids.approved && auth.clientId === ids.approvedId))) throw configurationError(stored);
+  return auth;
 }
 
 function configurationError(stored?: StoredRegistration, message?: string) {

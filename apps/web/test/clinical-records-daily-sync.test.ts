@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   append: vi.fn(), signal: vi.fn(), open: vi.fn(), seal: vi.fn(),
 }));
 vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
-  resolveClinicalProviderDirectoryEntry: (id: string) => ({ id, clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", resourceTypes: ["Patient", "Observation"] }),
+  resolveClinicalProviderDirectoryEntry: () => null,
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/clinical-records/transport-access", () => ({ readClinicalTransportAccess: mocks.access }));
@@ -26,7 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: vi.f
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => Promise<unknown>) => fn() }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({ unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32) }) }));
 vi.mock("@/src/lib/clinical-records/retrieval", () => ({ appendClinicalRetrievalWakeTx: mocks.append, signalClinicalRetrievalWake: mocks.signal }));
-vi.mock("@/src/lib/clinical-records/secrets", () => ({ openClinicalConnectionSecret: mocks.open, sealClinicalConnectionSecret: mocks.seal }));
+vi.mock("@/src/lib/clinical-records/secrets", () => ({ openClinicalConnectionFhirBaseUrl: async () => "https://portal.example.test/FHIR/R4", openClinicalConnectionSecret: mocks.open, sealClinicalConnectionSecret: mocks.seal }));
 
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import { renewClinicalAccess } from "@/src/lib/clinical-records/persistent-access";
@@ -35,7 +35,7 @@ const now = new Date("2026-09-17T12:00:00Z");
 function fixture() {
   const row = {
     id: "crc_synthetic", memberId: "member_synthetic", providerDirectoryEntryId: "epic-synthetic",
-    status: "active", tokenVersion: 1, retrievalGeneration: 1, nextSyncAt: now,
+    sourceSystem: "epic-fhir", status: "active", tokenVersion: 1, retrievalGeneration: 1, nextSyncAt: now,
     refreshTokenEncrypted: "refresh-sealed", patientIdEncrypted: "patient-sealed", patientBindingEncrypted: "binding-sealed",
     accessTokenEncrypted: "access-sealed", accessTokenExpiresAt: new Date(0),
     refreshLeaseId: null as string | null, refreshLeaseExpiresAt: null as Date | null,
@@ -143,6 +143,7 @@ describe("rotating clinical refresh lease", () => {
     vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
     vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", "");
     const f = fixture();
+    f.row.providerDirectoryEntryId = "epic-sandbox";
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       access_token: "renewed", token_type: "Bearer", expires_in: 300,
     }));
