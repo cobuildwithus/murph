@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-26",
+  "order": 200,
+  "item": {
+    "id": "clinical-portal-place-matches",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Find your clinic in hospital search",
+    "summary": "When you connect medical records, search shows the clinic that matched and groups places that use the same patient portal.",
+    "details": "If a portal you connected might already include that place, Murph shows its name. You can still continue to sign in.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": [5372]
+  }
+}

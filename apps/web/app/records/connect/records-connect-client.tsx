@@ -261,6 +261,7 @@ export function ProviderSearch({
     try {
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
+        headers: { "X-Clinical-Directory-Version": "2" },
         payload: { query: normalizedQuery },
         signal: searchAbort.signal,
         url: PROVIDER_SEARCH_PATH,

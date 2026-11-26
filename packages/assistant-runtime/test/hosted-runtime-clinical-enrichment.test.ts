@@ -5,7 +5,7 @@ import type { ReadOnlyAssistantAskProviderUsageEvent } from "@murphai/assistant-
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
 
 import { ClinicalEnrichmentDocumentError } from "../src/hosted-runtime/clinical-enrichment-document.ts";
-import { createHostedClinicalEnrichmentRunner, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
+import { createHostedClinicalEnrichmentRunner, groupClinicalExtractionUnits, type HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 import type { ClinicalExtractionUnit } from "@murphai/vault-usecases/clinical-enrichment";
 
 const NOW = "2026-09-11T12:00:00.000Z";
@@ -48,6 +48,8 @@ const SPLIT_RECORDS = clinicalDocumentExtractionOutputSchema.parse({ status: "co
   { payload: { kind: "clinical_assertion", occurredAt, title: "Symptom denial", assertion: "denial_asserted", assertedOn: "2026-09-01", domain: "symptom", polarity: "denied", subject: "Nausea", assertionText: "Denies nausea." }, dateBasis: "document", dateEvidence: "Sep 1, 2026", page: 2 },
 ] }).records;
 const [LAB, VITAL, DENIAL] = [SPLIT_RECORDS[0]!, SPLIT_RECORDS[1]!, SPLIT_RECORDS[2]!];
+const documentPage = (page: number, cursor = page === 1): ClinicalExtractionUnit =>
+  ({ ...unit, key: `synthetic-key/${page}.json`, page, cursor, cursorRef: `document:0:${page}` });
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -129,6 +131,103 @@ describe("clinical document background runner", () => {
       },
     }));
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("reads up to four consecutive PDF pages in one pass and saves each page's records", async () => {
+    const { input, state, prepareDocument, executeExtraction, cleanup, run } = setup([1, 2, 3, 4, 5].map((page) => documentPage(page)));
+    prepareDocument.mockImplementation(async ({ page }) => ({
+      totalPages: 5, extractedText: `Synthetic page ${page}.`, renderedPages: [{ page, path: `/synthetic-scratch-${page}/page.png` }],
+      scratchRoots: [`/synthetic-scratch-${page}`], cleanup,
+    }));
+    executeExtraction.mockImplementation(async (request) => {
+      await request.beforeProviderEntry?.();
+      return request.renderedPages?.length === 4
+        ? { status: "complete", records: [{ ...LAB, page: 1 }, { ...VITAL, page: 3 }, { ...DENIAL, page: 3 }] }
+        : { status: "complete", records: [{ ...LAB, page: 5 }] };
+    });
+    run();
+    await vi.waitFor(() => expect(state.saveClinicalExtraction).toHaveBeenCalledTimes(5));
+    expect(executeExtraction).toHaveBeenCalledTimes(2);
+    const [group] = executeExtraction.mock.calls.find(([request]) => request.renderedPages?.length === 4)!;
+    expect(group).toMatchObject({ family: "all", model: "gpt-6.1-terra", serviceTier: "flex",
+      renderedPages: [1, 2, 3, 4].map((page) => ({ page, path: `/synthetic-scratch-${page}/page.png` })),
+      scratchRoots: [1, 2, 3, 4].map((page) => `/synthetic-scratch-${page}`),
+      extractedText: [1, 2, 3, 4].map((page) => `--- page ${page} ---\nSynthetic page ${page}.`).join("\n\n") });
+    const saved = new Map(state.saveClinicalExtraction.mock.calls.map(([call]) => [call.unit.page, call.outputs]));
+    expect(saved.get(1)).toEqual({ labs: { status: "complete", records: [{ ...LAB, page: 1 }] },
+      measurements: { status: "complete", records: [] }, history: { status: "complete", records: [] } });
+    expect(saved.get(2)).toEqual({ labs: { status: "complete", records: [] },
+      measurements: { status: "complete", records: [] }, history: { status: "complete", records: [] } });
+    expect(saved.get(3)).toEqual({ labs: { status: "complete", records: [] },
+      measurements: { status: "complete", records: [{ ...VITAL, page: 3 }] }, history: { status: "complete", records: [{ ...DENIAL, page: 3 }] } });
+    expect(saved.get(5)?.labs.records).toEqual([{ ...LAB, page: 5 }]);
+    expect(cleanup).toHaveBeenCalledTimes(5);
+    await vi.waitFor(() => expect(input.onWorkUpdated).toHaveBeenCalledTimes(2));
+  });
+
+  for (const [name, groupResult] of [
+    ["reports blocked", { status: "blocked", reason: "Synthetic facts on pages 2 and 3 remain.", records: [{ ...LAB, page: 1 }] }],
+    // At the record limit a complete-looking answer can still have dropped a tail of facts.
+    ["reaches the record limit", { status: "complete", records: Array.from({ length: 100 }, (_, index) => ({ ...LAB, page: 1 + (index % 3) })) }],
+  ] as const) {
+    it(`runs a group's pages alone, under their own retry rules, when the group ${name}`, async () => {
+      const pages = [1, 2, 3].map((page) => documentPage(page));
+      const { state, prepareDocument, executeExtraction, cleanup, run, queue } = setup(pages);
+      prepareDocument.mockImplementation(async ({ page }) => ({
+        totalPages: 3, renderedPages: [{ page, path: `/synthetic-scratch-${page}/page.png` }], scratchRoots: [`/synthetic-scratch-${page}`], cleanup,
+      }));
+      executeExtraction.mockImplementation(async (request) => {
+        await request.beforeProviderEntry?.();
+        const supplied = request.renderedPages?.map(({ page }) => page) ?? [];
+        if (supplied.length > 1) {
+          // Nothing was saved, so the next plan offers the same pages again.
+          queue.push(...pages);
+          return groupResult as ClinicalDocumentExtractionOutput;
+        }
+        if (supplied[0] === 2) throw new Error("Synthetic provider unavailable.");
+        return { status: "complete", records: [{ ...LAB, page: supplied[0]! }] };
+      });
+      // A group never touches job state itself; each page settles on the single-page rules.
+      const runner = run();
+      await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(4));
+      await vi.waitFor(() => expect(runner.hasOwnedWork()).toBe(false));
+      expect(executeExtraction.mock.calls.map(([request]) => request.renderedPages?.map(({ page }) => page)))
+        .toEqual(expect.arrayContaining([[1, 2, 3], [1], [2], [3]]));
+      expect(state.saveClinicalExtraction.mock.calls.map(([call]) => call.unit.page).sort()).toEqual([1, 3]);
+      // Page 2 ran ahead of the cursor, so its failure stays outside the cursor's attempt budget.
+      expect(state.deferClinicalEnrichment).not.toHaveBeenCalled();
+      expect(cleanup).toHaveBeenCalledTimes(6);
+    });
+  }
+
+  it("gives a page repeated within one plan a single owner", async () => {
+    // Two attachments hold the same PDF and clinical date, so their pages share cache keys.
+    const first = [1, 2, 3, 4, 5].map((page) => (page === 1 ? { ...documentPage(page), failures: 1 } : documentPage(page)));
+    const second = [1, 2, 3, 4].map((page) => ({ ...documentPage(page, false), locator: { attachmentIndex: 1 }, cursorRef: `document:1:${page}` }));
+    const { executeExtraction, run } = setup([...first, ...second]);
+    const runner = run();
+    await vi.waitFor(() => expect(executeExtraction).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(runner.hasOwnedWork()).toBe(false));
+    expect(executeExtraction.mock.calls.map(([request]) => request.renderedPages?.length)).toEqual([1, 4]);
+  });
+
+  it("groups only consecutive first-attempt pages of one PDF, four at a time", () => {
+    const resource = { ...unit, key: "resource/1.json", page: 1, locator: { resourceIndex: 0 },
+      source: { ...unit.source, resource: { rawRef: "raw/clinical-records/synthetic/bundle.json", resourceType: "Observation", resourceId: "synthetic", sha256: "d".repeat(64) } } };
+    const image = { ...documentPage(1), key: "image/1.json", locator: { attachmentIndex: 1 }, source: { ...unit.source, mediaType: "image/png" } };
+    const pages = [1, 2, 3, 4, 5, 6].map((page) => documentPage(page));
+    const retried = { ...documentPage(8), failures: 1 };
+    const otherDocument = { ...documentPage(9), key: "other/10.json", locator: { attachmentIndex: 2 } };
+    const groups = groupClinicalExtractionUnits(
+      [...pages, retried, documentPage(9), otherDocument, { ...documentPage(10), key: "solo/10.json" }, documentPage(11), resource, image],
+      new Set(["solo/10.json"]),
+    );
+    expect(groups.map((group) => group.map((member) => member.key))).toEqual([
+      ["synthetic-key/1.json", "synthetic-key/2.json", "synthetic-key/3.json", "synthetic-key/4.json"],
+      ["synthetic-key/5.json", "synthetic-key/6.json"],
+      ["synthetic-key/8.json"], ["synthetic-key/9.json"], ["other/10.json"], ["solo/10.json"], ["synthetic-key/11.json"],
+      ["resource/1.json"], ["image/1.json"],
+    ]);
   });
 
   it("runs several units at once, retries on the standard tier and reads structured resources with Luna", async () => {

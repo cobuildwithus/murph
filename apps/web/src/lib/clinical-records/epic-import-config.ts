@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/epic/production.jwks.json";
 import sandboxSet from "../../../public/.well-known/epic/sandbox.jwks.json";
 import { epicAssertionSigner, type EpicClientAuth } from "./epic-client-auth";
@@ -19,7 +21,16 @@ export function epicImportQueryEnabled(providerId: string, queryScopeId: string)
 
 type StoredRegistration = { clientId: string; grant: "callback" | "refresh" };
 
-function readRegistrations(provider: ClinicalProviderDirectoryEntry) {
+export const epicProfileSchema = z.object({
+  environment: z.enum(["production", "sandbox"]),
+  method: z.enum(["public", "basic", "private_key_jwt"]),
+  hospitalApproved: z.boolean(),
+  basicCredentialSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+}).strict();
+export type EpicProfile = z.infer<typeof epicProfileSchema>;
+type RegistrationOwner = Pick<ClinicalProviderDirectoryEntry, "id" | "clientIdEnvironmentKey">;
+
+function readRegistrations(provider: RegistrationOwner) {
   const production = provider.clientIdEnvironmentKey === "EPIC_SMART_CLIENT_ID";
   const prefix = production ? "EPIC_SMART_" : "EPIC_SMART_NON_PRODUCTION_";
   const activeId = process.env[provider.clientIdEnvironmentKey]?.trim();
@@ -69,12 +80,53 @@ function resolveAuth(ids: ReturnType<typeof readRegistrations>, stored?: StoredR
   return { method: "public", clientId };
 }
 
+/** Only per-brand registrations can improve access over another brand on the same portal. */
+export function epicPortalAccessRank(provider: ClinicalProviderDirectoryEntry): number {
+  try {
+    const ids = readRegistrations(provider);
+    if (!ids.approved && !ids.basic) return 0;
+    const auth = resolveAuth(ids);
+    if (ids.approved) return 2;
+    return Number(auth.method === "basic");
+  } catch {
+    return -1;
+  }
+}
+
+function basicCredentialSha256(auth: Extract<EpicClientAuth, { method: "basic" }>): string {
+  return createHash("sha256").update(JSON.stringify([auth.clientId, auth.clientSecret])).digest("hex");
+}
+
 export function resolveEpicClient(provider: ClinicalProviderDirectoryEntry, stored?: StoredRegistration) {
   const registrations = readRegistrations(provider);
   const auth = resolveAuth(registrations, stored);
   const hospitalApprovedImports = registrations.approved && auth.clientId === registrations.approvedId;
-  return { auth, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
+  const profile: EpicProfile = { environment: registrations.production ? "production" : "sandbox",
+    method: auth.method, hospitalApproved: hospitalApprovedImports,
+    ...(auth.method === "basic" ? { basicCredentialSha256: basicCredentialSha256(auth) } : {}) };
+  return { auth, profile, hospitalApprovedImports, resourceTypes: hospitalApprovedImports ? provider.resourceTypes
     : provider.resourceTypes.filter(type => EPIC_AUTOMATIC_RESOURCE_TYPES.includes(type)) };
+}
+
+/** Historical Epic artifacts had one fixed sandbox entry and production brands. */
+export function resolveSavedEpicAuth(providerId: string, stored: StoredRegistration, profile?: EpicProfile) {
+  const sandbox = profile ? profile.environment === "sandbox" : providerId === "epic-sandbox";
+  const ids = readRegistrations({ id: providerId, clientIdEnvironmentKey:
+    sandbox ? "EPIC_SMART_NON_PRODUCTION_CLIENT_ID" : "EPIC_SMART_CLIENT_ID" });
+  if (profile?.method === "public" && !ids.approved && !profile.hospitalApproved && stored.clientId === ids.publicId
+    && stored.clientId !== ids.asymmetricId && stored.clientId !== ids.approvedId) {
+    return { method: "public", clientId: stored.clientId } as const;
+  }
+  const auth = resolveAuth(ids, stored);
+  if (profile?.method === "basic" && auth.method === "basic" && basicCredentialSha256(auth) !== profile.basicCredentialSha256) {
+    if (stored.grant === "refresh") throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_BASIC_CREDENTIAL_CHANGED", httpStatus: 409, message: "The saved Basic credential has changed.",
+    });
+    throw configurationError(stored);
+  }
+  if (profile && (auth.method !== profile.method ||
+    profile.hospitalApproved !== (ids.approved && auth.clientId === ids.approvedId))) throw configurationError(stored);
+  return auth;
 }
 
 function configurationError(stored?: StoredRegistration, message?: string) {

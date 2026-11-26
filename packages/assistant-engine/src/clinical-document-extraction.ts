@@ -92,6 +92,15 @@ const CLINICAL_EXTRACTION_INSTRUCTIONS = [
   'Return only clinical fields and the permitted dateBasis/dateEvidence and page/excerpt locators. Never invent record IDs, source paths, external references, provider IDs, links, evidence authority, or mutation instructions.',
 ].join('\n')
 
+// Added only when an assignment supplies several pages, so single-page prompts stay unchanged.
+// Without it, live GPT-6.1 Terra runs stopped early on groups of dense pages and reported them blocked.
+const PAGE_GROUP_INSTRUCTIONS = [
+  '',
+  'Several supplied pages form one assignment; extracted text, when supplied, marks each page with a --- page N --- line.',
+  'Extract every fact from every supplied page in this one response, however long it becomes. Never stop early, summarize, or leave a supplied page for later; report blocked only for evidence you cannot read or resolve, or when the record limit is reached.',
+  'Each proposed record holds values or statements from one supplied page and names that page. A table or report continued across supplied pages becomes separate records for each page, and the continued records keep its documented date and context.',
+].join('\n')
+
 const STRUCTURED_EXTRACTION_INSTRUCTIONS = [
   '',
   'This assignment selects exactly one structured FHIR resource.',
@@ -120,7 +129,8 @@ export async function executeClinicalDocumentExtraction(
   }
   const runtimeWorkspaceRoots = [workspaceRoot, ...scratchRoots]
   const finalMessage = await executeConfinedReadOnlyAssistantAskTurn(input, {
-    baseInstructions: CLINICAL_EXTRACTION_INSTRUCTIONS + (input.source.resource ? STRUCTURED_EXTRACTION_INSTRUCTIONS : ""),
+    baseInstructions: CLINICAL_EXTRACTION_INSTRUCTIONS + (renderedPages.length > 1 ? PAGE_GROUP_INSTRUCTIONS : '')
+      + (input.source.resource ? STRUCTURED_EXTRACTION_INSTRUCTIONS : ''),
     developerInstructions: null,
     groupSharedRead: false,
     outputSchema: clinicalDocumentExtractionOutputJsonSchema(family),

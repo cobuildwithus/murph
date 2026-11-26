@@ -45,11 +45,26 @@ export interface ClinicalProviderFacilityContract {
   state: string | null;
 }
 
+export interface ClinicalMatchedFacility extends ClinicalProviderFacilityContract {
+  street?: readonly string[];
+}
+
 export interface ClinicalProviderSearchResultContract {
+  matchedFacility?: ClinicalMatchedFacility | null;
+  sharedPlaces?: readonly string[];
+  possiblyIncludedThrough?: string;
   brandName: string;
   facilities: readonly ClinicalProviderFacilityContract[];
   id: string;
   sourceSystem: "epic-fhir";
+}
+
+export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResultContract): string[] {
+  const facility = provider.matchedFacility ?? provider.facilities[0];
+  const locality = facility && [facility.name === provider.brandName ? null : facility.name,
+    ...(provider.matchedFacility?.street ?? []), facility.city, facility.state].filter(Boolean).join(", ");
+  return [locality, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
+    && `May already be included through ${provider.possiblyIncludedThrough}`].filter((label): label is string => Boolean(label));
 }
 
 export interface ClinicalProviderSearchResponseContract {
@@ -79,7 +94,7 @@ export interface ClinicalRecordConnectionContract {
   lastSyncCompletedAt: string | null;
   latestRun: ClinicalRecordLatestRunContract | null;
   providerDirectoryEntryId: string;
-  sourceSystem: "epic-fhir";
+  sourceSystem: string;
   status: ClinicalRecordConnectionStatus;
 }
 
@@ -120,9 +135,14 @@ export function parseClinicalProviderSearchResponse(
     directoryVersion: requireString(record.directoryVersion, 80),
     ok: true,
     providers: requireArray(record.providers, 20).map((provider) => {
-      const item = requireExactRecord(provider, ["brandName", "facilities", "id", "sourceSystem"]);
+      const item = requireExactRecord(provider, ["brandName", "facilities", "id", "sourceSystem"],
+        ["matchedFacility", "sharedPlaces", "possiblyIncludedThrough"]);
       if (item.sourceSystem !== "epic-fhir") throw invalidContract();
       return {
+        ...(item.matchedFacility === undefined ? {} : { matchedFacility: item.matchedFacility === null
+          ? null : parseMatchedFacility(item.matchedFacility) }),
+        ...(item.sharedPlaces === undefined ? {} : { sharedPlaces: requireArray(item.sharedPlaces, 8).map(place => requireString(place, 160)) }),
+        ...(item.possiblyIncludedThrough === undefined ? {} : { possiblyIncludedThrough: requireString(item.possiblyIncludedThrough, 160) }),
         brandName: requireString(item.brandName, 160),
         facilities: requireArray(item.facilities, 8).map(parseFacility),
         id: requireIdentifier(item.id),
@@ -200,6 +220,12 @@ export function parseClinicalRecordCallbackMarker(
   return value;
 }
 
+function parseMatchedFacility(value: unknown): ClinicalMatchedFacility {
+  const record = requireExactRecord(value, ["city", "name", "postalCode", "state"], ["street"]);
+  const { street, ...facility } = record;
+  return { ...parseFacility(facility), ...(street === undefined ? {} : { street: requireArray(street, 4).map(line => requireString(line, 180)) }) };
+}
+
 function parseFacility(value: unknown): ClinicalProviderFacilityContract {
   const record = requireExactRecord(value, ["city", "name", "postalCode", "state"]);
   return {
@@ -222,7 +248,6 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     "sourceSystem",
     "status",
   ], ["canImport", "lastCheckedAt", "nextSyncAt"]);
-  if (record.sourceSystem !== "epic-fhir") throw invalidContract();
   return {
     ...(record.canImport !== undefined ? { canImport: parseBoolean(record.canImport) } : {}),
     connectedAt: requireIsoTimestamp(record.connectedAt),
@@ -234,7 +259,7 @@ function parseConnection(value: unknown): ClinicalRecordConnectionContract {
     ...(record.nextSyncAt === undefined ? {} : { nextSyncAt: optionalIsoTimestamp(record.nextSyncAt) }),
     latestRun: record.latestRun === null ? null : parseLatestRun(record.latestRun),
     providerDirectoryEntryId: requireIdentifier(record.providerDirectoryEntryId),
-    sourceSystem: "epic-fhir",
+    sourceSystem: requireIdentifier(record.sourceSystem),
     status: requireConnectionStatus(record.status),
   };
 }

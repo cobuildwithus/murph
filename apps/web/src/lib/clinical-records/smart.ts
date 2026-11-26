@@ -334,7 +334,7 @@ export function readGrantedSmartResourceTypes(
   return readGrantedEpicBetaResourceTypes(scopes, candidates);
 }
 
-function requirePinnedEndpoint(value: unknown, fhirBase: URL, label: string): string {
+export function requirePinnedEndpoint(value: unknown, fhirBase: URL, label: string): string {
   const text = requireBoundedString(value, label, 2_048);
   const endpoint = new URL(text);
   if (

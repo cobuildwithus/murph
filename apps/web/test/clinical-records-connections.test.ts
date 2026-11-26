@@ -1,3 +1,4 @@
+import { parseClinicalRecordConnectionsResponse } from "@/src/lib/clinical-records/client-contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import squareLogos from "@/src/lib/clinical-records/provider-logos-square.json";
 
@@ -186,6 +187,16 @@ describe("Clinical Records connection lifecycle", () => {
     })]);
     expect(JSON.stringify(connections)).not.toContain("sealed-");
     expect(JSON.stringify(connections)).not.toContain("patient context");
+  });
+
+  it("lists Epic and other source systems together", async () => {
+    const row = { connectedAt: new Date(), displayName: "Sample network", status: "active", retrievalRuns: [] };
+    mocks.connectionFindMany.mockResolvedValue(["epic-fhir", "synthetic-fhir"].map((sourceSystem, index) => ({
+      ...row, sourceSystem, id: `crc_${index}`, providerDirectoryEntryId: `source-${index}`,
+    })));
+    const connections = await listClinicalRecordConnectionsForMember("member_sample");
+    expect(parseClinicalRecordConnectionsResponse({ ok: true, connections }).connections.map(row => row.sourceSystem))
+      .toEqual(["epic-fhir", "synthetic-fhir"]);
   });
 
   it("lets an authenticated server page reuse the member-bound safe projection", async () => {

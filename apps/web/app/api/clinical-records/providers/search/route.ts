@@ -17,7 +17,7 @@ export async function GET(): Promise<Response> {
 
 export const POST = withClinicalJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  await requireActiveHostedAppSessionFromRequest(request);
+  const auth = await requireActiveHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request, { limitBytes: MAX_BODY_BYTES });
   if (Object.keys(body).some((key) => !SEARCH_REQUEST_KEYS.has(key))) {
     throw clinicalRecordsError({
@@ -28,11 +28,11 @@ export const POST = withClinicalJsonError(async (request: Request) => {
   }
   return clinicalJsonOk({
     ok: true,
-    ...searchClinicalProviderDirectory({
+    ...await searchClinicalProviderDirectory({
       city: readOptionalSearchText(body.city),
       query: readOptionalSearchText(body.query),
       state: readOptionalSearchText(body.state),
-    }),
+    }, request.headers.get("X-Clinical-Directory-Version") === "2" ? auth.member.id : undefined),
   });
 });
 

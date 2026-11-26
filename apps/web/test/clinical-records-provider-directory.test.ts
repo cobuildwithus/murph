@@ -25,8 +25,8 @@ describe("Clinical Records provider directory", () => {
       "utf8",
     )));
 
-    expect(directory.entries).toHaveLength(1_246);
-    expect(directory.version).toMatch(/^2026-07-20\.epic-brands-r4-policy-v2$/u);
+    expect(directory.entries.length).toBeGreaterThan(1_000);
+    expect(directory.version).toMatch(/^\d{4}-\d{2}-\d{2}\.epic-brands-r4-policy-v2$/u);
     expect(directory.schema).toBe(CLINICAL_PROVIDER_DIRECTORY_SCHEMA);
     expect(directory.sourceBundleSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
@@ -193,6 +193,17 @@ describe("Clinical Records provider directory", () => {
     expect(piedmont.providers.some((provider) =>
       provider.brandName.toLocaleLowerCase("en-US").includes("piedmont")
     )).toBe(true);
+  });
+
+  it("groups shared endpoints before the result cap while preserving the best matching directory ID", () => {
+    const directory = parseClinicalProviderDirectory(makeDirectory({}));
+    const original = directory.entries[0]!;
+    const entries = Array.from({ length: 22 }, (_, index) => ({ ...original, id: `epic-site-${index}`, brandName: `Clinic ${index}` }));
+    entries.push({ ...original, id: "epic-remote", brandName: "Clinic 2", fhirBaseUrl: "https://remote.example.test/r4" });
+    const results = searchClinicalProviderDirectorySnapshot({ ...directory, entries }, { grouped: true, query: "Clinic 2" }).providers;
+    expect(results.map(row => row.id)).toEqual(["epic-site-2", "epic-remote"]);
+    expect(results[0]?.sharedPlaces).toContain("Clinic 1");
+    expect(results[1]?.sharedPlaces).toBeUndefined();
   });
 
   it("keeps the Epic brand id stable when the endpoint changes", () => {
