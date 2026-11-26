@@ -107,6 +107,11 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261126140000_health_post_game_scope",
+    // The health_post table is tiny before launch, and this deploy rebuilds its feed index.
+    new Set(["DROP INDEX"]),
+  ],
+  [
     "20261126120000_health_post_card_keys",
     // Earlier writers omit the keys and receive the same empty list as existing posts.
     new Set(["ADD COLUMN NOT NULL"]),

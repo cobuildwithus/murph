@@ -3325,7 +3325,7 @@ model HealthPost {
   attachment         HealthPostAttachment?
   activity           HealthActivity?
 
-  @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc), gameId])
   @@map("health_post")
 }
 
