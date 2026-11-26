@@ -16,11 +16,11 @@ function preview(activity: RecordedActivity) {
 }
 
 describe("recorded timed cards", () => {
-  it("uses minute averages for chart markers, names the sample peak, and preserves gaps", () => {
+  it("uses minute averages for chart markers, names the same peak the line shows, and preserves gaps", () => {
     const card = preview({ ...summary, heartRate });
     expect(card).toMatchObject({
       candidateId: `activity:${summary.id}:activity_heart_rate`, title: { number: "3 min", measure: "strength session" },
-      subtitle: "heart rate peaked at 133",
+      subtitle: "heart rate peaked at 114",
       source_note: "Recorded on Feb 16, evening. The line shows each minute's average.",
       chart: { type: "heart_rate", perMinute: [82, null, 114, 87], low: { minute: 1, bpm: 82 }, peak: { minute: 3, bpm: 114 }, timerMinutes: 3 },
     });
@@ -44,7 +44,7 @@ describe("recorded timed cards", () => {
     const paused = { ...summary, kind: "sauna", elapsedSec: 31 * 60, movingSec: 22 * 60, timerSec: 20 * 60,
       heartRate: { lowBpm: 70, avgBpm: 104, peakBpm: 131, perMinute: Array.from({ length: 22 }, (_, i) => 80 + i) } } as const;
     const card = preview(paused);
-    expect(card).toMatchObject({ title: { number: "22 min", measure: "sauna" }, subtitle: "heart rate peaked at 131" });
+    expect(card).toMatchObject({ title: { number: "22 min", measure: "sauna" }, subtitle: "heart rate peaked at 101" });
     expect(() => validateRecordedActivity({ ...paused, heartRate: { ...paused.heartRate, perMinute: Array(31).fill(95) } }))
       .toThrow("Check the minute heart rate readings.");
   });
@@ -125,7 +125,9 @@ describe("recorded timed cards", () => {
     expect(hidden.specRevision).toBe(createHash("sha256").update(canonical).digest("hex"));
     // Pauses stay out of the card: only the time spent recording is shown.
     expect(preview({ ...activity, elapsedSec: 230 })).toEqual(display);
-    const changed = preview({ ...activity, heartRate: { ...heartRate, peakBpm: 135 } });
+    // The card shows the minute line, so only the line changes it; the summary's own peak doesn't.
+    expect(preview({ ...activity, heartRate: { ...heartRate, peakBpm: 135 } })).toEqual(display);
+    const changed = preview({ ...activity, heartRate: { ...heartRate, perMinute: [82, null, 116, 87] } });
     expect(changed.specRevision).not.toBe(display.specRevision);
     expect(changed.change_options[1].specRevision).toBe(hidden.specRevision);
   });
