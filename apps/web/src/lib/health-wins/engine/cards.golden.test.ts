@@ -133,6 +133,7 @@ it("exports synthetic examples of every rendered shape", () => {
   const walk: RecordedActivity = {
     id: "238bba63-f944-4fe7-a508-295fe7789afa", kind: "walk",
     startedAt: "2037-03-12T14:09:00Z", elapsedSec: 810, movingSec: 750,
+    heartRate: { lowBpm: 97, avgBpm: 114, peakBpm: 126 },
     route: {
       distanceM: 1250, climbM: 16,
       splits: [{ distanceM: 1000, seconds: 600 }, { distanceM: 250, seconds: 150 }],

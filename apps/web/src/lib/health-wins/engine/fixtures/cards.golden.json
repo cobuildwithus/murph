@@ -880,6 +880,7 @@
       "type": "two_bars",
       "barWidth": "thin",
       "metric": "sleep_score",
+      "label": "Sleep score",
       "unit": "points",
       "expectedDirection": "increase",
       "adherence": {
@@ -1051,6 +1052,27 @@
       "chips": [
         "1.25 km",
         "10:00 /km"
+      ],
+      "stats": [
+        {
+          "label": "Distance",
+          "value": "1.25",
+          "unit": "km"
+        },
+        {
+          "label": "Pace",
+          "value": "10:00",
+          "unit": "/km"
+        },
+        {
+          "label": "Time",
+          "value": "12:30"
+        },
+        {
+          "label": "Climb",
+          "value": "16",
+          "unit": "m"
+        }
       ]
     }
   },
@@ -1066,7 +1088,7 @@
     },
     "id": "activity:238bba63-f944-4fe7-a508-295fe7789afa:activity_splits",
     "kind": "activity_splits",
-    "subtitle": "fastest km 10:00",
+    "subtitle": "in 12:30, 10:00 a km",
     "source_note": "Recorded on Mar 12, afternoon. Splits by km.",
     "chart": {
       "type": "splits",
@@ -1085,7 +1107,7 @@
           "partial": true
         }
       ],
-      "fastest": 0
+      "fastest": null
     }
   },
   {

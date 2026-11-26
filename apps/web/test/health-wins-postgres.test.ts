@@ -294,12 +294,14 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     const paths = [encodePolyline([[-141.2, -32.4], [-141.199, -32.4]])];
     const activity = {
       id: randomUUID(), kind: "walk", startedAt: "2032-04-12T19:18:00Z", movingSec: 622, elapsedSec: 637,
+      heartRate: { lowBpm: 92, avgBpm: 104, peakBpm: 121, perMinute: Array(11).fill(null) },
       route: { distanceM: 1000, climbM: 6, splits: [{ distanceM: 1000, seconds: 622 }], paths },
     };
     const preview = await previewActivity(author.request("activities/cards", "POST", { activity }));
     expect(preview.status).toBe(200);
     const { cards } = await preview.json();
     const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
+    expect(map.chart.stats?.map((stat: { label: string }) => stat.label)).not.toContain("Heart rate");
     const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
     const id = randomUUID();
     const pick = { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision };
@@ -317,7 +319,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(shared.status).toBe(200);
     expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision,
       spec: { ...choice.spec, chart: { ...choice.spec.chart, art: { key: expect.stringMatching(/^area:v2:/u) } } } }]);
-    expect(choice.spec.chart).toEqual({ ...map.chart, paths, chips: [] });
+    expect(choice.spec.chart).toEqual({ type: "route_map", paths, frame: map.chart.frame });
     expect(map.chart).not.toHaveProperty("art");
     expect(deferred).toHaveLength(0);
   });

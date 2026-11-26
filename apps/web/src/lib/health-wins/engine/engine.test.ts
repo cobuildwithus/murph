@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { activityCandidates } from "./activities";
 import { generateHealthWins, type DailySample, type Experiment, type Game, type HealthWinsInput } from "./index";
 import { rankCandidates } from "./ranking";
 import type { Candidate } from "./types";
@@ -192,4 +193,27 @@ it("ranks by effect versus noise, recency and record bonus, breaking ties by car
   expect(ids(sample("older", 1, 1, "2034-04-01"), sample("recent", 1, 1))).toEqual(["recent", "older"]);
   expect(ids(sample("comparison", 1, 1), record)).toEqual(["record", "comparison"]);
   expect(ids(sample("z", 1, 2), sample("a", 1, 2), sample("a", 1, 2))).toEqual(["a", "z"]);
+});
+
+it("keeps the best Challenges card when higher-scoring data fills the catalog", () => {
+  const filters = ["Sleep", "Heart", "Labs", "Fitness"] as const;
+  const data = Array.from({ length: 28 }, (_, i): Candidate => ({
+    date: member.today, effect: 28 - i, noise: 1,
+    card: {
+      id: `observation-${i}`, filter: filters[i % filters.length], kind: "percentile",
+      title: { number: "Top 20%", measure: "score" }, subtitle: "", source_note: "",
+      chart: { type: "percentile", value: 80, unit: "points", group: "Reference group",
+        cuts: [], topPercent: 20, lowerIsBetter: false },
+    },
+  }));
+  const games = activityCandidates({ member, games: [game("lunges")] });
+  const ids = (candidates: Candidate[]) => rankCandidates([...candidates, ...games], member.today).cards.map(card => card.id);
+  expect(ids(data)).toEqual([...data.slice(0, 23).map(item => item.card.id), "game_climb:lunges"]);
+
+  const [result] = activityCandidates({ member, experiments: [experiment(1)] });
+  expect(ids([...data, result])).toEqual([...data.slice(0, 22).map(item => item.card.id), "game_climb:lunges", result.card.id]);
+
+  // When only 22 observations outrank the games, both fit in score order.
+  const lowerTail = data.map((item, i) => i < 22 ? item : { ...item, date: "2032-03-01", effect: 0 });
+  expect(ids(lowerTail)).toEqual([...data.slice(0, 22).map(item => item.card.id), "game_climb:lunges", "game_streak"]);
 });
