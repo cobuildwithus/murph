@@ -33,7 +33,7 @@ describe("companion contact evidence", () => {
       hostedMember: { update: vi.fn(), findUniqueOrThrow: vi.fn().mockResolvedValue({ companionLastContactAt: null, companionLastForegroundAt: null }) } };
     m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
     await recordCompanionHeartbeat("synthetic", "foreground");
-    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormant: false } });
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormantAt: null } });
     await recordCompanionHeartbeat("synthetic", "background");
     expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
     expect(await readRuntimeCompanionPresence("synthetic", null)).toEqual({ status: "unknown", lastContactAt: null, lastForegroundAt: null });
@@ -50,7 +50,7 @@ describe("companion contact evidence", () => {
     const clientInfo = { platform: "ios" as const, version: "1.1.22", build: "109", osVersion: "18.1.0", deviceModel: "iPhone16,2" };
     await recordCompanionHeartbeat("synthetic", "foreground", clientInfo);
     expect(tx.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ where: { id: "synthetic" }, data: {
-      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormant: false,
+      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormantAt: null,
       companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
       companionOsVersion: "18.1.0", companionDeviceModel: "iPhone16,2",
     } });

@@ -220,7 +220,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       await send({ operation: "release", ...runtime, runnerContainerName: target });
     } else {
       await send({ operation: "complete", ...runtime, settledRunnerContainerName: target, immediateRecheckRequested: false });
-      expect((await first.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(false);
+      expect((await first.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeNull();
       await send({ operation: "target_retired", runnerContainerName: target });
     }
     await recordRuntimeMemberInteraction(first, userId, old);
@@ -238,9 +238,9 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const cutoff = new Date(now.getTime() - 60 * 86_400_000);
     await observer.hostedMember.update({ where: { id }, data: { createdAt: cutoff, runtimeLastInteractionAt: cutoff } });
     await first.$transaction(tx => markDormantRuntimeAfterStop(tx, id, new Date(now.getTime() - 1)));
-    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormant).toBe(false);
+    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormantAt).toBeNull();
     await first.$transaction(tx => markDormantRuntimeAfterStop(tx, id, now));
-    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormant).toBe(true);
+    expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormantAt).toBeInstanceOf(Date);
   });
 
   it("a returning member wins a concurrent shutdown", async () => {
@@ -260,10 +260,10 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const dayUtc = new Date(now.toISOString().slice(0, 10));
     await first.hostedLinqDailyState.create({ data: { memberId: userId, dayUtc, firstSeenAt: now, lastSeenAt: now, inboundCount: 1 } });
     await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: target });
-    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(false);
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeNull();
     await first.hostedLinqDailyState.update({ where: { memberId_dayUtc: { memberId: userId, dayUtc } }, data: { inboundCount: 0, outboundCount: 1 } });
     await observer.$transaction(tx => markDormantRuntimeAfterStop(tx, userId, now));
-    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(true);
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormantAt).toBeInstanceOf(Date);
   });
 
   async function gameFundingRooms(now: Date) {

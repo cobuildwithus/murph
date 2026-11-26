@@ -146,7 +146,7 @@ describe("lapsed member product access with real guards and companion services",
     for (const response of responses) expect({ status: response.status, body: await response.json() }).not.toMatchObject({ status: 403 });
     expect(responses.map(response => response.status)).toEqual(Array(8).fill(200));
     expect(db.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ where: { id: member.id }, data: {
-      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date),
+      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date), runtimeDormantAt: null,
     } });
     expect(db.companionPushRoute.upsert).toHaveBeenCalledOnce();
     expect(edge.enroll).not.toHaveBeenCalled(); expect(edge.welcome).not.toHaveBeenCalled();

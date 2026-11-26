@@ -266,7 +266,7 @@ describe("session failure observations before Better Auth masking", () => {
     const credential = browserCredential(renewed.headers);
     const browser = await read({ credential, transport: "browser" });
     expect(db.hostedMember.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: { runtimeDormant: false, runtimeLastInteractionAt: expect.any(Date) },
+      data: { runtimeDormantAt: null, runtimeLastInteractionAt: expect.any(Date) },
     }));
     expect(browser.session?.sessionId).toBe(sessionId);
     expect(browser.session?.expiresAt).toEqual(renewed.session?.expiresAt);

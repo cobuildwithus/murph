@@ -92,11 +92,11 @@ describe.skipIf(!enabled)("encrypted Better Auth adapter with PostgreSQL", () =>
     const headers = new Headers({ origin: "https://www.withmurph.ai" });
     await auth.api.sendVerificationOTP({ headers, body: { email, type: "sign-in" } });
     expect(delivered).toMatch(/^\d{6}$/u);
-    await getPrisma().hostedMember.update({ where: { id: memberId }, data: { runtimeDormant: true, runtimeLastInteractionAt: null } });
+    await getPrisma().hostedMember.update({ where: { id: memberId }, data: { runtimeDormantAt: new Date(), runtimeLastInteractionAt: null } });
     const result = await auth.api.signInEmailOTP({ headers, body: { email, otp: delivered }, returnHeaders: true });
     expect(result.response.user.id).toBe(memberId);
     expect(await getPrisma().hostedMember.findUniqueOrThrow({ where: { id: memberId } })).toMatchObject({
-      runtimeDormant: false, runtimeLastInteractionAt: expect.any(Date),
+      runtimeDormantAt: null, runtimeLastInteractionAt: expect.any(Date),
     });
     const cookie = result.headers.get("set-cookie") ?? "";
     expect(cookie).toContain("__Host-murph-auth-session=");

@@ -24,7 +24,7 @@ export async function recordRuntimeMemberInteraction(
   if (at.getTime() <= now - INACTIVITY_MS) return;
   await db.hostedMember.updateMany({
     where: { id: memberId, OR: [{ runtimeLastInteractionAt: null }, { runtimeLastInteractionAt: { lt: at } }] },
-    data: { runtimeDormant: false, runtimeLastInteractionAt: at },
+    data: { runtimeDormantAt: null, runtimeLastInteractionAt: at },
   });
 }
 
@@ -34,8 +34,8 @@ export async function markDormantRuntimeAfterStop(tx: Prisma.TransactionClient, 
   // Correlate every history probe to this member so a stop never scans the fleet.
   // Older installations have daily Linq counts without an exact last-inbound time.
   await tx.$executeRaw`
-    UPDATE hosted_member AS m SET runtime_dormant = TRUE
-    WHERE m.id = ${userId} AND NOT m.runtime_dormant
+    UPDATE hosted_member AS m SET runtime_dormant_at = ${now}
+    WHERE m.id = ${userId} AND m.runtime_dormant_at IS NULL
       AND GREATEST(m.created_at, m.runtime_last_interaction_at, m.companion_last_foreground_at) <= ${cutoff}
       AND NOT EXISTS (SELECT 1 FROM hosted_thread_container WHERE member_id = m.id)
       AND NOT EXISTS (SELECT 1 FROM hosted_group WHERE runtime_member_id = m.id)

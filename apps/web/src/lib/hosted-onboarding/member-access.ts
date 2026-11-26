@@ -382,13 +382,13 @@ export async function readActiveHostedMemberAccess(input: {
   // Ordinary access is one statement. Game-only rooms additionally require
   // the exact observed pair, including the bound announcement room itself.
   const member = await prisma.hostedMember.findUnique({
-    select: { id: true, ...(input.forRuntimeStart ? { runtimeDormant: true } : {}) },
+    select: { id: true, ...(input.forRuntimeStart ? { runtimeDormantAt: true } : {}) },
     where: {
       ...activeHostedMemberAccessWithParticipantsWhere(input.now, false),
       id: input.memberId,
     },
   });
-  if (member) return !input.forRuntimeStart || !member.runtimeDormant;
+  if (member) return !input.forRuntimeStart || member.runtimeDormantAt === null;
   return (await readGameChatAccessIds({ memberIds: [input.memberId], now: input.now, prisma })).has(input.memberId);
 }
 

@@ -327,7 +327,7 @@ async function buildHostedRuntimeInactiveFacts(input: {
   const retentionEligible = workspace?.inboxMediaRetentionWakeAt != null
     && await prisma.hostedMember.findUnique({
       select: { id: true },
-      where: { id: input.userId, runtimeDormant: false, AND: [hostedRuntimeMemberEligibleWhere()] },
+      where: { id: input.userId, runtimeDormantAt: null, AND: [hostedRuntimeMemberEligibleWhere()] },
     });
   const retentionWakeAt = retentionEligible ? workspace.inboxMediaRetentionWakeAt : null;
   return buildHostedRuntimeBlockedFacts({

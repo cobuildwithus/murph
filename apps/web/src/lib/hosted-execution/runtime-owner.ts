@@ -381,7 +381,7 @@ async function readRuntimeAdmissionTx(
   const member = await tx.hostedMember.findUnique({
     select: { id: true },
     where: {
-      id: userId, runtimeDormant: false,
+      id: userId, runtimeDormantAt: null,
       AND: [
         hostedRuntimeMemberEligibleWhere(),
         ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere(now, false)]),
@@ -394,7 +394,7 @@ async function readRuntimeAdmissionTx(
   // Preserve the ordinary fast path and the source member's consent boundary.
   const eligibleMember = await tx.hostedMember.findUnique({
     select: { id: true },
-    where: { id: userId, runtimeDormant: false, threadContainer: { isNot: null }, AND: [hostedRuntimeMemberEligibleWhere()] },
+    where: { id: userId, runtimeDormantAt: null, threadContainer: { isNot: null }, AND: [hostedRuntimeMemberEligibleWhere()] },
   });
   if (!eligibleMember) return null;
   const allowanceBeneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: userId, now, prisma: tx });

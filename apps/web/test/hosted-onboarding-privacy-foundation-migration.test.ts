@@ -103,6 +103,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
+    'runtimeDormantAt DateTime? @map("runtime_dormant_at")',
+    'runtimeLastInteractionAt DateTime? @map("runtime_last_interaction_at")',
     'firstSignInMethod String? @map("first_sign_in_method")',
     "gameProfile GameProfile?",
     // Progress content is sealed in member-owned tables; these are cascade relations only.

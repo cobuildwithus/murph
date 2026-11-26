@@ -21,3 +21,6 @@ decision. PR 5344 carries the deployment and CI evidence.
 Status: completed
 Updated: 2026-11-26
 Completed: 2026-11-26
+
+The release migration wrapper rejected a required boolean column. The release
+candidate uses a nullable stop timestamp. A null value allows admission.
