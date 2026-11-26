@@ -186,8 +186,8 @@ and runs all 13 tests.
 publishes the workspace checkpoint and drains the exact outbox intent through
 ordinary provider entry. It can recover that intent by run key. The detail job
 uses the direct scheduled audience, the private receipt reference and a stable
-run key. A completed one-shot stays disabled in the private cron store so a
-replayed change pointer cannot schedule it again. Leading and final bubble keys
+run key. The restore test copies the private cron store after the one-shot
+completes. Replaying the pointer from that snapshot finds the disabled job. Leading and final bubble keys
 are checked again before entering the outbox, recognized at Web’s dispatch
 fence and excluded from terminal retry. A downgrade between bubbles leaves
 only the already staged reply. The three-mode synthetic journey passed with
@@ -204,8 +204,12 @@ all of the following before the first production admission.
 1. Authenticate compatibility evidence for the serving runner and the manually
    deployed Cloudflare port, including mixed releases. The production sweep
    supplies this evidence and admission verifies it under the member lock. An
-   old or missing reader leaves the new run on v2. The current caller-supplied
-   revision constant cannot attest either release.
+   old or missing reader leaves the new run on the ordinary retrieval protocol.
+   Web currently requires an exact caller-supplied match of notice revision 2
+   for both components. At revision 1 the runner blocks clinical replies and
+   the port drops Web’s acknowledgement. The revision 2 runner requires the
+   explicit acknowledgement on its exact private route. Neither component
+   verifies these numbers today, and the production sweep supplies neither.
 2. Authorize clinical replies in Web only for the accepted, receipt-proved run,
    matching credential epoch, replacement ongoing grant, current OpenAI approval,
    preference revision and exact frozen private route. Preserve proactive pause
@@ -214,9 +218,29 @@ all of the following before the first production admission.
    same authorized turn. A definite terminal failure consumes the attempt.
 3. Persist the next safe regional wake for quiet hours, hold missing or
    unsupported regions without polling and recover on a route change. Preserve
-   blocked, deferred and skipped occurrences, including a private outbox or cron
-   preflight that would otherwise retire the only copy. Recheck at the wake.
-4. Exercise all three settings through production admission and synthetic
+   blocked, deferred and skipped occurrences. Detail currently records a line
+   health block, proactive pause or missing port acknowledgement as
+   `skipped_gate`. This consumes the one-shot locally and disables it. Pointer
+   replay finds the retained job and returns. Notice treats a missing
+   acknowledgement as retryable, but an explicit preflight block can also
+   retire its intent. Make both modes defer transient blocks without consuming
+   coverage. Test block then recovery, including Web authorizing while an older
+   serving port still drops the acknowledgement. Recheck authority at the wake.
+4. Claim detail generation durably once per accepted run outside the restorable
+   workspace. Restoring a snapshot from before completion can run the model
+   again. Web’s clinical engagement branch currently returns before claiming
+   provider dispatch. Even a fence for each bubble cannot cover a new bubble
+   index produced by a second generation. Restore a pre-completion snapshot
+   with a second generation that would produce extra bubbles and prove it
+   stages or sends no new replies. Reconcile the original generation’s
+   outstanding deliveries without authorizing another.
+5. Remove each disabled private detail job after Web durably covers the
+   occurrence. Keep its replay protection in the per-run claim. Exercise
+   cleanup and restore from both sides of the coverage transition. Otherwise
+   the cron store grows by one job per occurrence and its strict shape keeps
+   older runners from reopening it indefinitely. Retain compatible readers for
+   outstanding work and restorable snapshots.
+6. Exercise all three settings through production admission and synthetic
    delivery together, with mixed serving revisions, late enrichment, empty
    receipts, restore, withdrawn approval, reconnect, removal, route changes,
    opt-out during generation, downgrade between bubbles, health and quiet-hour

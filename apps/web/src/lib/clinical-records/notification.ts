@@ -54,7 +54,8 @@ async function readClinicalNotificationRecipient(tx: Prisma.TransactionClient, m
 
 // The production sweep supplies no reader revisions until dispatch and recovery ship together.
 export type ClinicalDailyNoticeReaders = { runner: number; cloudflarePort: number };
-const CLINICAL_DAILY_NOTICE_REVISION = 1;
+// Revision 2 requires the port to forward explicit clinical reply authorization to the runner.
+const CLINICAL_DAILY_NOTICE_REVISION = 2;
 
 /** Daily admission has locked the member and checked launch consent, the due grant and named approvals. */
 export async function freezeClinicalDailyNotification(
