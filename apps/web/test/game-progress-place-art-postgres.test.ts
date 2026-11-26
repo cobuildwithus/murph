@@ -133,10 +133,14 @@ describe.skipIf(!enabled)("shared place art store", () => {
     const write = vi.fn(async () => { await gate; return { status: "completed", output_text: JSON.stringify(story) }; });
     const client = { responses: { create: write } } as unknown as OpenAI;
     const place = { id: "test-c", label: "Middle, Delaware, United States" };
-    const flips = Promise.all(Array.from({ length: 6 }, () => readPlaceStory(place, { client })));
-    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-    release();
-    const views = await flips;
+    // Keep the winning writer in flight through the five concurrent reads.
+    let readersFinished = 0;
+    const views = await Promise.all(Array.from({ length: 6 }, async () => {
+      const view = await readPlaceStory(place, { client });
+      readersFinished += 1;
+      if (readersFinished === 5) release();
+      return view;
+    }));
     expect(views.filter(view => view.state === "ready")).toHaveLength(1);
     expect(views.filter(view => view.state === "making")).toHaveLength(5);
     expect(await readPlaceStory(place, { client })).toEqual({ state: "ready", ...story });
