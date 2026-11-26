@@ -11662,6 +11662,61 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Pr
   throw new Error("Timed out waiting for hosted workspace runner condition.");
 }
 
+test("a checkpoint can observe clinical applies draining before the first apply starts", async () => {
+  const fixture = await createForegroundDeviceFixture();
+  const first = createDeferred<null>();
+  const second = createDeferred<null>();
+  const preparation = vi.spyOn(systemMailbox, "prepareHostedSystemMailboxItemForCheckpoint")
+    .mockResolvedValue(null)
+    .mockReturnValueOnce(first.promise)
+    .mockReturnValueOnce(second.promise);
+  const tracked: Promise<void>[] = [];
+  const owner = createHostedWorkspaceSystemWork({
+    preparation: fixture.ownerInput,
+    runnerInput: {
+      checkpointRequestBuilder: createRunnerCheckpointBuilder({ attemptId: "attempt_synthetic_apply_drain" }),
+      expectedUserId: TEST_USER_ID,
+      async importItem() { throw new Error("Unexpected mailbox import."); },
+      limitPerLane: 1,
+      platform: fixture.platform,
+      requestId: "request_synthetic_apply_drain",
+      trackLocalWorkspaceMutationCompletion(completion) { if (completion) tracked.push(completion); },
+      vaultRoot: fixture.vaultRoot,
+      workspace: fixture.workspace,
+    },
+    onCompleted() { throw new Error("Unexpected prepared item."); },
+    onFailure(error) { throw error; },
+    settleOwnedMutations: async () => { await Promise.all(tracked); },
+  });
+  try {
+    owner.resume();
+    const before = owner.readClinicalApplies();
+    assert.equal(before.pending, false);
+    owner.kick(["apply-clinical-enrichment"]);
+    owner.kick(["apply-clinical-enrichment"]);
+    first.resolve(null);
+    await tracked[0];
+    assert.equal(owner.readClinicalApplies().pending, true);
+    assert.equal(before.drained.aborted, false);
+    second.resolve(null);
+    await tracked[1];
+    assert.equal(before.drained.aborted, true);
+
+    const next = owner.readClinicalApplies();
+    assert.equal(next.pending, false);
+    assert.equal(next.drained.aborted, false);
+    owner.kick(["apply-clinical-enrichment"]);
+    await tracked[2];
+    assert.equal(next.drained.aborted, true);
+  } finally {
+    first.resolve(null);
+    second.resolve(null);
+    await Promise.allSettled(tracked);
+    preparation.mockRestore();
+    await fixture.cleanup();
+  }
+});
+
 // This composes the real workspace runner and automation lane, mailbox owner,
 // Junction provider with WHOOP-labelled data, importer, WriteBatch/receipt persistence, and query. The engine
 // pass is a held model stand-in and device HTTP is synthetic. Cross-process projection coherence is a separate query
