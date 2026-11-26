@@ -87,6 +87,9 @@ describe("clinical document background runner", () => {
     expect(cleanup).not.toHaveBeenCalled();
     for (const [request] of executeExtraction.mock.calls) {
       expect(request.source).toEqual(work.source);
+      // History keeps the member's model; Luna dropped and inverted history facts in live evaluation.
+      const history = request.family === "history";
+      expect([request.model, request.reasoningEffort]).toEqual(history ? [input.model ?? null, undefined] : ["gpt-6-luna", "high"]);
       expect(request.timeZone).toBe(work.timeZone);
       expect(request.renderedPages).toEqual([{ page: 2, path: "/synthetic-scratch/page.png" }]);
     }
