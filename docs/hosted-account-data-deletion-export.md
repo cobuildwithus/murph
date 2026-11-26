@@ -177,6 +177,7 @@ The Settings vault export does not include:
 
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
+| `prisma.game_area_art_member_budget` | Member cascade | Omitted | Holds only the member ID, the latest UTC claim day and its area painting claim count. |
 | `prisma.health_activity` | Member cascade | Approved Settings export | Includes saved activity summaries and their local day. |
 | Health wins posts, comments, cheers, hides and win sets | Cascade from member or parent post | Outside the vault-only Settings export | Deletes the member's posts and comments, activity on their posts, their cheers, hides involving them in either direction, and their suggestion sets. |
 | Health wins photo attachments and sealed Progress objects | Retire and purge before member cascade | Outside the vault-only Settings export | Attachment ownership and the sealed storage key survive a failed purge. The object lifecycle covers staged, published and retired photos. |

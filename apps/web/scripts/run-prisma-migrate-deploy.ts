@@ -107,6 +107,11 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261126060000_game_area_art_claims",
+    // Zero released claims preserves existing fences. The status check only widens.
+    new Set(["ADD COLUMN NOT NULL", "ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20261119213000_game_place_art_story",
     // Only widens place art kinds to stories; old rows and writers remain valid.
     // Replace atomically with NOT VALID, then validate without the metadata lock.

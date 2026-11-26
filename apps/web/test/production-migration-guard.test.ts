@@ -721,9 +721,11 @@ describe("hosted web production migration guard", () => {
     }
   });
 
-  test("limits the place art story kind to constraint replacement", async () => {
+  test.each([
+    "20261119213000_game_place_art_story",
+    "20261126060000_game_area_art_claims",
+  ])("accepts the place art expansion in %s and rejects an unrelated column drop", async migrationId => {
     const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
-    const migrationId = "20261119213000_game_place_art_story";
     try {
       const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
       await writeMigrationSql(migrationsDir, migrationId, sql);
