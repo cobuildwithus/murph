@@ -13,11 +13,13 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(),
-  control: vi.fn(), decode: vi.fn(), wake: vi.fn(), refresh: vi.fn(),
+  control: vi.fn(), decode: vi.fn(), wake: vi.fn(), refresh: vi.fn(), prisma: vi.fn(() => ({})),
 }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.prisma }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
-vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
+vi.mock("@/src/lib/better-auth/native-auth", () => ({
+  assertHostedNativeMemberAuthCurrentTx: mocks.current, assertHostedNativeMemberAuthCurrentForRead: mocks.current,
+}));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedBrowserVaultReplicaState: mocks.workspace }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({
@@ -31,6 +33,7 @@ import { createBrowserVaultRouteQueryClient, selectBrowserVaultReplicaDemand } f
 import type { decodeReadyBrowserVaultSession } from "@/src/lib/browser-vault/loader";
 import { GET } from "../app/api/device-sync/companion/numbers/route";
 import { readCompanionHealthSeries, readSavedCompanionBody } from "../src/lib/device-sync/companion-numbers";
+import { readMeasureInputs } from "../src/lib/health-wins/inputs";
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
@@ -164,6 +167,25 @@ it("serves only the documented four saved series and comparison fields, includin
   expect(mocks.decode).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...selection, expectedMemberId: "member_native", signal: expect.any(AbortSignal) }));
   expect(mocks.current).toHaveBeenCalledExactlyOnceWith({ member: { id: "member_native" } }, {});
   expect(mocks.authority).toHaveBeenCalledTimes(2);
+});
+
+it("reads a viewer's analyte through a labs-only session without requesting any metric buckets", async () => {
+  const replica = fixture();
+  replica.labResultRows = [{
+    analyte: "Glucose", biomarkerKey: "biomarker:glucose", comparator: null, date: through,
+    drawId: "lab-draw", fastingStatus: "fasting", flag: "normal", id: "lab-result", labName: null,
+    metricKey: "glucose", normalizedUnit: "mg/dL", normalizedValue: 87, observedAt: savedAt,
+    parentResultStatus: "normal", referenceRange: null, rowSchema: "murph.browser-vault.lab-result-row.v1",
+    sourceLabel: null, specimenKind: "serum", textValue: null, unit: "mg/dL", value: 87,
+  }];
+  shards = await splitBrowserVaultReplica(parseBrowserVaultReplica(replica));
+  mocks.prisma.mockReturnValue({ $transaction: (callback: (tx: object) => unknown) => callback({}) });
+  const result = await readMeasureInputs(await mocks.auth(), through, "glucose", request().signal);
+  expect(result).toMatchObject({ input: { labs: [{ analyte: "glucose", value: 87 }] }, observed: true });
+  expect(mocks.control).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    requestedShards: ["core", "labs"], signal: expect.any(AbortSignal),
+  }));
+  expect(mocks.control.mock.calls[0]?.[0]).not.toHaveProperty("requestedMetricBuckets");
 });
 
 it("uses local today across midnight and DST, retaining canonical daily dates", async () => {

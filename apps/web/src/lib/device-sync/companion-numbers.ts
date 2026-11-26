@@ -130,7 +130,9 @@ async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: 
     const saved = await loadPublishedCompanionMetricReplica({
       memberId, signal, metricKeys: metrics.map(id => COMPANION_HEALTH_METRICS[id].key), requestedShards, replicaState,
     });
-    return saved.state === "ready" ? saved : null;
+    if (saved.state !== "ready") return null;
+    if (!("metrics" in saved.client)) throw numbersUnavailable("replica_metrics_missing");
+    return { ...saved, client: saved.client };
   } catch (error) {
     if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) return null;
     // Keep this read's own stage; every other failure stays a retryable 503.
@@ -157,9 +159,11 @@ export async function loadPublishedCompanionMetricReplica({
   ))].sort();
   signal.throwIfAborted();
   const keys = await generateHostedUserRecipientKeyPair();
+  signal.throwIfAborted();
   const session = parseBrowserVaultSessionResponse({
     ...await control.createBrowserVaultSession({
-      browserPublicKeyJwk: keys.publicKeyJwk, replicaRef, requestedShards, requestedMetricBuckets, userId: memberId,
+      browserPublicKeyJwk: keys.publicKeyJwk, replicaRef, requestedShards, signal, userId: memberId,
+      ...(requestedMetricBuckets.length ? { requestedMetricBuckets } : {}),
     }),
     freshness: assessBrowserVaultReplicaFreshness({ now: new Date().toISOString(), replicaRef }).freshness,
     refreshPending: false,
@@ -172,7 +176,6 @@ export async function loadPublishedCompanionMetricReplica({
     session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId,
     requestedShards, requestedMetricBuckets, signal,
   });
-  if (!("metrics" in loaded.client)) throw numbersUnavailable("replica_metrics_missing");
   return { state: "ready", client: loaded.client, freshness: session.freshness } as const;
 }
 

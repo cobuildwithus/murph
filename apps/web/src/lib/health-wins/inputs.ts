@@ -1,16 +1,20 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import type { BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
+import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
+import { assertHostedNativeMemberAuthCurrentForRead, type HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
 import { readPaintedRouteArt } from "../game/progress/route-art";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
-import type { HealthWinsInput } from "./engine";
+import { isMetric } from "./engine/metrics";
+import type { HealthWinsInput, Measure, Metric } from "./engine/types";
 import { readHealthWinExperiments } from "./experiment-inputs";
 import { isHealthDietEnabled } from "./flag";
 import { readHealthWinGameInputs } from "./game-inputs";
-import { readHealthWinLabs } from "./lab-inputs";
+import { readHealthWinAnalyte, readHealthWinLabs } from "./lab-inputs";
 import { readHealthWinMeals } from "./meal-inputs";
 import { readHealthWinWearables, WIN_METRIC_KEYS } from "./wearable-inputs";
 
@@ -30,32 +34,41 @@ function sources(signal: AbortSignal) {
   return { read, missing };
 }
 
-function memberInputs(today: string, client?: BrowserVaultMetricSeriesCapableQueryClient): HealthWinsInput["member"] {
+function memberInputs(today: string, client?: BrowserVaultCoreCapableQueryClient): HealthWinsInput["member"] {
   const demographics = client?.replica.demographics;
   return { today, age: demographics?.birthYear == null ? null : Number(today.slice(0, 4)) - demographics.birthYear,
     sex: demographics?.biologicalSex ?? null, wearableProvider: null };
 }
 
-async function readReplicaInputs(client: BrowserVaultMetricSeriesCapableQueryClient, today: string, clock: Date,
-  source: ReturnType<typeof sources>, dietEnabled: boolean) {
-  const member = memberInputs(today, client);
-  const wearable = await source.read("wearables", () => {
+function wearableInputs(client: BrowserVaultCoreCapableQueryClient, today: string, clock: Date, metrics?: Metric[]) {
+  if (!("metrics" in client)) throw Error("Missing metrics shard");
+  let stepsThrough = today;
+  if (!metrics || metrics.includes("steps")) {
     const timeZone = client.replica.meals?.timeZone;
     if (!timeZone) throw Error("Missing vault time zone");
-    const stepsThrough = lastSettledStepDay(clock, timeZone);
-    return { ...readHealthWinWearables(client, today, stepsThrough), stepsThrough };
-  });
+    stepsThrough = lastSettledStepDay(clock, timeZone);
+  }
+  return { ...readHealthWinWearables(client, today, stepsThrough, metrics), stepsThrough };
+}
+
+function labRows(client: BrowserVaultCoreCapableQueryClient, today: string) {
+  if (!("labResults" in client)) throw Error("Missing lab shard");
+  return client.labResults.list({ to: today });
+}
+
+async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, today: string, clock: Date,
+  source: ReturnType<typeof sources>, dietEnabled: boolean) {
+  const member = memberInputs(today, client);
+  const wearable = await source.read("wearables", () => wearableInputs(client, today, clock));
   if (wearable) {
     member.wearableProvider = wearable.wearableProvider;
     if (!wearable.complete) source.missing.add("wearables");
   }
-  const labs = await source.read("labs", () => {
-    if (!("labResults" in client)) throw Error("Missing lab shard");
-    return readHealthWinLabs(client.labResults.list({ to: today }), today);
+  const labs = await source.read("labs", () => readHealthWinLabs(labRows(client, today), today));
+  const experiments = await source.read("experiments", () => {
+    if (!("experimentOutcomes" in client.replica)) throw Error("Missing experiment outcomes");
+    return readHealthWinExperiments(client.replica.experimentOutcomes, client.entities.list({ families: ["experiment"] }), today);
   });
-  const experiments = await source.read("experiments", () => readHealthWinExperiments(
-    client.replica.experimentOutcomes, client.entities.list({ families: ["experiment"] }), today,
-  ));
   const meals = dietEnabled ? await source.read("meals", () => readHealthWinMeals(client.replica.meals, today)) : null;
   return {
     inputs: { member, daily: wearable?.daily ?? [], sessions: client.replica.activitySessions ?? [],
@@ -64,9 +77,18 @@ async function readReplicaInputs(client: BrowserVaultMetricSeriesCapableQueryCli
   };
 }
 
-export async function readHealthWinInputs(memberId: string, checkAuthority: () => Promise<void>, today: string, signal: AbortSignal) {
+async function withInputAuthority<T>(checkAuthority: () => Promise<void>, load: () => Promise<T>): Promise<T> {
   await checkAuthority();
   try {
+    return await load();
+  } finally {
+    // Authority loss always wins, including after a timeout or a failed independent input.
+    await checkAuthority();
+  }
+}
+
+export async function readHealthWinInputs(memberId: string, checkAuthority: () => Promise<void>, today: string, signal: AbortSignal) {
+  return withInputAuthority(checkAuthority, async () => {
     const source = sources(signal);
     const saved = await source.read("replica", () => loadPublishedCompanionMetricReplica({
       memberId, signal, metricKeys: Object.values(WIN_METRIC_KEYS), requestedShards: ["core", "metricsIndex", "labs"],
@@ -91,8 +113,53 @@ export async function readHealthWinInputs(memberId: string, checkAuthority: () =
     ])).digest("hex");
     signal.throwIfAborted();
     return { input, distanceArtUrl, sourceRevision, complete: !source.missing.size };
-  } finally {
-    // Authority loss always wins, including after a timeout or a failed independent input.
-    await checkAuthority();
+  });
+}
+
+const MEASURE_READ_BUDGET_MS = 4000;
+
+function measureUnavailable() {
+  return hostedOnboardingError({ code: "HEALTH_SEE_YOURS_UNAVAILABLE", httpStatus: 503, retryable: true,
+    message: "Your card is temporarily unavailable." });
+}
+
+async function readMeasureSource(memberId: string, today: string, measure: Measure, signal: AbortSignal):
+  Promise<{ input: HealthWinsInput; observed: boolean }> {
+  signal.throwIfAborted();
+  const saved = await loadPublishedCompanionMetricReplica({
+    memberId, signal, timeoutMs: MEASURE_READ_BUDGET_MS,
+    ...(isMetric(measure) ? { requestedShards: ["core", "metricsIndex"], metricKeys: [WIN_METRIC_KEYS[measure]] }
+      : { requestedShards: ["core", "labs"], metricKeys: [] }),
+  });
+  if (saved.state === "not_ready") throw measureUnavailable();
+  if (saved.state === "unpublished") return { input: { member: memberInputs(today) }, observed: false };
+  signal.throwIfAborted();
+  const member = memberInputs(today, saved.client);
+  if (!isMetric(measure)) {
+    const { labs, observed } = readHealthWinAnalyte(labRows(saved.client, today), today, measure);
+    return { input: { member, labs }, observed };
+  }
+  const { daily, wearableProvider, complete, observed } = wearableInputs(saved.client, today, new Date(), [measure]);
+  if (!complete) throw measureUnavailable();
+  return { input: { member: { ...member, wearableProvider }, daily }, observed };
+}
+
+export async function readMeasureInputs(auth: HostedNativeMemberAuth, today: string, measure: Measure, requestSignal: AbortSignal) {
+  const deadline = AbortSignal.timeout(MEASURE_READ_BUDGET_MS);
+  const signal = AbortSignal.any([requestSignal, deadline]);
+  const memberId = auth.member.id;
+  const checkAuthority = () => getPrisma().$transaction(async tx => {
+    await assertHostedNativeMemberAuthCurrentForRead(auth, tx);
+    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
+  });
+  try {
+    const result = await withInputAuthority(checkAuthority, () => readMeasureSource(memberId, today, measure, signal));
+    signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) throw error;
+    requestSignal.throwIfAborted();
+    // Transport and decryption errors may contain private replica locators.
+    throw measureUnavailable();
   }
 }

@@ -7,7 +7,7 @@ import { openGameTexts } from "../game/crypto";
 import { assertGameMemberAuthCurrentForRead } from "../game/http/auth";
 import { gameNotFound } from "../game/http/errors";
 import { effectiveTermWords, outcomeFor, parseStoredResult, parseTermWords } from "../game/rules";
-import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import {
   type CachedHealthCandidate, type HealthCardSelection, previewRecordedCandidate, resolveRecordedSelection, specDigest,
@@ -128,14 +128,9 @@ export async function preparePayoffSelection(memberId: string, pick: HealthCardS
   const [prepared] = await payoffCandidates(rows);
   if (!prepared) throw gameNotFound();
   const { candidate, row } = prepared;
-  try {
-    const card = resolveRecordedSelection([candidate], pick);
-    if (!card) throw payoffChanged();
-    return { gameId: row.gameId, debtorMemberId: row.debtorMemberId, ticketId: row.ticketId, card, basis: payoffBasis(row) };
-  } catch (error) {
-    if (isHostedOnboardingError(error) && error.code === "HEALTH_ACTIVITY_CARD_CHANGED") throw payoffChanged();
-    throw error;
-  }
+  const card = resolveRecordedSelection([candidate], pick, payoffChanged);
+  if (!card) throw payoffChanged();
+  return { gameId: row.gameId, debtorMemberId: row.debtorMemberId, ticketId: row.ticketId, card, basis: payoffBasis(row) };
 }
 
 /** The caller holds the pair and game locks, in that order, through post publication and redemption. */

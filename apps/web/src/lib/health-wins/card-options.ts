@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { ClientUnits } from "../companion/client-info";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
@@ -111,23 +112,38 @@ export function withDistanceTrendUnits(candidate: CachedHealthCandidate): Cached
   ] } };
 }
 
+function prepareMemberCandidate(
+  memberId: string, engineCard: CardSpec, revision: (spec: Variant["spec"]) => string, distanceArtUrl?: string | null,
+): CachedHealthCandidate {
+  const id = createHostedOpaqueIdentifier("health-win-card", JSON.stringify([memberId, engineCard.id]))!;
+  const card = engineCard.kind === "cumulative" && distanceArtUrl
+    ? { ...engineCard, id, chart: { ...engineCard.chart, art: { url: distanceArtUrl } } }
+    : { ...engineCard, id };
+  const variant = (option: Variant["option"], spec: Variant["spec"]): Variant => ({ option, spec, specRevision: revision(spec) });
+  const variants: CachedHealthCandidate["variants"] = [variant("original", card)];
+  const converted = hoursCard(card);
+  if (converted) variants.push(variant("hours", converted));
+  variants.push(variant("hide_numbers", hidden(card)));
+  return withDistanceTrendUnits({ id, variants });
+}
+
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
 export function prepareHealthCandidates(
   memberId: string, cards: readonly CardSpec[], distanceArtUrl: string | null = null,
   detection?: { achievements: ReadonlyMap<string, HealthWinAchievement>; complete: boolean },
 ): CachedHealthCandidate[] {
-  return cards.map(engineCard => {
-    const id = createHostedOpaqueIdentifier("health-win-card", JSON.stringify([memberId, engineCard.id]))!;
-    const card = engineCard.kind === "cumulative" && distanceArtUrl
-      ? { ...engineCard, id, chart: { ...engineCard.chart, art: { url: distanceArtUrl } } }
-      : { ...engineCard, id };
-    const variants: CachedHealthCandidate["variants"] = [{ option: "original", specRevision: randomUUID(), spec: card }];
-    const converted = hoursCard(card);
-    if (converted) variants.push({ option: "hours", specRevision: randomUUID(), spec: converted });
-    variants.push({ option: "hide_numbers", specRevision: randomUUID(), spec: hidden(card) });
-    const achievement = detection?.achievements.get(engineCard.id);
-    return withDistanceTrendUnits({ id, variants, ...(achievement && { achievement, sourceComplete: detection?.complete }) });
+  return cards.map(card => {
+    const candidate = prepareMemberCandidate(memberId, card, () => randomUUID(), distanceArtUrl);
+    const achievement = detection?.achievements.get(card.id);
+    return achievement ? { ...candidate, achievement, sourceComplete: detection?.complete } : candidate;
   });
+}
+
+export function prepareSeeYoursCandidate(memberId: string, card: CardSpec, units: ClientUnits): CachedHealthCandidate {
+  if (!card.measure) throw invalidGameRequest("Choose a card with a measure.");
+  const candidate = prepareMemberCandidate(memberId, card, specDigest);
+  const display = units === "metric" ? candidate : candidate.miles ?? candidate;
+  return { id: `mine:${card.measure}:${card.kind}`, variants: display.variants };
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
@@ -204,10 +220,14 @@ export function freezeHealthSelections(candidates: CachedHealthCandidate[], sele
   });
 }
 
-export function resolveRecordedSelection(candidates: readonly CachedHealthCandidate[], pick: HealthCardSelection): FrozenHealthCard | null {
+const activityCardChanged = () => hostedOnboardingError({
+  code: "HEALTH_ACTIVITY_CARD_CHANGED", httpStatus: 409, message: "Preview the activity again before posting.",
+});
+
+export function resolveRecordedSelection(
+  candidates: readonly CachedHealthCandidate[], pick: HealthCardSelection, onChanged: () => Error = activityCardChanged,
+): FrozenHealthCard | null {
   const variant = candidates.find(card => card.id === pick.candidateId)?.variants.find(item => item.option === pick.option);
-  if (!variant || pick.specRevision !== variant.specRevision) throw hostedOnboardingError({
-    code: "HEALTH_ACTIVITY_CARD_CHANGED", httpStatus: 409, message: "Preview the activity again before posting.",
-  });
-  return variant.spec === null ? null : { id: pick.candidateId, specRevision: variant.specRevision, spec: variant.spec };
+  if (!variant || pick.specRevision !== variant.specRevision) throw onChanged();
+  return variant.spec === null ? null : { id: variant.spec.id, specRevision: variant.specRevision, spec: variant.spec };
 }

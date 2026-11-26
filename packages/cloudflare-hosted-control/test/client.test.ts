@@ -1348,6 +1348,26 @@ describe("createCloudflareHostedControlClient", () => {
     });
   });
 
+  it("aborts a browser vault session fetch at the caller's deadline", async () => {
+    const controller = new AbortController();
+    const deadline = new Error("Read deadline elapsed");
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      getBearerToken: async () => "test-token",
+      timeoutMs: 4_000,
+      fetchImpl: async (_url, init) => {
+        controller.abort(deadline);
+        init?.signal?.throwIfAborted();
+        throw new Error("Fetch did not receive the outer signal");
+      },
+    });
+    await expect(client.createBrowserVaultSession({
+      browserPublicKeyJwk: { crv: "P-256", kty: "EC", x: "x-value", y: "y-value" },
+      replicaRef: createReplicaRef(), requestedShards: ["core", "labs"],
+      signal: controller.signal, userId: "lab-reader",
+    })).rejects.toBe(deadline);
+  });
+
   it("rejects empty, duplicate, and unsupported browser vault shard requests", async () => {
     const client = createCloudflareHostedControlClient({
       baseUrl: "https://runner.example.test/root/",

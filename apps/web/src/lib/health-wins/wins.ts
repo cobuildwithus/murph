@@ -38,7 +38,7 @@ async function assertAuthority(auth: HostedNativeMemberAuth, db: Prisma.Transact
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: db });
 }
 
-function localToday(profile: { timeZone: string } | null | undefined) {
+export function localToday(profile: { timeZone: string } | null | undefined) {
   if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
   return toLocalDayKey(new Date(), profile.timeZone);
 }

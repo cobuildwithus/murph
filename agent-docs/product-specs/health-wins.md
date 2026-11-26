@@ -54,7 +54,8 @@ against this year's completed months when at least three qualify, otherwise
 against the preceding 12 months when at least three qualify. A fiber streak
 requires five consecutive days at or above 30 g. The longest streak in the
 last 90 days qualifies when it ended within 60 days. A missing day or
-incomplete fiber reading breaks the streak.
+incomplete fiber reading breaks the streak. Diet cards omit the measure used
+by See yours.
 
 ## Posting a payoff
 
@@ -151,6 +152,38 @@ The poster can receive a push for a new comment or cheer. An hour of cheers
 on one post generates at most one push. A private comment can notify only
 the poster. Removing access before delivery suppresses the notification.
 
+## See yours
+
+A member can open a partner’s published card with a `measure` to see a private
+card for the same lab analyte or wearable metric. **Hide my numbers** keeps
+the generic milestone title and omits the measure. Cards frozen before
+measure tagging also omit it. The partner receives no signal that the member
+opened the card.
+
+The response identifies the measure by `key`, display `label` and `source`
+(`labs` or `wearable`). When a card qualifies, `card` holds the viewer’s
+preview and `reason` is null. The server tries the partner’s card kind first.
+Both cards must show percentiles in matching units for `friend` to carry the
+partner’s published `{value, unit}`. Resting heart rate also requires both
+charts to carry the same `referenceKey` (`oura_sleeping_hr` or
+`apple_resting_hr`). Otherwise `friend` is null.
+
+When a successful read finds no observation for the measure, `card` and
+`friend` are null and `reason` is `no_labs` or `no_wearable`. A reading that
+cannot support a card gives `not_enough_data`. This includes a flagged or
+out-of-range latest draw. An unavailable replica, a failed read or decode,
+or a read that exceeds four seconds returns retryable 503
+`HEALTH_SEE_YOURS_UNAVAILABLE`.
+
+To post the preview, send its private `mine:<measure>:<kind>` candidate ID,
+chosen option and that option’s SHA-256 `specRevision`. Each preview
+includes its available alternate specs and revisions. A post can include
+one such pick alongside suggested or recorded cards. The server rebuilds the chosen spec
+in the requested units. A mismatch returns 409 `HEALTH_SEE_YOURS_CHANGED`.
+Open See yours again and confirm the new preview before posting. The published
+card uses the same opaque ID as its matching suggestion, which leaves the
+picker once shared.
+
 ## Companion API
 
 All paths below are relative to `/api/game/v1/health` and require member
@@ -172,8 +205,9 @@ when recording is disabled.
 | `POST activities/kind` | Send `{name}` when the member chooses a custom name. Returns `{name, kind, timer, decided}` with the cleaned name. Send that name back unchanged on preview, save and post. |
 | `POST activities/cards` | Send `{activity}` to preview without saving. Returns `{suggestedTitle, cards}`. Each card includes the flat spec, `candidateId`, `specRevision` and `change_options`. Each option carries its own revision. Alternate options include the exact display spec, or `null` for map removal. |
 | `PUT activities/{id}` | Send `{activity}` with the matching UUID and summary fields only. Returns `{id}`. Repeating the same save returns the same receipt. Reusing the UUID for a different summary returns 409. |
-| `POST posts` | Send a client UUID in `id` and at least one of `caption`, `cards` or `attachmentId`. Send up to 12 distinct picks in display order. For suggested cards, include `setRevision` and send `{candidateId, option}`. For recorded cards, include the previewed `activity` and send `{candidateId, option, specRevision}` for the chosen option. The two kinds of pick can be interleaved. Send `original` for the unmodified card. Returns `{id, version}`. Retry with the same UUID. |
-| `GET / PATCH / DELETE posts/{id}` | GET returns `{post}`. PATCH takes `expectedVersion`. On an ordinary post send a caption or replacement selection. On a recording post, edit the caption, send `removeCardIds` to remove specific frozen cards, or send `cards: []` to clear the selection. Keep at least a caption, card or photo. It returns `{id, version}`. A revision conflict returns 409. DELETE returns 204. |
+| `POST posts` | Send a client UUID in `id` and at least one of `caption`, `cards` or `attachmentId`. Send up to 12 distinct picks in display order. Include `setRevision` for suggested cards and send `{candidateId, option}`. For recorded and See yours cards, send `{candidateId, option, specRevision}` for the chosen option. Recorded picks also require the previewed `activity`. Send `original` for the unmodified card. Returns `{id, version}`. Retry with the same UUID. |
+| `GET / PATCH / DELETE posts/{id}` | GET returns `{post}`. PATCH takes `expectedVersion`. Authors can edit the caption on any live post they own. Payoff posts accept only caption edits. On other posts, send `removeCardIds` to remove specific frozen cards or `cards: []` to clear the selection. Ordinary posts also accept a replacement selection from the current set. Both `mine:` and `game:` picks require a new post. Keep at least a caption, card or photo. PATCH returns `{id, version}`. A revision conflict returns 409. DELETE returns 204. |
+| `GET posts/{id}/see-yours?card={frozenCardId}` | Returns `{measure, card, reason, friend}` in the viewer’s client units. An inaccessible post or missing card returns 404. The viewer’s own post or a card without a measure returns 400. The limit is 10 reads per viewer per minute, then 429. |
 | `GET feed` | Returns `{posts, nextCursor}`. Pass `nextCursor` in `?cursor=` until it is null. An intervening removal can leave an empty page with a continuation. |
 | `PUT / DELETE posts/{id}/cheer` | Set or clear the viewer's cheer. Both return 204. |
 | `GET / POST posts/{id}/comments` | GET returns `{comments, nextCursor}`. POST takes a client UUID in `id`, `body` and optional `visibility` (`everyone` or `poster`). It returns `{id}`. |
@@ -186,8 +220,7 @@ To publish a payoff, send one `game:<gameId>` pick with `option: "original"`,
 its previewed `specRevision` and a ready `attachmentId`. A payoff needs no
 `setRevision`. A changed spec returns 409 `HEALTH_PAYOFF_CHANGED`. A different
 live post for the game returns 409 `HEALTH_PAYOFF_EXISTS`. An ineligible game
-returns 404. Retrying the original post ID returns its receipt. PATCH accepts
-only caption edits on a payoff and rejects game selections on all posts.
+returns 404. Retrying the original post ID returns its receipt.
 
 ### Recorded activity fields
 
@@ -341,6 +374,12 @@ for their own posts. A cumulative distance card’s map chart may contain
 `art: {url}`, a link to the painting selected when the card was prepared.
 
 ## Rollout
+
+Deploy See yours on the existing feed allowlist before releasing a client
+that requests it. The client offers See yours only on another member’s
+published card with a `measure`. Detector v6 adds that field to eligible
+cards when a daily set regenerates. Previously published cards keep their
+frozen specs.
 
 `MURPH_HEALTH_DIET_MEMBER_IDS` controls suggestion generation. Existing
 offers remain usable until their cached set is replaced. A client that lacks
