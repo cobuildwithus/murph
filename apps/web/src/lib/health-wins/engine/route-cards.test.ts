@@ -138,7 +138,7 @@ describe("recorded route cards", () => {
     expect(map?.chart).toEqual({ ...original, chips: [] });
     for (const spec of [map, splits, hr]) {
       expect(spec?.title.number).toBe("");
-      expect(spec?.subtitle).not.toMatch(/\d/u);
+      expect(spec?.subtitle).toBe("Shared without numbers.");
     }
     expect(splits?.chart).toEqual({ type: "hidden" });
     expect(hr?.chart).toEqual({ type: "hidden" });

@@ -1,6 +1,8 @@
 import { metricInfo, metricNames } from "./metrics";
-import { isDate, median } from "./shared";
+import { dayNumber, isDate, median } from "./shared";
 import type { DailySample, Metric } from "./types";
+
+const OUTLIER_WINDOW_RADIUS_DAYS = 45;
 
 export function canonicalProvider(provider: string): string {
   const key = provider.trim().toLowerCase().replace(/[-_ ]+/gu, " ");
@@ -49,11 +51,20 @@ function cleanMetric(rows: readonly DailySample[], today: string, metric: Metric
     }
   }
 
-  if (!rule.physiological || selected.length === 0) return selected;
+  if (!rule.physiological) return selected;
+  const dates = selected.map(point => dayNumber(point.date));
   const values = selected.map(point => point.value);
-  const center = median(values);
-  const cutoff = 6 * median(values.map(value => Math.abs(value - center)));
-  return selected.filter(point => Math.abs(point.value - center) <= cutoff);
+  let start = 0;
+  let end = 0;
+  return selected.filter((point, index) => {
+    const day = dates[index];
+    while (dates[start] < day - OUTLIER_WINDOW_RADIUS_DAYS) start++;
+    while (end < dates.length && dates[end] <= day + OUTLIER_WINDOW_RADIUS_DAYS) end++;
+    const nearby = values.slice(start, end);
+    const center = median(nearby);
+    const cutoff = 6 * median(nearby.map(value => Math.abs(value - center)));
+    return Math.abs(point.value - center) <= cutoff;
+  });
 }
 
 /** Pick one whole-day observation per metric before estimating its dispersion. */

@@ -38,14 +38,14 @@ function hr(date: string, sourceLabel: string, value: number, method = ""): Brow
     rowSchema: "murph.browser-vault.metric-row.v1", statistic: "value", valueLabel: null };
 }
 
-function outcome(id: string, modality: string): ExperimentOutcome {
+function outcome(id: string, modality: string | null): ExperimentOutcome {
   return {
     schemaVersion: "murph.experiment-outcome.v1", asOf: today,
     adherenceSummary: { completedSessions: 2, targetSessions: 8, minimumUsefulSessions: 4, status: "behind" },
     conclusion: { headline: "Private summary", plainLanguage: "Private summary", caveats: [] },
     confidence: { level: "low", reasons: [] }, confounders: [],
     experiment: { id, slug: "custom-slug", title: "Custom intervention", status: "completed" },
-    commonsProtocolRef: null, effectiveProtocolSnapshot: { modality, doseSignature: "", effectiveSpecHash: "" },
+    commonsProtocolRef: null, effectiveProtocolSnapshot: modality === null ? null : { modality, doseSignature: "", effectiveSpecHash: "" },
     windows: { baselineStart: "2026-07-01", baselineEnd: "2026-07-04",
       interventionStart: "2026-07-05", interventionEnd: "2026-07-12" },
     metricResults: [{ baselineMean: 62, interventionMean: 60, baselineDayCount: 4, interventionDayCount: 6,
@@ -95,6 +95,23 @@ it("adapts canonical means, overlap windows and adherence, withholding private c
   expect(JSON.stringify(result)).not.toContain("custom-slug");
   expect(readHealthWinExperiments([first, outcome("exp_unknown", "Unclassified")], [], today)).toEqual([]);
   expect(readHealthWinExperiments([{ ...first, metricResults: [{ ...first.metricResults[0]!, statistic: "sum" }] }], [], today)).toEqual([]);
+});
+
+it.each([
+  ["tabata_interval_training", ["Tabata intervals"]],
+  ["personal circuit notes", []],
+] as const)("uses only an allowed custom run plan modality for a win (%s)", async (modality, titles) => {
+  const trial = outcome("exp_circuit", null);
+  const { interventionStart, interventionEnd } = trial.windows;
+  mock.session.mockResolvedValue({ state: "ready", client: {
+    replica: { source: { dataVersion: "custom-plan" }, meals: { timeZone: "UTC" }, experimentOutcomes: [trial] },
+    entities: { list: () => [{ id: trial.experiment.id, status: "completed",
+      attributes: { runPlan: { modality, interventionStart, interventionEnd } } }] },
+    metrics: { series: () => [] }, labResults: { list: () => [] },
+  } });
+  const { input } = await readHealthWinInputs(auth, today, signal);
+  const cards = generateHealthWins(input).filter(card => card.kind === "experiment_result");
+  expect(cards.map(card => card.title.number)).toEqual(titles);
 });
 
 it("uses canonical experiment aliases and percentage units for sleep efficiency", () => {

@@ -107,11 +107,115 @@
       "measure": "steps"
     },
     "subtitle": "on Sep 23, most this year",
-    "source_note": "Recorded on Sep 23. Based on 2 tracked days.",
+    "source_note": "Recorded on Sep 23. Based on 28 tracked days.",
     "chart": {
       "type": "record",
       "unit": "steps",
       "series": [
+        {
+          "date": "2036-06-01",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-02",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-03",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-04",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-05",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-06",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-07",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-08",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-09",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-10",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-11",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-12",
+          "value": 6300
+        },
+        {
+          "date": "2036-06-13",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-01",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-02",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-03",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-04",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-05",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-06",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-07",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-08",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-09",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-10",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-11",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-12",
+          "value": 6300
+        },
+        {
+          "date": "2036-07-13",
+          "value": 6300
+        },
         {
           "date": "2036-09-23",
           "value": 11580

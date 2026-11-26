@@ -17,18 +17,19 @@ const PUBLIC_MODALITIES: ReadonlyMap<string, string> = new Map([
 ]);
 const metricByKey = new Map(Object.entries(WIN_METRIC_KEYS).map(([metric, key]) => [key, metric as Metric]));
 
-function publicTitle(outcome: ExperimentOutcome) {
+function publicTitle(outcome: ExperimentOutcome, runPlan: unknown) {
   const key = outcome.commonsProtocolRef?.key;
   if (key) {
     const protocol = /^(?:protocol|protocol_variant):([a-z0-9-]+)(?:\/[a-z0-9-]+)?$/u.exec(key)?.[1];
     return protocol ? PUBLIC_MODALITIES.get(protocol) : undefined;
   }
-  const modality = outcome.effectiveProtocolSnapshot?.modality?.trim().toLowerCase().replace(/[ _]+/gu, "-");
-  return modality ? PUBLIC_MODALITIES.get(modality) : undefined;
+  const modality = outcome.effectiveProtocolSnapshot?.modality ??
+    (runPlan && typeof runPlan === "object" && "modality" in runPlan ? runPlan.modality : null);
+  return typeof modality === "string" ? PUBLIC_MODALITIES.get(modality.trim().toLowerCase().replace(/[ _]+/gu, "-")) : undefined;
 }
 
-function cardsFromOutcome(outcome: ExperimentOutcome, today: string): Experiment[] {
-  const title = publicTitle(outcome);
+function cardsFromOutcome(outcome: ExperimentOutcome, today: string, runPlan: unknown): Experiment[] {
+  const title = publicTitle(outcome, runPlan);
   const { baselineStart, baselineEnd, interventionStart, interventionEnd } = outcome.windows;
   if (!title || outcome.experiment.status !== "completed" || !baselineStart || !baselineEnd || !interventionStart
     || !interventionEnd || interventionEnd > today || interventionEnd > outcome.asOf || baselineEnd >= interventionStart) return [];
@@ -89,7 +90,8 @@ function shareableGroups(periods: Iterable<Period>, byId: ReadonlyMap<string, Ex
 export function readHealthWinExperiments(
   outcomes: readonly ExperimentOutcome[], entities: readonly BrowserVaultEntity[], today: string,
 ): Experiment[] {
-  const byId = new Map(outcomes.map(o => [o.experiment.id, cardsFromOutcome(o, today)]));
+  const plans = new Map(entities.map(entity => [entity.id, entity.attributes.runPlan]));
+  const byId = new Map(outcomes.map(o => [o.experiment.id, cardsFromOutcome(o, today, plans.get(o.experiment.id))]));
   const periods = new Map<string, Period>();
   for (const { experiment, windows } of outcomes) {
     if (windows.interventionStart && experiment.status !== "planned") {

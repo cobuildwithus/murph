@@ -5,13 +5,14 @@ import { type HealthWinSet, Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { hostedAuthRateLimitStorage } from "../better-auth/rate-limit";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
+import type { ClientUnits } from "../companion/client-info";
 import { assertGameMemberAuthCurrentForRead, assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { gameHttpError } from "../game/http/errors";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import {
-  findCandidate, freezeHealthSelections, prepareHealthCandidates, previewHealthCandidate,
+  findCandidate, freezeHealthSelections, prepareHealthCandidates, previewHealthCandidate, withDistanceTrendUnits,
   type CachedHealthCandidate, type HealthCardSelection,
 } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
@@ -21,7 +22,7 @@ import { readHealthWinInputs } from "./inputs";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v4";
+const DETECTOR_VERSION = "v5";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 
@@ -60,12 +61,15 @@ function cipherTarget(memberId: string, revision: string) {
 async function openSet(row: HealthWinSet, signal?: AbortSignal) {
   const [opened] = await openHealthTexts([{ ...cipherTarget(row.memberId, row.revision), value: row.candidatesEncrypted }], signal);
   // The ciphertext is bound to the owner and the exact set revision.
-  return JSON.parse(opened) as CachedHealthCandidate[];
+  return (JSON.parse(opened) as CachedHealthCandidate[]).map(withDistanceTrendUnits);
 }
 
-async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, signal: AbortSignal) {
+interface WinReadOptions { signal: AbortSignal; refresh?: boolean; units?: ClientUnits }
+
+async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal, units }: WinReadOptions) {
   signal.throwIfAborted();
-  const candidates = (await openSet(row, signal)).map(candidate => previewHealthCandidate(candidate));
+  const candidates = (await openSet(row, signal)).map(candidate =>
+    previewHealthCandidate(units === "metric" ? candidate : candidate.miles ?? candidate));
   await getPrisma().$transaction(tx => readAuthority(auth, tx));
   return { day: row.day, setRevision: row.revision, candidates };
 }
@@ -103,12 +107,12 @@ export async function assertHealthSetCurrent(
   if (current?.day !== day || current.revision !== setRevision) throw staleSet();
 }
 
-export async function readHealthWins(auth: HostedNativeMemberAuth, options: { signal: AbortSignal; refresh?: boolean }) {
+export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinReadOptions) {
   const db = getPrisma(), memberId = auth.member.id;
   const { today, row: observed } = await readCurrent(auth);
   const now = new Date();
   if (!options.refresh && observed?.day === today && now.getTime() - observed.checkedAt.getTime() < CHECK_INTERVAL_MS) {
-    return present(auth, observed, options.signal);
+    return present(auth, observed, options);
   }
 
   const canRecompute = !options.refresh || (await hostedAuthRateLimitStorage(db).consume(
@@ -117,7 +121,7 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: { si
   const source = canRecompute ? await loadInputs(auth, today, options.signal) : null;
   if (!source) {
     const { row: lastGood } = await readCurrent(auth);
-    if (lastGood) return present(auth, lastGood, options.signal);
+    if (lastGood) return present(auth, lastGood, options);
     throw hostedOnboardingError({ code: "HEALTH_WINS_UNAVAILABLE", httpStatus: 503, retryable: true, message: "Your win cards are still loading." });
   }
   const sourceRevision = createHostedOpaqueIdentifier("health-win-source", JSON.stringify([memberId, DETECTOR_VERSION, source.sourceRevision]))!;
@@ -125,7 +129,7 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: { si
   let replacement: HealthWinSet | null = null;
   if (!keep) {
     const generated = generateHealthWins(source.input);
-    if (!generated.length && !source.complete && observed) return present(auth, observed, options.signal);
+    if (!generated.length && !source.complete && observed) return present(auth, observed, options);
     await db.$transaction(tx => readAuthority(auth, tx));
     const ranked = await rankHealthCards(generated, options.signal);
     const candidates = prepareHealthCandidates(memberId, ranked, source.distanceArtUrl);
@@ -163,7 +167,7 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: { si
     `;
     return stored;
   });
-  return present(auth, published, options.signal);
+  return present(auth, published, options);
 }
 
 async function openSelectedSet(auth: HostedNativeMemberAuth, expectedRevision: string) {
@@ -186,5 +190,5 @@ export async function resolveHealthCards(auth: HostedNativeMemberAuth, setRevisi
 
 export async function changeHealthWin(auth: HostedNativeMemberAuth, input: { candidateId: string; setRevision: string; option: string }) {
   const { candidates } = await openSelectedSet(auth, input.setRevision);
-  return { card: previewHealthCandidate(findCandidate(candidates, input.candidateId), input.option) };
+  return { card: previewHealthCandidate(findCandidate(candidates, input.candidateId).display, input.option) };
 }

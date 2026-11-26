@@ -3,7 +3,7 @@ import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-priva
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
 import type { CardSpec } from "./engine";
-import { formatWinMonth } from "./engine/shared";
+import { formatNumber, formatWinMonth, milesFromKm } from "./engine/shared";
 
 type Option = "original" | "hide_numbers" | "hide_map" | "hours";
 const labels: Record<Option, string> = {
@@ -28,31 +28,36 @@ function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
   };
 }
 
-const hundredthsOfHour = (minutes: number) => Math.round(minutes * 100 / 60);
-const hours = (minutes: number) => hundredthsOfHour(minutes) / 100;
+type TrendCard = Extract<CardSpec, { kind: "trend_change" }>;
+
+function convertTrend(card: TrendCard, unit: "hr" | "mi", convert: (value: number) => number): TrendCard | null {
+  const chart = card.chart;
+  const series = chart.series.map(point => ({ ...point, value: convert(point.value) }));
+  const latest = series.at(-1);
+  if (!latest) return null;
+  const baseline = convert(chart.baseline);
+  const usualTenths = Math.round(baseline * 10), currentTenths = Math.round(latest.value * 10);
+  const deltaTenths = currentTenths - usualTenths;
+  return {
+    ...card, title: { ...card.title, number: `${deltaTenths < 0 ? "−" : "+"}${formatNumber(Math.abs(deltaTenths) / 10)} ${unit}` },
+    chart: { ...chart, unit, baseline, delta: convert(chart.delta), series,
+      pills: [`Usual ${formatNumber(usualTenths / 10)} ${unit}`, `${formatWinMonth(latest.month, "short")} ${formatNumber(currentTenths / 10)} ${unit}`] },
+  };
+}
 
 function hoursCard(card: CardSpec): CardSpec | null {
   if (card.kind === "trend_change" && card.chart.unit === "min") {
-    const chart = card.chart;
-    const latest = chart.series.at(-1);
-    if (!latest) return null;
-    const displayedDelta = hundredthsOfHour(latest.value) - hundredthsOfHour(chart.baseline);
-    return {
-      ...card, title: { ...card.title, number: `${displayedDelta < 0 ? "−" : "+"}${Math.abs(displayedDelta) / 100} hr` },
-      chart: { ...chart, unit: "hr", baseline: chart.baseline / 60, delta: chart.delta / 60,
-        series: chart.series.map(point => ({ ...point, value: point.value / 60 })),
-        pills: [`Usual ${hours(chart.baseline)} hr`, `${formatWinMonth(latest.month, "short")} ${hours(latest.value)} hr`] },
-    };
+    return convertTrend(card, "hr", minutes => minutes / 60);
   }
   if (card.kind === "best_month" && card.chart.unit === "min") {
     const chart = card.chart, highlighted = chart.series.find(point => point.month === chart.highlight);
     if (!highlighted) return null;
-    return { ...card, title: { ...card.title, number: `${hours(highlighted.value)} hr` },
+    return { ...card, title: { ...card.title, number: `${formatNumber(highlighted.value / 60)} hr` },
       chart: { ...chart, unit: "hr", series: chart.series.map(point => ({ ...point, value: point.value / 60 })) } };
   }
   if (card.kind === "personal_record" && card.chart.unit === "min") {
     const chart = card.chart;
-    return { ...card, title: { ...card.title, number: `${hours(chart.highlight.value)} hr` },
+    return { ...card, title: { ...card.title, number: `${formatNumber(chart.highlight.value / 60)} hr` },
       chart: { ...chart, unit: "hr", highlight: { ...chart.highlight, value: chart.highlight.value / 60 },
         series: chart.series.map(point => ({ ...point, value: point.value / 60 })) } };
   }
@@ -80,9 +85,27 @@ interface MapRemoval {
   spec: null;
 }
 
-export interface CachedHealthCandidate {
+interface CandidateDisplay {
   id: string;
   variants: [Variant, ...(Variant | MapRemoval)[]];
+}
+
+export interface CachedHealthCandidate extends CandidateDisplay {
+  miles?: CandidateDisplay;
+}
+
+/** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
+export function withDistanceTrendUnits(candidate: CachedHealthCandidate): CachedHealthCandidate {
+  const original = candidate.variants[0].spec;
+  if (candidate.miles || original.kind !== "trend_change" || original.chart.type !== "trend" || original.chart.unit !== "km") return candidate;
+  const id = createHash("sha256").update(`miles:${candidate.id}`).digest("base64url");
+  const card = convertTrend({ ...original, id, kind: original.kind, chart: original.chart }, "mi", milesFromKm);
+  if (!card) return candidate;
+  const safe = hidden(card);
+  return { ...candidate, miles: { id, variants: [
+    { option: "original", spec: card, specRevision: specDigest(card) },
+    { option: "hide_numbers", spec: safe, specRevision: specDigest(safe) },
+  ] } };
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
@@ -96,12 +119,12 @@ export function prepareHealthCandidates(memberId: string, cards: readonly CardSp
     const converted = hoursCard(card);
     if (converted) variants.push({ option: "hours", specRevision: randomUUID(), spec: converted });
     variants.push({ option: "hide_numbers", specRevision: randomUUID(), spec: hidden(card) });
-    return { id, variants };
+    return withDistanceTrendUnits({ id, variants });
   });
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
-function recordedSpecRevision(spec: FrozenHealthCard["spec"] | null): string {
+function specDigest(spec: FrozenHealthCard["spec"] | null): string {
   const canonical = JSON.stringify(spec, (_key, value: unknown) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
     return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
@@ -112,15 +135,15 @@ function recordedSpecRevision(spec: FrozenHealthCard["spec"] | null): string {
 export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): CachedHealthCandidate {
   const safe = hidden(card, hiddenTitle);
   const withoutNumbers = card.kind === "activity_route"
-    ? { ...safe, kind: card.kind, subtitle: "shared without numbers", chart: {
+    ? { ...safe, kind: card.kind, chart: {
       type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art, chips: [],
     } }
-    : card.kind === "activity_splits" ? { ...safe, subtitle: "shared without numbers" } : safe;
+    : safe;
   const variants: CachedHealthCandidate["variants"] = [
-    { option: "original", spec: card, specRevision: recordedSpecRevision(card) },
-    { option: "hide_numbers", spec: withoutNumbers, specRevision: recordedSpecRevision(withoutNumbers) },
+    { option: "original", spec: card, specRevision: specDigest(card) },
+    { option: "hide_numbers", spec: withoutNumbers, specRevision: specDigest(withoutNumbers) },
   ];
-  if (card.kind === "activity_route") variants.push({ option: "hide_map", spec: null, specRevision: recordedSpecRevision(null) });
+  if (card.kind === "activity_route") variants.push({ option: "hide_map", spec: null, specRevision: specDigest(null) });
   return { id: card.id, variants };
 }
 
@@ -157,17 +180,19 @@ export function previewRecordedCandidate(candidate: CachedHealthCandidate) {
 }
 
 export function findCandidate(candidates: CachedHealthCandidate[], candidateId: string) {
-  const candidate = candidates.find(item => item.id === candidateId);
+  const candidate = candidates.find(item => item.id === candidateId || item.miles?.id === candidateId);
   if (!candidate) throw invalidGameRequest("Choose a card from this set.");
-  return candidate;
+  return { claimId: candidate.id, display: candidate.miles?.id === candidateId ? candidate.miles : candidate };
 }
 
 export function freezeHealthSelections(candidates: CachedHealthCandidate[], selections: readonly HealthCardSelection[]): FrozenHealthCard[] {
-  if (selections.length > 12 || new Set(selections.map(item => item.candidateId)).size !== selections.length) {
-    throw invalidGameRequest("Choose up to twelve different cards.");
-  }
+  if (selections.length > 12) throw invalidGameRequest("Choose up to twelve different cards.");
+  const seen = new Set<string>();
   return selections.flatMap(({ candidateId, option }) => {
-    const { spec, specRevision } = chooseVariant(findCandidate(candidates, candidateId), option);
+    const { claimId, display } = findCandidate(candidates, candidateId);
+    if (seen.has(claimId)) throw invalidGameRequest("Choose up to twelve different cards.");
+    seen.add(claimId);
+    const { spec, specRevision } = chooseVariant(display, option);
     return spec === null ? [] : [{ id: candidateId, specRevision, spec }];
   });
 }

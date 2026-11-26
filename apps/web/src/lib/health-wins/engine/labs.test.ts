@@ -97,6 +97,18 @@ describe("lab draws", () => {
       subtitle: "within the reference range", chart: { value: 0.026, range: { high: { value: 2.35 } } } }]);
   });
 
+  it("shows A1c readings to one decimal and reports changes in percentage points", () => {
+    const a1c = { analyte: "a1c", unit: "%", referenceRange: { low: 4, high: 6 } } as const;
+    for (const [value, label] of [[5, "5.0%"], [5.44, "5.4%"]] as const) {
+      expect(cards([draw(value, 7, a1c)])).toMatchObject([{ kind: "lab_range", title: { number: label },
+        subtitle: "within 4.0–6.0%", chart: { value } }]);
+    }
+    for (const [value, change] of [[5.4, "−0.4 points"], [4.8, "−1 point"]] as const) {
+      expect(cards([draw(5.7, 1, a1c), draw(5.9, 4, a1c), draw(value, 7, a1c)]))
+        .toMatchObject([{ kind: "lab_change", title: { number: change }, chart: { unit: "%", latest: { value } } }]);
+    }
+  });
+
   it("13. a reviewed serum comparator needs its exact unit, applicability and strict bound", () => {
     const only = draw(94, 9, { specimen: "serum" });
     expect(cards([only])).toMatchObject([{ kind: "lab_range", chart: { range: { high: { value: 100, inclusive: false } } } }]);
