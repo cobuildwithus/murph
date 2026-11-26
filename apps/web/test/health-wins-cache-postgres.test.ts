@@ -127,6 +127,28 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     });
   });
 
+  it("keeps an offered Diet card available to publish when Diet generation is turned off", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2035-06-08T12:00:00Z"));
+    const auth = await fixture();
+    vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", auth.member.id);
+    const meals = Array.from({ length: 26 }, (_, i) => ({
+      date: `2035-05-${String(i + 1).padStart(2, "0")}`, proteinG: 74, fiberG: null,
+    }));
+    source.mockImplementation((_memberId, _checkAuthority, today: string) => ({
+      ...data(today), input: { member: data(today).input.member, meals },
+    }));
+    const offered = await readHealthWins(auth, { signal });
+    const tally = offered.candidates.find(card => card.kind === "month_total");
+    expect(tally).toBeDefined();
+    vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", "");
+    expect(await readHealthWins(auth, { signal })).toEqual(offered);
+    const id = randomUUID();
+    expect(await createHealthPost(auth, { id, setRevision: offered.setRevision,
+      cards: [{ candidateId: tally!.id, option: "original" }] })).toEqual({ id, version: 1 });
+    expect(source).toHaveBeenCalledTimes(1);
+  });
+
   it("serves one stable set within the hour, freezes the selected option, and conflicts after replacement", async () => {
     const auth = await fixture(), memberId = auth.member.id;
     source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));

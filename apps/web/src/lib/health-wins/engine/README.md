@@ -1,6 +1,8 @@
 # Health wins engine
 
 `generateHealthWins(input)` returns up to 24 ranked `CardSpec` objects for one member.
+`detectHealthWins(input)` also returns a map of achievement descriptors keyed by card ID,
+which the win-text pilot uses to recognize previously seen achievements.
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
@@ -31,7 +33,7 @@ Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 
 Daily metric cards, lab change and range cards, and percentile cards carry a
 `measure` from the wearable metric or lab analyte catalog. Cumulative, session,
-activity, game and experiment cards omit it. The published hidden variant also
+activity, game, Diet and experiment cards omit it. The published hidden variant also
 omits the measure and the percentile reference method.
 
 `chooseSeeYours` tries the published card’s kind first. Labs then try a
@@ -70,13 +72,27 @@ See the [single-measure regression tests](see-yours.test.ts).
 | 15 | Name the highest passed skyline landmark from the Progress bank. Timed planks use the Progress plank ladder with passed rungs, the next rung and seconds to go. A best streak covers posting in every game and appears once. | [activities.test.ts](activities.test.ts) · game achievements |
 | 16 | Once three sessions of one type qualify in the current month, show their count, total time and longest session. | [activities.test.ts](activities.test.ts) · monthly sessions |
 | 17 | Exclude medications, genetics, conditions and weight, including private experiment overlaps. | [engine.test.ts](engine.test.ts) · admits only supported measures, [activities.test.ts](activities.test.ts) · withholds sensitive experiment topics |
-| 18 | Fill the first 12 places with up to three cards per filter, prioritizing daily trends, threshold counts, streaks, monthly bests and personal records in that order within a filter. A trend supersedes a best-month claim about the same monthly mean. Distance's best month uses the monthly total. Append the remaining distinct claims by score until the catalog reaches 24. Score uses effect divided by noise, plus recency decreasing from 1 to 0 over a year, plus 1 for a personal record. Card ID breaks ties. | [engine.test.ts](engine.test.ts) · prioritizes distinct daily claims, ranks by effect, balances twelve cards, caps a crowded filter, withholds conflicting snapshots |
+| 18 | Fill the first 12 places with up to three cards per filter, prioritizing daily trends, threshold counts, streaks, monthly bests and personal records in that order within a filter. A trend supersedes a best-month claim about the same monthly mean. Distance's best month uses the monthly total. Fill the remaining places by score, reserving one place in the 24 for the best card from each unrepresented filter. Score uses effect divided by noise, plus recency decreasing from 1 to 0 over a year, plus 1 for a personal record. Card ID breaks ties. | [engine.test.ts](engine.test.ts) · prioritizes distinct daily claims, ranks by effect, balances twelve cards, caps a crowded filter, keeps the best Challenges card, withholds conflicting snapshots |
+| 19 | Sum protein and fiber separately at full precision. A day counts for a nutrient when every logged meal supplies a finite value. A month needs 80% coverage. From day 14 onward, compare the current month's total so far with at least three qualifying completed months. Use this year's qualifying months when there are enough, otherwise look back 12 months. Label ties. | [health-wins-meal-inputs.test.ts](../../../../test/health-wins-meal-inputs.test.ts), [diet.test.ts](diet.test.ts) |
+| 20 | For the last completed month, show the first food in the nutrient's catalog order whose rounded equivalent count is 10–50. When the count rounds up, fill the last icon by the remaining fraction. When it rounds down, show full icons. Hiding numbers removes the tally and the gram total. | [diet.test.ts](diet.test.ts) |
+| 21 | Apply rule 8 to days with at least 30 g of fiber. A missing or incomplete day breaks the run. The chart shows known daily values from nine days before the run through nine days after it, up to today. | [diet.test.ts](diet.test.ts) |
 
 Audit findings 1–2 exercise rule 6, 3 exercises rules 1 and 10, 4 exercises rules 3 and 11, 5 exercises rule 10, and 6 exercises rules 4 and 8. Findings 7–9 exercise rule 12, 10 and 12 exercise rule 13, and 11 exercises rule 14.
 
 Run the focused suite with `pnpm --dir apps/web exec vitest run src/lib/health-wins`.
 
-[cards.golden.json](fixtures/cards.golden.json) contains one synthetic example of
-each engine card kind, including both the skyline and plank-ladder charts.
-The golden test reads this file during normal runs. To regenerate it, run
-`UPDATE_HEALTH_WINS_GOLDEN=1 pnpm --dir apps/web exec vitest run src/lib/health-wins/engine/cards.golden.test.ts`.
+[cards.golden.json](fixtures/cards.golden.json) contains 23 synthetic cards,
+including both nutrient tallies, a Diet best month, a fiber streak and a game
+payoff. The golden test reads this file during normal runs.
+
+To update the server and iOS fixtures together, run these commands from the
+server repository root with the iOS checkout at `../murph-ios`. The iOS tests
+use the same bytes as the server.
+
+```sh
+UPDATE_HEALTH_WINS_GOLDEN=1 pnpm --dir apps/web exec vitest run src/lib/health-wins/engine/cards.golden.test.ts
+fixture=apps/web/src/lib/health-wins/engine/fixtures/cards.golden.json
+ios_fixture=../murph-ios/MurphCompanionTests/Fixtures/HealthWins/cards.golden.json
+cp "$fixture" "$ios_fixture"
+cmp "$fixture" "$ios_fixture"
+```

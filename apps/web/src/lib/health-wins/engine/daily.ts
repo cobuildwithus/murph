@@ -1,6 +1,6 @@
 import { dailyAchievements, type DailyAchievementCharts } from "./daily-achievements";
 import { formatMetricValue, metricInfo, roundMetricValue } from "./metrics";
-import { formatNumber, formatWinMonth, mad, mean, median, milesFromKm } from "./shared";
+import { compareMonthlyValues, formatNumber, formatWinMonth, mad, mean, median, milesFromKm, monthIndex } from "./shared";
 import type { Candidate, DailySample, Metric } from "./types";
 
 interface MonthlyPoint {
@@ -31,16 +31,6 @@ export type DailyCharts = DailyAchievementCharts & {
     days: number;
   };
 };
-
-function monthIndex(date: string): number {
-  return Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1;
-}
-
-// Summing up to 31 observations can move an exact decimal tie by a few ULPs.
-function compareMonthlyValues(value: number, reference: number): number {
-  const tolerance = Number.EPSILON * 32 * Math.max(1, Math.abs(value), Math.abs(reference));
-  return Math.abs(value - reference) <= tolerance ? 0 : Math.sign(value - reference);
-}
 
 function requiredDays(month: string, currentMonth: string): number {
   return month === currentMonth ? 14 : 15;

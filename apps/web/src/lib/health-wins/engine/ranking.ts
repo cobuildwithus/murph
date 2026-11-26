@@ -3,7 +3,7 @@ import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthW
 
 const themes = {
   Sleep: "sleep", Fitness: "fitness", Heart: "heart",
-  Labs: "labs", Challenges: "challenges", Experiments: "experiments",
+  Labs: "labs", Diet: "diet", Challenges: "challenges", Experiments: "experiments",
 } as const satisfies Record<Filter, CardSpec["theme"]>;
 
 export function decorateCard(card: Candidate["card"]): CardSpec {
@@ -70,9 +70,16 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     const filter = candidate.card.filter;
     counts.set(filter, (counts.get(filter) ?? 0) + 1);
   }
-  const remaining = queues.flat().sort(byScore).slice(0, 24 - selected.length);
+  const remaining = queues.flat().sort(byScore);
+  const missingFilters = new Set(remaining.map(({ card }) => card.filter).filter(filter => !counts.has(filter)));
+  for (const candidate of remaining) {
+    if (selected.length === 24) break;
+    // Leave a slot for the best remaining card from each unrepresented filter.
+    const firstForFilter = missingFilters.delete(candidate.card.filter);
+    if (firstForFilter || selected.length < 24 - missingFilters.size) selected.push(candidate);
+  }
   const achievements = new Map<string, HealthWinAchievement>();
-  const cards = [...selected, ...remaining].map(({ card, achievement }) => {
+  const cards = selected.map(({ card, achievement }) => {
     if (achievement) achievements.set(card.id, achievement);
     return decorateCard(card);
   });

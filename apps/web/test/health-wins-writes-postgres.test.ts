@@ -3,14 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
 import { sealGameText } from "@/src/lib/game/crypto";
+import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import * as moderation from "@/src/lib/game/moderation";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
+import * as gameService from "@/src/lib/game/service";
 import { createHostedOpaqueDigest } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { getPrisma } from "@/src/lib/prisma";
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 import { prepareRecordedActivityExport } from "@/src/lib/health-wins/activity-export";
 import { prepareSeeYoursCandidate, previewRecordedCandidate } from "@/src/lib/health-wins/card-options";
-import { openHealthTexts } from "@/src/lib/health-wins/crypto";
+import * as healthCrypto from "@/src/lib/health-wins/crypto";
 import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
 import { seeYoursCard } from "@/src/lib/health-wins/engine/see-yours";
 import type { HealthWinsInput, LabDraw } from "@/src/lib/health-wins/engine/types";
@@ -18,7 +20,10 @@ import { readHealthPost } from "@/src/lib/health-wins/read";
 import { openRecordedActivitySummaries } from "@/src/lib/health-wins/recorded-summary";
 import { previewRecordedActivity, saveRecordedActivity } from "@/src/lib/health-wins/recorded-activities";
 import { uploadHealthPhoto } from "@/src/lib/health-wins/media";
+import { readHealthPayoffs } from "@/src/lib/health-wins/payoff";
 import { createHealthComment, createHealthPost, deleteHealthComment, deleteHealthPost, patchHealthPost, setHealthCheer } from "@/src/lib/health-wins/writes";
+import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
+import { seedHealthPayoff } from "./support/health-payoff-fixture";
 
 const state = vi.hoisted(() => ({
   consent: true, visible: true, currentSet: true, keysAvailable: true,
@@ -27,6 +32,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@/src/lib/game/progress/media-store", () => ({
   progressMediaStore: () => ({ putProgressPic: state.putPhoto }),
+  purgeProgressMedia: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("next/server", async original => ({ ...await original<object>(), after: (task: () => Promise<void>) => state.queued.push(task) }));
 vi.mock("@/src/lib/health-wins/flag", async original => ({ ...await original<object>(), isHealthFeedEnabled: () => true }));
@@ -88,8 +94,24 @@ function labRange(memberId: string, lab: LabDraw) {
   return { input, engineCard, candidate, preview: previewRecordedCandidate(candidate) };
 }
 
+async function payoffFixture() {
+  const owner = await member(), debtor = await member();
+  const memberId = owner.member.id, debtorId = debtor.member.id;
+  vi.stubEnv("MURPH_GAME_ENABLED", "true");
+  vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+  vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", memberId);
+  const { gameId, ticketId, result } = await seedHealthPayoff({ winnerId: memberId, debtorId });
+  const { cards } = await readHealthPayoffs(owner);
+  expect(cards).toHaveLength(1);
+  const pick = { candidateId: `game:${gameId}`, option: "original", specRevision: cards[0]!.specRevision };
+  const attachmentId = randomUUID();
+  await uploadHealthPhoto(owner, attachmentId, Uint8Array.of(3, 6, 9));
+  return { owner, debtorId, memberId, gameId, ticketId, result, input: { id: randomUUID(), attachmentId, cards: [pick] } };
+}
+
 describe.skipIf(!enabled)("health write transactions", () => {
   afterEach(async () => {
+    await cleanupGameFixtures(getPrisma(), memberIds);
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds.splice(0) } } });
     state.consent = state.visible = state.currentSet = state.keysAvailable = true;
     state.queued.length = 0;
@@ -165,7 +187,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
       const fields = row.cardsEncrypted.map((value, index) => ({
         table: "health_post" as const, memberId, rowId: postId, field: `card:${index}`, value,
       }));
-      return { cards: (await openHealthTexts(fields)).map(text => JSON.parse(text)), keys: row.postedCardKeys };
+      return { cards: (await healthCrypto.openHealthTexts(fields)).map(text => JSON.parse(text)), keys: row.postedCardKeys };
     }
     const key = (cardId: string) => createHostedOpaqueDigest("health-win-card", `${memberId}:${cardId}`);
     expect(await stored(id)).toEqual({ cards: [other, mine], keys: [key(other.id), key(preview.id)] });
@@ -178,6 +200,124 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(await stored(second.id)).toEqual({ cards: [other], keys: [key(other.id)] });
     expect(state.resolve).not.toHaveBeenCalled();
     expect(state.measure).not.toHaveBeenCalled();
+  });
+
+  it("commits the scoped payoff, photo and one redemption together across same-ID retries and a repost", async () => {
+    const { owner, memberId, gameId, ticketId, input } = await payoffFixture();
+    const db = getPrisma(), receipt = { id: input.id, version: 1 };
+    expect(await Promise.all([createHealthPost(owner, input), createHealthPost(owner, input)])).toEqual([receipt, receipt]);
+    const post = await db.healthPost.findUniqueOrThrow({ where: { id: input.id } });
+    expect(post).toMatchObject({ gameId, postedCardKeys: [], authorMemberId: memberId });
+    expect(post.cardsEncrypted).toHaveLength(1);
+    const [frozen] = await healthCrypto.openHealthTexts([{ memberId, rowId: post.id, field: "card:0", table: "health_post", value: post.cardsEncrypted[0]! }]);
+    expect(JSON.parse(frozen!)).toMatchObject({ id: `game:${gameId}`, specRevision: input.cards[0]!.specRevision,
+      spec: { kind: "game_result", chart: { type: "game_result", paid: true } } });
+    expect(await db.healthPostAttachment.findUniqueOrThrow({ where: { id: input.attachmentId } })).toMatchObject({ postId: post.id, status: "published" });
+    const events = () => db.gameEvent.findMany({ where: { gameId, type: "redeemed" }, select: { actor: true, payload: true } });
+    expect(await events()).toEqual([{ actor: memberId, payload: { v: 1, ticketId } }]);
+    const ticket = await db.gameTicket.findUniqueOrThrow({ where: { id: ticketId } });
+    expect(ticket).toMatchObject({ status: "redeemed", redeemedAt: expect.any(Date) });
+
+    for (const edit of [{ cards: [] }, { cards: [{ candidateId: "slot:willow", option: "original" }], setRevision: randomUUID() },
+      { removeCardIds: [input.cards[0]!.candidateId] }, { removeCardIds: ["fixture-frozen-card"] }, { caption: "Revised", setRevision: randomUUID() }]) {
+      await expect(patchHealthPost(owner, post.id, { ...edit, expectedVersion: 1 }))
+        .rejects.toMatchObject({ httpStatus: 400, message: "Only the caption can change on a payoff post." });
+    }
+    expect(await patchHealthPost(owner, post.id, { expectedVersion: 1, caption: "Course complete." })).toEqual({ id: post.id, version: 2 });
+    expect((await db.healthPost.findUniqueOrThrow({ where: { id: post.id } })).cardsEncrypted).toEqual(post.cardsEncrypted);
+    vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", "");
+    state.keysAvailable = false;
+    expect(await createHealthPost(owner, input)).toEqual({ id: post.id, version: 2 });
+    state.keysAvailable = true;
+    vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", memberId);
+    await deleteHealthPost(owner, post.id);
+    expect(await db.healthPost.findUniqueOrThrow({ where: { id: post.id } })).toMatchObject({ gameId, deletedAt: expect.any(Date) });
+    const next = { ...input, id: randomUUID(), attachmentId: randomUUID() };
+    await uploadHealthPhoto(owner, next.attachmentId, Uint8Array.of(4, 7));
+    await createHealthPost(owner, next);
+    expect(await events()).toHaveLength(1);
+    expect(await db.gameTicket.findUniqueOrThrow({ where: { id: ticketId } })).toEqual(ticket);
+  });
+
+  it("admits one of two distinct payoff posts for the same game and preserves the unused draft", async () => {
+    const { owner, input, gameId } = await payoffFixture(), db = getPrisma();
+    const other = { ...input, id: randomUUID(), attachmentId: randomUUID() };
+    await uploadHealthPhoto(owner, other.attachmentId, Uint8Array.of(11, 12));
+    const attempts = [input, other];
+    const results = await Promise.allSettled(attempts.map(attempt => createHealthPost(owner, attempt)));
+    expect(results.filter(r => r.status === "rejected")).toMatchObject([{ reason: { httpStatus: 409, code: "HEALTH_PAYOFF_EXISTS" } }]);
+    const winner = attempts[results.findIndex(r => r.status === "fulfilled")]!;
+    const unused = attempts.find(attempt => attempt !== winner)!;
+    expect(await db.healthPost.findMany({ where: { gameId }, select: { id: true } })).toEqual([{ id: winner.id }]);
+    expect(await db.gameEvent.count({ where: { gameId, type: "redeemed" } })).toBe(1);
+    expect(await db.healthPostAttachment.findUniqueOrThrow({ where: { id: unused.attachmentId } })).toMatchObject({ postId: null, status: "ready" });
+    await expect(createHealthPost(owner, unused)).rejects.toMatchObject({ httpStatus: 409, code: "HEALTH_PAYOFF_EXISTS" });
+  });
+
+  it("rolls back the post, photo, ticket and event when redemption fails before commit", async () => {
+    const { owner, gameId, ticketId, input } = await payoffFixture(), db = getPrisma();
+    const redeem = gameService.redeemGameTicketTx;
+    const failed = vi.spyOn(gameService, "redeemGameTicketTx").mockImplementationOnce(async (tx, ticket) => {
+      await redeem(tx, ticket);
+      throw new Error("Synthetic redemption failure");
+    });
+    try {
+      await expect(createHealthPost(owner, input)).rejects.toThrow("Synthetic redemption failure");
+    } finally {
+      failed.mockRestore();
+    }
+    expect(await db.healthPost.findUnique({ where: { id: input.id } })).toBeNull();
+    expect(await db.healthPostAttachment.findUniqueOrThrow({ where: { id: input.attachmentId } })).toMatchObject({ postId: null, status: "ready" });
+    expect(await db.gameTicket.findUniqueOrThrow({ where: { id: ticketId } })).toMatchObject({ status: "open", redeemedAt: null });
+    expect(await db.gameEvent.count({ where: { gameId, type: "redeemed" } })).toBe(0);
+    expect(await createHealthPost(owner, input)).toEqual({ id: input.id, version: 1 });
+    expect(await db.gameEvent.count({ where: { gameId, type: "redeemed" } })).toBe(1);
+  });
+
+  it("rejects a stale digest, disabled writer, invalid proof and payoff selection on an ordinary post", async () => {
+    const { owner, memberId, ticketId, gameId, input } = await payoffFixture(), db = getPrisma();
+    const pick = input.cards[0]!;
+    vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", "");
+    await expect(createHealthPost(owner, input)).rejects.toMatchObject({ httpStatus: 404 });
+    vi.stubEnv("MURPH_HEALTH_PAYOFF_MEMBER_IDS", memberId);
+    await expect(createHealthPost(owner, { ...input, cards: [{ ...pick, specRevision: "a".repeat(64) }] }))
+      .rejects.toMatchObject({ httpStatus: 409, code: "HEALTH_PAYOFF_CHANGED" });
+    await expect(createHealthPost(owner, { ...input, attachmentId: undefined })).rejects.toMatchObject({ httpStatus: 400 });
+    await expect(createHealthPost(owner, { ...input, setRevision: randomUUID(), cards: [pick, { candidateId: "slot:willow", option: "original" }] }))
+      .rejects.toMatchObject({ httpStatus: 400 });
+    await expect(createHealthPost(owner, { ...input, attachmentId: randomUUID() })).rejects.toMatchObject({ httpStatus: 409 });
+    const regular = await createHealthPost(owner, { id: randomUUID(), caption: "Finished the route." });
+    await expect(patchHealthPost(owner, regular.id, { expectedVersion: 1, setRevision: randomUUID(), cards: [pick] }))
+      .rejects.toMatchObject({ httpStatus: 400 });
+    expect(await db.healthPost.findUnique({ where: { id: input.id } })).toBeNull();
+    expect(await db.gameTicket.findUniqueOrThrow({ where: { id: ticketId } })).toMatchObject({ status: "open", redeemedAt: null });
+    expect(await db.gameEvent.count({ where: { gameId, type: "redeemed" } })).toBe(0);
+  });
+
+  it.each(["score correction", "debtor departure"] as const)("rechecks the prepared payoff after a %s", async change => {
+    const { owner, debtorId, gameId, ticketId, input, result } = await payoffFixture(), db = getPrisma();
+    const seal = healthCrypto.sealHealthTexts;
+    const sealing = vi.spyOn(healthCrypto, "sealHealthTexts").mockImplementationOnce(async fields => {
+      const encrypted = await seal(fields);
+      if (change === "debtor departure") {
+        await db.gamePlayer.update({ where: { gameId_memberId: { gameId, memberId: debtorId } }, data: { leftAt: new Date() } });
+      } else {
+        const corrected = { ...result, scores: result.scores.map(row => row.memberId === debtorId ? { ...row, score: 4, misses: 3 } : row) };
+        await db.game.update({ where: { id: gameId }, data: { result: toPrismaJsonObject(corrected) } });
+      }
+      return encrypted;
+    });
+    try {
+      const error = change === "debtor departure" ? { httpStatus: 404 } : { httpStatus: 409, code: "HEALTH_PAYOFF_CHANGED" };
+      await expect(createHealthPost(owner, input)).rejects.toMatchObject(error);
+      expect(sealing).toHaveBeenCalled();
+    } finally {
+      sealing.mockRestore();
+    }
+    expect(await db.healthPost.findUnique({ where: { id: input.id } })).toBeNull();
+    expect(await db.healthPostAttachment.findUniqueOrThrow({ where: { id: input.attachmentId } })).toMatchObject({ postId: null, status: "ready" });
+    expect(await db.gameTicket.findUniqueOrThrow({ where: { id: ticketId } })).toMatchObject({ status: "open", redeemedAt: null });
+    expect(await db.gameEvent.count({ where: { gameId, type: "redeemed" } })).toBe(0);
   });
 
   it("admits one concurrent creation, replays across a set replacement, and freezes one envelope per card", async () => {
@@ -246,7 +386,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
 
     async function storedCards() {
       const row = await db.healthPost.findUniqueOrThrow({ where: { id: input.id } });
-      const opened = await openHealthTexts(row.cardsEncrypted.map((value, index) => ({
+      const opened = await healthCrypto.openHealthTexts(row.cardsEncrypted.map((value, index) => ({
         memberId, rowId: input.id, table: "health_post", field: `card:${index}`, value,
       })));
       return opened.map(value => JSON.parse(value));
@@ -307,7 +447,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
 
     const post = await db.healthPost.findUniqueOrThrow({ where: { id } });
     expect(post.cardsEncrypted).toHaveLength(1);
-    const [card] = await openHealthTexts([{ memberId, table: "health_post", rowId: id, field: "card:0", value: post.cardsEncrypted[0]! }]);
+    const [card] = await healthCrypto.openHealthTexts([{ memberId, table: "health_post", rowId: id, field: "card:0", value: post.cardsEncrypted[0]! }]);
     expect(JSON.parse(card!)).toMatchObject({ id: splits.candidateId, spec: { kind: "activity_splits" } });
     expect(card).not.toContain("paths");
     expect(card).not.toContain("area:v2:");

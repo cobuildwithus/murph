@@ -1,33 +1,21 @@
 import { formatMetricValue, metricInfo } from "./metrics";
 import { cardDateKey, dayNumber, formatNumber, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
+import { longestStreak, streakDateRange, thresholdBars, type ThresholdBars } from "./streak";
 import type { Candidate, DailySample, Metric } from "./types";
 
 type Point = { date: string; value: number };
-type SleepBars = {
-  type: "bars";
-  unit: "min";
-  threshold: number;
-  series: (Point & { passing: boolean })[];
-  pills: string[];
-};
 
 export type DailyAchievementCharts = {
-  threshold_count: SleepBars;
-  streak: SleepBars & { highlight: { start: string; end: string } };
+  threshold_count: ThresholdBars;
+  streak: ThresholdBars & { highlight: { start: string; end: string } };
   personal_record: { type: "record"; unit: string; series: Point[]; highlight: Point & { label: string }; pills: string[] };
 };
 
 const SLEEP_TARGET_MINUTES = 8 * 60;
 const MIN_RECORD_DAYS = 28;
 
-function sleepBars(rows: readonly DailySample[]): SleepBars {
-  return {
-    type: "bars",
-    unit: "min",
-    threshold: SLEEP_TARGET_MINUTES,
-    series: rows.map(({ date, value }) => ({ date, value, passing: value >= SLEEP_TARGET_MINUTES })),
-    pills: ["8 hours"],
-  };
+function sleepBars(rows: readonly Point[]): ThresholdBars {
+  return thresholdBars(rows, SLEEP_TARGET_MINUTES, "min", "8 hours");
 }
 
 function sleepCount(rows: readonly DailySample[], today: string): Candidate | undefined {
@@ -52,49 +40,22 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
   };
 }
 
-function streakDateRange(start: string, end: string, today: string): string {
-  if (start.slice(0, 7) !== end.slice(0, 7)) {
-    return `${formatWinDate(start, today)} to ${formatWinDate(end, today)}`;
-  }
-  const year = end.slice(0, 4);
-  const range = `${formatWinMonth(start, "short")} ${Number(start.slice(8))} to ${Number(end.slice(8))}`;
-  return year === today.slice(0, 4) ? range : `${range}, ${year}`;
-}
-
 function sleepStreak(rows: readonly DailySample[], today: string): Candidate | undefined {
-  const todayNumber = dayNumber(today);
-  const nights = rows.filter(({ date }) => todayNumber - dayNumber(date) < 90);
-  let startIndex = 0;
-  let lastPassingDay = -Infinity;
-  let bestLength = 0;
-  let bestEnd = 0;
-  for (const [index, night] of nights.entries()) {
-    if (night.value < SLEEP_TARGET_MINUTES) continue;
-    const day = dayNumber(night.date);
-    if (day !== lastPassingDay + 1) startIndex = index;
-    lastPassingDay = day;
-    const length = index - startIndex + 1;
-    if (length >= bestLength) {
-      bestLength = length;
-      bestEnd = index;
-    }
-  }
-  if (bestLength < 5) return;
-  const end = nights[bestEnd].date;
-  if (todayNumber - dayNumber(end) > 60) return;
-  const start = nights[bestEnd - bestLength + 1].date;
+  const run = longestStreak(rows, today, SLEEP_TARGET_MINUTES);
+  if (!run) return;
+  const { start, end, length, window } = run;
   return {
     date: end,
-    effect: bestLength,
+    effect: length,
     noise: 5,
     card: {
       id: `streak:sleep_total_min:${cardDateKey(end)}`,
       kind: "streak",
       filter: "Sleep",
-      title: { number: `${bestLength} nights`, measure: "8+ hours" },
+      title: { number: `${length} nights`, measure: "8+ hours" },
       subtitle: `in a row, ${streakDateRange(start, end, today)}`,
       source_note: `Longest recorded run in the last 90 days, ending ${formatWinDate(end, today)}.`,
-      chart: { ...sleepBars(nights), highlight: { start, end } },
+      chart: { ...sleepBars(window), highlight: { start, end } },
     },
   };
 }

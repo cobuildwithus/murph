@@ -11,6 +11,7 @@ import { generateHealthWins, type HealthWinsInput } from "../src/lib/health-wins
 import * as inputs from "../src/lib/health-wins/inputs";
 import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/profile/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
+import { GET as photo } from "../app/api/game/v1/health/photos/[id]/route";
 import { POST as post } from "../app/api/game/v1/health/posts/route";
 import { DELETE as deletePost, GET as openPost, PATCH as editPost } from "../app/api/game/v1/health/posts/[id]/route";
 import { GET as seeYours } from "../app/api/game/v1/health/posts/[id]/see-yours/route";
@@ -33,7 +34,11 @@ import { getPrisma } from "../src/lib/prisma";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
 
 const deferred = vi.hoisted(() => [] as Array<() => Promise<void>>);
+const readPhotoObject = vi.hoisted(() => vi.fn());
 vi.mock("next/server", async original => ({ ...await original<object>(), after: (task: () => Promise<void>) => deferred.push(task) }));
+vi.mock("../src/lib/game/progress/media-store", async original => ({
+  ...await original<object>(), progressMediaStore: () => ({ readProgressPic: readPhotoObject }),
+}));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) {
@@ -227,6 +232,80 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(source).not.toHaveBeenCalled();
   });
 
+  it("limits a payoff and its interactions to the two players across feed, profile, detail and photo reads", async () => {
+    const poster = await person(), player = await person(), otherPartner = await person();
+    const gameId = await pair(poster, player);
+    await pair(poster, otherPartner);
+    const id = randomUUID(), photoId = randomUUID(), commentId = randomUUID();
+    const [storageKeyEncrypted] = await crypto.sealHealthTexts([{
+      table: "health_post_attachment", memberId: poster.id, rowId: photoId, field: "storage_key", value: "synthetic-photo",
+    }]);
+    await db.healthPost.create({ data: { id, gameId, authorMemberId: poster.id,
+      attachment: { create: { id: photoId, memberId: poster.id, storageKeyEncrypted, status: "published" } },
+    } });
+    const bytes = Uint8Array.of(20, 30, 40);
+    readPhotoObject.mockReset().mockResolvedValue({ envelope: "synthetic-photo-envelope" });
+    vi.spyOn(crypto, "openHealthPhoto").mockImplementation(async () => bytes.slice());
+    const readFeed = async (who: Person) => (await feed(who.request("feed"))).json();
+    const readProfile = async (who: Person) => (await profile(who.request(`people/${poster.id}/profile`), memberContext(poster.id))).json();
+    const readPhoto = (who: Person) => photo(who.request(`photos/${photoId}`), context(photoId));
+    const addCheer = (who: Person) => cheer(who.request(`posts/${id}/cheer`, "PUT"), context(id));
+    const addComment = (who: Person) => comment(who.request(`posts/${id}/comments`, "POST", {
+      id: commentId, body: "The blue ribbon arrived.",
+    }), context(id));
+
+    const openCards = vi.spyOn(crypto, "openHealthTexts");
+    expect((await seeYours(otherPartner.request(`posts/${id}/see-yours?card=game:${gameId}`), context(id))).status).toBe(404);
+    expect(openCards).not.toHaveBeenCalled();
+
+    expect((await readFeed(otherPartner)).posts).toEqual([]);
+    expect(await readProfile(otherPartner)).toMatchObject({ memberId: poster.id, posts: [] });
+    expect((await readPost(otherPartner, id)).status).toBe(404);
+    expect((await comments(otherPartner.request(`posts/${id}/comments`), context(id))).status).toBe(404);
+    expect((await readPhoto(otherPartner)).status).toBe(404);
+    expect(readPhotoObject).not.toHaveBeenCalled();
+    expect((await addCheer(otherPartner)).status).toBe(404);
+    expect((await addComment(otherPartner)).status).toBe(404);
+
+    expect((await readFeed(player)).posts).toMatchObject([{ id }]);
+    expect((await readProfile(player)).posts).toMatchObject([{ id }]);
+    expect((await readPost(player, id)).status).toBe(200);
+    const response = await readPhoto(player);
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect((await addCheer(player)).status).toBe(204);
+    expect((await addComment(player)).status).toBe(200);
+    expect(await commentIds(player, id)).toEqual([commentId]);
+    expect(await commentIds(poster, id)).toEqual([commentId]);
+  });
+
+  it("keeps the game audience on leave, block and game deletion, even with another shared game", async () => {
+    const poster = await person(), player = await person(), id = randomUUID();
+    const gameId = await pair(poster, player);
+    await pair(poster, player);
+    await db.healthPost.create({ data: { id, gameId, authorMemberId: poster.id } });
+    const block = { blockerMemberId: player.id, blockedMemberId: poster.id };
+    await db.gameBlock.create({ data: block });
+    expect((await readPost(player, id)).status).toBe(404);
+    await db.gameBlock.deleteMany({ where: block });
+    expect((await readPost(player, id)).status).toBe(200);
+
+    const seat = { gameId, memberId: player.id };
+    const open = crypto.openHealthTexts;
+    vi.spyOn(crypto, "openHealthTexts").mockImplementationOnce(async (...args) => {
+      const result = await open(...args);
+      await db.gamePlayer.updateMany({ where: seat, data: { leftAt: new Date() } });
+      return result;
+    });
+    expect((await readPost(player, id)).status).toBe(404);
+    expect((await (await feed(player.request("feed"))).json()).posts).toEqual([]);
+    await db.gamePlayer.updateMany({ where: seat, data: { leftAt: null } });
+    expect((await readPost(player, id)).status).toBe(200);
+    await db.game.delete({ where: { id: gameId } });
+    expect((await readPost(player, id)).status).toBe(404);
+    expect((await readPost(poster, id)).status).toBe(200);
+  });
+
   it("lists only the viewer's own hides newest first and removes an undone hide", async () => {
     const viewer = await person(), newest = await person(), oldest = await person(), other = await person();
     const stranger = await person();
@@ -338,12 +417,14 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     const paths = [encodePolyline([[-141.2, -32.4], [-141.199, -32.4]])];
     const activity = {
       id: randomUUID(), kind: "walk", startedAt: "2032-04-12T19:18:00Z", movingSec: 622, elapsedSec: 637,
+      heartRate: { lowBpm: 92, avgBpm: 104, peakBpm: 121, perMinute: Array(11).fill(null) },
       route: { distanceM: 1000, climbM: 6, splits: [{ distanceM: 1000, seconds: 622 }], paths },
     };
     const preview = await previewActivity(author.request("activities/cards", "POST", { activity }));
     expect(preview.status).toBe(200);
     const { cards } = await preview.json();
     const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
+    expect(map.chart.stats?.map((stat: { label: string }) => stat.label)).not.toContain("Heart rate");
     const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
     const id = randomUUID();
     const pick = { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision };
@@ -361,7 +442,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(shared.status).toBe(200);
     expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision,
       spec: { ...choice.spec, chart: { ...choice.spec.chart, art: { key: expect.stringMatching(/^area:v2:/u) } } } }]);
-    expect(choice.spec.chart).toEqual({ ...map.chart, paths, chips: [] });
+    expect(choice.spec.chart).toEqual({ type: "route_map", paths, frame: map.chart.frame });
     expect(map.chart).not.toHaveProperty("art");
     expect(deferred).toHaveLength(0);
   });

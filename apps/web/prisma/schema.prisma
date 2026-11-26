@@ -3312,6 +3312,7 @@ model GameProgressSharePhoto {
 model HealthPost {
   id                 String                @id @db.Uuid
   authorMemberId     String                @map("author_member_id")
+  gameId             String?               @map("game_id")
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   deletedAt          DateTime?             @map("deleted_at") @db.Timestamptz(3)
   version            Int                   @default(1)
@@ -3325,7 +3326,7 @@ model HealthPost {
   attachment         HealthPostAttachment?
   activity           HealthActivity?
 
-  @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc), gameId])
   @@map("health_post")
 }
 

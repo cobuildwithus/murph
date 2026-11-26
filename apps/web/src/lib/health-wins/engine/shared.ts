@@ -37,6 +37,16 @@ export function cardDateKey(date: string): string {
   return date.replaceAll("-", "");
 }
 
+export function monthIndex(date: string): number {
+  return Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1;
+}
+
+// Summing up to 31 observations can move an exact decimal tie by a few ULPs.
+export function compareMonthlyValues(value: number, reference: number): number {
+  const tolerance = Number.EPSILON * 32 * Math.max(1, Math.abs(value), Math.abs(reference));
+  return Math.abs(value - reference) <= tolerance ? 0 : Math.sign(value - reference);
+}
+
 export function mean(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }

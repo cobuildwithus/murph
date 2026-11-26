@@ -12,8 +12,10 @@ import { lastSettledStepDay } from "../settled-step-day";
 import { isMetric } from "./engine/metrics";
 import type { HealthWinsInput, Measure, Metric } from "./engine/types";
 import { readHealthWinExperiments } from "./experiment-inputs";
+import { isHealthDietEnabled } from "./flag";
 import { readHealthWinGameInputs } from "./game-inputs";
 import { readHealthWinAnalyte, readHealthWinLabs } from "./lab-inputs";
+import { readHealthWinMeals } from "./meal-inputs";
 import { readHealthWinWearables, WIN_METRIC_KEYS } from "./wearable-inputs";
 
 function sources(signal: AbortSignal) {
@@ -55,7 +57,7 @@ function labRows(client: BrowserVaultCoreCapableQueryClient, today: string) {
 }
 
 async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, today: string, clock: Date,
-  source: ReturnType<typeof sources>) {
+  source: ReturnType<typeof sources>, dietEnabled: boolean) {
   const member = memberInputs(today, client);
   const wearable = await source.read("wearables", () => wearableInputs(client, today, clock));
   if (wearable) {
@@ -67,9 +69,10 @@ async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, tod
     if (!("experimentOutcomes" in client.replica)) throw Error("Missing experiment outcomes");
     return readHealthWinExperiments(client.replica.experimentOutcomes, client.entities.list({ families: ["experiment"] }), today);
   });
+  const meals = dietEnabled ? await source.read("meals", () => readHealthWinMeals(client.replica.meals, today)) : null;
   return {
     inputs: { member, daily: wearable?.daily ?? [], sessions: client.replica.activitySessions ?? [],
-      labs: labs ?? [], experiments: experiments ?? [] },
+      labs: labs ?? [], experiments: experiments ?? [], meals: meals ?? undefined },
     stepsThrough: wearable?.stepsThrough ?? null,
   };
 }
@@ -94,7 +97,8 @@ export async function readHealthWinInputs(memberId: string, checkAuthority: () =
     if (saved?.state === "not_ready") source.missing.add("replica");
     const client = saved?.state === "ready" ? saved.client : null;
     const clock = new Date();
-    const vault = client ? await readReplicaInputs(client, today, clock, source)
+    const dietEnabled = isHealthDietEnabled(memberId);
+    const vault = client ? await readReplicaInputs(client, today, clock, source, dietEnabled)
       : { inputs: { member: memberInputs(today) }, stepsThrough: null };
     // Older readable replicas can reuse Progress's matching run cache. A failed or missing replica cannot.
     const runs = client ? client.replica.runs ?? null : { days: [] };
@@ -105,7 +109,7 @@ export async function readHealthWinInputs(memberId: string, checkAuthority: () =
       ? await source.read("distanceArt", () => readPaintedRouteArt(memberId, ["steps", "walk.meters", "run.meters", "walk.steps", "run.steps"], signal))
       : null;
     const sourceRevision = createHash("sha256").update(JSON.stringify([
-      client?.replica.source.dataVersion ?? null, today, vault.stepsThrough, game?.sourceRevision ?? null, distanceArtUrl, [...source.missing],
+      client?.replica.source.dataVersion ?? null, today, vault.stepsThrough, game?.sourceRevision ?? null, distanceArtUrl, dietEnabled, [...source.missing],
     ])).digest("hex");
     signal.throwIfAborted();
     return { input, distanceArtUrl, sourceRevision, complete: !source.missing.size };

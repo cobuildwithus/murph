@@ -58,21 +58,36 @@ export function isSeeYoursPick(pick: { candidateId: string }) {
   return pick.candidateId.startsWith("mine:");
 }
 
+export function isPayoffPick(pick: { candidateId: string }) {
+  return pick.candidateId.startsWith("game:");
+}
+
+export function validPayoffPost(input: { cards?: readonly { candidateId: string; specRevision?: string }[]; attachmentId?: string }) {
+  const payoff = input.cards?.find(isPayoffPick);
+  return !payoff || (input.cards?.length === 1 && Boolean(input.attachmentId) && digest.safeParse(payoff.specRevision).success);
+}
+
+export function hasExternalCardEdit(input: { cards?: readonly { candidateId: string }[]; removeCardIds?: readonly string[] }) {
+  const external = (pick: { candidateId: string }) => isPayoffPick(pick) || isSeeYoursPick(pick);
+  return input.cards?.some(external) || input.removeCardIds?.some(candidateId => external({ candidateId }));
+}
+
 export const createPostBody = z.strictObject({
   ...postFields, id: uuid, attachmentId: uuid.optional(), activity: activityWithDisplay.optional(),
 })
+  .refine(validPayoffPost)
   .refine(input => (input.cards?.filter(isSeeYoursPick).length ?? 0) <= 1)
   .refine(input => input.cards?.every(card => {
     if (isSeeYoursPick(card)) return digest.safeParse(card.specRevision).success;
     if (card.candidateId.startsWith("activity:")) return input.activity !== undefined && digest.safeParse(card.specRevision).success;
-    return input.setRevision !== undefined;
+    return isPayoffPick(card) || input.setRevision !== undefined;
   }) ?? true)
   .refine(input => Boolean(input.caption?.trim() || input.cards?.length || input.attachmentId));
 export const patchPostBody = z.strictObject({
   ...postFields, expectedVersion: z.number().int().positive().max(2147483647),
   removeCardIds: z.array(candidateId).min(1).max(12).refine(ids => new Set(ids).size === ids.length).optional(),
 })
-  .refine(input => !input.cards?.some(isSeeYoursPick))
+  .refine(input => !hasExternalCardEdit(input))
   .refine(input => !input.cards?.length || input.setRevision !== undefined)
   .refine(input => !input.removeCardIds || (input.cards === undefined && input.setRevision === undefined))
   .refine(input => input.caption !== undefined || input.cards !== undefined || input.removeCardIds !== undefined);
