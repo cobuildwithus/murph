@@ -6817,7 +6817,7 @@ One author-indexed query returns at most one matching digest per candidate (up t
 This filter leaves the stored set and its revision available to open composers.
 If the opaque-ID keyring is unavailable, Web skips the filter and logs the error class.
 
-To publish a card the client submits its candidate ID, option and opaque set
+To publish a suggestion the client submits its candidate ID, option and opaque set
 revision. A superseded set returns 409. The post freezes each selected spec
 and its revision in one envelope. Removing numbers removes the underlying
 measurements and tooltip values before publication. A recorded route map can
@@ -6826,6 +6826,26 @@ distance, Web includes a ready Progress painting's immutable URL inside the
 sealed chart. Looking up that painting only reads existing route state and art.
 Clients render unknown charts with the title, subtitle and an update note.
 The server stores no card images.
+
+### See yours
+
+Web opens the selected frozen card through the feed’s content visibility
+query. Its `measure` selects one wearable bucket or the labs shard of the
+viewer’s published Browser Vault replica. The reader checks the capability
+for that source and carries observed presence separately from eligible
+readings. Its four-second deadline covers the whole read. Before returning,
+Web rechecks viewer authority, post visibility and the frozen post version.
+The only write is a rate-limit counter keyed to the viewer. See yours bypasses
+daily sets and Decisions ranking.
+
+Preview and publication run the same detector for the viewer’s local day.
+The private `mine:<measure>:<kind>` pick selects a card during creation.
+Web derives the member’s opaque suggestion ID, applies client units and
+checks the chosen variant’s digest before sealing it. The frozen card and
+its spec share that opaque display ID, including the miles ID for distance
+trends. This lets the existing posted-card lookup suppress a matching
+suggestion and prevents publishing both through different selectors in one
+post. A committed retry reads its receipt before rebuilding any card.
 
 ### Recorded activities
 

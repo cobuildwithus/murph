@@ -23,7 +23,7 @@ import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v5";
+const DETECTOR_VERSION = "v6";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 
@@ -36,7 +36,7 @@ async function readAuthority(auth: HostedNativeMemberAuth, db: Prisma.Transactio
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: db });
 }
 
-function localToday(profile: { timeZone: string } | null | undefined) {
+export function localToday(profile: { timeZone: string } | null | undefined) {
   if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
   return toLocalDayKey(new Date(), profile.timeZone);
 }

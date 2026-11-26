@@ -6,6 +6,10 @@ const themes = {
   Labs: "labs", Challenges: "challenges", Experiments: "experiments",
 } as const satisfies Record<Filter, CardSpec["theme"]>;
 
+export function decorateCard(card: Candidate["card"]): CardSpec {
+  return { ...card, theme: themes[card.filter], share: { caption_tips: [] } };
+}
+
 const dailyKindOrder: Partial<Record<CardKind, number>> = {
   trend_change: 0, threshold_count: 1, streak: 2, best_month: 3, personal_record: 4,
 };
@@ -67,7 +71,5 @@ export function rankCandidates(candidates: readonly Candidate[], today: string):
     counts.set(filter, (counts.get(filter) ?? 0) + 1);
   }
   const remaining = queues.flat().sort(byScore).slice(0, 24 - selected.length);
-  return [...selected, ...remaining].map(({ card }) => ({
-    ...card, theme: themes[card.filter], share: { caption_tips: [] },
-  }));
+  return [...selected, ...remaining].map(({ card }) => decorateCard(card));
 }

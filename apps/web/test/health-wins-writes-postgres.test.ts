@@ -2,13 +2,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
+import { sealGameText } from "@/src/lib/game/crypto";
 import * as moderation from "@/src/lib/game/moderation";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import { createHostedOpaqueDigest } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { getPrisma } from "@/src/lib/prisma";
+import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 import { prepareRecordedActivityExport } from "@/src/lib/health-wins/activity-export";
+import { prepareSeeYoursCandidate, previewRecordedCandidate } from "@/src/lib/health-wins/card-options";
 import { openHealthTexts } from "@/src/lib/health-wins/crypto";
 import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
+import { seeYoursCard } from "@/src/lib/health-wins/engine/see-yours";
+import type { HealthWinsInput, LabDraw } from "@/src/lib/health-wins/engine/types";
+import { readHealthPost } from "@/src/lib/health-wins/read";
 import { openRecordedActivitySummaries } from "@/src/lib/health-wins/recorded-summary";
 import { previewRecordedActivity, saveRecordedActivity } from "@/src/lib/health-wins/recorded-activities";
 import { uploadHealthPhoto } from "@/src/lib/health-wins/media";
@@ -16,7 +22,7 @@ import { createHealthComment, createHealthPost, deleteHealthComment, deleteHealt
 
 const state = vi.hoisted(() => ({
   consent: true, visible: true, currentSet: true, keysAvailable: true,
-  resolve: vi.fn(), sent: vi.fn(), queued: [] as Array<() => Promise<void>>,
+  resolve: vi.fn(), measure: vi.fn(), sent: vi.fn(), queued: [] as Array<() => Promise<void>>,
   putPhoto: vi.fn(),
 }));
 vi.mock("@/src/lib/game/progress/media-store", () => ({
@@ -27,12 +33,15 @@ vi.mock("@/src/lib/health-wins/flag", async original => ({ ...await original<obj
 vi.mock("@/src/lib/browser-vault/authority", () => ({
   assertBrowserVaultMemberAuthority: async () => { if (!state.consent) throw new Error("Synthetic consent withdrawal"); },
 }));
-vi.mock("@/src/lib/health-wins/wins", () => ({
+vi.mock("@/src/lib/health-wins/inputs", () => ({ readMeasureInputs: state.measure }));
+vi.mock("@/src/lib/health-wins/wins", async original => ({
+  ...await original<object>(),
   resolveHealthCards: state.resolve,
   assertHealthSetCurrent: async () => { if (!state.currentSet) throw Object.assign(new Error("Set replaced"), { httpStatus: 409 }); },
 }));
 // Audience has its own relational route proof. Use the real parent/child liveness facts in these mutation races.
-vi.mock("@/src/lib/health-wins/audience", () => ({
+vi.mock("@/src/lib/health-wins/audience", async original => ({
+  ...await original<object>(),
   findVisibleHealthPost: (db: Prisma.TransactionClient, _viewer: string, id: string) => state.visible
     ? db.healthPost.findFirst({ where: { id, deletedAt: null }, select: { id: true, authorMemberId: true, version: true } }) : null,
   findVisibleHealthComment: (db: Prisma.TransactionClient, _viewer: string, id: string) => state.visible
@@ -69,6 +78,16 @@ async function member(): Promise<HostedNativeMemberAuth> {
   return { kind: "better-auth", credential, member, sessionId, proof: { row, expiresAt, credentialDigest: createHash("sha256").update(credential).digest() } };
 }
 
+function labRange(memberId: string, lab: LabDraw) {
+  const input: HealthWinsInput = {
+    member: { today: new Date().toISOString().slice(0, 10), age: null, sex: null, wearableProvider: null },
+    labs: [lab],
+  };
+  const engineCard = seeYoursCard(input, lab.analyte, "lab_range")!;
+  const candidate = prepareSeeYoursCandidate(memberId, engineCard, "metric");
+  return { input, engineCard, candidate, preview: previewRecordedCandidate(candidate) };
+}
+
 describe.skipIf(!enabled)("health write transactions", () => {
   afterEach(async () => {
     await getPrisma().hostedMember.deleteMany({ where: { id: { in: memberIds.splice(0) } } });
@@ -76,7 +95,89 @@ describe.skipIf(!enabled)("health write transactions", () => {
     state.queued.length = 0;
     state.sent.mockClear();
     state.resolve.mockReset();
+    state.measure.mockReset();
     vi.unstubAllEnvs();
+  });
+
+  it.each([
+    { analyte: "insulin", value: 7, unit: "µIU/mL" },
+    { analyte: "a1c", value: 5.3, unit: "%" },
+    { analyte: "glucose", value: 86, unit: "mg/dL" },
+  ] as const)("publishes the hidden $analyte preview with opaque IDs in the complete post response", async draw => {
+    const owner = await member(), memberId = owner.member.id, db = getPrisma();
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+    const firstNameEncrypted = await sealGameText({ memberId, table: "game_profile", rowId: memberId, field: "first_name" }, "Spruce");
+    await db.gameProfile.create({ data: { memberId, timeZone: "UTC", firstNameEncrypted: firstNameEncrypted! } });
+    for (const scope of ["launch.legal", "launch.health-data"] as const) {
+      await recordHostedLaunchRequiredConsent({ memberId, scope, prisma: db });
+    }
+    const date = "2021-10-18";
+    const { preview, input, engineCard } = labRange(memberId, {
+      ...draw, date, referenceRange: { low: draw.value - 1, high: draw.value + 1 },
+    });
+    state.measure.mockResolvedValue({ input, observed: true });
+    const hidden = preview.change_options.find(item => item.id === "hide_numbers")!;
+    const cards = [{ candidateId: preview.candidateId, option: hidden.id, specRevision: hidden.specRevision }];
+    const receipt = await createHealthPost(owner, { id: randomUUID(), cards }, "metric");
+    const response = await readHealthPost(owner, receipt.id);
+    expect(response.post).toMatchObject({ cards: [{ id: preview.id, specRevision: hidden.specRevision, spec: hidden.spec }] });
+    expect(hidden.spec).toMatchObject({ id: preview.id, title: { measure: "Lab milestone" }, chart: { type: "hidden" } });
+    expect(hidden.spec).not.toHaveProperty("measure");
+    const json = JSON.stringify(response);
+    for (const privateValue of [preview.candidateId, engineCard.id, date]) {
+      expect(json).not.toContain(privateValue);
+    }
+    expect(json).not.toMatch(new RegExp(`\\b${draw.analyte}\\b`, "i"));
+  });
+
+  it("checks a See yours digest before publishing, deduplicates aliases, and removes either kind from a mixed post", async () => {
+    const owner = await member(), memberId = owner.member.id, db = getPrisma();
+    await db.gameProfile.create({ data: { memberId, timeZone: "UTC", firstNameEncrypted: "fixture-label" } });
+    const draw = { analyte: "glucose", value: 91, unit: "mg/dL", date: "2022-09-14", referenceRange: { low: 68, high: 112 } } as const;
+    const { input, candidate, preview } = labRange(memberId, draw);
+    const pick = { candidateId: preview.candidateId, option: "original", specRevision: preview.specRevision };
+    const mine = { id: preview.id, specRevision: preview.specRevision, spec: candidate.variants[0].spec };
+    const other = { id: "fixture-steps", specRevision: randomUUID(), spec: { title: "Fixture steps" } };
+    const otherPick = { candidateId: other.id, option: "original" };
+    const setRevision = randomUUID(), id = randomUUID();
+    const body = { id, setRevision, cards: [otherPick, pick] };
+    state.resolve.mockResolvedValue({ day: input.member.today, cards: [other] });
+    state.measure.mockResolvedValueOnce({ input: { ...input, labs: [{ ...draw, value: 93 }] }, observed: true });
+    await expect(createHealthPost(owner, body, "metric")).rejects.toMatchObject({ httpStatus: 409, code: "HEALTH_SEE_YOURS_CHANGED" });
+    expect(await db.healthPost.count({ where: { id } })).toBe(0);
+
+    state.measure.mockResolvedValue({ input, observed: true });
+    const alias = { candidateId: preview.id, option: "hide_numbers" };
+    const hidden = preview.change_options.find(option => option.id === "hide_numbers")!;
+    state.resolve.mockResolvedValueOnce({ day: input.member.today, cards: [{ id: preview.id, specRevision: randomUUID(), spec: hidden.spec }] });
+    await expect(createHealthPost(owner, { ...body, cards: [alias, pick] }, "metric")).rejects.toMatchObject({ httpStatus: 400 });
+    expect(await db.healthPost.count({ where: { id } })).toBe(0);
+    const receipt = await createHealthPost(owner, body, "metric");
+    const second = await createHealthPost(owner, { ...body, id: randomUUID() }, "metric");
+    state.currentSet = false;
+    state.resolve.mockClear();
+    state.measure.mockReset().mockRejectedValue(new Error("Replica unavailable"));
+    expect(await createHealthPost(owner, body, "metric")).toEqual(receipt);
+
+    async function stored(postId: string) {
+      const row = await db.healthPost.findUniqueOrThrow({ where: { id: postId } });
+      const fields = row.cardsEncrypted.map((value, index) => ({
+        table: "health_post" as const, memberId, rowId: postId, field: `card:${index}`, value,
+      }));
+      return { cards: (await openHealthTexts(fields)).map(text => JSON.parse(text)), keys: row.postedCardKeys };
+    }
+    const key = (cardId: string) => createHostedOpaqueDigest("health-win-card", `${memberId}:${cardId}`);
+    expect(await stored(id)).toEqual({ cards: [other, mine], keys: [key(other.id), key(preview.id)] });
+    await expect(patchHealthPost(owner, id, { expectedVersion: 2, removeCardIds: [other.id] })).rejects.toMatchObject({ httpStatus: 409 });
+    await expect(patchHealthPost(owner, id, { expectedVersion: 1, removeCardIds: [preview.candidateId] })).rejects.toMatchObject({ httpStatus: 400 });
+    await patchHealthPost(owner, id, { expectedVersion: 1, removeCardIds: [other.id] });
+    await patchHealthPost(owner, second.id, { expectedVersion: 1, removeCardIds: [preview.id] });
+    await expect(patchHealthPost(owner, id, { expectedVersion: 2, removeCardIds: [preview.id] })).rejects.toMatchObject({ httpStatus: 400 });
+    expect(await stored(id)).toEqual({ cards: [mine], keys: [key(preview.id)] });
+    expect(await stored(second.id)).toEqual({ cards: [other], keys: [key(other.id)] });
+    expect(state.resolve).not.toHaveBeenCalled();
+    expect(state.measure).not.toHaveBeenCalled();
   });
 
   it("admits one concurrent creation, replays across a set replacement, and freezes one envelope per card", async () => {

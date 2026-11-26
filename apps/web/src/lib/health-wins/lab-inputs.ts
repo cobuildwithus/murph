@@ -121,13 +121,22 @@ function comparableHistory(rows: BrowserVaultLabResultRow[], analyte: Analyte): 
   });
 }
 
+function observedAnalyte(row: BrowserVaultLabResultRow, today: string) {
+  if (!isStrictIsoDate(row.date) || row.date > today) return;
+  const definition = resolveLabResultMetricDefinition(row.metricKey);
+  return definition && analytes.get(definition.key);
+}
+
+export function readHealthWinAnalyte(rows: readonly BrowserVaultLabResultRow[], today: string, analyte: Analyte) {
+  const matches = rows.filter(row => observedAnalyte(row, today) === analyte);
+  return { labs: comparableHistory(matches, analyte), observed: matches.length > 0 };
+}
+
 /** Only the latest observed date can represent an analyte, including when that date is ineligible. */
 export function readHealthWinLabs(rows: readonly BrowserVaultLabResultRow[], today: string): LabDraw[] {
   const groups = new Map<Analyte, BrowserVaultLabResultRow[]>();
   for (const row of rows) {
-    if (!isStrictIsoDate(row.date) || row.date > today) continue;
-    const definition = resolveLabResultMetricDefinition(row.metricKey);
-    const analyte = definition && analytes.get(definition.key);
+    const analyte = observedAnalyte(row, today);
     if (!analyte) continue;
     const group = groups.get(analyte);
     if (group) group.push(row);

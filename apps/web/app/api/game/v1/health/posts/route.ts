@@ -8,5 +8,5 @@ import { jsonOk } from "@/src/lib/hosted-onboarding/http";
 export const maxDuration = 300;
 
 export const POST = withHealthRoute(async (request, auth) => {
-  return jsonOk(await createHealthPost(auth, await readHealthBody(request, createPostBody), clientUnits(request)));
+  return jsonOk(await createHealthPost(auth, await readHealthBody(request, createPostBody), clientUnits(request), request.signal));
 });

@@ -13,7 +13,7 @@ export { metricInfo } from "./metrics";
 
 export type {
   Analyte, CardKind, CardSpec, DailySample, Experiment, Filter, Game, GameStreakDay, HealthWinRank,
-  HealthWinRankResult, HealthWinsInput, LabDraw, Metric, RankMetric, Session, SessionType,
+  HealthWinRankResult, HealthWinsInput, LabDraw, Measure, Metric, RankMetric, Session, SessionType,
 } from "./types";
 
 /** Generate one member's ranked cards as of the supplied local calendar day. */

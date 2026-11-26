@@ -6,12 +6,14 @@ import { PUT as saveActivity } from "../app/api/game/v1/health/activities/[id]/r
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
 import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
-import { prepareHealthCandidates } from "../src/lib/health-wins/card-options";
-import { generateHealthWins } from "../src/lib/health-wins/engine";
+import { freezeHealthSelections, prepareHealthCandidates } from "../src/lib/health-wins/card-options";
+import { generateHealthWins, type HealthWinsInput } from "../src/lib/health-wins/engine";
+import * as inputs from "../src/lib/health-wins/inputs";
 import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/profile/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { POST as post } from "../app/api/game/v1/health/posts/route";
 import { DELETE as deletePost, GET as openPost, PATCH as editPost } from "../app/api/game/v1/health/posts/[id]/route";
+import { GET as seeYours } from "../app/api/game/v1/health/posts/[id]/see-yours/route";
 import { DELETE as uncheer, PUT as cheer } from "../app/api/game/v1/health/posts/[id]/cheer/route";
 import { GET as comments, POST as comment } from "../app/api/game/v1/health/posts/[id]/comments/route";
 import { DELETE as deleteComment } from "../app/api/game/v1/health/comments/[id]/route";
@@ -86,6 +88,28 @@ async function share(author: Person) {
 
 const readPost = (who: Person, id: string) => openPost(who.request(`posts/${id}`), context(id));
 
+function insulinReading(value: number, today: string): HealthWinsInput {
+  return {
+    member: { today, age: 42, sex: "female", wearableProvider: null },
+    labs: [{ analyte: "insulin", value, unit: "µIU/mL", date: today, fasting: true }],
+  };
+}
+
+async function frozenLabPost(author: Person, option = "original") {
+  const today = new Date().toISOString().slice(0, 10);
+  const input = insulinReading(3.4, today);
+  const candidates = prepareHealthCandidates(author.id, generateHealthWins(input));
+  const cardId = candidates[0].id, postId = randomUUID();
+  const [card] = freezeHealthSelections(candidates, [{ candidateId: cardId, option }]);
+  const cardsEncrypted = await crypto.sealHealthTexts([{
+    memberId: author.id, table: "health_post", rowId: postId, field: "card:0", value: JSON.stringify(card),
+  }]);
+  await db.healthPost.create({ data: { id: postId, authorMemberId: author.id, cardsEncrypted } });
+  return { postId, read(who: Person, selector = cardId) {
+    return seeYours(who.request(`posts/${postId}/see-yours?card=${selector}`), context(postId));
+  } };
+}
+
 async function commentIds(who: Person, postId: string) {
   const response = await comments(who.request(`posts/${postId}/comments`), context(postId));
   expect(response.status).toBe(200);
@@ -106,6 +130,97 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     deferred.length = 0;
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("reads one viewer measure privately, leaving the viewer's suggestions and the post's interactions intact", async () => {
+    const author = await person(), viewer = await person();
+    await pair(author, viewer);
+    const shared = await frozenLabPost(author);
+    const input = insulinReading(8.1, new Date().toISOString().slice(0, 10));
+    vi.spyOn(inputs, "readHealthWinInputs").mockResolvedValue({
+      input: { ...input, sessions: Array.from({ length: 3 }, () => ({ date: input.member.today, type: "walk", minutes: 23 })) },
+      sourceRevision: "fixture", complete: true, distanceArtUrl: null,
+    });
+    const suggestions = await wins(viewer.request("wins"));
+    expect(suggestions.status).toBe(200);
+    const before = await suggestions.json();
+    expect(before.candidates).toHaveLength(1);
+    const stored = () => db.healthWinSet.findMany({ where: { memberId: viewer.id } });
+    const sealed = await stored();
+    const source = vi.spyOn(inputs, "readMeasureInputs").mockResolvedValue({ input, observed: true });
+    const response = await shared.read(viewer);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    const result = await response.json();
+    const measure = { key: "insulin", source: "labs", label: "insulin" };
+    expect(result).toMatchObject({
+      measure, reason: null, friend: { value: 3.4, unit: "µIU/mL" },
+      card: { candidateId: "mine:insulin:percentile", measure: "insulin", specRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        chart: { type: "percentile", value: 8.1 }, change_options: [{ id: "original" }, { id: "hide_numbers" }] },
+    });
+    expect(Object.keys(result.friend).sort()).toEqual(["unit", "value"]);
+    source.mockResolvedValue({ input: { member: input.member }, observed: false });
+    expect(await (await shared.read(viewer)).json()).toEqual({ measure, card: null, reason: "no_labs", friend: null });
+    expect(await (await wins(viewer.request("wins"))).json()).toEqual(before);
+    expect(await stored()).toEqual(sealed);
+    const post = await db.healthPost.findUniqueOrThrow({ where: { id: shared.postId },
+      select: { cheerPushClaimedAt: true, _count: { select: { cheers: true, comments: true } } } });
+    expect(post).toEqual({ cheerPushClaimedAt: null, _count: { cheers: 0, comments: 0 } });
+    expect(deferred).toHaveLength(0);
+  });
+
+  it("opens only a visible partner's selected measure and rejects stale post versions after the replica read", async () => {
+    const author = await person(), viewer = await person();
+    await pair(author, viewer);
+    const shared = await frozenLabPost(author);
+    const hidden = await frozenLabPost(author, "hide_numbers");
+    const source = vi.spyOn(inputs, "readMeasureInputs");
+    expect((await shared.read(author)).status).toBe(400);
+    expect((await hidden.read(viewer)).status).toBe(400);
+    expect((await shared.read(viewer, "another-card")).status).toBe(404);
+    await db.gameBlock.create({ data: { blockerMemberId: author.id, blockedMemberId: viewer.id } });
+    expect((await shared.read(viewer)).status).toBe(404);
+    await db.gameBlock.deleteMany({ where: { blockerMemberId: author.id } });
+    await db.healthFeedHide.create({ data: { memberId: viewer.id, hiddenMemberId: author.id } });
+    expect((await shared.read(viewer)).status).toBe(404);
+    await db.healthFeedHide.deleteMany({ where: { memberId: viewer.id } });
+    expect(source).not.toHaveBeenCalled();
+    source.mockImplementationOnce(async (_auth, today) => {
+      await db.healthPost.update({ where: { id: shared.postId }, data: { version: { increment: 1 } } });
+      return { input: insulinReading(7.2, today), observed: true };
+    });
+    expect((await shared.read(viewer)).status).toBe(404);
+    source.mockImplementationOnce(async (_auth, today) => {
+      await revokeHostedConsentScope({ memberId: author.id, scope: "launch.health-data", prisma: db });
+      return { input: insulinReading(7.2, today), observed: true };
+    });
+    expect((await shared.read(viewer)).status).toBe(404);
+    expect((await shared.read(viewer)).status).toBe(404);
+    await recordHostedLaunchRequiredConsent({ memberId: author.id, scope: "launch.health-data", prisma: db });
+    source.mockImplementationOnce(async (_auth, today) => {
+      await revokeHostedConsentScope({ memberId: viewer.id, scope: "launch.health-data", prisma: db });
+      return { input: insulinReading(7.2, today), observed: true };
+    });
+    expect((await shared.read(viewer)).status).toBe(403);
+    await recordHostedLaunchRequiredConsent({ memberId: viewer.id, scope: "launch.health-data", prisma: db });
+    await db.healthPost.update({ where: { id: shared.postId }, data: { deletedAt: new Date() } });
+    expect((await shared.read(viewer)).status).toBe(404);
+    expect(source).toHaveBeenCalledTimes(3);
+  });
+
+  it("limits See yours across posts per viewer before opening content", async () => {
+    const viewer = await person(), other = await person();
+    const source = vi.spyOn(inputs, "readMeasureInputs");
+    const missingPost = (who: Person) => {
+      const id = randomUUID();
+      return seeYours(who.request(`posts/${id}/see-yours?card=some-card`), context(id));
+    };
+    for (let n = 0; n < 10; n++) expect((await missingPost(viewer)).status).toBe(404);
+    const limited = await missingPost(viewer);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("cache-control")).toBe("private, no-store");
+    expect((await missingPost(other)).status).toBe(404);
+    expect(source).not.toHaveBeenCalled();
   });
 
   it("lists only the viewer's own hides newest first and removes an undone hide", async () => {

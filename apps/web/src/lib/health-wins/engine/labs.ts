@@ -1,5 +1,6 @@
 import { REVIEWED_BIOMARKER_FALLBACK_RANGES } from "@murphai/health-metrics";
 import type { LabNormMetric } from "../../game/progress/norms";
+import { measures } from "./measures";
 import { percentileCandidate } from "./percentiles";
 import { cardDateKey, cardText, formatNumber, formatWinDate, isDate, labUnitKey, mad, median } from "./shared";
 import type { Analyte, Candidate, HealthWinRank, HealthWinsInput, LabDraw } from "./types";
@@ -15,16 +16,16 @@ export interface LabCharts {
   lab_range: { type: "gauge"; value: number; unit: string; range: Interval; date: string };
 }
 
-interface LabRule { label: string; unit: string; rankMetric?: LabNormMetric; step?: number; fallbackKey?: string }
+interface LabRule { unit: string; rankMetric?: LabNormMetric; step?: number; fallbackKey?: string }
 const analytes: Record<Analyte, LabRule> = {
-  hdl: { label: "HDL", unit: "mg/dL", rankMetric: "hdlCholesterol", step: 5 },
-  ldl: { label: "LDL", unit: "mg/dL", rankMetric: "ldlCholesterol", step: 10, fallbackKey: "biomarker:ldl-c" },
-  triglycerides: { label: "triglycerides", unit: "mg/dL", rankMetric: "triglycerides", step: 15, fallbackKey: "biomarker:triglycerides" },
-  total_chol: { label: "total cholesterol", unit: "mg/dL", rankMetric: "totalCholesterol", fallbackKey: "biomarker:total-cholesterol" },
-  hs_crp: { label: "hs-CRP", unit: "mg/L", rankMetric: "hsCrp", step: 0.3, fallbackKey: "biomarker:hs-crp" },
-  insulin: { label: "insulin", unit: "µIU/mL", rankMetric: "fastingInsulin", step: 2 },
-  a1c: { label: "A1c", unit: "%", rankMetric: "hba1c", step: 0.2 },
-  glucose: { label: "glucose", unit: "mg/dL", step: 5 },
+  hdl: { unit: "mg/dL", rankMetric: "hdlCholesterol", step: 5 },
+  ldl: { unit: "mg/dL", rankMetric: "ldlCholesterol", step: 10, fallbackKey: "biomarker:ldl-c" },
+  triglycerides: { unit: "mg/dL", rankMetric: "triglycerides", step: 15, fallbackKey: "biomarker:triglycerides" },
+  total_chol: { unit: "mg/dL", rankMetric: "totalCholesterol", fallbackKey: "biomarker:total-cholesterol" },
+  hs_crp: { unit: "mg/L", rankMetric: "hsCrp", step: 0.3, fallbackKey: "biomarker:hs-crp" },
+  insulin: { unit: "µIU/mL", rankMetric: "fastingInsulin", step: 2 },
+  a1c: { unit: "%", rankMetric: "hba1c", step: 0.2 },
+  glucose: { unit: "mg/dL", step: 5 },
 };
 
 function sameDraw(a: LabDraw, b: LabDraw): boolean {
@@ -119,8 +120,8 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   return {
     date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
     card: {
-      id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs",
-      title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, rule.unit === "%" ? "points" : latest.unit)}`, measure: rule.label },
+      id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs", measure: latest.analyte,
+      title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, rule.unit === "%" ? "points" : latest.unit)}`, measure: measures[latest.analyte].label },
       subtitle: `compared with the median of ${values.length} prior draws`,
       source_note: `Latest draw on ${dateLabel}. ${fastingKnown ? "Fasting draws" : "Lab draws"} in ${latest.unit}.`,
       chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },
@@ -128,7 +129,8 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   };
 }
 
-export function labCandidates(input: HealthWinsInput, rank: HealthWinRank): Candidate[] {
+export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
+  options: { minBetterShare?: number; rangeMode?: "fallback" | "independent" } = {}): Candidate[] {
   const candidates: Candidate[] = [];
   for (const analyte of Object.keys(analytes) as Analyte[]) {
     const rule = analytes[analyte];
@@ -139,23 +141,25 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank): Cand
       ? reportedInterval(latest.referenceRange)
       : publishedInterval(latest, input.member.age, rule);
     const within = interval && includesValue(interval, latest.value);
-    if (latest.referenceRange && !within) continue;
+    // See yours can draw an independent range card and respects either source's known limits.
+    if (!within && (latest.referenceRange || (interval && options.rangeMode === "independent"))) continue;
 
     const dateLabel = formatWinDate(latest.date, input.member.today);
+    const displayValue = formatLabValue(latest.value, latest.unit);
     const change = labChange(latest, prior, rule, dateLabel);
     if (change) candidates.push(change);
     const percentile = rule.rankMetric && percentileCandidate({
       rank: rank(rule.rankMetric, latest.value, { member: input.member, unit: latest.unit, fasting: latest.fasting }),
       value: latest.value,
-      id: analyte, label: rule.label, unit: latest.unit, filter: "Labs", date: latest.date,
+      id: analyte, label: measures[analyte].label, displayValue, unit: latest.unit, filter: "Labs", date: latest.date,
       observation: `Lab draw on ${dateLabel}`,
-    }, input.member.today);
+    }, input.member.today, options.minBetterShare);
     if (percentile) candidates.push(percentile);
-    if (!change && !percentile && interval && within) candidates.push({
+    if ((options.rangeMode === "independent" || (!change && !percentile)) && interval && within) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {
-        id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs",
-        title: { number: formatLabValue(latest.value, latest.unit), measure: rule.label },
+        id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs", measure: analyte,
+        title: { number: displayValue, measure: measures[analyte].label },
         subtitle: intervalSubtitle(interval, latest.unit),
         source_note: `${interval.source}. Draw on ${dateLabel}.`,
         chart: { type: "gauge", value: latest.value, unit: latest.unit, range: interval, date: latest.date },

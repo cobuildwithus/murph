@@ -1,7 +1,7 @@
 import { healthMean14 } from "../../game/progress/health";
-import { metricInfo } from "./metrics";
+import { formatMetricValue, metricInfo } from "./metrics";
 import { cardDateKey, cardText, dayNumber, formatWinDate, isDate, mean } from "./shared";
-import type { Candidate, DailySample, Filter, HealthWinRank, HealthWinRankResult, HealthWinsInput } from "./types";
+import type { Candidate, DailySample, Filter, HealthWinRank, HealthWinRankResult, HealthWinsInput, Measure } from "./types";
 
 export interface PercentileCharts {
   percentile: {
@@ -12,14 +12,16 @@ export interface PercentileCharts {
     group: string;
     topPercent: number;
     lowerIsBetter: boolean;
+    referenceKey?: HealthWinRankResult["referenceKey"];
   };
 }
 
 interface PercentileEvidence {
   rank: HealthWinRankResult | null;
   value: number;
-  id: string;
+  id: Measure;
   label: string;
+  displayValue: string;
   unit: string;
   filter: Filter;
   date: string;
@@ -33,9 +35,9 @@ function cohortSubtitle(group: string): string {
   return `for ${cohort}`;
 }
 
-export function percentileCandidate(evidence: PercentileEvidence, today: string): Candidate | undefined {
+export function percentileCandidate(evidence: PercentileEvidence, today: string, minBetterShare = 70): Candidate | undefined {
   const { rank, value, id, label, unit, filter, date, observation } = evidence;
-  if (!rank || !(rank.betterShare >= 70 && rank.betterShare <= 100)) return;
+  if (!rank || !(rank.betterShare >= minBetterShare && rank.betterShare <= 100)) return;
   const source = cardText(rank.source).replace(/\b\d{4}-\d{2}-\d{2}\b/gu,
     date => isDate(date) ? formatWinDate(date, today) : date);
   const group = cardText(rank.group);
@@ -44,11 +46,12 @@ export function percentileCandidate(evidence: PercentileEvidence, today: string)
   return {
     date, effect: rank.betterShare - 50, noise: 25,
     card: {
-      id: `percentile-${id}-${cardDateKey(date)}`, kind: "percentile", filter,
-      title: { number: `Top ${topPercent}%`, measure: label },
+      id: `percentile-${id}-${cardDateKey(date)}`, kind: "percentile", filter, measure: id,
+      title: { number: rank.betterShare < 50 ? evidence.displayValue : `Top ${topPercent}%`, measure: label },
       subtitle: cohortSubtitle(group),
       source_note: `${observation}. ${source}`,
-      chart: { type: "percentile", value, unit, group, cuts: rank.cuts, topPercent, lowerIsBetter: rank.lowerIsBetter },
+      chart: { type: "percentile", value, unit, group, cuts: rank.cuts, topPercent, lowerIsBetter: rank.lowerIsBetter,
+        ...(rank.referenceKey && { referenceKey: rank.referenceKey }) },
     },
   };
 }
@@ -79,7 +82,8 @@ function wearableObservation(metric: keyof typeof wearableRankMetrics, rows: rea
   };
 }
 
-export function percentileCandidates(input: HealthWinsInput, rows: readonly DailySample[], rank: HealthWinRank): Candidate[] {
+export function percentileCandidates(input: HealthWinsInput, rows: readonly DailySample[], rank: HealthWinRank,
+  options: { minBetterShare?: number } = {}): Candidate[] {
   const candidates: Candidate[] = [];
   const { member } = input;
   for (const metric of ["rhr_bpm", "steps", "vo2max"] as const) {
@@ -89,7 +93,8 @@ export function percentileCandidates(input: HealthWinsInput, rows: readonly Dail
     const candidate = percentileCandidate({
       rank: rank(wearableRankMetrics[metric], reading.value, { member, unit, daily: reading.points }),
       value: reading.value, date: reading.date, observation: reading.observation, id: metric, label, unit, filter,
-    }, member.today);
+      displayValue: formatMetricValue(metric, reading.value, "title"),
+    }, member.today, options.minBetterShare);
     if (candidate) candidates.push(candidate);
   }
   return candidates;

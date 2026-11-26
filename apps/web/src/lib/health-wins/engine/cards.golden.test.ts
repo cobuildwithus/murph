@@ -53,7 +53,7 @@ function syntheticInput(): HealthWinsInput {
     rank: metric => metric === "restingHeartRate" ? {
       betterShare: 83, group: "Women 30 to 39", source: "Synthetic resting heart rate reference",
       cuts: [{ percentile: 10, value: 51 }, { percentile: 50, value: 63 }, { percentile: 90, value: 75 }],
-      lowerIsBetter: true,
+      lowerIsBetter: true, referenceKey: "oura_sleeping_hr",
     } : null,
     labs: [
       { analyte: "ldl", value: 125, unit: "mg/dL", date: "2036-03-04", fasting: false },

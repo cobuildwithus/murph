@@ -27,6 +27,28 @@ Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 - The game adapter supplies `gameStreak.calendar` with the member's per-date outcomes across all scheduled games, including unclassified exercises. The engine fills dates without an outcome with `no_game` and orders `chart.calendar` in whole Monday–Sunday weeks. Callers that omit `gameStreak` can still supply per-exercise `bestStreak` summaries. Summaries without daily evidence show the streak length and dates.
 - Skyline entries in `landmarksPassed` and `next` carry a display `name` from the Progress height bank and `heightUnit: "ft"`. An unknown ID gets the display name `Landmark`.
 
+## Drawing one member’s card for See yours
+
+Daily metric cards, lab change and range cards, and percentile cards carry a
+`measure` from the wearable metric or lab analyte catalog. Cumulative, session,
+activity, game and experiment cards omit it. The published hidden variant also
+omits the measure and the percentile reference method.
+
+`chooseSeeYours` tries the published card’s kind first. Labs then try a
+percentile and a range card. Wearables try a percentile for steps, resting
+heart rate or VO2 max, then a trend. `seeYoursCard` rebuilds a selected kind
+for publication. Both use the unranked detector results and the same theme
+and sharing hints as suggestions.
+
+For these private previews the percentile detector accepts any valid rank
+and leads with the measured value below the median. Trends accept a flat or
+unfavorable change when the current month and three preceding months meet
+the coverage rules. An eligible lab range can coexist with a percentile or
+change. The usual unit, method, fasting and latest-draw checks still apply.
+The reader supplies evidence of an observation separately so the engine can
+distinguish a missing measurement from one that cannot support a card.
+See the [single-measure regression tests](see-yours.test.ts).
+
 ## Rules and synthetic regression tests
 
 | Rule | Behavior | Test file and case or suite |

@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { readPairBoard } from "../game/board";
 import { openGameTexts } from "../game/crypto";
 import { assertGameMemberAuthCurrentForRead } from "../game/http/auth";
@@ -144,6 +145,28 @@ export async function readHealthPost(auth: Auth, postId: string) {
   const { posts } = await finishRead(auth, tx => finishPosts(tx, viewer, page));
   if (!posts[0]) throw gameNotFound();
   return { post: posts[0] };
+}
+
+export async function readVisibleFrozenCard(viewer: string, postId: string, cardId: string, signal: AbortSignal) {
+  const [post] = await getPrisma().$queryRaw<Pick<PostRow, "authorMemberId" | "cardsEncrypted" | "version">[]>`
+    SELECT p.author_member_id AS "authorMemberId", p.cards_encrypted AS "cardsEncrypted", p.version
+    FROM health_post p WHERE p.id = ${postId}::uuid AND ${visibleHealthPostSql(viewer)}`;
+  if (!post) throw gameNotFound();
+  const fields = post.cardsEncrypted.map((value, index) => ({
+    memberId: post.authorMemberId, table: "health_post" as const, rowId: postId, field: `card:${index}`, value,
+  }));
+  const opened = await openHealthTexts(fields, signal);
+  const card = opened.map(value => JSON.parse(value) as FrozenHealthCard).find(card => card.id === cardId);
+  if (!card) throw gameNotFound();
+  return { spec: card.spec, version: post.version, authorMemberId: post.authorMemberId };
+}
+
+export function assertVisibleFrozenCardCurrent(auth: Auth, postId: string, version: number) {
+  return finishRead(auth, async tx => {
+    const viewer = auth.member.id;
+    await assertBrowserVaultMemberAuthority({ memberId: viewer, prisma: tx });
+    if ((await findVisibleHealthPost(tx, viewer, postId))?.version !== version) throw gameNotFound();
+  });
 }
 
 export function healthCommentPageSql(viewerId: string, postId: string, posterId: string, position?: HealthPagePosition) {

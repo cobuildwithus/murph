@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import type { BrowserVaultLabResultRow } from "@murphai/query/browser";
 import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import type { ExperimentOutcome } from "@murphai/contracts";
 import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
@@ -20,10 +21,11 @@ vi.mock("../src/lib/device-sync/companion-numbers", () => ({
   loadPublishedCompanionMetricReplica: mock.session,
 }));
 vi.mock("../src/lib/health-wins/game-inputs", () => ({ readHealthWinGameInputs: mock.games }));
-import { readHealthWinInputs } from "../src/lib/health-wins/inputs";
+import { readHealthWinInputs, readMeasureInputs } from "../src/lib/health-wins/inputs";
 import { retainedDailySamples } from "../src/lib/health-wins/wearable-inputs";
 import { readHealthWinExperiments } from "../src/lib/health-wins/experiment-inputs";
 import { generateHealthWins } from "../src/lib/health-wins/engine";
+import { chooseSeeYours } from "../src/lib/health-wins/engine/see-yours";
 import { mapKey } from "../src/lib/game/progress/place-art-make";
 import { artPath } from "../src/lib/game/progress/place-art";
 
@@ -196,6 +198,116 @@ it("distinguishes an empty vault from a published replica that failed to open", 
   expect(empty.complete).toBe(true);
   expect(partial.complete).toBe(false);
   expect(empty.sourceRevision).not.toBe(partial.sourceRevision);
+});
+
+it("loads one wearable bucket and keeps observed readings separate from eligible samples", async () => {
+  const series = vi.fn().mockReturnValueOnce([hr(today, "Oura", 51)]).mockReturnValueOnce([hr(today, "Oura", 999)])
+    .mockReturnValueOnce([]);
+  mock.session.mockResolvedValue({ state: "ready", client: { replica: {}, metrics: { series } } });
+  const read = () => readMeasureInputs(auth, today, "rhr_bpm", signal);
+  expect(await read()).toMatchObject({ observed: true, input: {
+    member: { wearableProvider: "oura" }, daily: [{ metric: "rhr_bpm", value: 51, date: today }],
+  } });
+  expect(mock.session).toHaveBeenCalledExactlyOnceWith({ memberId: auth.member.id, signal: expect.any(AbortSignal),
+    metricKeys: ["resting-heart-rate"], requestedShards: ["core", "metricsIndex"], timeoutMs: 4000 });
+  expect(series).toHaveBeenCalledExactlyOnceWith({
+    metricKey: "resting-heart-rate", from: "2025-09-25", to: today, grain: "day",
+  });
+  expect(await read()).toMatchObject({ observed: true, input: { daily: [] } });
+  expect(await read()).toMatchObject({ observed: false, input: { daily: [] } });
+  expect(mock.games).not.toHaveBeenCalled();
+  expect(mock.states).not.toHaveBeenCalled();
+});
+
+it("recognizes an unsettled step day without passing it to the detectors", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date(today + "T09:00:00Z"));
+    const series = vi.fn().mockReturnValue([{ ...hr(today, "Apple Health", 3200), metricKey: "steps", unit: "steps" }]);
+    mock.session.mockResolvedValue({ state: "ready", client: { replica: { meals: { timeZone: "UTC" } }, metrics: { series } } });
+    const { input, observed } = await readMeasureInputs(auth, today, "steps", signal);
+    expect(series).toHaveBeenCalledWith(expect.objectContaining({ metricKey: "steps", to: today }));
+    expect(input.daily).toEqual([]);
+    expect(chooseSeeYours(input, "steps", "percentile", observed)).toEqual({ reason: "not_enough_data" });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+const draw: BrowserVaultLabResultRow = {
+  analyte: "LDL", biomarkerKey: null, comparator: null, date: today, drawId: "draw-recent", fastingStatus: "unknown",
+  flag: "normal", id: "result-recent", labName: null, metricKey: "ldl-calculated", normalizedUnit: "mg/dL",
+  normalizedValue: 87, observedAt: today + "T09:00:00Z", parentResultStatus: "normal", referenceRange: null,
+  rowSchema: "murph.browser-vault.lab-result-row.v1", sourceLabel: null, specimenKind: "serum", textValue: null,
+  unit: "mg/dL", value: 87,
+};
+
+it.each<Partial<BrowserVaultLabResultRow>>([
+  { flag: "high" }, { referenceRange: { high: 72 } }, { normalizedUnit: "unknown" }, { drawId: null },
+])("retains presence when the latest draw disqualifies an analyte's history (%j)", async updates => {
+  const list = vi.fn().mockReturnValue([
+    { ...draw, date: "2026-06-11", drawId: "draw-earlier" }, { ...draw, ...updates },
+    { ...draw, metricKey: "hdl-c" },
+  ]);
+  mock.session.mockResolvedValue({ state: "ready", client: { replica: {}, labResults: { list } } });
+  const { input, observed } = await readMeasureInputs(auth, today, "ldl", signal);
+  expect(input.labs).toEqual([]);
+  expect(chooseSeeYours(input, "ldl", "percentile", observed)).toEqual({ reason: "not_enough_data" });
+  expect(mock.session).toHaveBeenCalledExactlyOnceWith({ memberId: auth.member.id, signal: expect.any(AbortSignal),
+    metricKeys: [], requestedShards: ["core", "labs"], timeoutMs: 4000 });
+  expect(list).toHaveBeenCalledExactlyOnceWith({ to: today });
+  expect(mock.games).not.toHaveBeenCalled();
+});
+
+it("distinguishes an absent analyte from conflicting draws through to the response reason", async () => {
+  const list = vi.fn().mockReturnValueOnce([{ ...draw, date: "2027-01-03" }, { ...draw, metricKey: "hdl-c" }])
+    .mockReturnValueOnce([draw, { ...draw, drawId: "another-draw" }]);
+  mock.session.mockResolvedValue({ state: "ready", client: { replica: {}, labResults: { list } } });
+  const reason = async () => {
+    const { input, observed } = await readMeasureInputs(auth, today, "ldl", signal);
+    return chooseSeeYours(input, "ldl", "percentile", observed);
+  };
+  expect(await reason()).toEqual({ reason: "no_labs" });
+  expect(await reason()).toEqual({ reason: "not_enough_data" });
+});
+
+const unavailableMeasure = { code: "HEALTH_SEE_YOURS_UNAVAILABLE", httpStatus: 503, retryable: true };
+it("separates unpublished replicas from unavailable shards and failed reads", async () => {
+  mock.session.mockResolvedValueOnce({ state: "unpublished" }).mockResolvedValueOnce({ state: "not_ready" })
+    .mockRejectedValueOnce(Error("decode failed"))
+    .mockResolvedValueOnce({ state: "ready", client: { replica: {} } })
+    .mockResolvedValueOnce({ state: "ready", client: { replica: {}, metrics: { series() { throw Error("bucket unavailable"); } } } })
+    .mockResolvedValueOnce({ state: "ready", client: { replica: {}, metrics: { series: () => [] } } });
+  const read = () => readMeasureInputs(auth, today, "rhr_bpm", signal);
+  expect(await read()).toMatchObject({ observed: false });
+  for (let i = 0; i < 4; i++) await expect(read()).rejects.toMatchObject(unavailableMeasure);
+  await expect(readMeasureInputs(auth, today, "ldl", signal)).rejects.toMatchObject(unavailableMeasure);
+});
+
+it("applies the deadline to the whole measure load and rechecks authority after draining it", async () => {
+  const deadline = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+  try {
+    mock.session.mockImplementationOnce(async ({ signal: sourceSignal }) => {
+      expect(sourceSignal.aborted).toBe(false);
+      deadline.abort();
+      expect(sourceSignal.aborted).toBe(true);
+      return { state: "unpublished" };
+    });
+    await expect(readMeasureInputs(auth, today, "ldl", signal)).rejects.toMatchObject(unavailableMeasure);
+    expect(timeout).toHaveBeenCalledWith(4000);
+    expect(mock.authority).toHaveBeenCalledTimes(2);
+  } finally {
+    timeout.mockRestore();
+  }
+});
+
+it("denies the measure after authority loss even when decryption failed", async () => {
+  const denied = hostedOnboardingError({ code: "CONSENT_REQUIRED", message: "Consent required", httpStatus: 403 });
+  mock.session.mockRejectedValueOnce(Error("unreadable replica"));
+  mock.authority.mockResolvedValueOnce(undefined).mockRejectedValueOnce(denied);
+  await expect(readMeasureInputs(auth, today, "insulin", signal)).rejects.toBe(denied);
+  expect(mock.native).toHaveBeenCalledTimes(2);
 });
 
 it("keeps canonical outcomes when a legacy replica lacks a lab shard or health time zone", async () => {
