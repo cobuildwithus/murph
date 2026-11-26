@@ -9,7 +9,7 @@ export function GET() {
         // "/connect/?*" is a source's link page: at least one character after
         // the slash. It never matches "/connect" or "/connect/", the website's
         // own connect page, which stays in the browser.
-        components: [{ "/": "/recap/*" }, { "/": "/g/*" }, { "/": "/connect/?*" }],
+        components: [{ "/": "/recap/*" }, { "/": "/g/*" }, { "/": "/connect/?*" }, { "/": "/wins/*" }],
       }],
     },
   }, {

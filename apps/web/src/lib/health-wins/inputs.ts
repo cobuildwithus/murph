@@ -74,11 +74,7 @@ async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, tod
   };
 }
 
-async function withInputAuthority<T>(auth: HostedNativeMemberAuth, load: () => Promise<T>): Promise<T> {
-  const checkAuthority = () => getPrisma().$transaction(async tx => {
-    await assertHostedNativeMemberAuthCurrentForRead(auth, tx);
-    await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
-  });
+async function withInputAuthority<T>(checkAuthority: () => Promise<void>, load: () => Promise<T>): Promise<T> {
   await checkAuthority();
   try {
     return await load();
@@ -88,9 +84,8 @@ async function withInputAuthority<T>(auth: HostedNativeMemberAuth, load: () => P
   }
 }
 
-export async function readHealthWinInputs(auth: HostedNativeMemberAuth, today: string, signal: AbortSignal) {
-  const memberId = auth.member.id;
-  return withInputAuthority(auth, async () => {
+export async function readHealthWinInputs(memberId: string, checkAuthority: () => Promise<void>, today: string, signal: AbortSignal) {
+  return withInputAuthority(checkAuthority, async () => {
     const source = sources(signal);
     const saved = await source.read("replica", () => loadPublishedCompanionMetricReplica({
       memberId, signal, metricKeys: Object.values(WIN_METRIC_KEYS), requestedShards: ["core", "metricsIndex", "labs"],
@@ -103,7 +98,7 @@ export async function readHealthWinInputs(auth: HostedNativeMemberAuth, today: s
       : { inputs: { member: memberInputs(today) }, stepsThrough: null };
     // Older readable replicas can reuse Progress's matching run cache. A failed or missing replica cannot.
     const runs = client ? client.replica.runs ?? null : { days: [] };
-    const game = await source.read("game", () => readHealthWinGameInputs(auth, today, runs, clock, signal));
+    const game = await source.read("game", () => readHealthWinGameInputs(memberId, today, runs, clock, signal));
     if (game && !game.complete) source.missing.add("game");
     const input: HealthWinsInput = { ...vault.inputs, games: game?.games ?? [], gameStreak: game?.gameStreak ?? null };
     const distanceArtUrl = input.daily?.some(row => row.metric === "distance_km" && row.value > 0 && row.date.slice(0, 4) === today.slice(0, 4))
@@ -148,8 +143,13 @@ async function readMeasureSource(memberId: string, today: string, measure: Measu
 export async function readMeasureInputs(auth: HostedNativeMemberAuth, today: string, measure: Measure, requestSignal: AbortSignal) {
   const deadline = AbortSignal.timeout(MEASURE_READ_BUDGET_MS);
   const signal = AbortSignal.any([requestSignal, deadline]);
+  const memberId = auth.member.id;
+  const checkAuthority = () => getPrisma().$transaction(async tx => {
+    await assertHostedNativeMemberAuthCurrentForRead(auth, tx);
+    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
+  });
   try {
-    const result = await withInputAuthority(auth, () => readMeasureSource(auth.member.id, today, measure, signal));
+    const result = await withInputAuthority(checkAuthority, () => readMeasureSource(memberId, today, measure, signal));
     signal.throwIfAborted();
     return result;
   } catch (error) {

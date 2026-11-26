@@ -8,6 +8,9 @@ import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../
 import { assertHealthSetCurrent, changeHealthWin, readHealthWins, resolveHealthCards } from "../src/lib/health-wins/wins";
 import { createHealthPost, deleteHealthPost, patchHealthPost } from "../src/lib/health-wins/writes";
 import * as cardOptions from "../src/lib/health-wins/card-options";
+import * as chatHealth from "../src/lib/hosted-onboarding/linq-provider-health-store";
+import * as destinations from "../src/lib/hosted-routing/assistant-notification-destination";
+import { drainHealthWinTexts } from "../src/lib/health-wins/nudge-job";
 import * as crypto from "../src/lib/health-wins/crypto";
 import type { HealthWinsInput } from "../src/lib/health-wins/engine";
 import { seeYoursCard } from "../src/lib/health-wins/engine/see-yours";
@@ -16,6 +19,7 @@ const source = vi.hoisted(() => vi.fn());
 const measureSource = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/health-wins/inputs", () => ({ readHealthWinInputs: source, readMeasureInputs: measureSource }));
 vi.mock("../src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedDomainRootForWeb: async ({ domain, userId }: { domain: string; userId: string }) => ({ domain, userId, rootKeyId: "fixture-win-root" }),
   unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32, 49), envelope: { rootKeyId: "fixture-win-root" } }),
   unwrapHostedDomainRootForWebByRootKeyId: async () => ({ rootKey: Buffer.alloc(32, 49) }),
 }));
@@ -49,6 +53,18 @@ async function fixture(sessionDays = 1): Promise<HostedNativeMemberAuth> {
     proof: { row, expiresAt, credentialDigest: createHash("sha256").update(credential).digest() } };
 }
 
+function enableWinTexts(...members: string[]) {
+  vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", members.join(","));
+  vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", members.join(","));
+}
+
+function sessionInputs(today: string, total = 20, complete = true) {
+  const result = data(today, total, complete);
+  result.input.sessions = ["01", "02", "03"].map(day =>
+    ({ type: "walk", minutes: 14, date: `${today.slice(0, 7)}-${day}` }));
+  return result;
+}
+
 async function publishEasternHistory(utcDays: number[]) {
   // At 11:00 UTC the UTC+14 and UTC-12 local dates are two days apart.
   const instant = (day: number) => Date.UTC(2031, 5, day, 11);
@@ -56,7 +72,7 @@ async function publishEasternHistory(utcDays: number[]) {
   vi.setSystemTime(instant(utcDays[0]));
   const auth = await fixture(30);
   await db.gameProfile.update({ where: { memberId: auth.member.id }, data: { timeZone: "Pacific/Kiritimati" } });
-  source.mockImplementation(async (_auth, today: string) => data(today));
+  source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
   for (const day of utcDays) {
     vi.setSystemTime(instant(day));
     await readHealthWins(auth, { signal });
@@ -64,7 +80,7 @@ async function publishEasternHistory(utcDays: number[]) {
   return auth;
 }
 
-function incompleteInputs(_auth: HostedNativeMemberAuth, today: string) {
+function incompleteInputs(_memberId: string, _checkAuthority: () => Promise<void>, today: string) {
   return { input: { member: data(today).input.member }, complete: false, sourceRevision: "fixture-incomplete" };
 }
 
@@ -80,6 +96,7 @@ function distanceHistory(today: string) {
 describe.skipIf(!enabled)("member-local health win sets", () => {
   afterEach(async () => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     source.mockReset();
     measureSource.mockReset();
     await db.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
@@ -112,7 +129,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("serves one stable set within the hour, freezes the selected option, and conflicts after replacement", async () => {
     const auth = await fixture(), memberId = auth.member.id;
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     const first = await readHealthWins(auth, { signal });
     const candidateId = first.candidates[0].id;
     expect((await readHealthWins(auth, { signal })).setRevision).toBe(first.setRevision);
@@ -127,7 +144,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     const unchanged = await readHealthWins(auth, { signal });
     expect(unchanged).toEqual(first);
     await db.healthWinSet.updateMany({ where: { memberId }, data: { checkedAt: new Date(0) } });
-    source.mockImplementation(async (_auth, today: string) => data(today, 39, false));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today, 39, false));
     const replacement = await readHealthWins(auth, { signal });
     expect(replacement.candidates[0].title.number).toBe("39");
     expect(replacement.setRevision).not.toBe(first.setRevision);
@@ -135,9 +152,103 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     await expect(resolveHealthCards(auth, first.setRevision, [{ candidateId, option: "original" }])).rejects.toMatchObject({ httpStatus: 409 });
   });
 
+  it("enrolls on presentation, including legacy, throttled, partial and fallback sets", async ({ onTestFinished }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2032-02-19T11:04:00Z"));
+    vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 22).toString("base64url"));
+    const auth = await fixture(3), memberId = auth.member.id;
+    const where = { memberId };
+    const throttleId = `arl_${authLookupKey("verification", "rate-limit", `health-wins-refresh:member:${memberId}`)}`;
+    onTestFinished(async () => { await db.hostedAuthRecord.deleteMany({ where: { model: "verification", id: throttleId } }); });
+    const read = (refresh = false) => readHealthWins(auth, { signal, refresh });
+    source.mockImplementation((_memberId, _check, today: string) => sessionInputs(today));
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "");
+    const legacy = await read();
+    expect(await db.healthWinNudge.findUnique({ where })).toBeNull();
+
+    enableWinTexts(memberId);
+    expect(await read()).toEqual(legacy);
+    expect(await db.healthWinNudge.findUniqueOrThrow({ where })).toMatchObject({ baselineAt: null, lastPresentedAt: expect.any(Date) });
+    source.mockImplementationOnce((_memberId, _check, today: string) => sessionInputs(today, 22, false));
+    const partial = await read(true);
+    const card = partial.candidates.find(candidate => candidate.kind === "sessions")!;
+    expect(card.winRef).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(JSON.stringify(partial)).not.toMatch(/"achievement"|"sourceComplete"|"seenKey"/u);
+    expect(await db.healthWinNudge.findUniqueOrThrow({ where })).toMatchObject({ baselineAt: null });
+    for (const refresh of [false, true]) {
+      await db.healthWinNudge.update({ where, data: { lastPresentedAt: new Date(0) } });
+      expect(await read(refresh)).toEqual(partial);
+      const state = await db.healthWinNudge.findUniqueOrThrow({ where });
+      expect(state.lastPresentedAt.getTime()).toBeGreaterThan(0);
+      expect(state.baselineAt).toBeNull();
+    }
+    expect(source).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(new Date("2032-02-20T11:04:00Z"));
+    await db.healthWinNudge.update({ where, data: { lastPresentedAt: new Date(0) } });
+    const deadline = new AbortController(), nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const budget = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 8_000 ? deadline.signal : nativeTimeout(ms));
+    source.mockImplementationOnce((_memberId, _check, _today, sourceSignal: AbortSignal) => {
+      deadline.abort(new DOMException("Test input timeout", "TimeoutError"));
+      sourceSignal.throwIfAborted();
+    });
+    expect(await read()).toEqual(partial);
+    expect((await db.healthWinNudge.findUniqueOrThrow({ where })).lastPresentedAt.getTime()).toBeGreaterThan(0);
+    budget.mockRestore();
+    const complete = await read();
+    const refreshed = complete.candidates.find(candidate => candidate.kind === "sessions")!;
+    expect(refreshed.winRef).toBe(card.winRef);
+    const baseline = await db.healthWinNudge.findUniqueOrThrow({ where });
+    expect(baseline.baselineAt).toBeInstanceOf(Date);
+    expect(baseline.seenKeys).toHaveLength(1);
+    expect(baseline.seenKeys).not.toContain(card.winRef);
+    const peer = await fixture();
+    enableWinTexts(memberId, peer.member.id);
+    const peerCard = (await readHealthWins(peer, { signal })).candidates.find(candidate => candidate.kind === "sessions")!;
+    expect(peerCard.winRef).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(peerCard.winRef).not.toBe(card.winRef);
+
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "");
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await db.healthWinNudge.update({ where, data: { lastPresentedAt: new Date(0) } });
+    const withoutKeys = await read();
+    expect(withoutKeys.candidates.find(candidate => candidate.id === refreshed.id)).toBeDefined();
+    expect(withoutKeys.candidates.every(candidate => candidate.winRef === undefined)).toBe(true);
+    expect((await db.healthWinNudge.findUniqueOrThrow({ where })).lastPresentedAt.getTime()).toBeGreaterThan(0);
+  });
+
+  it("accepts a held composer selection after a complete background detection reads changed inputs", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2032-04-14T10:17:00Z"));
+    const auth = await fixture(3), memberId = auth.member.id;
+    enableWinTexts(memberId);
+    source.mockImplementation((_memberId, _check, today: string) => sessionInputs(today));
+    const held = await readHealthWins(auth, { signal });
+    const selection = held.candidates.find(candidate => candidate.kind === "sessions")!;
+    vi.setSystemTime(new Date("2032-04-14T11:07:00Z"));
+    const now = new Date();
+    await db.hostedLinqDailyState.create({ data: { memberId, dayUtc: new Date("2032-04-14T00:00:00Z"),
+      inboundCount: 1, firstSeenAt: now, lastSeenAt: now } });
+    vi.spyOn(destinations, "resolveHostedAssistantNotificationDestination").mockResolvedValue({
+      conversationShape: "direct-member", externalThreadRouteAuthority: null,
+      route: { channel: "linq", actorId: null, identityId: "fixture-identity", threadId: "fixture-thread",
+        threadIsDirect: true, delivery: { kind: "thread", target: "fixture-thread" } },
+    });
+    vi.spyOn(chatHealth, "readHostedLinqChatHealth").mockResolvedValue({
+      service: "iMessage", linqChatLookupKey: "fixture-thread", phoneNumberLookupKey: null,
+      providerObservedAt: now, providerUpdatedAt: now, providerStatus: "HEALTHY",
+    });
+    source.mockImplementation((_memberId, _check, today: string) => sessionInputs(today, 38));
+    expect(await drainHealthWinTexts({ prisma: db, signal })).toMatchObject({ claimed: 1, computed: 1, errors: 0 });
+    expect(source).toHaveBeenCalledTimes(2);
+    expect((await db.healthWinNudge.findUniqueOrThrow({ where: { memberId } })).lastEvaluatedDay).toBe(held.day);
+    const id = randomUUID();
+    await createHealthPost(auth, { id, setRevision: held.setRevision, cards: [{ candidateId: selection.id, option: "original" }] });
+    expect(await db.healthPost.count({ where: { id } })).toBe(1);
+  });
+
   it("offers only cards absent from live posts as a member posts, edits, and deletes", async () => {
     const auth = await fixture();
-    source.mockImplementation(async (_auth, today: string) => {
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
       const result = data(today);
       result.input.daily = [{ metric: "distance_km", provider: "apple", value: 9, date: today }];
       return result;
@@ -166,7 +277,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("keeps equal candidate IDs separate for two members", async () => {
     const owner = await fixture(), peer = await fixture();
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     // Exercise a literal ID collision without depending on today's member-bound candidate generation.
     const prepare = cardOptions.prepareHealthCandidates;
     vi.spyOn(cardOptions, "prepareHealthCandidates").mockImplementation((_memberId, cards) => prepare("fixture-namespace", cards));
@@ -188,7 +299,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2033-03-29T12:00:00Z"));
     const auth = await fixture(14);
-    source.mockImplementation(async (_auth, today: string) => {
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
       const result = data(today);
       result.input.sessions = ["01", "02", "03"].map(day =>
         ({ type: "walk", minutes: 23, date: `${today.slice(0, 7)}-${day}` }));
@@ -206,7 +317,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("returns all cached suggestions when the card-key keyring is unavailable", async ({ onTestFinished }) => {
     const auth = await fixture();
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     const first = await readHealthWins(auth, { signal });
     await createHealthPost(auth, { id: randomUUID(), setRevision: first.setRevision,
       cards: [{ candidateId: first.candidates[0].id, option: "original" }] });
@@ -230,7 +341,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     const startedAt = Math.floor(Date.now() / 60_000) * 60_000 + 59_990;
     const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
     let total = 27;
-    source.mockImplementation(async (_auth, today: string) => data(today, total));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today, total));
     const first = await readHealthWins(auth, { signal });
     total = 72;
     const refresh = { signal, refresh: true };
@@ -253,7 +364,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it.each([null, "/api/game/v1/progress/art/map%3Av1%3Acard%3Afixture"])("freezes only available map art (%s)", async distanceArtUrl => {
     const auth = await fixture();
-    source.mockImplementation(async (_auth, today: string) => {
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
       const result = data(today);
       result.input.daily = [{ metric: "distance_km", provider: "apple", value: 7, date: today }];
       return { ...result, distanceArtUrl };
@@ -273,7 +384,8 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2034-07-24T12:00:00Z"));
     const auth = await fixture(7);
-    source.mockImplementation(async (_auth, today: string) => distanceHistory(today));
+    enableWinTexts(auth.member.id);
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => distanceHistory(today));
     const metric = await readHealthWins(auth, { signal, units: "metric" });
     const us = await readHealthWins(auth, { signal, units: "us" });
     expect(await readHealthWins(auth, { signal, units: "uk" })).toEqual(us);
@@ -284,13 +396,16 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     const mi = us.candidates.find(card => card.kind === "trend_change")!;
     expect(km.chart).toMatchObject({ unit: "km", pills: ["Usual 3.8 km", "Jul 5.3 km"] });
     expect(mi.id).not.toBe(km.id);
+    expect(mi.winRef).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(km.winRef).toBe(mi.winRef);
     expect(mi).toMatchObject({ title: { number: "+1 mi" }, chart: { unit: "mi",
       baseline: expect.closeTo(2.34), delta: expect.closeTo(0.94), pills: ["Usual 2.3 mi", "Jul 3.3 mi"],
       series: [2.34, 2.34, 2.34, 3.28].map(value => ({ value: expect.closeTo(value) })),
     } });
     for (const card of [km, mi]) {
       const selection = { candidateId: card.id, option: "original" };
-      expect((await changeHealthWin(auth, { ...selection, setRevision: us.setRevision })).card).toEqual(card);
+      const changed = await changeHealthWin(auth, { ...selection, setRevision: us.setRevision });
+      expect({ ...changed.card, winRef: mi.winRef }).toEqual(card);
       expect((await resolveHealthCards(auth, us.setRevision, [selection])).cards[0]).toMatchObject({
         id: card.id, specRevision: card.specRevision, spec: { title: card.title, chart: card.chart },
       });
@@ -336,11 +451,11 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     let release!: () => void;
     const started = new Promise<void>(resolve => { markStarted = resolve; });
     const finish = new Promise<void>(resolve => { release = resolve; });
-    source.mockImplementationOnce(async (_auth, today: string) => {
+    source.mockImplementationOnce(async (_memberId, _checkAuthority, today: string) => {
       markStarted();
       await finish;
       return data(today, 31);
-    }).mockImplementationOnce(async (_auth, today: string) => data(today, 48));
+    }).mockImplementationOnce(async (_memberId, _checkAuthority, today: string) => data(today, 48));
     const slow = readHealthWins(auth, { signal });
     await started;
     try {
@@ -395,14 +510,14 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("returns the last good day on timeout and rejects it after the next day's set arrives", async () => {
     const auth = await fixture(), memberId = auth.member.id;
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     const first = await readHealthWins(auth, { signal });
     const previousDay = "2008-03-14";
     await db.healthWinSet.update({ where: { memberId_day: { memberId, day: first.day } }, data: { day: previousDay } });
 
     const deadline = new AbortController(), nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
     vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 8_000 ? deadline.signal : nativeTimeout(ms));
-    source.mockImplementationOnce(async (_auth, _today: string, sourceSignal: AbortSignal) => {
+    source.mockImplementationOnce(async (_memberId, _checkAuthority, _today: string, sourceSignal: AbortSignal) => {
       deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
       sourceSignal.throwIfAborted();
     });
@@ -422,7 +537,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     const auth = await fixture(), memberId = auth.member.id;
     const deadline = new AbortController(), nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
     vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => ms === 8_000 ? deadline.signal : nativeTimeout(ms));
-    source.mockImplementationOnce(async (_auth, _today: string, sourceSignal: AbortSignal) => {
+    source.mockImplementationOnce(async (_memberId, _checkAuthority, _today: string, sourceSignal: AbortSignal) => {
       if (withdrawn) await revokeHostedConsentScope({ memberId, prisma: db, scope: "launch.health-data" });
       deadline.abort(new DOMException("Fixture deadline", "TimeoutError"));
       sourceSignal.throwIfAborted();
@@ -435,7 +550,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("serves a warm set while the member and session rows are locked, then rejects a revoked session", async () => {
     const auth = await fixture(), memberId = auth.member.id;
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     const warm = await readHealthWins(auth, { signal });
     await db.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM hosted_member WHERE id = ${memberId} FOR UPDATE`;
@@ -448,7 +563,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
 
   it("refuses a warm set when health consent is lost during decryption", async () => {
     const auth = await fixture(), memberId = auth.member.id;
-    source.mockImplementation(async (_auth, today: string) => data(today));
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => data(today));
     await readHealthWins(auth, { signal });
     const open = crypto.openHealthTexts;
     vi.spyOn(crypto, "openHealthTexts").mockImplementationOnce(async (...args) => {

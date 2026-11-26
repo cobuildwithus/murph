@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { GET } from "../../../app/api/game/v1/health/posts/[id]/see-yours/route";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type { CardSpec, HealthWinRankResult, HealthWinsInput } from "./engine/types";
 
-const mocks = vi.hoisted(() => ({ frozen: vi.fn(), inputs: vi.fn() }));
-vi.mock("../game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "fixture-viewer" } }) }));
+const mocks = vi.hoisted(() => ({
+  auth: vi.fn(async () => ({ member: { id: "fixture-viewer" } })), frozen: vi.fn(), inputs: vi.fn(),
+  recheck: vi.fn(async () => {}),
+}));
+vi.mock("../game/http/auth", () => ({ requireGameMemberAuth: mocks.auth }));
 vi.mock("../better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: async () => ({ allowed: true }) }) }));
 vi.mock("../prisma", () => ({ getPrisma: () => ({ gameProfile: { findUnique: async () => ({ timeZone: "UTC" }) } }) }));
-vi.mock("./read", () => ({ readVisibleFrozenCard: mocks.frozen, assertVisibleFrozenCardCurrent: async () => {} }));
+vi.mock("./read", () => ({ readVisibleFrozenCard: mocks.frozen, assertVisibleFrozenCardCurrent: mocks.recheck }));
 vi.mock("./inputs", () => ({ readMeasureInputs: mocks.inputs }));
 
 const member: HealthWinsInput["member"] = { today: "2032-08-14", age: 42, sex: "female", wearableProvider: "oura" };
@@ -23,11 +27,15 @@ const labInput: HealthWinsInput = {
 beforeEach(() => vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "fixture-viewer"));
 afterEach(() => vi.unstubAllEnvs());
 
+function requestCard() {
+  const request = new Request(`https://fixture.test/api/game/v1/health/posts/${postId}/see-yours?card=fixture-card`);
+  return GET(request, { params: Promise.resolve({ id: postId }) });
+}
+
 async function openCard(spec: CardSpec, input: HealthWinsInput) {
   mocks.frozen.mockResolvedValueOnce({ spec, authorMemberId: "fixture-poster", version: 2 });
   mocks.inputs.mockResolvedValueOnce({ input, observed: true });
-  const request = new Request(`https://fixture.test/api/game/v1/health/posts/${postId}/see-yours?card=fixture-card`);
-  const response = await GET(request, { params: Promise.resolve({ id: postId }) });
+  const response = await requestCard();
   expect(response.status).toBe(200);
   return response.json();
 }
@@ -49,6 +57,27 @@ it.each([
   const missingViewerKey = await openCard(frozen, { member, daily, rank });
   expect(missingViewerKey.card.kind).toBe("percentile");
   expect(missingViewerKey.friend).toBeNull();
+});
+
+it("requires initial authentication and conceals the post if viewer authority is lost during the read", async () => {
+  const signedOut = hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in." });
+  const revoked = hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." });
+  mocks.auth.mockRejectedValueOnce(signedOut);
+  expect((await requestCard()).status).toBe(401);
+
+  const frozen = { spec: frozenLab, authorMemberId: "fixture-poster", version: 1 };
+  mocks.frozen.mockResolvedValueOnce(frozen).mockResolvedValueOnce(frozen);
+  // The replica reader rechecks authority in finally, before the post's final visibility check.
+  mocks.inputs.mockRejectedValueOnce(revoked);
+  const duringLoad = await requestCard();
+  mocks.inputs.mockResolvedValueOnce({ input: labInput, observed: true });
+  mocks.recheck.mockRejectedValueOnce(signedOut);
+  const afterLoad = await requestCard();
+  for (const response of [duringLoad, afterLoad]) {
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.json()).toMatchObject({ error: { code: "GAME_NOT_FOUND" } });
+  }
 });
 
 it("compares units using their normalized key and returns only the frozen value and unit", async () => {

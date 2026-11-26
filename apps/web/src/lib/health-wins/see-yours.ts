@@ -2,8 +2,8 @@ import "server-only";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { hostedAuthRateLimitStorage } from "../better-auth/rate-limit";
 import type { ClientUnits } from "../companion/client-info";
-import { invalidGameRequest } from "../game/http/errors";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { gameNotFound, invalidGameRequest } from "../game/http/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import {
   prepareSeeYoursCandidate, previewRecordedCandidate, resolveRecordedSelection, type FrozenHealthCard, type HealthCardSelection,
@@ -29,6 +29,12 @@ function friendMarker(frozen: FrozenHealthCard["spec"], viewerCard: CardSpec) {
   return { value: friend.value, unit: friend.unit };
 }
 
+// Once the frozen card is admitted, loss of viewer authority makes it unavailable just like a lost audience grant.
+function concealRevokedRead(error: unknown): never {
+  if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) throw gameNotFound();
+  throw error;
+}
+
 export async function readSeeYours(
   auth: HostedNativeMemberAuth, postId: string, cardId: string, units: ClientUnits, signal: AbortSignal,
 ) {
@@ -43,14 +49,14 @@ export async function readSeeYours(
     throw invalidGameRequest("Choose a shared measure on a friend's post.");
   }
 
-  const { input, observed } = await readViewerMeasure(auth, key, signal);
+  const { input, observed } = await readViewerMeasure(auth, key, signal).catch(concealRevokedRead);
   const result = chooseSeeYours(input, key, spec.kind, observed);
   const measure = { key, ...measures[key] };
   const response = "card" in result ? {
     measure, card: previewRecordedCandidate(prepareSeeYoursCandidate(viewer, result.card, units)),
     reason: null, friend: friendMarker(spec, result.card),
   } : { measure, card: null, reason: result.reason, friend: null };
-  await assertVisibleFrozenCardCurrent(auth, postId, version);
+  await assertVisibleFrozenCardCurrent(auth, postId, version).catch(concealRevokedRead);
   return response;
 }
 

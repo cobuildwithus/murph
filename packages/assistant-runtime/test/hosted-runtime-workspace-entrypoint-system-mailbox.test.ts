@@ -2224,16 +2224,26 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test.each(["group join", "clinical notice", "clinical opt-out at dispatch"])("blocked system mailbox mode delivers one exact %s without draining a generic notification", async (kind) => {
-    const clinical = kind !== "group join";
+  test.each(["group join", "health win", "health win link fallback", "clinical notice", "clinical opt-out at dispatch"])("blocked system mailbox mode delivers one exact %s without draining a generic notification", async (kind) => {
+    const clinical = kind.startsWith("clinical");
+    const healthWin = kind.startsWith("health win");
+    const linkFallback = kind === "health win link fallback";
     const revoked = kind === "clinical opt-out at dispatch";
     const runId = "synthetic-clinical-run";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const exactText = clinical ? "New records came in. Want me to go through them?" : "You are now part of the synthetic group.";
+    const winQuestion = "Would you like to share your new win?";
+    const winLink = `https://www.withmurph.ai/wins/${"a".repeat(43)}`;
+    const directText = healthWin
+      ? `${winQuestion}\n${winLink}`
+      : "You are now part of the synthetic group.";
+    const exactText = clinical ? "New records came in. Want me to go through them?" : directText;
     const deliveryBodies: unknown[] = [];
-    const exactDeliveryKey = clinical ? `clinical-change:v1:${runId}:notice` : "group-join:membership_blocked_exact";
+    const directDeliveryKey = healthWin
+      ? `health-win:v1:${TEST_USER_ID}:${TEST_NOW.slice(0, 10)}`
+      : "group-join:membership_blocked_exact";
+    const exactDeliveryKey = clinical ? `clinical-change:v1:${runId}:notice` : directDeliveryKey;
     const exactDedupeKey =
       clinical ? `clinical-change:v1:${runId}` : `assistant.notification.requested:${exactDeliveryKey}`;
     const genericDeliveryKey = "generic:blocked_after_group_join";
@@ -2314,8 +2324,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       const url = request instanceof Request ? request.url : String(request);
       if (method === "POST" && url.includes("/messages")) {
         deliveryBodies.push(JSON.parse(String(init?.body)));
+        if (linkFallback && deliveryBodies.length === 2) {
+          return Response.json({ error: { code: "LINK_REJECTED" } }, { status: 400 });
+        }
         return new Response(JSON.stringify({
-          message: { id: "provider_group_join_confirmation" },
+          message: { id: `provider_exact_${deliveryBodies.length}` },
         }), {
           headers: { "content-type": "application/json" },
           status: 200,
@@ -2417,6 +2430,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             effectsPort: {
               async assertLinqRecentInboundEngagement(request) {
                 assert.equal(request.target, "linq_private_group_join_thread");
+                if (healthWin && !request.authorityCheckOnly) {
+                  assert.equal(request.idempotencyKey, exactDeliveryKey);
+                  events.push("health-win.dispatch");
+                }
                 if (clinical) {
                   assert.equal(request.idempotencyKey, exactDeliveryKey);
                   assert.equal(request.homeRouteFallbackAllowed, false);
@@ -2457,7 +2474,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
       const pendingAfter = await readHostedSystemMailboxState(vaultRoot);
       const outboxAfter = await listAssistantOutboxIntents(vaultRoot);
-      assert.equal(deliveryBodies.length, revoked ? 0 : 1, JSON.stringify({
+      expect(deliveryBodies, JSON.stringify({
         events,
         outbox: outboxAfter.map((intent) => ({
           deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
@@ -2469,9 +2486,19 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           status: item.status,
         })),
         result: completedResult,
-      }));
+      })).toMatchObject(revoked ? [] : [
+        { message: { idempotency_key: exactDeliveryKey, parts: [{ type: "text", value: healthWin ? winQuestion : exactText }] } },
+        ...(healthWin ? [
+          { message: { idempotency_key: `${exactDeliveryKey}:link`, parts: [{ type: "link", value: winLink }] } },
+        ] : []),
+        ...(linkFallback ? [
+          { message: { idempotency_key: `${exactDeliveryKey}:link:fallback`, parts: [{ type: "text", value: winLink }] } },
+        ] : []),
+      ]);
       if (clinical) expect(events).toEqual(expect.arrayContaining(["clinical.preflight", "clinical.dispatch"]));
-      if (!revoked) expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+      if (healthWin) {
+        expect(events.filter((event) => event === "health-win.dispatch")).toHaveLength(1);
+      }
       assert.deepEqual(
         outboxAfter.map((intent) => ({
           deliveryIdempotencyKey: intent.deliveryIdempotencyKey,

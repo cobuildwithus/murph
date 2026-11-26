@@ -134,6 +134,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
 
   it("reads one viewer measure privately, leaving the viewer's suggestions and the post's interactions intact", async () => {
     const author = await person(), viewer = await person();
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", viewer.id);
     await pair(author, viewer);
     const shared = await frozenLabPost(author);
     const input = insulinReading(8.1, new Date().toISOString().slice(0, 10));
@@ -147,6 +148,8 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(before.candidates).toHaveLength(1);
     const stored = () => db.healthWinSet.findMany({ where: { memberId: viewer.id } });
     const sealed = await stored();
+    const presentation = () => db.healthWinNudge.findUniqueOrThrow({ where: { memberId: viewer.id } });
+    const lastPresented = await presentation();
     const source = vi.spyOn(inputs, "readMeasureInputs").mockResolvedValue({ input, observed: true });
     const response = await shared.read(viewer);
     expect(response.status).toBe(200);
@@ -161,6 +164,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(Object.keys(result.friend).sort()).toEqual(["unit", "value"]);
     source.mockResolvedValue({ input: { member: input.member }, observed: false });
     expect(await (await shared.read(viewer)).json()).toEqual({ measure, card: null, reason: "no_labs", friend: null });
+    expect(await presentation()).toEqual(lastPresented);
     expect(await (await wins(viewer.request("wins"))).json()).toEqual(before);
     expect(await stored()).toEqual(sealed);
     const post = await db.healthPost.findUniqueOrThrow({ where: { id: shared.postId },
@@ -201,7 +205,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
       await revokeHostedConsentScope({ memberId: viewer.id, scope: "launch.health-data", prisma: db });
       return { input: insulinReading(7.2, today), observed: true };
     });
-    expect((await shared.read(viewer)).status).toBe(403);
+    expect((await shared.read(viewer)).status).toBe(404);
     await recordHostedLaunchRequiredConsent({ memberId: viewer.id, scope: "launch.health-data", prisma: db });
     await db.healthPost.update({ where: { id: shared.postId }, data: { deletedAt: new Date() } });
     expect((await shared.read(viewer)).status).toBe(404);

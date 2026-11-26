@@ -185,9 +185,23 @@ export type CardSpec = DetectedCard & {
   share: { caption_tips: readonly string[] };
 };
 
+/** Private detector evidence. The period is the observed month, event day, or intervention start. */
+export type HealthWinAchievement = (
+  | { kind: "trend_change" | "best_month" | "threshold_count" | "personal_record"; subject: Metric }
+  | { kind: "sessions"; subject: SessionType }
+  | { kind: "lab_change" | "lab_percentile"; subject: Analyte }
+  | { kind: "experiment_result"; subject: string }
+) & { period: string };
+
+export interface DetectedHealthWins {
+  cards: CardSpec[];
+  achievements: Map<string, HealthWinAchievement>;
+}
+
 /** Private ranking evidence. Effect and noise use the same units. */
 export interface Candidate {
   card: DetectedCard;
+  achievement?: HealthWinAchievement;
   /** Daily metric behind a trend, threshold, streak, monthly best or record. */
   metric?: Metric;
   date: string;

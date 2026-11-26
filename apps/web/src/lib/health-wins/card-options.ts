@@ -3,7 +3,7 @@ import type { ClientUnits } from "../companion/client-info";
 import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
-import type { CardSpec } from "./engine";
+import type { CardSpec, HealthWinAchievement } from "./engine";
 import { formatNumber, formatWinMonth, milesFromKm } from "./engine/shared";
 
 type Option = "original" | "hide_numbers" | "hide_map" | "hours";
@@ -93,6 +93,9 @@ interface CandidateDisplay {
 
 export interface CachedHealthCandidate extends CandidateDisplay {
   miles?: CandidateDisplay;
+  /** Private detector evidence on the sealed wrapper, independent of its units or variants. */
+  achievement?: HealthWinAchievement;
+  sourceComplete?: boolean;
 }
 
 /** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
@@ -125,8 +128,15 @@ function prepareMemberCandidate(
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
-export function prepareHealthCandidates(memberId: string, cards: readonly CardSpec[], distanceArtUrl: string | null = null): CachedHealthCandidate[] {
-  return cards.map(card => prepareMemberCandidate(memberId, card, () => randomUUID(), distanceArtUrl));
+export function prepareHealthCandidates(
+  memberId: string, cards: readonly CardSpec[], distanceArtUrl: string | null = null,
+  detection?: { achievements: ReadonlyMap<string, HealthWinAchievement>; complete: boolean },
+): CachedHealthCandidate[] {
+  return cards.map(card => {
+    const candidate = prepareMemberCandidate(memberId, card, () => randomUUID(), distanceArtUrl);
+    const achievement = detection?.achievements.get(card.id);
+    return achievement ? { ...candidate, achievement, sourceComplete: detection?.complete } : candidate;
+  });
 }
 
 export function prepareSeeYoursCandidate(memberId: string, card: CardSpec, units: ClientUnits): CachedHealthCandidate {
