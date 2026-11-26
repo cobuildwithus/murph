@@ -14,6 +14,7 @@ import type {
   HostedBrowserVaultReplicaMetricBucketSetRef,
 } from "@murphai/hosted-execution/browser-vault";
 
+import { loadBrowserVaultExport } from "../src/lib/browser-vault/export";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { createJsonPostRequest } from "./route-test-helpers";
 
@@ -26,6 +27,8 @@ const TEST_BROWSER_VAULT_METRIC_BUCKET_IDS = Array.from(
 
 const mocks = vi.hoisted(() => ({
   prepareProgressShareExport: vi.fn(),
+  openHealthTexts: vi.fn(),
+  assertHostedAppSessionCurrentTx: vi.fn(),
   assertBrowserVaultMemberAuthority: vi.fn(),
   afterResponse: vi.fn((callback: () => void | Promise<void>) => {
     void callback();
@@ -48,6 +51,11 @@ const mocks = vi.hoisted(() => ({
   verifySensitiveActionChallenge: vi.fn(),
   consumeSensitiveActionChallenge: vi.fn(),
   readHostedWorkspaceBrowserVaultSourceStateHash: vi.fn<(snapshotRef: unknown) => string | null>(() => null),
+}));
+
+vi.mock("@/src/lib/health-wins/crypto", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/health-wins/crypto")>(),
+  openHealthTexts: mocks.openHealthTexts,
 }));
 
 vi.mock("@/src/lib/game/progress/share-export", () => ({ prepareProgressShareExport: mocks.prepareProgressShareExport }));
@@ -76,6 +84,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
+  assertHostedAppSessionCurrentTx: mocks.assertHostedAppSessionCurrentTx,
   requireActiveHostedAppSessionFromRequest: mocks.requireActivePrivyMemberAuth,
   requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
@@ -779,7 +788,56 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns a truthful retained-replica error without waking withdrawn processing", async () => {
+  it("downloads saved summaries through Settings after withdrawal without a retained replica", async () => {
+    const createdAt = new Date("2030-09-12T16:04:00.000Z");
+    const memberId = "synthetic-recording-owner";
+    const rows = Array.from({ length: 71 }, (_, index) => {
+      const id = `b41bb55e-c1e5-411a-ba8a-${String(index).padStart(12, "0")}`;
+      return { id, memberId, day: "2030-09-12", createdAt, postId: null, summaryEncrypted: `sealed-${id}` };
+    });
+    const summary = (id: string) => ({ id, kind: "other", startedAt: "2030-09-12T15:08:00.000Z", elapsedSec: 711, movingSec: 710 });
+    const findMany = vi.fn().mockImplementation(({ take, where }) => {
+      const cursorId = where.OR?.[1].id.gt;
+      return rows.filter(row => !cursorId || row.id > cursorId).slice(0, take);
+    });
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({ member: { id: memberId }, sessionId: "export-session" });
+    mocks.getPrisma.mockReturnValue({
+      healthActivity: { findMany },
+      $transaction: (run: (tx: object) => Promise<void>) => run(mocks.prismaClient),
+    });
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    mocks.openHealthTexts.mockImplementation((entries: { rowId: string }[]) => entries.map(entry => JSON.stringify(summary(entry.rowId))));
+
+    const result = await loadBrowserVaultExport({
+      authorization: {
+        method: "passkey", token: "synthetic-export-token",
+        assertion: { type: "public-key", id: "synthetic-proof", rawId: "synthetic-proof", clientExtensionResults: {},
+          response: { authenticatorData: "proof", clientDataJSON: "proof", signature: "proof" } },
+      },
+      fetchImpl: (input, init) => settingsVaultExportSessionRoute.POST(new Request(new URL(String(input), "https://export.example.test"), init)),
+    });
+
+    expect(JSON.parse(await result.blob.text())).toEqual({
+      browserVault: null, exportedAt: result.generatedAt, progressShares: [],
+      recordedActivities: rows.map(row => ({ ...summary(row.id), day: row.day, createdAt: createdAt.toISOString(), postId: null })),
+    });
+    expect(findMany).toHaveBeenCalledTimes(2);
+    for (const [query] of findMany.mock.calls) {
+      expect(query.where).toMatchObject({ memberId, deletedAt: null });
+    }
+    const opened = mocks.openHealthTexts.mock.calls.flatMap(([entries]) => entries);
+    expect(opened).toEqual(rows.map(row => ({
+      memberId, rowId: row.id, table: "health_activity", field: "summary", value: row.summaryEncrypted,
+    })));
+    expect(mocks.assertHostedAppSessionCurrentTx).toHaveBeenCalledTimes(4);
+    expect(mocks.consumeSensitiveActionChallenge.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.openHealthTexts.mock.invocationCallOrder[0]!);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+  });
+
+  it("preserves the retained-replica response for an older export client after withdrawal", async () => {
+    const healthActivity = { findMany: vi.fn() };
+    mocks.getPrisma.mockReturnValue({ healthActivity });
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
@@ -796,6 +854,7 @@ describe("browser vault session route", () => {
       }),
     );
 
+    expect(healthActivity.findMany).not.toHaveBeenCalled();
     expect(response.status).toBe(409);
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();

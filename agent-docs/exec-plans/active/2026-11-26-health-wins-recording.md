@@ -81,3 +81,13 @@ that decision from those three fields. Row 4 therefore owns counting recordings 
 session wins. It needs a compatible projection with reconciliation inputs, a bounded
 summary read, shared activity aliases and candidate-set cache invalidation. The timed
 server rollout can save and export summaries independently.
+
+## Web handoff
+
+Local PostgreSQL verification covered preview without writes, concurrent saves and
+competing publications, mixed selections, stale revisions, post removal, partner access
+and consent withdrawal. The Settings client and route exported multiple pages of summaries
+for a withdrawn member without a retained vault replica. The activity migration applied
+to a fresh database and account deletion removed its saved rows. The focused Web suites,
+typecheck and Prisma validation passed. The companion rollout and session projection
+work remain open.

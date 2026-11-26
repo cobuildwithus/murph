@@ -9,8 +9,9 @@ import {
 import {
   HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS,
   HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
+  type HostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/browser-vault";
-import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
+import { parseHostedUserRecipientPublicKeyJwk, type HostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
@@ -39,6 +40,7 @@ import {
   verifySensitiveActionChallenge,
 } from "@/src/lib/sensitive-actions/server";
 
+import { prepareRecordedActivityExport } from "@/src/lib/health-wins/activity-export";
 import { prepareProgressShareExport } from '@/src/lib/game/progress/share-export';
 import { progressEffect } from '@/src/lib/game/progress/http';
 
@@ -118,14 +120,61 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const refreshPending = freshness.shouldRefresh || deviceSyncImportPending;
 
-  if (!replicaRef) {
-    if (!processingAllowed) {
-      throw browserVaultRetainedReplicaUnavailableError();
-    }
-    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-    throw browserVaultSessionNotFreshError();
-  }
+  const assertCurrent = () => prisma.$transaction(tx => assertHostedAppSessionCurrentTx({
+    memberId: auth.member.id, prisma: tx, request, sessionId: auth.sessionId, authProof: auth.authProof,
+  }));
+  // Older Settings clients only recognize picture records.
+  const activityRecords = body.includeRecordedActivities === true
+    ? await prepareRecordedActivityExport(auth.member.id, assertCurrent)
+    : null;
+  const session = replicaRef
+    ? await fetchExportSession({ browserPublicKeyJwk, replicaRef, userId: auth.member.id }, acceptsBucketedReplica)
+    : null;
 
+  if (processingAllowed && (!session || refreshPending)) {
+    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+  }
+  if (!session && !activityRecords) {
+    throw processingAllowed ? browserVaultSessionNotFreshError() : browserVaultRetainedReplicaUnavailableError();
+  }
+  const shareRecords = await progressEffect("prepare_share_export", () => prepareProgressShareExport(auth.member.id, assertCurrent));
+
+  // Consume approval only after the retained export is ready to stream.
+  await consumeSensitiveActionChallenge({
+    challenge, prisma, session: { request, sessionId: auth.sessionId, authProof: auth.authProof },
+  });
+
+  // One record at a time keeps image bytes out of the bulk replica response buffer.
+  const encoder = new TextEncoder();
+  async function* exportRecords() {
+    if (activityRecords) yield* activityRecords();
+    yield* shareRecords();
+  }
+  const records = exportRecords();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify({
+        ...(session ?? { state: "no_replica", exportedAt: new Date().toISOString() }),
+        deviceSyncImportPending, freshness: session ? freshness.freshness : "stale",
+        refreshPending: refreshPending || !session, workspaceVersion: workspace?.version ?? null,
+      }) + '\n'));
+    },
+    async pull(controller) {
+      try {
+        const next = await records.next();
+        if (next.done) controller.close();
+        else controller.enqueue(encoder.encode(next.value));
+      } catch { controller.error(new Error('Data export could not finish. Try again.')); }
+    },
+    async cancel() { await records.return(); },
+  }), { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
+});
+
+async function fetchExportSession(input: {
+  browserPublicKeyJwk: HostedUserRecipientPublicKeyJwk;
+  replicaRef: HostedBrowserVaultReplicaRef;
+  userId: string;
+}, acceptsBucketedReplica: boolean) {
   const client = readHostedExecutionControlClientIfConfigured();
   if (!client) {
     throw hostedOnboardingError({
@@ -134,28 +183,12 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Hosted execution control plane is not configured.",
     });
   }
-
-  let session:
-    | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
-    | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
-  const sessionInput = {
-    browserPublicKeyJwk,
-    replicaRef,
-    userId: auth.member.id,
-  };
   try {
-    session = acceptsBucketedReplica
-      ? await client.createBrowserVaultExportSession(sessionInput)
-      : await client.createBrowserVaultSession(sessionInput);
+    return acceptsBucketedReplica
+      ? await client.createBrowserVaultExportSession(input)
+      : await client.createBrowserVaultSession(input);
   } catch (error) {
-    if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-      if (!processingAllowed) {
-        throw browserVaultRetainedReplicaUnavailableError();
-      }
-      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-      throw browserVaultSessionNotFreshError();
-    }
-
+    if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") return null;
     if (error instanceof CloudflareHostedControlMalformedResponseError) {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
@@ -163,42 +196,9 @@ export const POST = withJsonError(async (request: Request) => {
         message: "Hosted execution control plane returned an invalid browser vault session.",
       });
     }
-
     throw error;
   }
-
-  if (processingAllowed && refreshPending) {
-    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-  }
-
-  const shareRecords = await progressEffect('prepare_share_export', () => prepareProgressShareExport(auth.member.id, () =>
-    prisma.$transaction(tx => assertHostedAppSessionCurrentTx({ memberId: auth.member.id, prisma: tx,
-      request, sessionId: auth.sessionId, authProof: auth.authProof }))));
-
-  // Consume the challenge atomically only once the encrypted replica is in
-  // hand. A failure here aborts the response without releasing the session.
-  await consumeSensitiveActionChallenge({
-    challenge, prisma, session: { request, sessionId: auth.sessionId, authProof: auth.authProof },
-  });
-
-  // One record at a time keeps image bytes out of the bulk replica response buffer.
-  const encoder = new TextEncoder();
-  const records = shareRecords();
-  return new Response(new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(JSON.stringify({ ...session, deviceSyncImportPending,
-        freshness: freshness.freshness, refreshPending, workspaceVersion: workspace?.version ?? null }) + '\n'));
-    },
-    async pull(controller) {
-      try {
-        const next = await records.next();
-        if (next.done) controller.close();
-        else controller.enqueue(encoder.encode(next.value));
-      } catch { controller.error(new Error('Picture export could not finish. Try again.')); }
-    },
-    async cancel() { await records.return(); },
-  }), { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
-});
+}
 
 async function readExportProcessingAllowed(memberId: string, prisma: ReturnType<typeof getPrisma>) {
   const state = await readHostedHealthDataConsentState({ memberId, prisma });

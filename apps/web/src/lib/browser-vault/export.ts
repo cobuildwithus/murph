@@ -8,6 +8,7 @@ import {
   unwrapHostedBrowserSessionKey,
   type HostedBrowserSessionKeyEnvelope,
   type HostedCipherEnvelope,
+  type HostedUserRecipientPrivateKeyJwk,
 } from "@murphai/runtime-state";
 import {
   getHostedBrowserVaultReplicaStorageKeyId,
@@ -86,6 +87,7 @@ export async function loadBrowserVaultExport({
     body: JSON.stringify({
       authorization,
       browserPublicKeyJwk: publicKeyJwk,
+      includeRecordedActivities: true,
       ...(acceptsBucketedReplica
         ? {
             requestedMetricBuckets:
@@ -117,26 +119,23 @@ export async function loadBrowserVaultExport({
   const records = readExportRecords(response);
   try {
     const first = await records.next();
-    const session = parseBrowserVaultExportSession(first.value);
-    assertNotAborted(signal);
-    assertBrowserVaultExportSessionMatchesAtomicRef(session);
+    const header = requireRecord(first.value, "Settings export session");
+    const payload = await loadRetainedVaultPayload(header, privateKeyJwk, signal);
 
-    // Both transports wrap one replica data key. Unwrap it exactly once, after
-    // the complete response has passed its atomic ref/AAD validation.
-    const replicaKey = await unwrapHostedBrowserSessionKey({
-      envelope: session.replicaKeyEnvelope,
-      recipientPrivateKeyJwk: privateKeyJwk,
-    });
-    assertNotAborted(signal);
-    const payload = session.transport === "legacy"
-      ? await loadLegacyBrowserVaultExport({ replicaKey, session, signal })
-      : await loadBucketedBrowserVaultExport({ replicaKey, session, signal });
-
+    const activityParts: BlobPart[] = [];
     const shareParts: BlobPart[] = [];
     // The medal photo comes last, on its own record.
     let photoPart: BlobPart[] = [];
     for await (const value of records) {
-      const record = requireRecord(value, 'Progress share export record');
+      const record = requireRecord(value, "Settings export record");
+      if (Array.isArray(record.recordedActivities)) {
+        const activities = record.recordedActivities.map(activity => requireRecord(activity, "Recorded activity export"));
+        if (activities.length) {
+          if (activityParts.length) activityParts.push(",");
+          activityParts.push(new Blob([JSON.stringify(activities)]).slice(1, -1));
+        }
+        continue;
+      }
       if (record.progressSharePhoto !== undefined) {
         const photo = requireRecord(record.progressSharePhoto, 'Medal photo export');
         requireIsoTimestamp(photo.createdAt, 'Medal photo createdAt');
@@ -152,16 +151,47 @@ export async function loadBrowserVaultExport({
       if (shareParts.length) shareParts.push(',');
       shareParts.push(new Blob([JSON.stringify(share)]));
     }
-    const blob = new Blob([payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, ']', ...photoPart, '}'], { type: VAULT_EXPORT_MIME_TYPE });
-    return {
-      blob,
-      deviceSyncImportPending: session.deviceSyncImportPending,
-      freshness: session.freshness,
-      generatedAt: payload.generatedAt,
-      refreshPending: session.refreshPending,
-      workspaceVersion: session.workspaceVersion,
-    };
+    if (header.state === "no_replica" && !activityParts.length) {
+      throw new ContractValidationError("Settings export is missing its recorded activities.");
+    }
+    const blob = new Blob([
+      payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, "]", ...photoPart,
+      ...(activityParts.length ? [',"recordedActivities":[', ...activityParts, "]"] : []), "}",
+    ], { type: VAULT_EXPORT_MIME_TYPE });
+    return { ...payload, blob };
   } finally { await records.return(undefined); }
+}
+
+async function loadRetainedVaultPayload(
+  record: Record<string, unknown>, privateKeyJwk: HostedUserRecipientPrivateKeyJwk, signal?: AbortSignal,
+): Promise<BrowserVaultExportResult> {
+  assertNotAborted(signal);
+  if (record.state === "no_replica") {
+    requireExactRecord(record, ["state", "exportedAt", "deviceSyncImportPending", "freshness", "refreshPending", "workspaceVersion"], "Settings export without a replica");
+    const generatedAt = requireIsoTimestamp(record.exportedAt, "Settings export timestamp");
+    return {
+      blob: new Blob([JSON.stringify({ browserVault: null, exportedAt: generatedAt })]),
+      generatedAt,
+      deviceSyncImportPending: readOptionalBoolean(record.deviceSyncImportPending, false, "deviceSyncImportPending"),
+      freshness: "stale",
+      refreshPending: true,
+      workspaceVersion: readOptionalNullableString(record.workspaceVersion, "workspaceVersion"),
+    };
+  }
+  const session = parseBrowserVaultExportSession(record);
+  assertBrowserVaultExportSessionMatchesAtomicRef(session);
+  const replicaKey = await unwrapHostedBrowserSessionKey({
+    envelope: session.replicaKeyEnvelope,
+    recipientPrivateKeyJwk: privateKeyJwk,
+  });
+  assertNotAborted(signal);
+  const payload = session.transport === "legacy"
+    ? await loadLegacyBrowserVaultExport({ replicaKey, session, signal })
+    : await loadBucketedBrowserVaultExport({ replicaKey, session, signal });
+  return {
+    ...payload, deviceSyncImportPending: session.deviceSyncImportPending, freshness: session.freshness,
+    refreshPending: session.refreshPending, workspaceVersion: session.workspaceVersion,
+  };
 }
 
 /** Streaming export records never assemble all base64 images into one JS string. */

@@ -19,7 +19,7 @@ Account deletion is intentionally deliberate but does not introduce a separate p
 1. For vault export, `POST /api/settings/sensitive-action-challenge` derives a binding from the authenticated member, action kind, and Murph app-session id. It stores only a SHA-256 hash of the random challenge token and expires the row after 15 minutes. The endpoint temporarily admits the legacy `account.delete` kind so Settings pages loaded before the deletion change can finish during rollout, but the deletion route neither requires nor consumes that challenge.
 2. The browser obtains a WebAuthn assertion for the complete server-generated action challenge with user verification required.
 3. The export route verifies the assertion against the current encrypted approval aggregate, canonical RP/origin, member and session. It retains the verified snapshot for the final atomic counter/challenge commit; there is no provider-wallet lookup.
-4. Settings vault export uses the same encrypted browser-vault replica plumbing as dashboard reads but runs through a self-contained `POST /api/settings/vault-export/session` route. The route verifies the user-verified passkey assertion first, then re-reads workspace state and pending device-sync state, compares the current workspace source-state hash against the replica's `sourceBundleHash`, fetches the encrypted retained replica from the hosted execution control client, and only then atomically consumes the one-time challenge. An existing retained replica remains exportable while source changes or device imports are pending; the response marks that state so the client explains that recent changes may be absent, and active processing receives a best-effort refresh signal. A missing workspace or replica returns a retryable error without consuming the challenge. Members with current legal consent who never granted health-data consent can export the latest retained replica. Both missing and withdrawn health-data consent prevent the export from waking processing.
+4. Settings vault export uses the same encrypted browser-vault replica plumbing as dashboard reads but runs through a self-contained `POST /api/settings/vault-export/session` route. The route verifies the user-verified passkey assertion first, then re-reads workspace state and pending device-sync state, compares the current workspace source-state hash against the replica's `sourceBundleHash`, fetches the encrypted retained replica from the hosted execution control client, and only then atomically consumes the one-time challenge. An existing retained replica remains exportable while source changes or device imports are pending; the response marks that state so the client explains that recent changes may be absent, and active processing receives a best-effort refresh signal. When the browser requests recorded activities, saved summaries remain exportable even if the workspace has no retained replica. Otherwise a missing replica returns a retryable error and preserves the challenge. Members with current legal consent who never granted health-data consent can export the latest retained replica. Both missing and withdrawn health-data consent prevent the export from waking processing.
 5. The Settings client decrypts the browser-vault replica in-browser and downloads the decrypted JSON. The decrypted vault payload never passes through a separate hosted metadata-export endpoint; the obsolete public `/api/settings/data-export` route was removed.
 6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, resolves the current app-session member, enforces browser mutation-origin protection and the exact typed phrase, then suspends that member before starting provider cleanup. It requires and consumes no passkey authorization; any legacy authorization field is ignored.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
@@ -60,12 +60,19 @@ failure code and a base64 JPEG only when ready. No storage key, source photo key
 prompt or provider response is exported. Retired/failed/generating attempts export
 metadata only. Changing the profile photo does not remove a made share.
 
-The same authenticated, passkey-approved session endpoint emits newline-delimited
-JSON: the existing encrypted replica session first, followed by share records.
-The browser decrypts the replica as before and appends share records as Blob parts;
-it never assembles every image into one JavaScript string. No new endpoint,
-capability, stored export, provider call or upload path is added. This extends the
-current vault-only export; this checkout has no existing Progress-pic export.
+The authenticated, passkey-approved session endpoint emits newline-delimited JSON.
+Settings requests recorded activities with `includeRecordedActivities: true`.
+The first record contains the encrypted replica session, or `state: "no_replica"`
+when the member has saved activities and the replica is absent. In that case the
+download includes `browserVault: null` and the export timestamp. The remaining
+records carry saved activities and Progress shares. The browser decrypts the
+replica and appends these records as Blob parts.
+
+Settings includes the member's retained summaries in `recordedActivities`, with
+their activity ID, local day, saved timestamp and optional post ID. Web reads
+and opens summaries in bounded batches, rechecking the session before each
+batch is released. The same explicit export remains available after withdrawal,
+even when health recording is disabled.
 
 Progress selects at most 10,001 narrow share rows and refuses overflow before
 consuming the approval or loading media. Processing is serial, with one image in
@@ -170,6 +177,7 @@ The Settings vault export does not include:
 
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
+| `prisma.health_activity` | Member cascade | Approved Settings export | Includes saved activity summaries and their local day. |
 | Health wins posts, comments, cheers, hides and win sets | Cascade from member or parent post | Outside the vault-only Settings export | Deletes the member's posts and comments, activity on their posts, their cheers, hides involving them in either direction, and their suggestion sets. |
 | Health wins photo attachments and sealed Progress objects | Retire and purge before member cascade | Outside the vault-only Settings export | Attachment ownership and the sealed storage key survive a failed purge. The object lifecycle covers staged, published and retired photos. |
 | Weekly game replies (`game_reply`) | Cascade from author profile or parent entry/game | Not included in the vault-only Settings export | Encrypted text or inline AAC audio, no transcript. Report evidence is reporter-owned and follows report lifetime. |

@@ -141,6 +141,12 @@ export interface HostedAccountDataStoreCoverageEntry {
 
 export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   {
+    slug: "prisma.health_activity",
+    label: "Recorded health activities",
+    deletion: "live-delete",
+    note: "Deleting the member cascades their sealed activity summaries. Approved Settings exports include their retained summaries, including after health consent withdrawal.",
+  },
+  {
     slug: "prisma.health_post",
     label: "Health feed posts",
     deletion: "live-delete",
