@@ -1,7 +1,7 @@
 import 'server-only';
 import * as z from '@murphai/contracts/zod-runtime';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
-import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, routeBbox, type Coordinate } from './route-geometry';
+import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, latitudeAt, MAP_SIZES, mercatorY, routeBbox, type Bbox, type Coordinate } from './route-geometry';
 import { BANK } from './bank';
 import type { MapQuery } from './contract';
 import type { RouteLeg } from './state';
@@ -20,14 +20,15 @@ function unavailable() {
 }
 
 /** URLs and provider errors remain inside this boundary, including the token. */
-async function mapboxRequest(path: string, query: Record<string, string>): Promise<Response> {
+async function mapboxRequest(path: string, query: Record<string, string>, signal?: AbortSignal): Promise<Response> {
   const token = process.env.MAPBOX_ACCESS_TOKEN;
   if (!token) throw unavailable();
   const url = new URL(`https://api.mapbox.com${path}`);
   for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
   url.searchParams.set('access_token', token);
   try {
-    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const response = await fetch(url, { cache: 'no-store', signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     if (!response.ok) { await response.body?.cancel(); throw unavailable(); }
     return response;
   } catch { throw unavailable(); }
@@ -148,10 +149,23 @@ export async function reversePlace(at: Coordinate): Promise<{ name: string; plac
 }
 
 /** Plain satellite of exactly `bbox` at `width` x `height` pixels: no overlays, logo or attribution. */
-export async function satelliteImage(bbox: readonly number[], width: number, height: number, signal: AbortSignal): Promise<Buffer> {
+export async function satelliteImage(bbox: Bbox, width: number, height: number, signal: AbortSignal, view: 'bounds' | 'center' = 'bounds'): Promise<Buffer> {
   signal.throwIfAborted();
-  const response = await mapboxRequest(`/styles/v1/mapbox/satellite-v9/static/[${bbox.join(',')}]/${width / 2}x${height / 2}@2x`,
-    { padding: '0', attribution: 'false', logo: 'false' });
+  let position = `[${bbox.join(',')}]`;
+  const query: Record<string, string> = { attribution: 'false', logo: 'false' };
+  if (view === 'center') {
+    // Center/zoom keeps a continuous tile frame even where its east edge wraps.
+    const [west, south, east, north] = bbox;
+    const longitude = ((west + east) / 2 + 540) % 360 - 180;
+    const latitude = latitudeAt((mercatorY(north) + mercatorY(south)) / 2);
+    // Static styles use 512 CSS pixels per world tile. @2x doubles the output.
+    const zoom = Math.log2((width / 2) / 512 * 360 / (east - west));
+    position = `${longitude},${latitude},${zoom}`;
+  } else {
+    query.padding = '0';
+  }
+  const format = view === 'center' ? '.png' : '';
+  const response = await mapboxRequest(`/styles/v1/mapbox/satellite-v9/static/${position}/${width / 2}x${height / 2}@2x${format}`, query, signal);
   return Buffer.from(await response.arrayBuffer());
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { areaFrame, routeBounds } from "../src/lib/game/progress/area-art";
+import { areaFrame, areaFrameFromKey, routeBounds } from "../src/lib/game/progress/area-art";
 import { encodePolyline, type Coordinate } from "../src/lib/game/progress/route-geometry";
 
 describe("public area frames", () => {
@@ -11,6 +11,7 @@ describe("public area frames", () => {
     expect(areaFrame([second])).toEqual(area);
     expect(areaFrame([second, first])).toEqual(area);
     expect(area.art.key).toBe("area:v1:15/4095/16384");
+    expect(areaFrameFromKey(area.art.key)).toEqual(area.frame);
     const tiles = 2 ** 15;
     expect(area.frame.west).toBe(4095 / tiles * 360 - 180);
     expect(area.frame.east).toBe(4098 / tiles * 360 - 180);
@@ -41,6 +42,7 @@ describe("public area frames", () => {
     expect(frame.west).toBeLessThanOrEqual(179.999);
     expect(frame.east).toBeGreaterThanOrEqual(180.001);
     expect(frame.east - frame.west).toBe(3 * 360 / 2 ** 15);
+    expect(areaFrameFromKey(art.key)).toEqual(frame);
     expect(areaFrame([encodePolyline([...points].reverse())])).toEqual({ frame, art });
   });
 

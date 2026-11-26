@@ -2,10 +2,11 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import OpenAI, { toFile } from 'openai';
 import sharp from 'sharp';
+import { areaFrameFromKey } from './area-art';
 import { coastAgreement } from './coast-check';
 import { satelliteImage } from './mapbox';
-import { ArtError } from './place-art';
-import { cutPolyline, decodePolyline, expandBbox, MAP_SIZES, routeBbox, townPosition, type Coordinate } from './route-geometry';
+import { ArtError, artState, ensureArt, readArtRows } from './place-art';
+import { cutPolyline, decodePolyline, expandBbox, MAP_SIZES, routeBbox, townPosition, type Bbox, type Coordinate } from './route-geometry';
 import type { MapQuery } from './contract';
 import type { RouteLeg } from './state';
 
@@ -60,17 +61,34 @@ export async function makePoster(label: string, signal: AbortSignal): Promise<Bu
   return sharp(decoded(result), { limitInputPixels: 40_000_000 }).jpeg({ quality: 85 }).toBuffer();
 }
 
-/**
- * The route's frame painted in the chosen look (E1). The satellite photo is
- * taken of the frame grown to the edit canvas, painted, cut back to the frame,
- * and kept only if its coast still lines up with the photo.
- */
 export async function makePaintedMap(polyline: string, size: MapQuery['size'], signal: AbortSignal): Promise<Buffer> {
   const { width, height } = MAP_SIZES[size];
-  const canvas = size === 'card' ? { width: 1536, height: 1024, edit: '1536x1024' as const } : { width: 1024, height: 1024, edit: '1024x1024' as const };
-  const bbox = routeBbox(decodePolyline(polyline), width, height);
-  const photo = await satelliteImage(expandBbox(bbox, canvas.width / canvas.height), canvas.width, canvas.height, signal);
+  return makePaintedFrame(routeBbox(decodePolyline(polyline), width, height), size, signal);
+}
+
+/** After publication, only the public area key supplies geography to the painter. */
+export async function ensureAreaArt(key: string, beforeProvider: () => Promise<void>): Promise<void> {
+  if (process.env.MURPH_HEALTH_PAINTED_RUNS !== 'true') return;
+  const frame = areaFrameFromKey(key);
+  if (!frame) return;
+  const rows = await readArtRows([key]);
+  if (artState(rows.get(key), 'map')) return;
+  await beforeProvider();
+  const bbox: Bbox = [frame.west, frame.south, frame.east, frame.north];
+  await ensureArt([{ key, kind: 'map', make: signal => makePaintedFrame(bbox, 'area', signal, beforeProvider) }], rows);
+}
+
+/** Paint the satellite canvas, crop it to the frame and verify that its coast lines up. */
+async function makePaintedFrame(bbox: Bbox, size: MapQuery['size'] | 'area', signal: AbortSignal,
+  beforeProvider?: () => Promise<void>): Promise<Buffer> {
+  const { width, height } = size === 'area' ? { width: 768, height: 512 } : MAP_SIZES[size];
+  const canvas = size === 'drawer' ? { width: 1024, height: 1024, edit: '1024x1024' as const } : { width: 1536, height: 1024, edit: '1536x1024' as const };
+  // The three-by-two public grid already fits the edit canvas exactly.
+  const bounds = size === 'area' ? bbox : expandBbox(bbox, canvas.width / canvas.height);
+  await beforeProvider?.();
+  const photo = await satelliteImage(bounds, canvas.width, canvas.height, signal, size === 'area' ? 'center' : 'bounds');
   const image = await toFile(photo, 'map.png', { type: 'image/png' });
+  await beforeProvider?.();
   const result = await providerCall(() => client(signal).images.edit({ model: MODEL, image,
     prompt: MAP_PROMPT, n: 1, size: canvas.edit, quality: 'high', output_format: 'png' }, { signal, maxRetries: 0 }));
   const frame = Math.round(canvas.width * height / width);

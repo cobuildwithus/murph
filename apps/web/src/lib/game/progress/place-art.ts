@@ -6,7 +6,7 @@ import { getPrisma } from '../../prisma';
 /**
  * Shared place art: a poster per public place and a painting per route map,
  * each made once and reused by everyone. Rows hold no member and no route
- * text; posters are keyed by a public place id, maps by a geometry hash.
+ * text. Game maps use a geometry hash. Health win maps use a public tile frame.
  */
 export type ArtKind = 'poster' | 'map' | 'story';
 export type ArtFailure = 'generation_failed' | 'timeout' | 'refused' | 'drifted';

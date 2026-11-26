@@ -14,9 +14,11 @@ const day = new Date("2031-03-04T12:00:00.000Z");
 const at = (ms: number) => new Date(day.getTime() + ms);
 const STORY = { deadlineMs: 12_000, retryAfterMs: 60_000, budgeted: false };
 const story = { title: "River mills town", facts: ["It sits on a river.", "Mills once ran here.", "A college is nearby."] };
+const area = "area:v1:15/3801/16384";
+const nextArea = "area:v1:15/3804/16384";
 
 async function clear() {
-  await db.gamePlaceArt.deleteMany({ where: { OR: [{ key: { startsWith: "poster:v1:test-" } }, { key: { startsWith: "story:v1:test-" } }] } });
+  await db.gamePlaceArt.deleteMany({ where: { OR: [{ key: { startsWith: "poster:v1:test-" } }, { key: { startsWith: "story:v1:test-" } }, { key: { in: [area, nextArea] } }] } });
   await db.gamePlaceArtBudget.deleteMany({});
 }
 
@@ -29,6 +31,25 @@ describe.skipIf(!enabled)("shared place art store", () => {
     expect(claims.filter(claim => claim === 1)).toHaveLength(1);
     expect(claims.filter(claim => claim === null)).toHaveLength(7);
     expect((await db.gamePlaceArtBudget.findUniqueOrThrow({ where: { day: new Date("2031-03-04") } })).attempts).toBe(1);
+  });
+
+  it("makes the same area once and shares its image allowance with game maps", async () => {
+    const today = new Date(new Date().toISOString().slice(0, 10));
+    await db.gamePlaceArtBudget.create({ data: { day: today, attempts: 149 } });
+    const make = vi.fn(async () => Buffer.from("synthetic painting"));
+    const job = { key: area, kind: "map" as const, make };
+    await Promise.all([ensureArt([job], new Map()), ensureArt([job], new Map())]);
+    expect(after.jobs).toHaveLength(1);
+    await after.jobs[0]!();
+    await ensureArt([job], new Map());
+    await ensureArt([{ ...job, key: nextArea }], new Map());
+    expect(make).toHaveBeenCalledOnce();
+    expect(after.jobs).toHaveLength(1);
+    expect(artState((await readArtRows([area])).get(area), "map")).toEqual({
+      state: "ready", path: "/api/game/v1/progress/art/area%3Av1%3A15%2F3801%2F16384",
+    });
+    expect(await db.gamePlaceArt.findUnique({ where: { key: nextArea } })).toBeNull();
+    expect((await db.gamePlaceArtBudget.findUniqueOrThrow({ where: { day: today } })).attempts).toBe(150);
   });
 
   it("lets only the claiming attempt finish, and never changes ready bytes", async () => {

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ edit: vi.fn(), generate: vi.fn(), satellite: vi.fn(), reverse: vi.fn(), rows: vi.fn(), ensure: vi.fn(),
   patch: vi.fn(), after: [] as (() => Promise<void>)[] }));
@@ -15,7 +15,9 @@ vi.mock('../src/lib/game/progress/place-art', async original => ({ ...await orig
 vi.mock('../src/lib/game/progress/state', async original => ({ ...await original<typeof import('../src/lib/game/progress/state')>(), patchMeasureState: mocks.patch }));
 vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({}) }));
 import { coastAgreement } from '../src/lib/game/progress/coast-check';
-import { drawRouteOnPainting, makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from '../src/lib/game/progress/place-art-make';
+import { areaFrameFromKey } from '../src/lib/game/progress/area-art';
+import { drawRouteOnPainting, ensureAreaArt, makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from '../src/lib/game/progress/place-art-make';
+import type { ArtJob } from '../src/lib/game/progress/place-art';
 import { attachRouteArt } from '../src/lib/game/progress/route-art';
 import { routeView } from '../src/lib/game/progress/route-progress';
 import { encodePolyline, expandBbox, routeBbox } from '../src/lib/game/progress/route-geometry';
@@ -99,6 +101,74 @@ describe('painted maps', () => {
     expect(request).toMatchObject({ size: '1024x1536', quality: 'medium' });
     expect(request.prompt).toContain('travel poster illustration of Del Mar, California, United States');
     expect(request.prompt).toMatch(/No text/u);
+  });
+});
+
+describe('painted run areas', () => {
+  const key = 'area:v1:15/3801/16384';
+  const beforeProvider = vi.fn<() => Promise<void>>();
+  beforeEach(() => { vi.stubEnv('MURPH_HEALTH_PAINTED_RUNS', 'true'); });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function claimedJob() {
+    await ensureAreaArt(key, beforeProvider);
+    const [job]: ArtJob[] = mocks.ensure.mock.calls[0]![0];
+    expect(job).toMatchObject({ key, kind: 'map' });
+    return job!;
+  }
+
+  it('leaves disabled painting and invalid keys out of the art store', async () => {
+    await ensureAreaArt('area:v1:16/3801/16384', beforeProvider);
+    vi.stubEnv('MURPH_HEALTH_PAINTED_RUNS', 'false');
+    await ensureAreaArt(key, beforeProvider);
+    expect(mocks.rows).not.toHaveBeenCalled();
+    expect(mocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it.each(['making', 'ready'])('reuses a %s painting', async status => {
+    mocks.rows.mockResolvedValue(new Map([[key, { key, status, startedAt: new Date() }]]));
+    await ensureAreaArt(key, beforeProvider);
+    expect(mocks.ensure).not.toHaveBeenCalled();
+    expect(beforeProvider).not.toHaveBeenCalled();
+  });
+
+  it('checks the origin before consuming an attempt', async () => {
+    beforeProvider.mockRejectedValue(new Error('origin unavailable'));
+    await expect(ensureAreaArt(key, beforeProvider)).rejects.toThrow();
+    expect(mocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it('sends only the public three-by-two frame and paints it edge to edge', async () => {
+    const photo = await coastImage(1536, 1024, 0.4);
+    mocks.satellite.mockResolvedValue(photo);
+    mocks.edit.mockResolvedValue(b64(photo));
+    const signal = new AbortController().signal;
+    const job = await claimedJob();
+    const painting = await job.make(signal);
+    const { west, south, east, north } = areaFrameFromKey(key)!;
+    expect(mocks.satellite).toHaveBeenCalledWith([west, south, east, north], 1536, 1024, signal, 'center');
+    expect(mocks.edit.mock.calls[0]![0]).toEqual({ model: 'gpt-image-2.6-flare', image: photo,
+      prompt: expect.any(String), n: 1, size: '1536x1024', quality: 'high', output_format: 'png' });
+    expect(await sharp(painting).metadata()).toMatchObject({ width: 768, height: 512, format: 'jpeg' });
+  });
+
+  it('skips the satellite request after admission is lost', async () => {
+    const job = await claimedJob();
+    beforeProvider.mockRejectedValue(new Error('origin unavailable'));
+    await expect(job.make(new AbortController().signal)).rejects.toThrow();
+    expect(mocks.satellite).not.toHaveBeenCalled();
+    expect(mocks.edit).not.toHaveBeenCalled();
+  });
+
+  it('rechecks admission between the satellite request and the model request', async () => {
+    const job = await claimedJob();
+    mocks.satellite.mockImplementation(async () => {
+      beforeProvider.mockRejectedValue(new Error('origin unavailable'));
+      return Buffer.from('synthetic image');
+    });
+    await expect(job.make(new AbortController().signal)).rejects.toThrow();
+    expect(mocks.satellite).toHaveBeenCalledOnce();
+    expect(mocks.edit).not.toHaveBeenCalled();
   });
 });
 
