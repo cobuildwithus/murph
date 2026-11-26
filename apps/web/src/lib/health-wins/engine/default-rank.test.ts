@@ -35,14 +35,26 @@ describe("the default health win ranker", () => {
       metric: "rhr_bpm", provider: day % 2 ? "Oura" : "Garmin", value: 55,
       date: `2032-06-${String(day + 1).padStart(2, "0")}`,
     }));
-    expect(percentiles({ daily })).toMatchObject([{ title: { number: "Top 26%" }, chart: { lowerIsBetter: true } }]);
+    expect(percentiles({ daily })).toMatchObject([{ title: { number: "Top 26%" }, chart: { lowerIsBetter: true },
+      source_note: "Mean of 14 recorded days in the 14 days through Jun 14. Oura sleeping heart rate norms" }]);
 
     const watch = { ...member, wearableProvider: "Apple Watch" };
     const watchDays = daily.map(day => ({ ...day, provider: "Apple Watch" }));
-    expect(percentiles({ daily: watchDays, member: watch })).toMatchObject([{ title: { number: "Top 5%" } }]);
+    expect(percentiles({ daily: watchDays, member: watch })).toMatchObject([{ title: { number: "Top 5%" },
+      source_note: "Mean of 14 recorded days in the 14 days through Jun 14. Apple Heart and Movement Study" }]);
     expect(percentiles({ daily: watchDays })).toEqual([]);
     expect(percentiles({ daily: [daily[0], ...watchDays.slice(1)], member: watch })).toEqual([]);
     expect(percentiles({ daily: watchDays.map(day => ({ ...day, provider: "Apple Health" })), member: watch })).toEqual([]);
+  });
+
+  it.each([
+    ["steps", 18000, "Mean of 14 recorded days in the 14 days through Jun 14. US adults, NHANES 2011-2014"],
+    ["vo2max", 55, "Wearable estimate on Jun 14. FRIEND registry"],
+  ] as const)("includes a short display citation for %s", (metric, value, source_note) => {
+    const daily: DailySample[] = Array.from({ length: 14 }, (_, day) => ({
+      metric, value, provider: "Garmin", date: `2032-06-${String(day + 1).padStart(2, "0")}`,
+    }));
+    expect(percentiles({ daily })).toMatchObject([{ source_note }]);
   });
 
   it("offers HDL at the 70% boundary and preserves integer precision inside the band", () => {
@@ -51,7 +63,7 @@ describe("the default health win ranker", () => {
     expect(percentiles({ labs: [{ ...draw, value: 63.99 }] })).toEqual([]);
     expect(percentiles({ labs: [{ ...draw, value: 65.6 }] })).toMatchObject([{
       title: { number: "Top 26%" }, chart: { group: "Women 40 to 49", lowerIsBetter: false },
-      source_note: expect.stringContaining("August 2021-August 2023"),
+      source_note: "Lab draw on Jun 14. US adults, NHANES 2021-2023",
     }]);
     expect(percentiles({ labs: [draw], member: { ...member, sex: null } })).toEqual([]);
     expect(percentiles({ labs: [draw], member: { ...member, age: 19 } })).toEqual([]);

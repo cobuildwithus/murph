@@ -126,6 +126,7 @@ export type RankMetric = "restingHeartRate" | "steps" | "vo2Max" | LabNormMetric
 export interface HealthWinRankResult {
   /** Percentage of the comparison group the member's value outperforms, from 0 to 100. */
   betterShare: number;
+  /** Short, member-facing citation for the comparison cohort. */
   source: string;
   group: string;
   cuts: { percentile: number; value: number }[];
