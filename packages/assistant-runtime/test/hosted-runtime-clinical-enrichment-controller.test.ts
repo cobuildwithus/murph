@@ -4,6 +4,7 @@ import {
   classifyHostedClinicalPendingCheckpointWork,
   createHostedClinicalEnrichmentController,
   HOSTED_CLINICAL_ENRICHMENT_CONTINUATION_MAX_MS,
+  orderHostedClinicalUsageEffectsLast,
   resolveHostedBackgroundReadCheckpointDeadline,
   type HostedClinicalEnrichmentRunResult,
 } from "../src/hosted-runtime/clinical-enrichment-controller.ts";
@@ -43,6 +44,11 @@ describe("clinical enrichment controller", () => {
     expect(resolveHostedBackgroundReadCheckpointDeadline({
       ...input, clinicalDeadline: null, assistantAskDeadline: 50_000, pendingCheckpointWork: "due",
     })).toBe(50_000);
+  });
+  it("drains member-facing effects before batched page accounting, keeping each group's order", () => {
+    const effects = ["usage-1", "reply", "usage-2", "share"];
+    expect(orderHostedClinicalUsageEffectsLast(effects, (effect) => effect.startsWith("usage")))
+      .toEqual(["reply", "share", "usage-1", "usage-2"]);
   });
   it("does not defer checkpoints while discovering an empty queue", async () => {
     const discovery = deferred<HostedClinicalEnrichmentRunResult>();

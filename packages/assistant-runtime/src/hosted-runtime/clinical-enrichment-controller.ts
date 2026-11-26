@@ -28,6 +28,14 @@ export function classifyHostedClinicalPendingCheckpointWork<Effect>(input: {
   return input.durableEffects.length > 0 || input.canonicalReceiptCount > 0 ? "batchable" : "none";
 }
 
+/** Member-facing durable effects drain before batched clinical page accounting. */
+export function orderHostedClinicalUsageEffectsLast<Effect>(
+  effects: readonly Effect[],
+  isClinicalUsageEffect: (effect: Effect) => boolean,
+): Effect[] {
+  return [...effects.filter((effect) => !isClinicalUsageEffect(effect)), ...effects.filter(isClinicalUsageEffect)];
+}
+
 export function resolveHostedBackgroundReadCheckpointDeadline(input: {
   assistantAskDeadline: number | null;
   clinicalDeadline: number | null;

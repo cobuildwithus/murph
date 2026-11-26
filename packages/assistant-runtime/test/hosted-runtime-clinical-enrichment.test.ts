@@ -10,6 +10,24 @@ import { runOneHostedClinicalEnrichment, type HostedClinicalEnrichmentInput } fr
 
 const NOW = "2026-09-11T12:00:00.000Z";
 const EMPTY: ClinicalDocumentExtractionOutput = { status: "complete", records: [] };
+const SYNTHETIC_USAGE_EVENT: ReadOnlyAssistantAskProviderUsageEvent = {
+  stage: "answer",
+  usage: {
+    occurredAt: NOW,
+    provider: "codex-cli",
+    providerRequestOrdinal: 1,
+    providerRequestOutcome: "succeeded",
+    usage: {
+      apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: null,
+      inputTokens: 10, outputTokens: 2, providerMetadataJson: null,
+      providerName: "hosted-openai", providerRequestId: null,
+      rawUsageJson: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
+      reasoningTokens: null, requestedModel: "synthetic-model", servedModel: "synthetic-model",
+      tokenPricingBasis: "standard", totalTokens: 12, turnProfileJson: null,
+      usageExtractionSourcePath: "test.usage", usageExtractionVersion: "test-v1",
+    },
+  },
+};
 const work = {
   status: "extract" as const,
   jobId: "a".repeat(64),
@@ -213,24 +231,7 @@ describe("clinical document background runner", () => {
       return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true };
     } };
     input.deferUsageUntilAfterDurableCheckpoint = (effect) => { effects.push(effect); };
-    const event: ReadOnlyAssistantAskProviderUsageEvent = {
-      stage: "answer",
-      usage: {
-        occurredAt: NOW,
-        provider: "codex-cli",
-        providerRequestOrdinal: 1,
-        providerRequestOutcome: "succeeded",
-        usage: {
-          apiKeyEnv: null, baseUrl: null, cacheWriteTokens: null, cachedInputTokens: null,
-          inputTokens: 10, outputTokens: 2, providerMetadataJson: null,
-          providerName: "hosted-openai", providerRequestId: null,
-          rawUsageJson: { input_tokens: 10, output_tokens: 2, total_tokens: 12 },
-          reasoningTokens: null, requestedModel: "synthetic-model", servedModel: "synthetic-model",
-          tokenPricingBasis: "standard", totalTokens: 12, turnProfileJson: null,
-          usageExtractionSourcePath: "test.usage", usageExtractionVersion: "test-v1",
-        },
-      },
-    };
+    const event = SYNTHETIC_USAGE_EVENT;
     executeExtraction.mockImplementation(async (request) => {
       await request.beforeProviderEntry?.();
       request.onProviderUsage?.(event);
@@ -245,5 +246,32 @@ describe("clinical document background runner", () => {
     expect(new Set(records.map((record) => record.usageId)).size).toBe(4);
     expect(records.every((record) => record.featureKey === "clinical_document_extraction")).toBe(true);
     expect(records.every((record) => record.memberId === "synthetic-member")).toBe(true);
+  });
+
+  it("yields accounting to a foreground wake between records and replays the same usage ids", async () => {
+    const { input, executeExtraction } = setup();
+    const effects: HostedWorkspaceDurableCheckpointEffect[] = [];
+    const records: AssistantUsageRecord[] = [];
+    const wake = new AbortController();
+    input.usageRecordPort = { async recordUsage(record) {
+      records.push(record);
+      wake.abort(new Error("Synthetic foreground wake."));
+      return { recorded: true, usageId: record.usageId, platformAiUsageAllowedAfter: true };
+    } };
+    input.deferUsageUntilAfterDurableCheckpoint = (effect) => { effects.push(effect); };
+    executeExtraction.mockImplementation(async (request) => {
+      await request.beforeProviderEntry?.();
+      request.onProviderUsage?.(SYNTHETIC_USAGE_EVENT);
+      return EMPTY;
+    });
+    expect(await runOneHostedClinicalEnrichment(input)).toBe("settled");
+    // Shutdown and background abort never interrupt accounting; only a wake does.
+    const shutdown = AbortSignal.abort(new Error("Synthetic shutdown."));
+    await expect(effects[0]!({ signal: shutdown, wakeInterruptionSignal: wake.signal })).rejects.toThrow("Synthetic foreground wake.");
+    expect(records).toHaveLength(1);
+    await effects[0]!({ signal: shutdown });
+    expect(records).toHaveLength(4);
+    expect(new Set(records.map((record) => record.usageId)).size).toBe(3);
+    expect(records[1]?.usageId).toBe(records[0]?.usageId);
   });
 });

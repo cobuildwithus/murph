@@ -108,7 +108,7 @@ import {
   executeHostedMailboxEvent,
 } from "./hosted-runtime/events.ts";
 import { createHostedWorkspaceSystemWork, HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS } from "./hosted-runtime/workspace-system-work.ts";
-import { classifyHostedClinicalPendingCheckpointWork, createHostedClinicalEnrichmentController, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
+import { classifyHostedClinicalPendingCheckpointWork, createHostedClinicalEnrichmentController, orderHostedClinicalUsageEffectsLast, resolveHostedBackgroundReadCheckpointDeadline, type HostedClinicalEnrichmentController } from "./hosted-runtime/clinical-enrichment-controller.ts";
 import { runOneHostedClinicalEnrichment } from "./hosted-runtime/clinical-enrichment.ts";
 import { hasDueHostedClinicalEnrichmentWake, isHostedClinicalEnrichmentWakeItem, makeHostedClinicalEnrichmentWakeDue, setHostedClinicalEnrichmentWakeNextAttempt } from "./hosted-runtime/clinical-enrichment-wake.ts";
 import {
@@ -5208,7 +5208,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       requiresFollowUpCheckpoint: boolean;
       wake: HostedRuntimePendingWake;
     }> => {
-      const effects = readyDurableCheckpointEffects.slice();
+      const effects = orderHostedClinicalUsageEffectsLast(
+        readyDurableCheckpointEffects, (effect) => clinicalUsageEffects.has(effect));
       let requiresFollowUpCheckpoint = false;
       let durableWake: HostedRuntimePendingWake = {
         nextWakeAt: null,
@@ -5234,6 +5235,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 ? effect.vaultShareProjectionFailureWake
                 : await effect({
                     signal: effectSignal,
+                    wakeInterruptionSignal: interruption.signal,
                     vaultShareProjectionResult:
                       effectOptions.vaultShareProjectionResult ?? {
                         outcome: guardedRuntime.platform.vaultSharePort ? "error" : "no-port",
@@ -5276,7 +5278,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               status: "fail",
             });
           }
-          readyDurableCheckpointEffects.shift();
+          readyDurableCheckpointEffects.splice(readyDurableCheckpointEffects.indexOf(effect), 1);
         }
       } finally {
         await interruption.dispose();

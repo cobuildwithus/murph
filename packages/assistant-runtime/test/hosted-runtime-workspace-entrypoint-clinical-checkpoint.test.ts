@@ -254,6 +254,8 @@ async function runClinicalPagesInvocation(input: {
   extracting(): boolean;
   // Foreground passes wait for this, so the invocation cannot finish first.
   foregroundHeldUntil?: Promise<void>;
+  // The held foreground pass then commits a reply whose effect follows its checkpoint.
+  replyEffect?: () => Promise<void>;
   shutdownSignal?: AbortSignal;
   // Restores this vault instead of bootstrapping an empty one.
   snapshot?: Awaited<ReturnType<typeof createVaultSnapshotBundle>>;
@@ -274,7 +276,11 @@ async function runClinicalPagesInvocation(input: {
       async importItem() { return { status: "imported" }; },
       async runAssistantPhase() {
         await input.foregroundHeldUntil;
-        return { progressed: false, nextWakeAt: null, nextWakeReason: null };
+        const replyEffect = input.replyEffect;
+        if (!replyEffect) return { progressed: false, nextWakeAt: null, nextWakeReason: null };
+        input.replyEffect = undefined;
+        return { progressed: true, checkpointReason: "assistant_runtime_commit" as const,
+          afterCheckpoint: async () => ({ afterDurableCheckpoint: replyEffect, checkpointReason: "assistant_runtime_commit" as const }) };
       },
       platform: {
         ...createPlatform({
@@ -319,6 +325,30 @@ test("batches later clinical pages into one checkpoint in one invocation", async
     ]);
     // No page pays for a provider call that a checkpoint aborts.
     expect(events.filter((event) => event.endsWith(":requeued")), events.join(",")).toEqual([]);
+  } finally {
+    pages.runOne.mockRestore();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+test("delivers a reply's durable effect before the window's batched page accounting", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-clinical-pages-reply-"));
+  const events: string[] = [];
+  const pagesDone = createDeferred<void>();
+  const pages = mockClinicalPages(events, 3, (page) => { if (page === 3) pagesDone.resolve(); });
+  try {
+    await initializeVault({ vaultRoot, createdAt: TEST_NOW });
+    await runClinicalPagesInvocation({
+      attemptId: "attempt_synthetic_clinical_pages_reply", events, extracting: pages.extracting, vaultRoot,
+      foregroundHeldUntil: pagesDone.promise,
+      replyEffect: async () => { events.push("reply-effect"); },
+    });
+    expect(pages.completedPages(), events.join(",")).toBe(3);
+    const reply = events.indexOf("reply-effect");
+    expect(reply, events.join(",")).toBeGreaterThan(events.indexOf("snapshot"));
+    for (const page of [1, 2, 3]) {
+      expect(reply, events.join(",")).toBeLessThan(events.indexOf(`page-${page}:usage`));
+    }
   } finally {
     pages.runOne.mockRestore();
     await removeTempRoot(vaultRoot);
