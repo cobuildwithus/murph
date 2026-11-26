@@ -6776,6 +6776,8 @@ Decisions receives one call with the fixed category and detector labels and a
 three-second deadline. Failures use the engine's order. A source failure can
 omit that source. An input timeout returns the last available set, or a retryable
 503 if the member has none. Loss of member authority ends the read.
+Native authentication and Health content share unwrapped control roots for one
+request, and Web wipes the cached keys when the request ends.
 Health reads recheck session validity without taking member or session row
 locks. Writes retain those locks through commit.
 Daily candidate sets track the replica, game inputs, ready route painting

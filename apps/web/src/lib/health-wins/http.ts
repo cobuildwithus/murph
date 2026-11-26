@@ -20,8 +20,10 @@ export function withHealthRoute<Args extends unknown[]>(
 ) {
   const route = withJsonError(async (request: Request, ...args: Args) => {
     try {
-      const auth = await requireHealthFeedAuth(request);
-      return await runWithHostedDomainRootUnwrapCache(() => handler(request, auth, ...args));
+      return await runWithHostedDomainRootUnwrapCache(async () => {
+        const auth = await requireHealthFeedAuth(request);
+        return handler(request, auth, ...args);
+      });
     } catch (error) {
       if (isHostedOnboardingError(error) || error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
         throw error;
