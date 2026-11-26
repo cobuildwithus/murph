@@ -2224,22 +2224,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("blocked system mailbox mode delivers one exact group-join confirmation without draining a generic notification", async () => {
+  test.each(["group join", "clinical notice", "clinical opt-out at dispatch"])("blocked system mailbox mode delivers one exact %s without draining a generic notification", async (kind) => {
+    const clinical = kind !== "group join";
+    const revoked = kind === "clinical opt-out at dispatch";
+    const runId = "synthetic-clinical-run";
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const exactText = "You are now part of the synthetic group.";
+    const exactText = clinical ? "New records came in. Want me to go through them?" : "You are now part of the synthetic group.";
     const deliveryBodies: unknown[] = [];
-    const exactDeliveryKey = "group-join:membership_blocked_exact";
+    const exactDeliveryKey = clinical ? `clinical-change:v1:${runId}:notice` : "group-join:membership_blocked_exact";
     const exactDedupeKey =
-      `assistant.notification.requested:${exactDeliveryKey}`;
+      clinical ? `clinical-change:v1:${runId}` : `assistant.notification.requested:${exactDeliveryKey}`;
     const genericDeliveryKey = "generic:blocked_after_group_join";
     const genericDedupeKey =
       `assistant.notification.requested:${genericDeliveryKey}`;
     const exactItem = createMailboxItem({
       dedupeKey: exactDedupeKey,
       id: "mailbox_item_group_join_blocked_exact",
-      kind: "assistant.notification.requested",
+      kind: clinical ? "clinical-records.change-recorded" : "assistant.notification.requested",
       lane: "system",
       laneSeq: "1",
     });
@@ -2262,7 +2265,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         status: "resolved",
       },
       route: {
-        action: "dispatch-assistant-notification",
+        action: item.kind === "clinical-records.change-recorded" ? "consume-clinical-change" : "dispatch-assistant-notification",
         advanceProgress: true,
         itemRef: {
           id: item.id,
@@ -2331,7 +2334,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await enqueueHostedSystemMailboxItem({
         item: buildResolvedNotificationItem(exactItem),
         vaultRoot,
-        wake: buildNotificationWake({
+        wake: clinical ? { kind: "clinical-records.change-recorded", runId, generation: 2, userId: TEST_USER_ID,
+          occurredAt: TEST_NOW, eventId: exactDedupeKey } : buildNotificationWake({
           deliveryKey: exactDeliveryKey,
           eventId: exactDedupeKey,
           text: exactText,
@@ -2406,10 +2410,21 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 }),
               }),
             }),
+            clinicalRecordsPort: {
+              async readNotification() { return { mode: "notice", threadId: "linq_private_group_join_thread" }; },
+              readRun: vi.fn(), fetchPage: vi.fn(), recordOutcome: vi.fn(),
+            },
             effectsPort: {
               async assertLinqRecentInboundEngagement(request) {
                 assert.equal(request.target, "linq_private_group_join_thread");
+                if (clinical) {
+                  assert.equal(request.idempotencyKey, exactDeliveryKey);
+                  assert.equal(request.homeRouteFallbackAllowed, false);
+                  events.push(request.authorityCheckOnly ? "clinical.preflight" : "clinical.dispatch");
+                  if (revoked && !request.authorityCheckOnly) return { deliveryBlockCode: "chat_opted_out" };
+                }
                 return {
+                  ...(clinical ? { clinicalReplyAuthorized: true } : {}),
                   providerDispatchClaimed: true,
                   resolvedRoute: {
                     conversationThreadId: null,
@@ -2442,7 +2457,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
 
       const pendingAfter = await readHostedSystemMailboxState(vaultRoot);
       const outboxAfter = await listAssistantOutboxIntents(vaultRoot);
-      assert.equal(deliveryBodies.length, 1, JSON.stringify({
+      assert.equal(deliveryBodies.length, revoked ? 0 : 1, JSON.stringify({
         events,
         outbox: outboxAfter.map((intent) => ({
           deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
@@ -2455,7 +2470,8 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         })),
         result: completedResult,
       }));
-      expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+      if (clinical) expect(events).toEqual(expect.arrayContaining(["clinical.preflight", "clinical.dispatch"]));
+      if (!revoked) expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
       assert.deepEqual(
         outboxAfter.map((intent) => ({
           deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
@@ -2463,7 +2479,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         })),
         [{
           deliveryIdempotencyKey: exactDeliveryKey,
-          status: "sent",
+          status: revoked ? "failed" : "sent",
         }],
       );
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);

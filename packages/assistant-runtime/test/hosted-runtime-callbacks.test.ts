@@ -4939,26 +4939,33 @@ describe("hosted runtime callbacks", () => {
     expect(dependencies).not.toHaveProperty("sendVoice");
   });
 
-  it("rechecks a clinical notice at ordinary outbox preflight without sending its text to Web", async () => {
+  it.each(["revoked", "second recipient"])("refuses clinical outbox preflight for %s without sending text to Web", async reason => {
     const idempotencyKey = "clinical-change:v1:synthetic-run:notice";
     const target = "synthetic-private-thread";
     const effect = createEffect({ channel: "linq", idempotencyKey, threadId: target, threadIsDirect: true,
-      bindingDeliveryKind: "thread", bindingDeliveryTarget: target, message: "Synthetic message." });
+      bindingDeliveryKind: "thread", bindingDeliveryTarget: reason === "second recipient" ? "synthetic-alternate-thread" : target, message: "Synthetic message." });
     const intent = createPendingHostedDeliveryIntent({ channel: "linq", deliveryIdempotencyKey: idempotencyKey,
+      bindingDelivery: { kind: "thread", target }, explicitTarget: null,
       threadId: target, threadIsDirect: true, answeredMailboxItemIds: [], replyToMessageId: null,
       intentId: effect.effectId, message: effect.payload.message });
-    const lastError = { code: "ASSISTANT_LINQ_EGRESS_CLINICAL_AUTHORITY_UNAVAILABLE", message: "Clinical notification delivery is blocked." };
-    const failed = { ...intent, lastError, status: "failed" as const };
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(createMirrorState(intent));
-    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValueOnce(failed);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks }) => {
-      expect(await dispatchHooks.preflightDispatchIntent({ intent, now: new Date(), vault: HOSTED_WAKE.vaultRoot }))
-        .toEqual({ action: "stop", intent: failed });
-      return createDispatchResult(failed, lastError);
+      const result = await dispatchHooks.preflightDispatchIntent({ intent, now: new Date(), vault: HOSTED_WAKE.vaultRoot });
+      expect(result.action).toBe("stop");
+      return createDispatchResult(result.intent);
     });
-    const check = vi.fn(async () => ({ deliveryBlockCode: "clinical_authority_unavailable" as const }));
+    const check = vi.fn(async () => reason === "revoked" ? { deliveryBlockCode: "clinical_authority_unavailable" as const }
+      : { clinicalReplyAuthorized: true as const, resolvedRoute: { target, targetKind: "thread" as const, threadIsDirect: true,
+          conversationThreadId: null, directRecipientPhoneNumber: null, fromPhoneNumber: null } });
     await drainHostedPreparedAssistantDeliveries({ ...HOSTED_WAKE, assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({ assertLinqRecentInboundEngagement: check }) });
+    const expectedCode = reason === "revoked"
+      ? "ASSISTANT_LINQ_EGRESS_CLINICAL_AUTHORITY_UNAVAILABLE"
+      : "ASSISTANT_LINQ_EGRESS_CLINICAL_IMESSAGE_ONLY_UNAVAILABLE";
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      error: expect.objectContaining({ code: expectedCode, retryable: false }),
+      intentId: intent.intentId, onlyCurrentStatuses: ["pending", "retryable"], status: "failed", vault: HOSTED_WAKE.vaultRoot,
+    }));
     expect(check).toHaveBeenCalledWith(expect.objectContaining({ idempotencyKey, target, authorityCheckOnly: true,
       targetKind: "thread", homeRouteFallbackAllowed: false }), expect.anything());
     expect(JSON.stringify(check.mock.calls)).not.toContain(effect.payload.message);

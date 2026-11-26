@@ -425,6 +425,7 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  clinicalReplyAuthorized?: boolean;
   gameRematchAuthorityChecked?: boolean;
   assistantAskFallbackRequired?: boolean | null;
   deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null;

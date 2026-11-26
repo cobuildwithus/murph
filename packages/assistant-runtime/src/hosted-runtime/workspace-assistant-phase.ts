@@ -1967,6 +1967,7 @@ export async function runHostedWorkspaceAssistantPhase(
             resolvedRoute.conversationThreadId?.trim() ?? "";
           return {
             ...(conversationThreadId ? { conversationThreadId } : {}),
+            ...(authority.clinicalReplyAuthorized === true ? { clinicalReplyAuthorized: true } : {}),
             ...(authority.deliveryBlockCode
               ? { deliveryBlockCode: authority.deliveryBlockCode }
               : {}),

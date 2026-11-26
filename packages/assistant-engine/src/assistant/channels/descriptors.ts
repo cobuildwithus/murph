@@ -654,6 +654,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             ...request,
             answeredMailboxItemIds: answeredMailboxItemIds ?? [],
             homeRouteFallbackAllowed: shouldAllowLinqHomeRouteFallback({
+              idempotencyKey,
               bindingDelivery,
               candidate,
               explicitTarget,
@@ -793,6 +794,7 @@ async function sendLinqVoiceMemoDelivery(input: {
     )
   }
   const homeRouteFallbackAllowed = shouldAllowLinqHomeRouteFallback({
+    idempotencyKey: input.idempotencyKey,
     bindingDelivery: input.bindingDelivery,
     candidate: input.candidate,
     explicitTarget: input.explicitTarget,
@@ -1039,6 +1041,7 @@ function buildLinqVoiceMemoFallbackIdempotencyKey(input: {
   deliveryIdempotencyKey: string | null
 }): string {
   const stableParent = input.deliveryIdempotencyKey?.trim() || input.attachmentId
+  if (stableParent.startsWith('clinical-change:')) return `${stableParent}:transcript`
   return `linq-voice-memo-transcript:${stableParent}`
 }
 
@@ -1247,12 +1250,14 @@ function inferDeliveredLinqTargetKind(
 }
 
 function shouldAllowLinqHomeRouteFallback(input: {
+  idempotencyKey?: string | null
   bindingDelivery: AssistantBindingDelivery | null
   candidate: AssistantDeliveryCandidate
   explicitTarget: string | null
   threadIsDirect: boolean | null
 }): boolean {
   return (
+    !input.idempotencyKey?.startsWith('clinical-change:') &&
     input.threadIsDirect === true &&
     input.explicitTarget === null &&
     input.candidate.kind === 'thread' &&

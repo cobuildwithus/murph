@@ -1,3 +1,5 @@
+import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from "@murphai/runtime-state/assistant-ids";
+import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
 import { clinicalFhirRetrievalPlanSchema, hashClinicalFhirPatientId } from "@murphai/clinical-records";
 import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
@@ -54,7 +56,7 @@ if (enabled) {
 const now = new Date("2026-11-01T12:00:00Z");
 const daily = 24 * 60 * 60_000;
 const retry = 14 * 60_000;
-const currentReaders = { runner: 1, cloudflarePort: 1 };
+const currentReaders = { runner: 2, cloudflarePort: 2 };
 const emptyCounts = { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 0, fetchedResourceFamilyCount: 0,
   rawFileCount: 0, retractedCount: 0, reviewDecisionCount: 0, skippedExistingCount: 0, supersededCount: 0 };
 
@@ -197,8 +199,8 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
 
   it.each([
     ["production sweep", { scheduledSweep: true }],
-    ["old runner", { readers: { ...currentReaders, runner: 0 } }],
-    ["old port", { readers: { ...currentReaders, cloudflarePort: 0 } }],
+    ["old runner", { readers: { ...currentReaders, runner: 1 } }],
+    ["old port", { readers: { ...currentReaders, cloudflarePort: 1 } }],
     ["legacy client", { replacement: false }],
     ["failed baseline", { baselineStatus: "failed" }],
     ["partial baseline", { baselineStatus: "partial" }],
@@ -374,10 +376,12 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await f.terminal(true);
       expect(await f.count()).toBe(1);
       const attempt = (bubble: number, thread = f.threadId) => client.$transaction(tx => clinicalEgressBlock(tx, {
-        key: `clinical-change:v1:${f.pointer.runId}:detail:bubble:${bubble}`, memberId: f.memberId,
+        key: buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: clinicalChangeDeliveryKey(f.pointer.runId, "detail"),
+          index: bubble, turnId: "synthetic-turn" }), memberId: f.memberId,
         route: { conversationThreadId: thread, target: thread,
           directRecipientPhoneNumber: "+12025550109", fromPhoneNumber: null, targetKind: "thread", threadIsDirect: true },
       }));
+      expect(await attempt(0)).toBe("clinical_imessage_only_unavailable");
       expect(await attempt(1)).toBe("clinical_imessage_only_unavailable");
       expect(await attempt(1, "alternate-synthetic-thread")).toBe("clinical_authority_unavailable");
       await client.hostedMember.update({ where: { id: f.memberId },

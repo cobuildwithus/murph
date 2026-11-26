@@ -1,3 +1,4 @@
+import { clinicalChangeDeliveryKey } from '@murphai/hosted-execution/clinical-records-boundary'
 import { clinicalChangeRunRef } from '@murphai/core'
 import type { ClinicalNotificationDecision } from '@murphai/hosted-execution/clinical-records'
 import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
@@ -16,10 +17,11 @@ export async function queueClinicalChange(input: {
   const { decision, vault } = input
   if (decision.mode === 'off') return null
   const receiptRef = clinicalChangeRunRef(input.runId)
-  const deliveryKey = `clinical-change:v1:${input.runId}:${decision.mode}`
+  const deliveryKey = clinicalChangeDeliveryKey(input.runId, decision.mode)
   if (decision.mode === 'notice') {
     const intent = await createAssistantOutboxIntent({
       vault, createdAt: input.occurredAt, channel: 'linq', threadId: decision.threadId, threadIsDirect: true,
+      bindingDelivery: { kind: 'thread', target: decision.threadId },
       deliveryIdempotencyKey: deliveryKey, dedupeToken: deliveryKey, turnTrigger: 'automation-cron',
       turnId: `turn_clinical_${receiptRef}`, sessionId: `session_clinical_${receiptRef}`,
       message: 'New records came in. Want me to go through them?',
@@ -39,7 +41,7 @@ export async function queueClinicalChange(input: {
       return
     }
     const job = assistantCronJobSchema.parse({
-      schema: 'murph.assistant-cron-job.v1', jobId, name: 'Daily records update', enabled: true, keepAfterRun: false,
+      schema: 'murph.assistant-cron-job.v1', jobId, name: 'Daily records update', enabled: true, keepAfterRun: true,
       clinicalChange: { runId: input.runId, receiptRef },
       prompt: `Review the private clinical change receipts for run reference ${receiptRef}. Use your private vault tools to explain the changes to the member.`,
       schedule: { kind: 'at', at: input.occurredAt },

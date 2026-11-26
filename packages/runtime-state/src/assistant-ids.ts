@@ -18,3 +18,13 @@ export function isValidAssistantOpaqueId(
 ): boolean {
   return normalizeAssistantOpaqueId(value) !== null;
 }
+
+export function buildAssistantReplyBubbleDeliveryIdempotencyKey(input: {
+  deliveryIdempotencyKey?: string | null;
+  index: number;
+  turnId: string;
+}): string {
+  const prefix = (typeof input.deliveryIdempotencyKey === "string" && input.deliveryIdempotencyKey.trim())
+    || `assistant-bubble:${input.turnId}`;
+  return `${prefix}:bubble:${input.index}`;
+}

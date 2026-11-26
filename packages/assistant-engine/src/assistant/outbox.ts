@@ -2100,12 +2100,18 @@ async function sendAssistantOutboxDispatchIntent(input: AssistantOutboxDispatchM
   return sendAssistantOutboxDispatchMessage(input)
 }
 
+function assertClinicalReplyDispatchRoute(input: AssistantOutboxDispatchMessage & { dependencies?: AssistantChannelDependencies }) {
+  assertClinicalTextTransportAvailable(input.deliveryIdempotencyKey, input.channel === 'linq' && input.threadIsDirect === true
+    && Boolean(input.threadId && input.dependencies?.sendLinq) && !input.explicitTarget
+    && input.bindingDelivery?.kind === 'thread' && input.bindingDelivery.target === input.threadId)
+}
+
 export async function sendAssistantOutboxDispatchMessage(input: AssistantOutboxDispatchMessage & {
   dependencies?: AssistantChannelDependencies
   signal?: AbortSignal
   vault: string
 }): Promise<Awaited<ReturnType<typeof deliverAssistantMessageOverBinding>>> {
-  assertClinicalTextTransportAvailable(input.deliveryIdempotencyKey)
+  assertClinicalReplyDispatchRoute(input)
   const subject = normalizeAssistantOutboxDispatchSubject(input)
 
   return materializeAssistantOutboxDeliveredSession({
