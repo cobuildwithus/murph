@@ -165,6 +165,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", memberId);
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", memberId);
+    vi.stubEnv("MURPH_HEALTH_PAINTED_RUNS", "true");
     const summary = {
       id: randomUUID(), kind: "run" as const, startedAt: "2036-01-15T17:30:00.000Z", elapsedSec: 660, movingSec: 635,
       route: { distanceM: 2000, climbM: 11, splits: [{ distanceM: 1000, seconds: 310 }, { distanceM: 1000, seconds: 325 }] },
@@ -194,13 +195,14 @@ describe.skipIf(!enabled)("health write transactions", () => {
     await expect(createHealthPost(owner, { ...body, cards: [hideMap] }, "metric")).rejects.toMatchObject({ httpStatus: 400 });
     expect(await db.healthPost.count({ where: { id } })).toBe(0);
     expect(await createHealthPost(owner, body, "metric")).toEqual({ id, version: 1 });
+    expect(state.queued).toHaveLength(0);
 
     const post = await db.healthPost.findUniqueOrThrow({ where: { id } });
     expect(post.cardsEncrypted).toHaveLength(1);
     const [card] = await openHealthTexts([{ memberId, table: "health_post", rowId: id, field: "card:0", value: post.cardsEncrypted[0]! }]);
     expect(JSON.parse(card!)).toMatchObject({ id: splits.candidateId, spec: { kind: "activity_splits" } });
     expect(card).not.toContain("paths");
-    expect(card).not.toContain("area:v1:");
+    expect(card).not.toContain("area:v2:");
     expect(await db.healthActivity.findUniqueOrThrow({ where: { id: activity.id } }))
       .toMatchObject({ summaryEncrypted: saved.summaryEncrypted, postId: id });
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");

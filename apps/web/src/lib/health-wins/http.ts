@@ -3,15 +3,10 @@ import { RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-exe
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { requireGameMemberAuth } from "../game/http/auth";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
-import { describeLoggedErrorType } from "../http";
+import { describeKnownLoggedErrorType } from "../http";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { withJsonError } from "../hosted-onboarding/http";
 import { assertHealthFeedEnabled } from "./flag";
-
-const diagnosticClasses = new Set([
-  "Error", "TypeError", "RangeError", "SyntaxError", "DOMException",
-  "PrismaClientKnownRequestError", "PrismaClientInitializationError", "PrismaClientUnknownRequestError",
-]);
 
 export async function requireHealthFeedAuth(request: Request) {
   const auth = await requireGameMemberAuth(request);
@@ -31,9 +26,7 @@ export function withHealthRoute<Args extends unknown[]>(
       if (isHostedOnboardingError(error) || error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
         throw error;
       }
-      // Even a dependency's error name can contain private data.
-      const type = describeLoggedErrorType(error);
-      console.error("Health wins request failed.", { errorClass: diagnosticClasses.has(type) ? type : "UnknownError" });
+      console.error("Health wins request failed.", { errorClass: describeKnownLoggedErrorType(error) });
       return Response.json({ error: {
         code: "HEALTH_FEED_UNAVAILABLE", retryable: true,
         message: "Health wins could not load. Try again.",

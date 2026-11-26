@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 import { PlaceNotFound, previewRoute, resolveRoute, resolveRouteGeometry, renderRouteMap, reversePlace, satelliteImage, type FoundPlace } from '../src/lib/game/progress/mapbox';
 import { decodePolyline, encodePolyline, routeBbox } from '../src/lib/game/progress/route-geometry';
+import { areaFrame } from '../src/lib/game/progress/area-art';
 const polyline = encodePolyline([[-117.16, 32.72], [-118.24, 34.05], [-122.42, 37.77]]);
 const feature = (name: string, coordinates: [number, number]) => ({ features: [{ properties: { name }, geometry: { coordinates } }] });
 const mockFetch = vi.fn();
@@ -29,6 +30,19 @@ describe('Progress Mapbox boundary', () => {
     const url = mockFetch.mock.calls[0]![0] as URL;
     expect(decodeURIComponent(url.pathname)).toBe('/styles/v1/mapbox/satellite-v9/static/[-118.5,32.5,-117,34.2]/768x512@2x');
     expect(Object.fromEntries(url.searchParams)).toMatchObject({ padding: '0', attribution: 'false', logo: 'false' });
+  });
+  it('centers a public frame crossing the date line at the matching tile scale', async () => {
+    const { west, south, east, north } = areaFrame([encodePolyline([[179.999, -0.003], [-179.985, -0.001]])]).frame;
+    expect(east).toBeGreaterThan(180);
+    mockFetch.mockResolvedValueOnce(new Response());
+    await satelliteImage([west, south, east, north], 1536, 1024, new AbortController().signal, 'center');
+    const url = mockFetch.mock.calls[0]![0] as URL;
+    const [longitude, latitude, zoom] = url.pathname.split('/static/')[1]!.split('/')[0]!.split(',').map(Number);
+    expect(longitude).toBeCloseTo(-180 + 180 / 32768, 9);
+    expect(latitude).toBeCloseTo(-0.0109863, 6);
+    expect(zoom).toBe(14);
+    expect(url.pathname.endsWith('/768x512@2x.png')).toBe(true);
+    expect(url.searchParams.has('padding')).toBe(false);
   });
   it('keeps the first occurrence in sample order with two reverse geocodes in flight', async () => {
     const names = ['Start', 'Valley', 'Start', 'Ridge', 'Valley', 'Lake', 'Lake', 'End'];

@@ -743,6 +743,7 @@ model HostedMember {
   progressPics                   GameProgressPic[]
   progressShares                 GameProgressShare[]
   progressSharePhotos            GameProgressSharePhoto[]
+  areaArtBudget                  GameAreaArtMemberBudget?
   healthActivities               HealthActivity[]
   healthPosts                    HealthPost[]
   healthPostComments             HealthPostComment[]
@@ -3411,14 +3412,15 @@ model HealthPostAttachment {
 
 /// Shared, non-personal place art: one poster per public place, one painting per route map.
 model GamePlaceArt {
-  key         String    @id
-  kind        String
-  status      String
-  bytes       Bytes?
-  attempts    Int       @default(1)
-  startedAt   DateTime  @default(now()) @map("started_at")
-  readyAt     DateTime? @map("ready_at")
-  failureCode String?   @map("failure_code")
+  key            String    @id
+  kind           String
+  status         String
+  bytes          Bytes?
+  attempts       Int       @default(1)
+  releasedClaims Int       @default(0) @map("released_claims")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  readyAt        DateTime? @map("ready_at")
+  failureCode    String?   @map("failure_code")
 
   @@map("game_place_art")
 }
@@ -3428,6 +3430,16 @@ model GamePlaceArtBudget {
   attempts Int
 
   @@map("game_place_art_budget")
+}
+
+/// Only the latest UTC day is kept. This counter has no area or post reference.
+model GameAreaArtMemberBudget {
+  memberId String       @id @map("member_id")
+  day      DateTime     @db.Date
+  attempts Int
+  member   HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("game_area_art_member_budget")
 }
 
 model GameProgressTaskMeasure {

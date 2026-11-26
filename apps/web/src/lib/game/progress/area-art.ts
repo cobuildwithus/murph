@@ -1,4 +1,9 @@
+import "server-only";
+
+import { createHostedOpaqueDigest } from "../../hosted-onboarding/contact-privacy";
 import { decodePolyline, latitudeAt, mercatorY, type Coordinate } from "./route-geometry";
+
+const MAX_AREA_ZOOM = 15;
 
 /** East can extend beyond 180 degrees to keep a date-line crossing continuous. */
 export function routeBounds(points: readonly Coordinate[]) {
@@ -30,27 +35,42 @@ function tileOrigin(min: number, max: number, width: number) {
   return Math.max(Math.floor(min / width) * width, Math.ceil(max) - width);
 }
 
+function tileFrame(tiles: number, x: number, y: number) {
+  return {
+    west: x / tiles * 360 - 180,
+    south: latitudeAt((1 - 2 * (y + 2) / tiles) * Math.PI),
+    east: (x + 3) / tiles * 360 - 180,
+    north: latitudeAt((1 - 2 * y / tiles) * Math.PI),
+  };
+}
+
+export type AreaFrame = ReturnType<typeof tileFrame>;
+
+export function isAreaArtKey(key: string): boolean {
+  // A 32-byte MAC has 43 base64url characters. The last two bits are padding.
+  return /^area:v2:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u.test(key);
+}
+
 /** Fit the validated paths to three columns and two rows, with a minimum area at zoom 15. */
-export function areaFrame(paths: readonly string[]) {
+export function areaFrame(paths: readonly string[]): { frame: AreaFrame; art?: { key: string } } {
   const bounds = routeBounds(paths.flatMap(decodePolyline));
   const left = (bounds.west + 180) / 360;
   const right = (bounds.east + 180) / 360;
   const top = worldY(bounds.north);
   const bottom = worldY(bounds.south);
-  for (let z = 15; z >= 1; z--) {
+  for (let z = MAX_AREA_ZOOM; z >= 1; z--) {
     const tiles = 2 ** z;
     const x = tileOrigin(left * tiles, right * tiles, 3);
     const y = Math.min(tiles - 2, tileOrigin(top * tiles, bottom * tiles, 2));
     if (x > left * tiles || y > top * tiles) continue;
-    return {
-      frame: {
-        west: x / tiles * 360 - 180,
-        south: latitudeAt((1 - 2 * (y + 2) / tiles) * Math.PI),
-        east: (x + 3) / tiles * 360 - 180,
-        north: latitudeAt((1 - 2 * y / tiles) * Math.PI),
-      },
-      art: { key: `area:v1:${z}/${x}/${y}` },
-    };
+    const frame = tileFrame(tiles, x, y);
+    try {
+      const digest = createHostedOpaqueDigest("health-win-area", `${z}/${x}/${y}`);
+      return { frame, art: { key: `area:v2:${digest}` } };
+    } catch {
+      // An unavailable privacy keyring leaves the member's native map usable.
+      return { frame };
+    }
   }
   throw new RangeError("A route must fit within the map grid.");
 }

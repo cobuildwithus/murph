@@ -241,6 +241,7 @@ import {
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
+  "prisma.game_area_art_member_budget",
   "prisma.health_activity",
   "prisma.health_post",
   "prisma.health_post_comment",

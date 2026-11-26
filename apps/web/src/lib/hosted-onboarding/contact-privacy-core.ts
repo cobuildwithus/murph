@@ -404,6 +404,11 @@ export function readHostedContactPrivacyCurrentVersion(): string {
   return readHostedPrivacyKeyring().currentVersion;
 }
 
+/** An unpadded digest for opaque IDs whose wire format supplies its own prefix. */
+export function createHostedOpaqueDigest(kind: string, value: string): string {
+  return digestHostedPrivacyValue(kind, readHostedContactPrivacyCurrentVersion(), value, "base64url");
+}
+
 export function createHostedOpaqueIdentifier(
   kind: string,
   value: string | number | null | undefined,
@@ -508,10 +513,10 @@ function createHostedBlindIndex(
   return `${HOSTED_BLIND_INDEX_PREFIX}:${kind}:${version}:${digestHostedPrivacyValue(kind, version, value)}`;
 }
 
-function digestHostedPrivacyValue(kind: string, version: string, value: string): string {
+function digestHostedPrivacyValue(kind: string, version: string, value: string, encoding: "hex" | "base64url" = "hex"): string {
   return createHmac("sha256", deriveHostedPrivacyKey(`blind-index:${kind}`, version))
     .update(value)
-    .digest("hex");
+    .digest(encoding);
 }
 
 function deriveHostedPrivacyKey(purpose: string, version: string): Buffer {

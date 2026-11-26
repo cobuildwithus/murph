@@ -21,6 +21,7 @@ export {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedLinqMessageLookupKeyReadCandidates,
+  createHostedOpaqueDigest,
   createHostedOpaqueIdentifier,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,

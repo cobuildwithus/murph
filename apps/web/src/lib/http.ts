@@ -576,6 +576,17 @@ export function describeLoggedErrorType(error: unknown): string {
   return error === null ? "null" : typeof error;
 }
 
+const diagnosticClasses = new Set([
+  "Error", "TypeError", "RangeError", "SyntaxError", "DOMException",
+  "PrismaClientKnownRequestError", "PrismaClientInitializationError", "PrismaClientUnknownRequestError",
+]);
+
+/** A dependency's error message and even its class name can contain private data. */
+export function describeKnownLoggedErrorType(error: unknown): string {
+  const type = describeLoggedErrorType(error);
+  return diagnosticClasses.has(type) ? type : "UnknownError";
+}
+
 export function sanitizeJsonLogString(
   value: string | null | undefined,
   maxLength = JSON_LOG_STRING_MAX_LENGTH,

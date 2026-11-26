@@ -39,7 +39,15 @@ The phone owns route privacy. It trims both ends and enforces any private zone
 on every final segment after simplification, rounding and point capping. Web
 checks the shape, grid, size and plausibility of the submitted route.
 **Hide my numbers** removes measurements and keeps the map. **Hide the map**
-omits the entire route card, including its paths, frame and public-area key.
+omits the entire route card, including its paths, frame and painting key.
+
+Only the sealed post card stores the map frame. Its painting key reveals no
+coordinates, route or member. Web derives the key from the tile origin with
+HMAC-SHA256 under the hosted contact-privacy keyring. Stateless previews omit
+the key. An authenticated game member who has a key can fetch the ready JPEG.
+Before each provider call, Web checks that the author still has access and
+consent and the post still holds the map. Mapbox receives the frame and the
+image provider receives the satellite image. Neither receives the member's path.
 
 ## Typed-word game ideas
 

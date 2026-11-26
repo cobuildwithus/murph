@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({ edit: vi.fn(), generate: vi.fn(), satellite: vi.fn(), reverse: vi.fn(), rows: vi.fn(), ensure: vi.fn(),
   patch: vi.fn(), after: [] as (() => Promise<void>)[] }));
@@ -15,7 +15,8 @@ vi.mock('../src/lib/game/progress/place-art', async original => ({ ...await orig
 vi.mock('../src/lib/game/progress/state', async original => ({ ...await original<typeof import('../src/lib/game/progress/state')>(), patchMeasureState: mocks.patch }));
 vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({}) }));
 import { coastAgreement } from '../src/lib/game/progress/coast-check';
-import { drawRouteOnPainting, makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from '../src/lib/game/progress/place-art-make';
+import { drawRouteOnPainting, ensureAreaArt, makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from '../src/lib/game/progress/place-art-make';
+import { ArtSkipped, type ArtJob } from '../src/lib/game/progress/place-art';
 import { attachRouteArt } from '../src/lib/game/progress/route-art';
 import { routeView } from '../src/lib/game/progress/route-progress';
 import { encodePolyline, expandBbox, routeBbox } from '../src/lib/game/progress/route-geometry';
@@ -99,6 +100,77 @@ describe('painted maps', () => {
     expect(request).toMatchObject({ size: '1024x1536', quality: 'medium' });
     expect(request.prompt).toContain('travel poster illustration of Del Mar, California, United States');
     expect(request.prompt).toMatch(/No text/u);
+  });
+});
+
+describe('painted run areas', () => {
+  const key = `area:v2:${'x'.repeat(42)}g`;
+  const frame = { west: -116.25, south: -29.28, east: -116.22, north: -29.263 };
+  const area = { key, frame };
+  const memberId = 'synthetic-painter';
+  const beforeProvider = vi.fn<() => Promise<void>>();
+  beforeEach(() => { vi.stubEnv('MURPH_HEALTH_PAINTED_RUNS', 'true'); });
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function claimedJob() {
+    await ensureAreaArt(area, memberId, beforeProvider);
+    const [job]: ArtJob[] = mocks.ensure.mock.calls[0]![0];
+    expect(job).toMatchObject({ key, kind: 'map', areaMemberId: memberId });
+    return job!;
+  }
+
+  it('leaves disabled painting and invalid keys out of the art store', async () => {
+    await ensureAreaArt({ key: 'invalid', frame }, memberId, beforeProvider);
+    vi.stubEnv('MURPH_HEALTH_PAINTED_RUNS', 'false');
+    await ensureAreaArt(area, memberId, beforeProvider);
+    expect(mocks.rows).not.toHaveBeenCalled();
+    expect(mocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it.each(['making', 'ready'])('reuses a %s painting', async status => {
+    mocks.rows.mockResolvedValue(new Map([[key, { key, status, startedAt: new Date() }]]));
+    await ensureAreaArt(area, memberId, beforeProvider);
+    expect(mocks.ensure).not.toHaveBeenCalled();
+    expect(beforeProvider).not.toHaveBeenCalled();
+  });
+
+  it('checks the origin before consuming an attempt', async () => {
+    beforeProvider.mockRejectedValue(new ArtSkipped());
+    await expect(ensureAreaArt(area, memberId, beforeProvider)).rejects.toBeInstanceOf(ArtSkipped);
+    expect(mocks.ensure).not.toHaveBeenCalled();
+  });
+
+  it('sends the frame supplied by the card and paints it edge to edge', async () => {
+    const photo = await coastImage(1536, 1024, 0.4);
+    mocks.satellite.mockResolvedValue(photo);
+    mocks.edit.mockResolvedValue(b64(photo));
+    const signal = new AbortController().signal;
+    const job = await claimedJob();
+    const painting = await job.make(signal);
+    const { west, south, east, north } = frame;
+    expect(mocks.satellite).toHaveBeenCalledWith([west, south, east, north], 1536, 1024, signal, 'center');
+    expect(mocks.edit.mock.calls[0]![0]).toEqual({ model: 'gpt-image-2.6-flare', image: photo,
+      prompt: expect.any(String), n: 1, size: '1536x1024', quality: 'high', output_format: 'png' });
+    expect(await sharp(painting).metadata()).toMatchObject({ width: 768, height: 512, format: 'jpeg' });
+  });
+
+  it('skips the satellite request after admission is lost', async () => {
+    const job = await claimedJob();
+    beforeProvider.mockRejectedValue(new ArtSkipped());
+    await expect(job.make(new AbortController().signal)).rejects.toBeInstanceOf(ArtSkipped);
+    expect(mocks.satellite).not.toHaveBeenCalled();
+    expect(mocks.edit).not.toHaveBeenCalled();
+  });
+
+  it('rechecks admission between the satellite request and the model request', async () => {
+    const job = await claimedJob();
+    mocks.satellite.mockImplementation(async () => {
+      beforeProvider.mockRejectedValue(new ArtSkipped());
+      return Buffer.from('synthetic image');
+    });
+    await expect(job.make(new AbortController().signal)).rejects.toBeInstanceOf(ArtSkipped);
+    expect(mocks.satellite).toHaveBeenCalledOnce();
+    expect(mocks.edit).not.toHaveBeenCalled();
   });
 });
 

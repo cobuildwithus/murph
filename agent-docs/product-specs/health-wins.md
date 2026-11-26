@@ -140,16 +140,40 @@ level. All recording JSON shares the
 - Send zero to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. When no shareable path remains, send `paths: []`: the run keeps its splits card and gets no map.
 - Each path may cover at most `distanceM` plus the larger of 16 metres and 1% of `distanceM`. The diagonal of the bounding box across all paths must fit within `distanceM`. Average moving pace must be 150–1,200 seconds per kilometre for runs or 300–2,400 for walks, inclusive.
 
-The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`,
-`art: {key}`, and `chips: [distance, pace]` (two display strings). The frame covers
-three by two Web Mercator tiles. The art key `area:v1:{z}/{x}/{y}` identifies its
-northwest tile. Zoom 15 is the smallest geographic frame. Larger routes use a
-coarser zoom. The key and frame come only from whole tiles, never from the route's
-exact points. A block may slide by whole tiles to hold a route that crosses a block
-edge, so runs in one area share one of a few neighbouring keys rather than exactly
-one; requiring aligned blocks would push most short loops out to a much coarser zoom. A date-line crossing can have an east bound above 180 degrees so
-the frame stays continuous. Latitudes beyond the Mercator limit project to the
-outermost tile row. Use the native map when the area has no painting.
+The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`
+and `chips: [distance, pace]` (two display strings). The frame covers three by
+two Web Mercator tiles. Zoom 15 gives the smallest geographic frame. Larger
+routes use a coarser zoom. A block may slide by whole tiles to enclose a route
+that crosses a block edge. A date-line crossing can have an east bound above
+180 degrees to keep the frame continuous. Latitudes beyond the Mercator limit
+project to the outermost tile row.
+
+The published chart can also carry `art: {key}`. The key is `area:v2:` followed
+by an unpadded base64url HMAC-SHA256 of the northwest tile's `z/x/y`. The server
+uses a purpose-specific key from `HOSTED_CONTACT_PRIVACY_KEYS`, selected by
+`HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION`. Runs in the same frame share
+a key under that version. Rotation changes the painting key on future cards.
+Published cards keep their original painting keys and can still fetch ready
+JPEGs. The key reveals no coordinates. Previews use the native map. If Web
+lacks a usable key, the published chart also uses the native map.
+
+With `MURPH_HEALTH_PAINTED_RUNS=true`, committing a new post with a selected
+route map schedules a painting after the response. Before each provider call,
+Web checks the author's current access and consent and confirms the post
+still contains that route card. Mapbox receives the frame from the card. The
+image provider repaints its satellite image. Everyone with the same key shares
+one painting and the phone draws the sealed path on top.
+
+The authenticated `GET /api/game/v1/progress/art/{key}` takes the URL-encoded
+key and serves the ready JPEG. A missing painting returns 404. Reading a key
+uses no generation budget. Area and game paintings share the allowance of
+150 image attempts per UTC day. A member can start at most five area claims
+per UTC day. Reusing a ready painting or one already in progress is free.
+If the post loses admission before a provider call, Web refunds both allowances
+and the attempt, and another eligible post can claim the area immediately.
+While art is pending, over budget or unavailable, the phone uses its muted map.
+Turning the flag off stops new
+generation. Previously painted keys continue to serve their immutable JPEGs.
 
 The `activity_splits` card's `splits` chart contains `unit` (`mi` or `km`), a formatted
 summary `line`, and `splits: [{label, seconds, text, partial?}]`. Each row's

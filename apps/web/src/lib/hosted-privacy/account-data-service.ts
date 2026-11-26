@@ -141,6 +141,12 @@ export interface HostedAccountDataStoreCoverageEntry {
 
 export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   {
+    slug: "prisma.game_area_art_member_budget",
+    label: "Daily area painting allowance",
+    deletion: "live-delete",
+    note: "Deleting the member removes their latest UTC claim day and the count of area paintings claimed that day.",
+  },
+  {
     slug: "prisma.health_activity",
     label: "Recorded health activities",
     deletion: "live-delete",

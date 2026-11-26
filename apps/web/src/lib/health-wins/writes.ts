@@ -1,17 +1,21 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
+import { after } from "next/server";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import type { ClientUnits } from "../companion/client-info";
 import { assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { invalidGameRequest } from "../game/http/errors";
+import { ArtSkipped } from "../game/progress/place-art";
+import type { AreaPainting } from "../game/progress/place-art-make";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { describeKnownLoggedErrorType } from "../http";
 import { getPrisma } from "../prisma";
 import { findVisibleHealthPost } from "./audience";
 import { type CachedHealthCandidate, type FrozenHealthCard, type HealthCardSelection, resolveRecordedSelection } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import type { RecordedActivity } from "./engine/types";
-import { assertHealthRecordEnabled } from "./flag";
+import { assertHealthRecordEnabled, healthRecordCapability } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
 import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
@@ -61,14 +65,60 @@ async function sealPostContent(memberId: string, id: string, caption: string | n
   };
 }
 
-// Card ciphertext is bound to its array position. Re-seal the retained specs at their new positions.
-async function removeFrozenCards(memberId: string, id: string, encrypted: string[], removeIds: readonly string[]) {
+async function openFrozenCards(memberId: string, id: string, encrypted: string[]) {
   const target = { memberId, table: "health_post", rowId: id } as const;
   const opened = await openHealthTexts(encrypted.map((value, index) => ({ ...target, field: `card:${index}`, value })));
+  return opened.map(text => JSON.parse(text) as FrozenHealthCard);
+}
+
+// Card ciphertext is bound to its array position. Re-seal the retained specs at their new positions.
+async function removeFrozenCards(memberId: string, id: string, encrypted: string[], removeIds: readonly string[]) {
+  const opened = await openFrozenCards(memberId, id, encrypted);
   const remove = new Set(removeIds);
-  const keep = opened.map(text => JSON.parse(text) as FrozenHealthCard).filter(card => !remove.has(card.id));
+  const keep = opened.filter(card => !remove.has(card.id));
   if (opened.length - keep.length !== remove.size) throw invalidGameRequest("Choose a card on this post.");
   return keep;
+}
+
+function routePainting(cards: readonly FrozenHealthCard[]): AreaPainting | null {
+  for (const { spec } of cards) {
+    if (spec.kind === "activity_route" && spec.chart.type === "route_map" && spec.chart.art) {
+      return { key: spec.chart.art.key, frame: spec.chart.frame };
+    }
+  }
+  return null;
+}
+
+function paintRouteAfterCommit(memberId: string, postId: string, painting: AreaPainting) {
+  const paint = async () => {
+    const { ensureAreaArt } = await import("../game/progress/place-art-make");
+    const db = getPrisma();
+    // The insert committed the selected route card at version 1.
+    let verifiedVersion = 1;
+    const currentVersion = async () => {
+      if (process.env.MURPH_HEALTH_PAINTED_RUNS !== "true" || !healthRecordCapability(memberId)?.route) throw new ArtSkipped();
+      const current = await findVisibleHealthPost(db, memberId, postId);
+      if (current?.authorMemberId !== memberId) throw new ArtSkipped();
+      return current.version;
+    };
+    await ensureAreaArt(painting, memberId, async () => {
+      const version = await currentVersion();
+      if (version === verifiedVersion) return;
+      // Caption edits and removal of other cards may leave the route card intact.
+      const row = await db.healthPost.findFirst({ where: { id: postId, version, deletedAt: null, authorMemberId: memberId },
+        select: { cardsEncrypted: true } });
+      if (!row || routePainting(await openFrozenCards(memberId, postId, row.cardsEncrypted))?.key !== painting.key) throw new ArtSkipped();
+      if (await currentVersion() !== version) throw new ArtSkipped();
+      verifiedVersion = version;
+    });
+  };
+  try {
+    after(() => paint().catch((error: unknown) => {
+      if (!(error instanceof ArtSkipped)) console.error("Health wins area painting failed.", { errorClass: describeKnownLoggedErrorType(error) });
+    }));
+  } catch {
+    // A runtime without after() still returns the committed receipt and uses the native map.
+  }
 }
 
 /** An acknowledged retry does not depend on the original set still being current. */
@@ -92,20 +142,25 @@ export async function createHealthPost(
   const { cards, day } = await resolvePostCards(auth, input, recording?.candidates);
   if (!input.caption?.trim() && !cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   const data = await sealPostContent(memberId, id, input.caption, cards);
-  return db.$transaction(async tx => {
+  const { receipt, created } = await db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
     const inserted = await tx.healthPost.createMany({ data: [{ id, authorMemberId: memberId, ...data }], skipDuplicates: true });
     if (!inserted.count) {
       const row = await tx.healthPost.findUniqueOrThrow({ where: { id }, select: postReceipt });
-      return replayPost(row, memberId);
+      return { receipt: replayPost(row, memberId), created: false };
     }
     // A conflict rolls back the post. The shared set lock spans publication through commit.
     if (day && input.setRevision) await assertHealthSetCurrent(tx, memberId, day, input.setRevision);
     if (recording) await storeRecordedActivityTx(tx, recording.prepared, id);
     if (input.attachmentId) await publishHealthAttachmentTx(tx, memberId, id, input.attachmentId.toLowerCase());
-    return { id, version: 1 };
+    return { receipt: { id, version: 1 }, created: true };
   });
+  if (created && input.activity?.route && process.env.MURPH_HEALTH_PAINTED_RUNS === "true") {
+    const painting = routePainting(cards ?? []);
+    if (painting) paintRouteAfterCommit(memberId, id, painting);
+  }
+  return receipt;
 }
 
 export async function patchHealthPost(auth: Auth, postId: string, input: Content & { expectedVersion: number; removeCardIds?: readonly string[] }) {
