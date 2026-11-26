@@ -135,10 +135,10 @@ function specDigest(spec: FrozenHealthCard["spec"] | null): string {
 export function prepareRecordedCandidate(card: CardSpec, hiddenTitle: string): CachedHealthCandidate {
   const safe = hidden(card, hiddenTitle);
   const withoutNumbers = card.kind === "activity_route"
-    ? { ...safe, kind: card.kind, subtitle: "shared without numbers", chart: {
+    ? { ...safe, kind: card.kind, chart: {
       type: card.chart.type, paths: card.chart.paths, frame: card.chart.frame, art: card.chart.art, chips: [],
     } }
-    : card.kind === "activity_splits" ? { ...safe, subtitle: "shared without numbers" } : safe;
+    : safe;
   const variants: CachedHealthCandidate["variants"] = [
     { option: "original", spec: card, specRevision: specDigest(card) },
     { option: "hide_numbers", spec: withoutNumbers, specRevision: specDigest(withoutNumbers) },

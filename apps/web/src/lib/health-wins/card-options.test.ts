@@ -53,7 +53,8 @@ it("removes every value-bearing field, including the engine id, raw arrays, sour
   const [candidate] = prepareHealthCandidates("member-fixture", [record]);
   const hidden = previewHealthCandidate(candidate, "hide_numbers");
   expect(hidden.id).not.toContain(record.id);
-  expect(hidden).toMatchObject({ title: { number: "", measure: "Sleep milestone" }, source_note: "", chart: { type: "hidden" } });
+  expect(hidden).toMatchObject({ title: { number: "", measure: "Sleep milestone" }, subtitle: "Shared without numbers.",
+    source_note: "", chart: { type: "hidden" } });
   const { id, specRevision, ...display } = hidden;
   expect(id).not.toBe(record.id);
   expect(specRevision).not.toBe(previewHealthCandidate(candidate).specRevision);
