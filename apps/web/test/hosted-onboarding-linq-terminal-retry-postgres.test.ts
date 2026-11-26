@@ -1,3 +1,5 @@
+import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
+import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from "@murphai/runtime-state/assistant-ids";
 import { randomInt, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -16,6 +18,7 @@ import {
 import {
   applyHostedLinqDeliveryReceiptTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  recordHostedLinqRuntimeProviderDispatchFenceTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import { buildHostedLinqInviteSignupEffectId } from "@/src/lib/hosted-onboarding/linq-invite-signup-effect-id";
 import { claimHostedLinqInstantFirstTurn, completeHostedLinqInstantFirstTurn } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
@@ -73,8 +76,8 @@ if (enabled) {
   ) throw new Error("Terminal retry proof requires an explicitly selected local test database.");
 }
 
-async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>, clinical = false) {
-  const fixture = await seed(clinical);
+async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => Promise<void>, bubble?: number | "final") {
+  const fixture = await seed(bubble);
   try {
     await run(fixture);
   } finally {
@@ -89,7 +92,7 @@ async function withFixture(run: (fixture: Awaited<ReturnType<typeof seed>>) => P
   }
 }
 
-async function seed(clinical = false) {
+async function seed(bubble?: number | "final") {
   provider.start.mockClear();
   provider.firstTurnSend.mockReset();
   provider.log.mockReset();
@@ -102,7 +105,10 @@ async function seed(clinical = false) {
   const chatId = `retry-chat-${nonce}`;
   const messageId = `retry-original-${nonce}`;
   const retryId = `retry-replacement-${nonce}`;
-  const idempotencyKey = clinical ? `clinical-change:v1:${nonce}:detail` : `retry-intent-${nonce}`;
+  const finalKey = clinicalChangeDeliveryKey(nonce, "detail");
+  const idempotencyKey = bubble === undefined ? `retry-intent-${nonce}`
+    : bubble === "final" ? finalKey
+    : buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: finalKey, turnId: nonce, index: bubble });
   const phoneNumber = `+1555000${randomInt(1000, 9999)}`;
   const chatKey = createHostedLinqChatLookupKey(chatId)!;
   const lineKey = createHostedPhoneLookupKey(phoneNumber)!;
@@ -132,6 +138,13 @@ async function seed(clinical = false) {
       phoneNumberLookupKey: lineKey, sourceRef: idempotencyKey,
       targetKind: "thread", threadIsDirect, userId: memberId, prisma: client,
     });
+  if (bubble !== undefined) {
+    await prisma.$transaction(tx => recordHostedLinqRuntimeProviderDispatchFenceTx({
+      idempotencyKey, linqChatId: chatId, targetKind: "thread", sourceRef: idempotencyKey, prisma: tx,
+    }));
+    expect(await prisma.hostedLinqDelivery.findFirstOrThrow({ where: { linqChatLookupKey: chatKey } }))
+      .toMatchObject({ template: "clinical_change" });
+  }
   const result = await accepted();
   if (!result.deliveryId) throw new Error("Synthetic acceptance must have a delivery.");
   const deliveryId = result.deliveryId;
@@ -577,7 +590,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
     });
   });
 
-  it("consumes a clinical terminal failure without fetching or resending text", async () => {
+  it.each([0, 1, "final"] as const)("excludes clinical bubble %s at the dispatch fence and after terminal failure", async bubble => {
     await withFixture(async f => {
       await f.grantConsent();
       await f.receipt();
@@ -587,7 +600,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
       expect(provider.read).not.toHaveBeenCalled();
       expect(provider.send).not.toHaveBeenCalled();
       expect(provider.start).not.toHaveBeenCalled();
-    }, true);
+    }, bubble);
   });
 
   it("resets original timing and catches up only replacement delivery evidence", async () => {

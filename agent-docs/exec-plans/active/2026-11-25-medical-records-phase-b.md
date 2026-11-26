@@ -1,6 +1,6 @@
 # Phase B hospital records
 
-Status: active (E1 merged, E2 activation on hold)
+Status: active (locked admission merged, private delivery in review, production dispatch closed)
 Created: 2026-11-25
 Updated: 2026-11-25
 
@@ -107,18 +107,12 @@ Replacement-profile notifications use B7’s current named approvals at proof, s
    withdrew the iMessage-only requirement. Linq may choose iMessage, RCS or
    SMS. Render the notice privately without a source name. The existing
    explicit detail setting authorizes detail on that thread.
-4. Bind every outbound effect of a detail turn to the accepted run, current
-   policy and single recipient before allowing generation. Ordinary cron
-   replies mint ordinary keys today. No code mints clinical per-bubble keys
-   and those replies would bypass `clinicalEgressBlock`. Test revocation during
-   generation, between bubbles, on alternate tools and on retry. Preserve
-   the ordinary AI allowance rules. Today `assertClinicalCronTransport` stops
-   the job before `sendAssistantNotificationLocal` can expose scheduled tools.
-   Worker provider authority belongs to the running container. The owner
-   declined restricting xAI, Google video, ElevenLabs or Mapbox by turn origin,
-   so the detail turn keeps Murph's ordinary helpers; this item is about
-   message recipients only. Demonstrate that the system-work path
-   drains the fixed notice's `deliveryIntentIds` through actual outbox egress.
+4. Bind clinical outbox replies to the accepted run, current policy and frozen
+   private thread. Recheck before generation, after generation, between
+   bubbles and on retry. Preserve ordinary AI allowances and helpers.
+   A detail turn has the same shell and network reach as any scheduled turn,
+   bounded by the Worker’s existing messaging-operation check. The clinical
+   per-bubble checks cover the reply path only.
 5. Defer an occurrence during quiet hours and persist its next safe wake.
    Recheck authority at that wake before sending. If the verified number
    is missing or its region has no supported window, hold silently until
@@ -159,28 +153,6 @@ The webhook-owner tests check echoed text against writes, traces, logs and
 the Temporal handoff. The PostgreSQL retry test checks the persisted clinical
 marker and zero provider reads or replacement sends after a terminal failure.
 
-**Activation change.** Before enabling the daily writer, implement locked
-baseline, grant, named approval, epoch, revision and route admission, the
-per-effect detail and private provider authority checks, model-free notice
-drain, coverage at the provider attempt and quiet-hours retry. Exercise all
-three settings against the real admission path. Roll back by stopping new
-admissions first and retaining those readers, authorization checks, retry
-exclusion and durable coverage through the restore horizon.
-
-Activation must also close these replay and deployment hazards.
-
-- Every detail bubble must carry a production-minted `clinical-change:`
-  idempotency key. Exercise those actual keys at the Web dispatch fence and
-  verify the resulting template excludes every bubble from terminal retry.
-- A restored wake can read `published` again. The notice key deduplicates its
-  intent, but the one-shot detail job disappears after execution
-  (`keepAfterRun: false`). Prove that replay after checkpoint and after job
-  removal cannot start a second detail turn for the same run.
-- The strict notice decision lost `directoryLabel`. Mixed versions reject
-  notice decisions in either direction. Keep the eligibility writer closed
-  until Web, hosted runtime and the manually deployed Cloudflare port all
-  support the decision shape from this reader rollout.
-
 **Activation split, locked Web writer.** The first draft ends at run creation
 and pointer publication. The production sweep supplies no reader revisions.
 It can establish a baseline but cannot create an eligible run, publish a
@@ -210,34 +182,74 @@ serializes the change behind the run insert. The decision reader then refuses
 the frozen pin. The mocked admission suite now preserves real consent exports
 and runs all 13 tests.
 
-**Second draft, delivery and production activation.** Complete the following
-in the same head before supplying reader evidence to the production writer.
+**Private delivery draft.** The ordered system mailbox stages the fixed notice,
+publishes the workspace checkpoint and drains the exact outbox intent through
+ordinary provider entry. It can recover that intent by run key. The detail job
+uses the direct scheduled audience, the private receipt reference and a stable
+run key. The restore test copies the private cron store after the one-shot
+completes. Replaying the pointer from that snapshot finds the disabled job. Leading and final bubble keys
+are checked again before entering the outbox, recognized at Web’s dispatch
+fence and excluded from terminal retry. A downgrade between bubbles leaves
+only the already staged reply. The three-mode synthetic journey passed with
+a developer-local subscription.
+An ordinary route response from Web or a port that drops the clinical
+acknowledgement cannot authorize generation or delivery. Production Web issues
+no acknowledgement and the daily sweep supplies no release evidence.
 
-1. Have the admitting side verify authenticated compatibility evidence for
-   the actual serving runner and independently deployed port for this sweep.
-   Bind it to the serving release, including mixed releases and rollback.
-   An old or missing reader must leave the new run on v2. A previous run's
-   receipt, an environment flag or a revision supplied by the browser cannot
-   attest the current release.
-2. In Web's Linq dispatch transaction and provider-attempt reconciliation,
-   recheck the accepted run, current grants, preference, verified route,
-   proactive pause and line health. Cover only an actual provider attempt.
-   Preserve blocked work and exclude definite terminal failures from retry.
-3. At private detail generation, outbox staging and every alternate message
-   effect, bind the single recipient and run. Mint clinical keys for the
-   leading zero-indexed bubbles and the final bubble. Prove those exact keys
-   at Web's dispatch fence. Recheck after generation, between bubbles and on
-   retry. Preserve ordinary AI allowances and helpers. Prevent a restored
-   wake from scheduling a second turn after job removal.
-4. Carry the fixed notice intent from system work through the ordinary outbox
-   drain and dispatch without a model. Persist the next supported regional
-   window for quiet-hours deferral. Hold missing or unsupported numbers for
-   route changes without polling. Recheck at the wake. Open both private
-   transport gates and Web dispatch only with these checks in place.
-5. Prove actual sends, suppression, deferral, blocked recovery, definite
-   failure, alternate-recipient rejection and restore in the activation suite.
-   Run the synthetic live journeys and publish the member changelog when the
-   feature can ship. Deploy Web readers, hosted runtime and the Cloudflare port
-   manually from main, then enable admissions. Roll back admissions first.
-   After a pinned run exists, retain compatible readers, egress checks, retry
-   exclusion and coverage through outstanding work and restorable snapshots.
+**Remaining activation review.** This split isolates private mailbox checkpoint,
+cron replay and outbox changes from the production authorization transaction and
+release authentication. The boundary is Web’s signed egress response. Complete
+all of the following before the first production admission.
+
+1. Authenticate compatibility evidence for the serving runner and the manually
+   deployed Cloudflare port, including mixed releases. The production sweep
+   supplies this evidence and admission verifies it under the member lock. An
+   old or missing reader leaves the new run on the ordinary retrieval protocol.
+   Web currently requires an exact caller-supplied match of notice revision 2
+   for both components. At revision 1 the runner blocks clinical replies and
+   the port drops Web’s acknowledgement. The revision 2 runner requires the
+   explicit acknowledgement on its exact private route. Neither component
+   verifies these numbers today, and the production sweep supplies neither.
+2. Authorize clinical replies in Web only for the accepted, receipt-proved run,
+   matching credential epoch, replacement ongoing grant, current OpenAI approval,
+   preference revision and exact frozen private route. Preserve proactive pause
+   and line health. Account for the occurrence on a real provider attempt,
+   reconcile lost or ambiguous handoffs, and allow the remaining bubbles of the
+   same authorized turn. A definite terminal failure consumes the attempt.
+3. Persist the next safe regional wake for quiet hours, hold missing or
+   unsupported regions without polling and recover on a route change. Preserve
+   blocked, deferred and skipped occurrences. Detail currently records a line
+   health block, proactive pause or missing port acknowledgement as
+   `skipped_gate`. This consumes the one-shot locally and disables it. Pointer
+   replay finds the retained job and returns. Notice treats a missing
+   acknowledgement as retryable, but an explicit preflight block can also
+   retire its intent. Make both modes defer transient blocks without consuming
+   coverage. Test block then recovery, including Web authorizing while an older
+   serving port still drops the acknowledgement. Recheck authority at the wake.
+4. Claim detail generation durably once per accepted run outside the restorable
+   workspace. Restoring a snapshot from before completion can run the model
+   again. Web’s clinical engagement branch currently returns before claiming
+   provider dispatch. Even a fence for each bubble cannot cover a new bubble
+   index produced by a second generation. Restore a pre-completion snapshot
+   with a second generation that would produce extra bubbles and prove it
+   stages or sends no new replies. Reconcile the original generation’s
+   outstanding deliveries without authorizing another.
+5. Remove each disabled private detail job after Web durably covers the
+   occurrence. Keep its replay protection in the per-run claim. Exercise
+   cleanup and restore from both sides of the coverage transition. Otherwise
+   the cron store grows by one job per occurrence and its strict shape keeps
+   older runners from reopening it indefinitely. Retain compatible readers for
+   outstanding work and restorable snapshots.
+6. Exercise all three settings through production admission and synthetic
+   delivery together, with mixed serving revisions, late enrichment, empty
+   receipts, restore, withdrawn approval, reconnect, removal, route changes,
+   opt-out during generation, downgrade between bubbles, health and quiet-hour
+   recovery, and terminal failure. Verify every supported attachment or fallback
+   reply retains its clinical key and exact recipient. Add the public changelog
+   when registration alone can enable delivery.
+
+Deploy the additive baseline migration before Web, deploy compatible Web and
+runner readers, then the Cloudflare port manually from main. Enable admissions
+last. Roll back admissions first. Keep compatible decision, receipt, cron,
+checkpoint and egress readers, retry exclusion and durable coverage through all
+outstanding work and restorable snapshots after the first pinned run.

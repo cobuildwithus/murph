@@ -35,6 +35,8 @@ import { clinicalFhirResourceText, clinicalFhirResourceExtractionText } from '@m
 import { executeClinicalDocumentExtraction } from '../src/clinical-document-extraction.ts'
 import * as clinicalExtractionCodex from '../src/assistant-codex.ts'
 import { canSkipManagedAutomaticMealCloseout } from '../src/assistant/automatic-meal-closeout-eligibility.js'
+import { queueClinicalChange } from '../src/assistant/cron/clinical-change.ts'
+import { readAssistantCronStore } from '../src/assistant/cron/store.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
 import {
   ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA,
@@ -19378,6 +19380,42 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
       expect(decision.text).not.toContain('?')
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('daily clinical notification modes', () => {
+  it('stages silence and fixed notice without generation and explains one synthetic detail receipt', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vault = await mkdtemp(path.join(tmpdir(), 'clinical-mode-journey-'))
+    try {
+      await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
+      const threadId = 'synthetic-private-thread'
+      const paths = resolveAssistantStatePaths(vault)
+      for (const mode of ['off', 'notice', 'detail'] as const) {
+        const decision = mode === 'off' ? { mode } : { mode, threadId }
+        await queueClinicalChange({ vault, decision, runId: `synthetic-${mode}`, occurredAt: new Date().toISOString() })
+        expect((await readAssistantCronStore(paths)).jobs).toHaveLength(mode === 'detail' ? 1 : 0)
+        const intents = await listAssistantOutboxIntents(vault)
+        expect(intents.map(intent => intent.message)).toEqual(mode === 'off' ? [] : ['New records came in. Want me to go through them?'])
+      }
+      const [job] = (await readAssistantCronStore(paths)).jobs
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [], env: config.env, model: config.model, modelProvider: config.modelProvider,
+        prompt: [job!.prompt, 'Completed private receipt read for this occurrence: a new visit summary records a referral for physical therapy. No appointment date was included.'].join('\n'),
+        reasoningEffort: 'low', sandbox: 'read-only', workingDirectory: vault,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') throw new Error('Expected a private detail reply')
+      expect(decision.text).toMatch(/physical therapy|physiotherap/iu)
+      expect(decision.text).not.toMatch(/receipt|run reference|synthetic|\byou.re scheduled/iu)
+      process.stdout.write(`[daily clinical modes] off=silent notice=fixed detail=${decision.text}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([vault, ...config.temporaryPaths])
     }
   }, 360_000)
 })

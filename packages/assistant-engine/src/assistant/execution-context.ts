@@ -692,6 +692,7 @@ export interface AssistantHostedExecutionContext {
     targetKind: 'explicit' | 'thread'
   }): Promise<{
     conversationThreadId?: string | null
+    clinicalReplyAuthorized?: boolean
     deliveryBlockCode?: HostedRuntimeLinqDeliveryBlockCode | null
     deliveryPosture?: HostedRuntimeLinqDeliveryPosture | null
     target: string

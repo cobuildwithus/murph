@@ -7555,6 +7555,18 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(result && result.recapVideoCurrent).toBe(expected);
   });
 
+  it.each([true, false, "true", undefined])("forwards only an explicit clinical reply decision (%s)", async answer => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "synthetic-member", webCallbackSigning: environment.webCallbackSigning, webControlBaseUrl: "https://web.example.test",
+      fetchImpl: async () => Response.json({ ok: true, clinicalReplyAuthorized: answer }),
+    });
+    const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: true, idempotencyKey: "clinical-change:v1:synthetic-run:detail", target: "synthetic-thread", targetKind: "thread",
+    });
+    expect(result && result.clinicalReplyAuthorized).toBe(answer === true ? true : undefined);
+  });
+
   it.each([
     [true, true],
     ["true", undefined],

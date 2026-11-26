@@ -968,6 +968,12 @@ async function preflightClinicalDispatch(input: HostedAssistantDispatchPreflight
         signal: input.signal, target, targetKind: "thread",
       }) : null;
   // An older host can return a valid ordinary route without any clinical policy.
+  if (authority?.clinicalReplyAuthorized && !authority.deliveryBlockCode
+    && input.payload.idempotencyKey === intent.deliveryIdempotencyKey && !input.payload.explicitTarget
+    && input.payload.channel === "linq" && input.payload.threadIsDirect && input.payload.threadId === target
+    && input.payload.bindingDeliveryKind === "thread" && input.payload.bindingDeliveryTarget === target) {
+    return preflightHostedAssistantApprovals(input);
+  }
   const block = authority?.deliveryBlockCode ?? CLINICAL_TEXT_TRANSPORT_BLOCK;
   const failed = await markAssistantOutboxIntentMirrorTerminalById({
     error: createAssistantDeliveryTerminalError(`ASSISTANT_LINQ_EGRESS_${block.toUpperCase()}`, "Clinical notification delivery is blocked."),
@@ -4194,6 +4200,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           vaultRoot: input.vaultRoot,
         }),
         sendLinqVoiceMemo: createHostedAssistantLinqVoiceMemoSendDependency({
+          deliveryIdempotencyKey: mirrorState.intent?.deliveryIdempotencyKey,
           assertLiveness: input.assertLiveness,
           effectsPort: input.effectsPort,
           linqEnv: input.linqEnv,
@@ -4889,6 +4896,16 @@ function createHostedLinqAppCardFallbackErrorObserver(input: {
   };
 }
 
+function canClaimAnchoredTextBeforeBuild(
+  request: Parameters<NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]>>[0],
+  context: HostedAssistantLinqDeliveryContext | null | undefined,
+  key: string | null,
+  needsFreshFence: boolean,
+) {
+  return !needsFreshFence && !key?.startsWith("clinical-change:") && Boolean(context?.target)
+    && Boolean(request.replyToMessageId?.trim()) && request.card == null && !request.media?.length;
+}
+
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
@@ -4960,15 +4977,8 @@ function createHostedAssistantLinqSendDependency(input: {
     const includesVaultFile = media.some((item) => item.kind === "vault_file");
     // A reply anchored to an inbound goes to that inbound's chat. Web never
     // re-homes a claiming call, so a home-route fallback flag changes nothing here.
-    const claimBeforeBuild = !!deliveryContext?.target
-      && !!request.replyToMessageId?.trim()
-      && request.card == null
-      // Media is fetched or loaded before the first provider request. Claiming
-      // ahead of that work could leave a dispatch fence with no provider entry.
-      && media.length === 0
-      && !reviewedAssistantAskCompletion
-      && !privateAssistantAskCompletion
-      && !input.deliveryPurpose;
+    const claimBeforeBuild = canClaimAnchoredTextBeforeBuild(request, deliveryContext, idempotencyKey,
+      reviewedAssistantAskCompletion || privateAssistantAskCompletion || Boolean(input.deliveryPurpose));
     const assertPrivateAssistantAskCompletionRoute = async (route: {
       fromPhoneNumber: string | null;
       kind: HostedExecutionAssistantNotificationRoute["delivery"]["kind"];
@@ -5298,6 +5308,7 @@ function createHostedAssistantLinqSendDependency(input: {
             }),
       }, {
         ...dependencies,
+        clinicalReplyTarget: clinicalReplyTarget(engagement),
         onAppCardFallbackError,
         ...(input.publicInternetFetch
           ? { publicFetchImplementation: input.publicInternetFetch }
@@ -5758,7 +5769,13 @@ function buildHostedVaultFileMediaIdentity(input: {
   ]);
 }
 
+function hostedVoiceMemoKey(parent?: string | null, intentId?: string | null): string | null {
+  if (parent?.startsWith("clinical-change:")) return `${parent}:voice`;
+  return intentId ? `linq-voice-memo:${intentId}` : null;
+}
+
 function createHostedAssistantLinqVoiceMemoSendDependency(input: {
+  deliveryIdempotencyKey?: string | null;
   assertLiveness?: () => Promise<void>;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
@@ -5783,9 +5800,7 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         targetKind: request.targetKind ?? null,
       });
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = input.intentId
-      ? `linq-voice-memo:${input.intentId}`
-      : null;
+    const idempotencyKey = hostedVoiceMemoKey(input.deliveryIdempotencyKey, input.intentId);
     const replyToMessageId = request.replyToMessageId ?? null;
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
@@ -6478,6 +6493,18 @@ async function prepareHostedLinqRecapVideoAttachment(input: {
   return attachmentId ? [attachmentId] : [];
 }
 
+function assertClinicalReplyAuthority(key: string | null, target: string, result: HostedRuntimeLinqRecentInboundEngagementResult) {
+  if (!key?.startsWith("clinical-change:") || result.deliveryBlockCode) return;
+  if (result.clinicalReplyAuthorized && result.resolvedRoute?.target === target
+    && result.resolvedRoute.targetKind === "thread" && result.resolvedRoute.threadIsDirect) return;
+  throw markHostedDeliveryPreProvider(new VaultCliError("ASSISTANT_CLINICAL_REPLY_AUTHORITY_UNAVAILABLE",
+    "Web must confirm current clinical reply authority.", { retryable: true }));
+}
+
+function clinicalReplyTarget(result: HostedRuntimeLinqRecentInboundEngagementResult): string | undefined {
+  return result.clinicalReplyAuthorized ? result.resolvedRoute?.target : undefined;
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   assistantAskCompletionExpiresAt?: string;
@@ -6546,6 +6573,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     ) {
       const alreadyStarted = { providerDispatchClaimed: false };
       assertHostedAssistantLinqProviderDispatchClaim({
+        idempotencyKey: input.idempotencyKey,
         providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
         result: alreadyStarted,
       });
@@ -6559,6 +6587,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   const normalized: HostedRuntimeLinqRecentInboundEngagementResult = result ?? {};
   assertHostedAssistantProgressUpdateNotAcknowledged({ ...input, result: normalized });
   assertGameRematchEgressSupported(input.idempotencyKey, normalized);
+  assertClinicalReplyAuthority(input.idempotencyKey, input.target, normalized);
   if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
     const code = `ASSISTANT_LINQ_EGRESS_${
       normalized.deliveryBlockCode.toUpperCase()
@@ -6588,6 +6617,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
     && normalized.assistantAskFallbackRequired !== true
   ) {
     assertHostedAssistantLinqProviderDispatchClaim({
+      idempotencyKey: input.idempotencyKey,
       providerDispatchRetrySafe: input.providerDispatchRetrySafe === true,
       result: normalized,
     });
@@ -6643,6 +6673,7 @@ function isHostedLinqProviderDispatchAlreadyStartedError(error: unknown): boolea
 }
 
 function assertHostedAssistantLinqProviderDispatchClaim(input: {
+  idempotencyKey: string | null;
   providerDispatchRetrySafe: boolean;
   result: HostedRuntimeLinqRecentInboundEngagementResult;
 }): void {
@@ -6655,7 +6686,7 @@ function assertHostedAssistantLinqProviderDispatchClaim(input: {
   }
   if (
     input.result.providerDispatchClaimed === false
-    && !input.providerDispatchRetrySafe
+    && (!input.providerDispatchRetrySafe || input.idempotencyKey?.startsWith("clinical-change:"))
   ) {
     throw markHostedDeliveryMayHaveSucceeded(new VaultCliError(
       "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",

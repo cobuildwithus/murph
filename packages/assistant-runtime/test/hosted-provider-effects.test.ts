@@ -27,6 +27,9 @@ describe("hosted provider effects", () => {
       .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
     await expect(sendHostedProviderLinqMessage({ ...request, targetKind: "thread", threadIsDirect: true }, { env: {}, fetchImplementation }))
       .rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
+    await expect(sendHostedProviderLinqMessage({ ...request, targetKind: "thread", threadIsDirect: true }, {
+      clinicalReplyTarget: "another-synthetic-thread", env: {}, fetchImplementation,
+    })).rejects.toMatchObject({ code: "clinical_imessage_only_unavailable" });
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 

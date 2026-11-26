@@ -1,3 +1,4 @@
+import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { getHostedSystemMailboxModelFreeRouteActions } from "./hosted-runtime/mailbox-routing.ts";
 import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
@@ -1394,6 +1395,12 @@ function readHostedSystemMailboxCheckpointPreparationRecordItem(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): HostedSystemMailboxCheckpointPreparationRecordItem | null {
   return preparation && "item" in preparation ? preparation.item : null;
+}
+
+function exactSystemMailboxDeliveryKey(item: HostedSystemMailboxCheckpointPreparationRecordItem): string {
+  const wake = item.wake;
+  if (wake.kind === "clinical-records.change-recorded") return clinicalChangeDeliveryKey(wake.runId, "notice");
+  return wake.kind === "assistant.notification.requested" ? wake.notification.deliveryIdempotencyKey ?? "" : "";
 }
 
 function resolveHostedSystemMailboxCheckpointPreparationWake(
@@ -3903,12 +3910,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 };
               }
 
-              const deliveryIdempotencyKey =
-                preparationRecordItem.wake.kind ===
-                    "assistant.notification.requested"
-                  ? preparationRecordItem.wake.notification
-                    .deliveryIdempotencyKey ?? ""
-                  : "";
+              const deliveryIdempotencyKey = exactSystemMailboxDeliveryKey(preparationRecordItem);
               const exactDeliveryIntentState =
                 await resolveHostedAssistantDeliveryIntentState({
                   deliveryIdempotencyKey,
@@ -4040,7 +4042,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const recordItem = exactDeliveryRecordItem
             ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
           const ownsExactModelFreeDelivery = recordItem !== null
-            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
+            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem, exactDeliveryIntentState !== null);
           const preemptBeforeExactDelivery =
             shouldPreemptHostedSystemMailboxExactDelivery({
               assistantCronDueNow: projectedWake.assistantCronDueNow,
@@ -4194,10 +4196,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   vaultRoot: restored.vaultRoot,
                   wake: recordItem.wake,
                 });
-                const deliveryIdempotencyKey =
-                  recordItem.wake.kind === "assistant.notification.requested"
-                    ? recordItem.wake.notification.deliveryIdempotencyKey ?? ""
-                    : "";
+                const deliveryIdempotencyKey = exactSystemMailboxDeliveryKey(recordItem);
                 const refreshedIntentState =
                   await resolveHostedAssistantDeliveryIntentState({
                     deliveryIdempotencyKey,

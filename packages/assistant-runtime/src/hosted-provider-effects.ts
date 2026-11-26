@@ -44,6 +44,7 @@ import type {
 } from "./hosted-runtime/platform.ts";
 
 export interface HostedProviderEffectDependencies {
+  clinicalReplyTarget?: string;
   appCardCapabilityFetchImplementation?: typeof fetch;
   appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
@@ -64,6 +65,7 @@ export interface HostedProviderEffectDependencies {
 }
 
 interface HostedProviderEffectContext {
+  clinicalReplyTarget?: string;
   appCardCapabilityFetchImplementation?: typeof fetch;
   appCardTextFallbackFetchImplementation?: typeof fetch;
   loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>;
@@ -158,7 +160,8 @@ export async function sendHostedProviderLinqMessage(
   request: HostedRuntimeLinqSendRequest,
   dependencies: HostedProviderEffectDependencies,
 ): Promise<HostedRuntimeLinqSendResponse> {
-  assertClinicalTextTransportAvailable(request.idempotencyKey);
+  assertClinicalTextTransportAvailable(request.idempotencyKey, request.targetKind === "thread"
+    && !request.homeRouteFallbackAllowed && request.target === dependencies.clinicalReplyTarget);
   let effectiveRequest = request;
   const context = createHostedProviderEffectContext(
     dependencies,
@@ -362,6 +365,7 @@ async function sendHostedProviderLinqMessageDirect(
             context.appCardTextFallbackFetchImplementation,
         }
       : {}),
+    clinicalReplyTarget: context.clinicalReplyTarget,
     env: context.env,
     fetchImplementation: context.fetchImplementation,
     signal: context.signal,
@@ -386,6 +390,7 @@ function createHostedProviderEffectContext(
   const { publicFetchImplementation, ...providerDependencies } = dependencies;
   return {
     ...requireHostedProviderFetchDependencies(providerDependencies, operation),
+    clinicalReplyTarget: dependencies.clinicalReplyTarget,
     ...(dependencies.appCardCapabilityFetchImplementation
       ? {
           appCardCapabilityFetchImplementation:

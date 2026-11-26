@@ -1863,7 +1863,8 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
   }
 })
 
-async function sendHostedLinqNotificationText(text: string) {
+async function sendHostedLinqNotificationText(text: string, deliveryIdempotencyKey?: string,
+  authorizeBubble = (_key?: string) => true, staged: string[] = []) {
   const linqSession = createAssistantSession({
     binding: {
       actorId: 'actor-linq',
@@ -1886,14 +1887,15 @@ async function sendHostedLinqNotificationText(text: string) {
     }),
     session: linqSession,
   })
-  const deliverMessage = vi.fn(async (_input: Record<string, unknown>) => ({
-    delivery: null,
-    intent: {
-      intentId: 'intent-hosted-linq-notification',
-    },
-    kind: 'queued',
-    session: linqSession,
-  }))
+  const deliverMessage = vi.fn(async (input: Record<string, unknown>) => {
+    staged.push(String(input.deliveryIdempotencyKey))
+    return {
+      delivery: null,
+      intent: { intentId: 'intent-hosted-linq-notification' },
+      kind: 'queued',
+      session: linqSession,
+    }
+  })
   const mocks = {
     createAssistantRuntimeStateService: vi.fn(() => ({
       outbox: {
@@ -1998,9 +2000,13 @@ async function sendHostedLinqNotificationText(text: string) {
   )
 
   await sendAssistantNotificationLocal({
+    deliveryIdempotencyKey,
+    threadId: 'thread-linq',
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
+        resolveScheduledLinqRoute: async request => ({ clinicalReplyAuthorized: authorizeBubble(request.idempotencyKey),
+          target: 'thread-linq', threadIsDirect: true }),
         userEnvKeys: [],
       },
     },
@@ -2052,6 +2058,20 @@ test('sendAssistantNotificationLocal sends each --- bubble of a Linq notificatio
   }))
 })
 
+
+test('private scheduled detail stamps each outbox bubble with the originating run', async () => {
+  const finalKey = 'clinical-change:v1:synthetic-run:detail'
+  const calls = await sendHostedLinqNotificationText('Synthetic first.\n---\nSynthetic second.\n---\nSynthetic last.', finalKey)
+  expect(calls.map(call => call.deliveryIdempotencyKey)).toEqual([`${finalKey}:bubble:0`, `${finalKey}:bubble:1`, finalKey])
+})
+
+test('a downgrade between detail bubbles leaves just the first reply in the outbox', async () => {
+  const finalKey = 'clinical-change:v1:synthetic-run:detail'
+  const staged: string[] = []
+  await expect(sendHostedLinqNotificationText('Synthetic first.\n---\nSynthetic second.\n---\nSynthetic last.', finalKey,
+    key => key === `${finalKey}:bubble:0`, staged)).rejects.toThrow()
+  expect(staged).toEqual([`${finalKey}:bubble:0`])
+})
 
 test('sendAssistantNotificationLocal derives hosted notification keys from resolved delivery target', async () => {
   const linqSession = createAssistantSession({

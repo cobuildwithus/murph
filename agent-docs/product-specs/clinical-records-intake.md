@@ -632,9 +632,13 @@ The run row retains publication through queue cleanup. Private scheduling leaves
 Missing and empty evidence leave the member's conversation alone.
 
 In notice mode the private runtime writes one ordinary proactive outbox intent.
-It renders “New records came in. Want me to go through them?” locally.
+It renders “New records came in. Want me to go through them?” locally. The
+ordered system mailbox checkpoints and drains that intent without an AI turn
+or allowance.
 Off suppresses publication. Detail uses one scheduled turn with the private
-run receipt reference and the member’s explicit detail setting.
+run receipt reference and the member’s explicit detail setting. The private
+cron store retains its completed job so a restored pointer cannot queue a
+second turn. Web keeps delivery closed pending activation.
 
 The owner withdrew the iMessage-only requirement. Notices and details may use
 the exact verified private thread frozen at admission, including when Linq
