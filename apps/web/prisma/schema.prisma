@@ -3316,6 +3316,7 @@ model HealthPost {
   version            Int                   @default(1)
   captionEncrypted   String?               @map("caption_encrypted")
   cardsEncrypted     String[]              @default([]) @map("cards_encrypted")
+  postedCardKeys     String[]              @default([]) @map("posted_card_keys")
   cheerPushClaimedAt DateTime?             @map("cheer_push_claimed_at") @db.Timestamptz(3)
   author             HostedMember          @relation(fields: [authorMemberId], references: [id], onDelete: Cascade)
   cheers             HealthPostCheer[]
