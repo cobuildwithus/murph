@@ -62,7 +62,7 @@ function qualifyingMonths(rows: readonly DailySample[], currentMonth: string): M
   return months;
 }
 
-function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: string): Candidate[] {
+function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: string, anyDelta: boolean): Candidate[] {
   const currentMonth = today.slice(0, 7);
   const months = qualifyingMonths(rows, currentMonth);
   const current = months.at(-1);
@@ -73,15 +73,15 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
   const prior = months.slice(0, -1);
   const baselineMonths = prior.filter(month => monthIndex(currentMonth) - monthIndex(month.month) <= 3);
   const candidates: Candidate[] = [];
-  if (trendStep !== undefined && baselineMonths.length === 3) {
+  if (baselineMonths.length === 3) {
     const values = baselineMonths.map(month => month.value);
     const baseline = median(values);
     const delta = current.value - baseline;
     const effect = delta * direction;
-    if (direction * compareMonthlyValues(current.value, baseline + direction * trendStep) >= 0) {
+    if (anyDelta || (trendStep !== undefined && direction * compareMonthlyValues(current.value, baseline + direction * trendStep) >= 0)) {
       const displayedDelta = roundMetricValue(metric, current.value) - roundMetricValue(metric, baseline);
       candidates.push({
-        date, eventDate: today, effect, noise: Math.max(trendStep, mad(values)),
+        date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(values)),
         achievement: { kind: "trend_change", subject: metric, period: currentMonth },
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
@@ -160,7 +160,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       eventDate: monthPeriodEnd(best.month, today),
       effect: best.value - median(others), noise: Math.max(1, mad(others)),
       card: {
-        id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness",
+        id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness", measure: "distance_km",
         title: { number: formatNumber(best.value, 0), measure: "miles on foot" },
         subtitle: `in ${formatWinMonth(best.month)}, ${comparison === 0 ? "tied for " : ""}most this year`,
         source_note: `Walking and running distance across ${best.days} tracked days. Compared with every recorded monthly total this year.`,
@@ -172,7 +172,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
 }
 
 /** Rows are the date-ordered, one-provider-per-day observations from cleanDaily. */
-export function dailyCandidates(rows: readonly DailySample[], today: string): Candidate[] {
+export function dailyCandidates(rows: readonly DailySample[], today: string, { anyDelta = false } = {}): Candidate[] {
   const byMetric = new Map<Metric, DailySample[]>();
   for (const row of rows) {
     const series = byMetric.get(row.metric) ?? [];
@@ -181,8 +181,8 @@ export function dailyCandidates(rows: readonly DailySample[], today: string): Ca
   }
   const candidates: Candidate[] = [];
   for (const [metric, series] of byMetric) {
-    const achievements = [...monthlyCandidates(metric, series, today), ...dailyAchievements(metric, series, today)];
-    candidates.push(...achievements.map(candidate => ({ ...candidate, metric })));
+    const achievements = [...monthlyCandidates(metric, series, today, anyDelta), ...dailyAchievements(metric, series, today)];
+    candidates.push(...achievements.map(candidate => ({ ...candidate, metric, card: { ...candidate.card, measure: metric } })));
     if (metric === "distance_km") candidates.push(...distanceThisYear(series, today));
   }
   return candidates;

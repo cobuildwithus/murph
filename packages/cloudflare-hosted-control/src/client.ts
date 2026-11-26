@@ -236,6 +236,7 @@ export interface CloudflareHostedControlClient {
     replicaRef: HostedBrowserVaultReplicaRef;
     requestedMetricBuckets?: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
     requestedShards?: readonly CloudflareHostedControlBrowserVaultShardKind[];
+    signal?: AbortSignal;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession>;
   createBrowserVaultExportSession(input: {
@@ -392,6 +393,7 @@ export function createCloudflareHostedControlClient(
     requestedMetricBuckets?: readonly CloudflareHostedControlBrowserVaultMetricBucketId[];
     requestedShards?: readonly CloudflareHostedControlBrowserVaultShardKind[];
     sessionPurpose?: "export";
+    signal?: AbortSignal;
     userId: string;
   }): Promise<CloudflareHostedControlBrowserVaultSession> => {
     const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -447,6 +449,7 @@ export function createCloudflareHostedControlClient(
           userId,
         }),
       path: buildCloudflareHostedControlBrowserVaultSessionPath(userId),
+      signal: input.signal,
       request: {
         body,
         headers: {

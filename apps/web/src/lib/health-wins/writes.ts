@@ -24,13 +24,15 @@ import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfter
 import { assertPayoffCurrentTx, preparePayoffSelection } from "./payoff";
 import { postedCardKeys } from "./posted-card-keys";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
-import { hasPayoffCardEdit, validPayoffPost } from "./request";
+import { hasExternalCardEdit, isPayoffPick, isSeeYoursPick, validPayoffPost } from "./request";
+import { resolveSeeYoursSelection } from "./see-yours";
 import { assertHealthSetCurrent, resolveHealthCards } from "./wins";
 
 type Tx = Prisma.TransactionClient;
 type Auth = HostedNativeMemberAuth;
 type Content = { caption?: string | null; setRevision?: string; cards?: readonly HealthCardSelection[] };
 type CreatePost = Content & { id: string; attachmentId?: string; activity?: RecordedActivity };
+type CreateCardContext = { recorded?: readonly CachedHealthCandidate[]; units: ClientUnits; signal?: AbortSignal };
 type Comment = { id: string; visibility?: "everyone" | "poster"; body: string };
 const postReceipt = { id: true, authorMemberId: true, deletedAt: true, version: true } as const;
 const notFound = () => hostedOnboardingError({ code: "HEALTH_NOT_FOUND", httpStatus: 404, message: "That item is unavailable." });
@@ -42,27 +44,34 @@ function replayPost(row: { id: string; authorMemberId: string; deletedAt: Date |
   return { id: row.id, version: row.version };
 }
 
-async function resolvePostCards(auth: Auth, input: Content, candidates: readonly CachedHealthCandidate[] = []) {
+async function resolvePostCards(auth: Auth, input: Content, create?: CreateCardContext) {
   if (!input.cards?.length) return { cards: input.cards === undefined ? undefined : [], day: undefined };
-  const winSelections = input.cards.filter(pick => !pick.candidateId.startsWith("activity:"));
+  const minePicks = input.cards.filter(isSeeYoursPick);
+  if (minePicks.length > 1 || (minePicks.length && !create)) throw invalidGameRequest("Choose one See yours card when creating a post.");
+  const winSelections = input.cards.filter(pick => !pick.candidateId.startsWith("activity:") && !isSeeYoursPick(pick));
   if (winSelections.length && !input.setRevision) throw invalidGameRequest("Choose cards from a current set.");
   const wins = winSelections.length && input.setRevision
     ? await resolveHealthCards(auth, input.setRevision, winSelections)
     : undefined;
+  const bySelector = new Map(wins?.cards.map(card => [card.id, card]));
+  const mine = minePicks[0];
+  if (mine && create) {
+    const frozen = await resolveSeeYoursSelection(auth, mine, create.units, create.signal);
+    if (bySelector.has(frozen.id)) throw invalidGameRequest("Choose each card only once.");
+    bySelector.set(mine.candidateId, frozen);
+  }
   const cards = input.cards.map(pick => {
-    if (!pick.candidateId.startsWith("activity:")) {
-      const frozen = wins?.cards.find(card => card.id === pick.candidateId);
-      if (!frozen) throw invalidGameRequest("Choose a card from this set.");
-      return frozen;
-    }
-    return resolveRecordedSelection(candidates, pick);
+    if (pick.candidateId.startsWith("activity:")) return resolveRecordedSelection(create?.recorded ?? [], pick);
+    const frozen = bySelector.get(pick.candidateId);
+    if (!frozen) throw invalidGameRequest("Choose a card from this set.");
+    return frozen;
   }).filter(card => card !== null);
   return { cards, day: wins?.day };
 }
 
-async function resolveCreateCards(auth: Auth, input: CreatePost, candidates?: readonly CachedHealthCandidate[]) {
-  const pick = input.cards?.find(card => card.candidateId.startsWith("game:"));
-  if (!pick) return { ...await resolvePostCards(auth, input, candidates), payoff: null };
+async function resolveCreateCards(auth: Auth, input: CreatePost, create: CreateCardContext) {
+  const pick = input.cards?.find(isPayoffPick);
+  if (!pick) return { ...await resolvePostCards(auth, input, create), payoff: null };
   if (!validPayoffPost(input)) throw invalidGameRequest("Choose one payoff card with its preview and a photo.");
   const payoff = await preparePayoffSelection(auth.member.id, pick);
   await requireCurrentTermsFor(auth.member.id, { type: "redeem" });
@@ -153,7 +162,7 @@ function paintRouteAfterCommit(memberId: string, postId: string, painting: AreaP
 
 /** An acknowledged retry does not depend on the original set still being current. */
 export async function createHealthPost(
-  auth: Auth, input: CreatePost, units: ClientUnits = "us",
+  auth: Auth, input: CreatePost, units: ClientUnits = "us", signal?: AbortSignal,
 ) {
   const db = getPrisma(), memberId = auth.member.id, id = input.id.toLowerCase();
   const previous = await db.healthPost.findUnique({ where: { id }, select: { id: true } });
@@ -172,7 +181,7 @@ export async function createHealthPost(
   }
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
-  const { cards, day, payoff } = await resolveCreateCards(auth, input, recording?.candidates);
+  const { cards, day, payoff } = await resolveCreateCards(auth, input, { recorded: recording?.candidates, units, signal });
   if (!input.caption?.trim() && !cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   const data = await sealPostContent(memberId, id, input.caption, cards);
   const { receipt, created } = await db.$transaction(async tx => {
@@ -204,7 +213,6 @@ export async function createHealthPost(
 
 export async function patchHealthPost(auth: Auth, postId: string, input: Content & { expectedVersion: number; removeCardIds?: readonly string[] }) {
   const db = getPrisma(), memberId = auth.member.id, id = postId.toLowerCase();
-  if (hasPayoffCardEdit(input)) throw invalidGameRequest("Create a payoff post to share this card.");
   if (input.caption === undefined && input.cards === undefined && !input.removeCardIds?.length) throw invalidGameRequest("Choose an edit.");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
   const current = await db.healthPost.findFirst({ where: { id, authorMemberId: memberId, deletedAt: null }, select: {
@@ -215,8 +223,8 @@ export async function patchHealthPost(auth: Auth, postId: string, input: Content
   if (current.gameId !== null && (input.cards !== undefined || input.removeCardIds !== undefined || input.setRevision !== undefined)) {
     throw invalidGameRequest("Only the caption can change on a payoff post.");
   }
+  if (hasExternalCardEdit(input)) throw invalidGameRequest("Create a new post to share this card.");
   if (current.activity && input.cards?.length) throw invalidGameRequest("You can remove cards from a recorded post.");
-  if (input.removeCardIds && !current.activity) throw invalidGameRequest("Choose cards from the current set to edit this post.");
   const { cards, day } = input.removeCardIds
     ? { cards: await removeFrozenCards(memberId, id, current.cardsEncrypted, input.removeCardIds), day: undefined }
     : await resolvePostCards(auth, input);

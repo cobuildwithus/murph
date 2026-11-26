@@ -1,6 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { CardSpec } from "./engine";
-import { prepareHealthCandidates, previewHealthCandidate, freezeHealthSelections } from "./card-options";
+import {
+  freezeHealthSelections, prepareHealthCandidates, prepareSeeYoursCandidate,
+  previewHealthCandidate, previewRecordedCandidate, resolveRecordedSelection, specDigest,
+} from "./card-options";
 import { rankHealthCards } from "./decisions";
 
 const post = vi.hoisted(() => vi.fn());
@@ -59,6 +62,79 @@ it("removes every value-bearing field, including the engine id, raw arrays, sour
   expect(id).not.toBe(record.id);
   expect(specRevision).not.toBe(previewHealthCandidate(candidate).specRevision);
   expect(JSON.stringify(display)).not.toMatch(/153|2031|private date|fixture-private/u);
+});
+
+it("binds each See yours revision to the member's displayed spec, including hours", () => {
+  const measured: CardSpec = { ...record, measure: "sleep_deep_min" };
+  const [set] = prepareHealthCandidates("fixture-owner", [measured]);
+  const make = (memberId: string) => prepareSeeYoursCandidate(memberId, measured, "metric");
+  const candidate = make("fixture-owner");
+  const preview = previewRecordedCandidate(candidate);
+  expect(preview).toMatchObject({ id: set.id, candidateId: "mine:sleep_deep_min:personal_record" });
+  expect(candidate).toEqual(make("fixture-owner"));
+  expect(make("other-fixture-owner").variants[0].specRevision).not.toBe(preview.specRevision);
+  expect(candidate.variants.map(v => v.option)).toEqual(["original", "hours", "hide_numbers"]);
+  for (const variant of candidate.variants) {
+    expect(variant.specRevision).toBe(specDigest(variant.spec));
+    expect(variant.spec?.id).toBe(set.id);
+    const selection = { candidateId: candidate.id, option: variant.option, specRevision: variant.specRevision };
+    const frozen = resolveRecordedSelection([make("fixture-owner")], selection);
+    expect(frozen).toEqual({ id: set.id, specRevision: variant.specRevision, spec: variant.spec });
+    expect(JSON.stringify(frozen)).not.toContain("mine:");
+  }
+  expect(preview.change_options).toContainEqual(expect.objectContaining({
+    id: "hours", spec: expect.objectContaining({ measure: measured.measure, chart: expect.objectContaining({ unit: "hr" }) }),
+  }));
+});
+
+it("keeps the hidden milestone generic and strips the percentile measure and method", () => {
+  const heart: CardSpec = {
+    ...record, kind: "percentile", filter: "Heart", theme: "heart", measure: "rhr_bpm",
+    chart: { type: "percentile", value: 54, unit: "bpm", group: "fixture group", topPercent: 12,
+      lowerIsBetter: true, cuts: [], referenceKey: "oura_sleeping_hr" },
+  };
+  const candidate = prepareSeeYoursCandidate("fixture-owner", heart, "us");
+  const safe = previewHealthCandidate(candidate, "hide_numbers");
+  expect(safe).toMatchObject({ title: { number: "", measure: "Heart health milestone" }, chart: { type: "hidden" } });
+  expect(safe).not.toHaveProperty("measure");
+  expect(JSON.stringify(safe)).not.toMatch(/rhr_bpm|oura_sleeping_hr|fixture-private-id|fixture group/);
+});
+
+it.each(["insulin", "glucose", "a1c"] as const)("omits %s and the draw date from the complete hidden lab envelope", measure => {
+  const lab: CardSpec = {
+    ...record, id: `percentile-${measure}-20320518`, kind: "percentile", filter: "Labs", theme: "labs", measure,
+    title: { number: "Top 20%", measure }, source_note: "Fixture reading on 2032-05-18.",
+    chart: { type: "percentile", value: 5, unit: "fixture unit", group: "fixture group", topPercent: 20,
+      lowerIsBetter: true, cuts: [], referenceKey: "nhanes_labs" },
+  };
+  const candidate = prepareSeeYoursCandidate("fixture-owner", lab, "us");
+  const option = previewHealthCandidate(candidate, "hide_numbers");
+  const frozen = resolveRecordedSelection([candidate], { candidateId: candidate.id, option: "hide_numbers", specRevision: option.specRevision });
+  expect(frozen).toMatchObject({ id: option.id, spec: { id: option.id, title: { measure: "Lab milestone" }, chart: { type: "hidden" } } });
+  expect(frozen?.spec).not.toHaveProperty("measure");
+  const json = JSON.stringify(frozen);
+  expect(json).not.toContain(JSON.stringify(measure));
+  expect(json).not.toContain(lab.id);
+  expect(json).not.toMatch(/mine:|20320518|2032-05-18|nhanes_labs|fixture unit/);
+});
+
+it("uses the matching set display and opaque identity for distance trends in both unit systems", () => {
+  const distance: CardSpec = {
+    ...record, kind: "trend_change", measure: "distance_km", filter: "Fitness", theme: "fitness",
+    chart: { type: "trend", unit: "km", baseline: 3, delta: 2, pills: [],
+      series: [{ month: "2031-03", value: 3, days: 20 }, { month: "2031-04", value: 5, days: 16 }] },
+  };
+  const [set] = prepareHealthCandidates("fixture-owner", [distance]);
+  expect(set.miles?.id).toBeTruthy();
+  expect(set.miles?.id).not.toBe(set.id);
+  for (const units of ["metric", "us", "uk"] as const) {
+    const candidate = prepareSeeYoursCandidate("fixture-owner", distance, units);
+    const expected = units === "metric" ? set : set.miles!;
+    expect(candidate.id).toBe("mine:distance_km:trend_change");
+    expect(candidate.variants.map(v => v.spec)).toEqual(expected.variants.map(v => v.spec));
+    expect(candidate.variants[0].spec).toMatchObject({ id: expected.id, chart: { unit: units === "metric" ? "km" : "mi" } });
+    expect(candidate.variants.map(v => v.specRevision)).toEqual(expected.variants.map(v => specDigest(v.spec)));
+  }
 });
 
 it("uses one bounded Decisions call with fixed choices and orders only the supplied cards", async () => {

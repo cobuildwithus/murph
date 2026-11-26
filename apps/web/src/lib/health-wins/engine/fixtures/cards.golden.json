@@ -41,6 +41,7 @@
         "Nov 8h 10m"
       ]
     },
+    "measure": "sleep_total_min",
     "theme": "sleep",
     "share": {
       "caption_tips": []
@@ -93,6 +94,7 @@
       ],
       "highlight": "2036-11"
     },
+    "measure": "floors",
     "theme": "fitness",
     "share": {
       "caption_tips": []
@@ -102,6 +104,7 @@
     "id": "percentile-rhr_bpm-20361116",
     "kind": "percentile",
     "filter": "Heart",
+    "measure": "rhr_bpm",
     "title": {
       "number": "Top 17%",
       "measure": "RHR"
@@ -128,7 +131,8 @@
         }
       ],
       "topPercent": 17,
-      "lowerIsBetter": true
+      "lowerIsBetter": true,
+      "referenceKey": "oura_sleeping_hr"
     },
     "theme": "heart",
     "share": {
@@ -235,6 +239,7 @@
         "8 hours"
       ]
     },
+    "measure": "sleep_total_min",
     "theme": "sleep",
     "share": {
       "caption_tips": []
@@ -504,6 +509,7 @@
         "end": "2036-11-16"
       }
     },
+    "measure": "sleep_total_min",
     "theme": "sleep",
     "share": {
       "caption_tips": []
@@ -693,6 +699,7 @@
     "id": "lab-change-ldl-20361106",
     "kind": "lab_change",
     "filter": "Labs",
+    "measure": "ldl",
     "title": {
       "number": "−17 mg/dL",
       "measure": "LDL"
@@ -932,6 +939,7 @@
         "Sep 23"
       ]
     },
+    "measure": "steps",
     "theme": "fitness",
     "share": {
       "caption_tips": []
@@ -941,6 +949,7 @@
     "id": "lab-range-glucose-20351218",
     "kind": "lab_range",
     "filter": "Labs",
+    "measure": "glucose",
     "title": {
       "number": "93 mg/dL",
       "measure": "glucose"

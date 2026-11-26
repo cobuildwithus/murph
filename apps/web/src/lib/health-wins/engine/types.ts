@@ -79,6 +79,8 @@ export interface Session {
 export type Analyte =
   | "hdl" | "ldl" | "triglycerides" | "total_chol" | "hs_crp" | "insulin" | "a1c" | "glucose";
 
+export type Measure = Metric | Analyte;
+
 export interface LabDraw {
   analyte: Analyte;
   date: string;
@@ -140,6 +142,8 @@ export interface HealthWinRankResult {
   betterShare: number;
   /** Short, member-facing citation for the comparison cohort. */
   source: string;
+  /** Identity of the reference table or measurement method used by the default ranker. */
+  referenceKey?: "oura_sleeping_hr" | "apple_resting_hr" | "friend_vo2max" | "nhanes_steps" | "nhanes_labs";
   group: string;
   cuts: { percentile: number; value: number }[];
   lowerIsBetter: boolean;
@@ -180,6 +184,7 @@ type DetectedCard = {
     kind: K;
     id: string;
     filter: Filter;
+    measure?: Measure;
     title: { number: string; measure: string };
     subtitle: string;
     source_note: string;

@@ -13,9 +13,11 @@ import * as destinations from "../src/lib/hosted-routing/assistant-notification-
 import { drainHealthWinTexts } from "../src/lib/health-wins/nudge-job";
 import * as crypto from "../src/lib/health-wins/crypto";
 import type { HealthWinsInput } from "../src/lib/health-wins/engine";
+import { seeYoursCard } from "../src/lib/health-wins/engine/see-yours";
 
 const source = vi.hoisted(() => vi.fn());
-vi.mock("../src/lib/health-wins/inputs", () => ({ readHealthWinInputs: source }));
+const measureSource = vi.hoisted(() => vi.fn());
+vi.mock("../src/lib/health-wins/inputs", () => ({ readHealthWinInputs: source, readMeasureInputs: measureSource }));
 vi.mock("../src/lib/hosted-crypto/domain-root-store", () => ({
   prepareHostedDomainRootForWeb: async ({ domain, userId }: { domain: string; userId: string }) => ({ domain, userId, rootKeyId: "fixture-win-root" }),
   unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32, 49), envelope: { rootKeyId: "fixture-win-root" } }),
@@ -82,11 +84,21 @@ function incompleteInputs(_memberId: string, _checkAuthority: () => Promise<void
   return { input: { member: data(today).input.member }, complete: false, sourceRevision: "fixture-incomplete" };
 }
 
+function distanceHistory(today: string) {
+  const result = data(today);
+  result.input.daily = ["04", "05", "06", "07"].flatMap(month => Array.from({ length: 16 }, (_, i) => ({
+    metric: "distance_km", provider: "apple", date: `2034-${month}-${String(i + 1).padStart(2, "0")}`,
+    value: (month === "07" ? 3.28 : 2.34) * 1.609344,
+  })));
+  return result;
+}
+
 describe.skipIf(!enabled)("member-local health win sets", () => {
   afterEach(async () => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
     source.mockReset();
+    measureSource.mockReset();
     await db.hostedMember.deleteMany({ where: { id: { in: members.splice(0) } } });
   });
 
@@ -395,14 +407,7 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     vi.setSystemTime(new Date("2034-07-24T12:00:00Z"));
     const auth = await fixture(7);
     enableWinTexts(auth.member.id);
-    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
-      const result = data(today);
-      result.input.daily = ["04", "05", "06", "07"].flatMap(month => Array.from({ length: 16 }, (_, i) => ({
-        metric: "distance_km", provider: "garmin", date: `2034-${month}-${String(i + 1).padStart(2, "0")}`,
-        value: (month === "07" ? 3.28 : 2.34) * 1.609344,
-      })));
-      return result;
-    });
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => distanceHistory(today));
     const metric = await readHealthWins(auth, { signal, units: "metric" });
     const us = await readHealthWins(auth, { signal, units: "us" });
     expect(await readHealthWins(auth, { signal, units: "uk" })).toEqual(us);
@@ -437,6 +442,29 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     await createHealthPost(auth, { id: randomUUID(), setRevision: us.setRevision, cards: [{ candidateId: mi.id, option: "original" }] });
     expect((await readHealthWins(auth, { signal })).candidates).not.toContainEqual(mi);
     expect(await readHealthWins(auth, { signal, units: "metric" })).toEqual(metric);
+  });
+
+  it("hides the posted See yours distance display and restores it when the frozen card is removed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const today = "2034-07-24";
+    vi.setSystemTime(new Date(`${today}T12:00:00Z`));
+    const auth = await fixture();
+    const history = distanceHistory(today);
+    source.mockResolvedValue(history);
+    measureSource.mockResolvedValue({ input: history.input, observed: true });
+    const metric = await readHealthWins(auth, { signal, units: "metric" });
+    const us = await readHealthWins(auth, { signal, units: "us" });
+    const spec = seeYoursCard(history.input, "distance_km", "trend_change")!;
+    const preview = cardOptions.previewRecordedCandidate(cardOptions.prepareSeeYoursCandidate(auth.member.id, spec, "us"));
+    expect(us.candidates.find(card => card.kind === "trend_change")?.id).toBe(preview.id);
+    const post = await createHealthPost(auth, { id: randomUUID(), caption: "An afternoon walk.",
+      cards: [{ candidateId: preview.candidateId, option: "original", specRevision: preview.specRevision }] }, "us");
+    expect((await readHealthWins(auth, { signal, units: "us" })).candidates).toEqual(us.candidates.filter(card => card.id !== preview.id));
+    expect(await readHealthWins(auth, { signal, units: "metric" })).toEqual(metric);
+    await patchHealthPost(auth, post.id, { expectedVersion: post.version, removeCardIds: [preview.id] });
+    expect(await readHealthWins(auth, { signal, units: "us" })).toEqual(us);
+    expect(source).toHaveBeenCalledTimes(1);
+    expect(measureSource).toHaveBeenCalledTimes(1);
   });
 
   it("prevents a slower computation from replacing a newer publication", async () => {

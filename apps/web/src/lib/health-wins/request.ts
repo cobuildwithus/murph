@@ -54,28 +54,40 @@ const postFields = {
     .refine(cards => new Set(cards.map(card => card.candidateId)).size === cards.length).optional(),
 };
 
+export function isSeeYoursPick(pick: { candidateId: string }) {
+  return pick.candidateId.startsWith("mine:");
+}
+
+export function isPayoffPick(pick: { candidateId: string }) {
+  return pick.candidateId.startsWith("game:");
+}
+
 export function validPayoffPost(input: { cards?: readonly { candidateId: string; specRevision?: string }[]; attachmentId?: string }) {
-  const payoff = input.cards?.find(card => card.candidateId.startsWith("game:"));
+  const payoff = input.cards?.find(isPayoffPick);
   return !payoff || (input.cards?.length === 1 && Boolean(input.attachmentId) && digest.safeParse(payoff.specRevision).success);
 }
 
-export function hasPayoffCardEdit(input: { cards?: readonly { candidateId: string }[]; removeCardIds?: readonly string[] }) {
-  return input.cards?.some(card => card.candidateId.startsWith("game:")) || input.removeCardIds?.some(id => id.startsWith("game:"));
+export function hasExternalCardEdit(input: { cards?: readonly { candidateId: string }[]; removeCardIds?: readonly string[] }) {
+  const external = (pick: { candidateId: string }) => isPayoffPick(pick) || isSeeYoursPick(pick);
+  return input.cards?.some(external) || input.removeCardIds?.some(candidateId => external({ candidateId }));
 }
 
 export const createPostBody = z.strictObject({
   ...postFields, id: uuid, attachmentId: uuid.optional(), activity: activityWithDisplay.optional(),
 })
   .refine(validPayoffPost)
-  .refine(input => input.cards?.every(card => card.candidateId.startsWith("activity:")
-    ? input.activity !== undefined && digest.safeParse(card.specRevision).success
-    : card.candidateId.startsWith("game:") || input.setRevision !== undefined) ?? true)
+  .refine(input => (input.cards?.filter(isSeeYoursPick).length ?? 0) <= 1)
+  .refine(input => input.cards?.every(card => {
+    if (isSeeYoursPick(card)) return digest.safeParse(card.specRevision).success;
+    if (card.candidateId.startsWith("activity:")) return input.activity !== undefined && digest.safeParse(card.specRevision).success;
+    return isPayoffPick(card) || input.setRevision !== undefined;
+  }) ?? true)
   .refine(input => Boolean(input.caption?.trim() || input.cards?.length || input.attachmentId));
 export const patchPostBody = z.strictObject({
   ...postFields, expectedVersion: z.number().int().positive().max(2147483647),
   removeCardIds: z.array(candidateId).min(1).max(12).refine(ids => new Set(ids).size === ids.length).optional(),
 })
-  .refine(input => !hasPayoffCardEdit(input))
+  .refine(input => !hasExternalCardEdit(input))
   .refine(input => !input.cards?.length || input.setRevision !== undefined)
   .refine(input => !input.removeCardIds || (input.cards === undefined && input.setRevision === undefined))
   .refine(input => input.caption !== undefined || input.cards !== undefined || input.removeCardIds !== undefined);
@@ -87,6 +99,7 @@ export const commentBody = z.strictObject({
 export const changeWinBody = z.strictObject({ setRevision: uuid, option });
 const winsQuery = z.strictObject({ refresh: z.enum(["0", "1"]).optional() });
 const pageQuery = z.strictObject({ cursor: z.string().min(1).max(2048).optional() });
+const seeYoursQuery = z.strictObject({ card: candidateId });
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -99,6 +112,9 @@ export async function readHealthBody<T>(request: Request, schema: z.ZodType<T>):
 }
 export function readHealthCursor(request: Request) {
   return parse(pageQuery, Object.fromEntries(new URL(request.url).searchParams)).cursor;
+}
+export function readSeeYoursCardId(request: Request) {
+  return parse(seeYoursQuery, Object.fromEntries(new URL(request.url).searchParams)).card;
 }
 export function readWinsRefresh(request: Request) {
   return parse(winsQuery, Object.fromEntries(new URL(request.url).searchParams)).refresh === "1";

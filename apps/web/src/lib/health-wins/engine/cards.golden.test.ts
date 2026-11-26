@@ -58,7 +58,7 @@ function syntheticInput(): HealthWinsInput {
     rank: metric => metric === "restingHeartRate" ? {
       betterShare: 83, group: "Women 30 to 39", source: "Synthetic resting heart rate reference",
       cuts: [{ percentile: 10, value: 51 }, { percentile: 50, value: 63 }, { percentile: 90, value: 75 }],
-      lowerIsBetter: true,
+      lowerIsBetter: true, referenceKey: "oura_sleeping_hr",
     } : null,
     labs: [
       { analyte: "ldl", value: 125, unit: "mg/dL", date: "2036-03-04", fasting: false },
@@ -158,6 +158,7 @@ it("exports synthetic examples of every rendered shape", () => {
     },
   });
   const diet = detectDietWins();
+  for (const card of diet.cards) expect(card).not.toHaveProperty("measure");
   expect(Object.fromEntries(diet.achievements)).toEqual({
     "best_month:protein_g:2036-11": { kind: "best_month", subject: "protein_g", period: "2036-11" },
   });
