@@ -20,7 +20,7 @@ import { readHealthWinInputs } from "./inputs";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v2";
+const DETECTOR_VERSION = "v3";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 

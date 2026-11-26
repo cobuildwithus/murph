@@ -6,6 +6,11 @@ card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
 The function runs in memory and leaves the supplied arrays untouched.
 
+Full calendar days in chart data and copy read `Nov 6`, or `Nov 6, 2035` when
+the year differs from `member.today`. A record's `highlight.label` and pill
+use the same date. Render trend pills verbatim in their supplied order.
+Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
+
 ## Inputs that affect interpretation
 
 - Daily values are whole-day observations. Provider aliases are normalized. Conflicting values from one provider on one date make that provider unavailable for that date.
@@ -14,6 +19,8 @@ The function runs in memory and leaves the supplied arrays untouched.
 - Lab percentiles use the draw's unit and the matched row's direction. The default comparisons use p5 through p95. Favorable values past the outer supported cut read “Top 5%.” LDL, triglycerides and insulin accept fasting draws and draws with unknown fasting status. The source note identifies an unknown status. Glucose has no comparison cohort. [Lab reference sources and method](../../game/progress/lab-norms.md)
 - For a range card, pass the reporting lab's inclusive `referenceRange` in the draw's unit, or an eligible `specimen` for a reviewed comparator. A `normal` flag alone supplies no numeric bounds. When fasting status is known for any comparable triglyceride or glucose draw, the latest and at least two prior draws must be explicitly fasting for a change card.
 - Mark private interventions with `experiment.sensitiveCategory`, including experiments that measure an allowed outcome such as sleep. The caller owns this classification for free-text titles. A private overlapping intervention also withholds the concurrent readout.
+- The game adapter supplies `gameStreak.calendar` with the member's per-date outcomes across all scheduled games, including unclassified exercises. The engine fills dates without an outcome with `no_game` and orders `chart.calendar` in whole Monday–Sunday weeks. Callers that omit `gameStreak` can still supply per-exercise `bestStreak` summaries. Summaries without daily evidence show the streak length and dates.
+- Skyline entries in `landmarksPassed` and `next` carry a display `name` from the Progress height bank and `heightUnit: "ft"`. An unknown ID gets the display name `Landmark`.
 
 ## Rules and synthetic regression tests
 
@@ -41,3 +48,8 @@ The function runs in memory and leaves the supplied arrays untouched.
 Audit findings 1–2 exercise rule 6, 3 exercises rules 1 and 10, 4 exercises rules 3 and 11, 5 exercises rule 10, and 6 exercises rules 4 and 8. Findings 7–9 exercise rule 12, 10 and 12 exercise rule 13, and 11 exercises rule 14.
 
 Run the focused suite with `pnpm --dir apps/web exec vitest run src/lib/health-wins`.
+
+[cards.golden.json](fixtures/cards.golden.json) contains one synthetic example of
+each engine card kind, including both the skyline and plank-ladder charts.
+The golden test reads this file during normal runs. To regenerate it, run
+`UPDATE_HEALTH_WINS_GOLDEN=1 pnpm --dir apps/web exec vitest run src/lib/health-wins/engine/cards.golden.test.ts`.

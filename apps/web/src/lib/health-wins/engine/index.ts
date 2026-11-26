@@ -12,7 +12,7 @@ export { canonicalProvider } from "./daily-clean";
 export { metricInfo } from "./metrics";
 
 export type {
-  Analyte, CardKind, CardSpec, DailySample, Experiment, Filter, Game, HealthWinRank,
+  Analyte, CardKind, CardSpec, DailySample, Experiment, Filter, Game, GameStreakDay, HealthWinRank,
   HealthWinRankResult, HealthWinsInput, LabDraw, Metric, RankMetric, Session, SessionType,
 } from "./types";
 

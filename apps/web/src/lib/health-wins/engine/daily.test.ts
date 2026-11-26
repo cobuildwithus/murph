@@ -47,6 +47,16 @@ describe("trend_change", () => {
     });
   });
 
+  it("supplies the native trend pills in display order", () => {
+    const asOf = "2034-11-23";
+    const months = ["2034-08", "2034-09", "2034-10", "2034-11"];
+    const daily = months.flatMap((month, index) =>
+      monthOf("sleep_total_min", month, [421, 433, 447, 489][index], 16, 15));
+    const trend = dailyCandidates(cleanDaily(daily, asOf), asOf).map(({ card }) => card)
+      .find(card => card.kind === "trend_change");
+    expect(trend?.chart.pills).toEqual(["Usual 7h 13m", "Nov 8h 9m"]);
+  });
+
   it("subtracts the displayed whole minutes for the title and preserves measured chart values", () => {
     const sleep = fourMonths("sleep_deep_min", [69, 83.75, 94, 108.25], 8);
     const trend = cards(sleep).find(card => card.kind === "trend_change");

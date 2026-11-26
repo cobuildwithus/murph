@@ -42,7 +42,7 @@ describe("threshold_count", () => {
     const count = result.find(c => c.kind === "threshold_count");
     expect(count?.title.number).toBe("6 of 10 nights");
     expect(count?.chart.series).toHaveLength(10);
-    expect(count?.chart.series.map(point => point.date)).not.toContain(dateAt(-7));
+    expect(count?.chart.series.map(point => point.date)).not.toContain("Apr 21");
     expect(result.some(c => c.kind === "streak")).toBe(false);
   });
 });
@@ -54,7 +54,7 @@ describe("streak", () => {
     const result = cards(SLEEP, rows).find(c => c.kind === "streak");
     expect(result?.title).toEqual({ number: "5 nights", measure: "8+ hours" });
     expect(result?.subtitle).toBe("in a row, Apr 21 to 25");
-    expect(result?.chart.highlight).toEqual({ start: dateAt(-7), end: dateAt(-3) });
+    expect(result?.chart.highlight).toEqual({ start: "Apr 21", end: "Apr 25" });
     expect(cards(SLEEP, nights(five.slice(1))).some(c => c.kind === "streak")).toBe(false);
   });
 
@@ -66,7 +66,7 @@ describe("streak", () => {
     expect(cards(SLEEP, [...older, ...nights(five)]).some(c => c.kind === "streak")).toBe(false);
     const crossingWindow = nights([...five, 488, 496], -93);
     const recent = cards(SLEEP, [...crossingWindow, ...nights(five)]).find(c => c.kind === "streak");
-    expect(recent?.chart.highlight).toEqual({ start: dateAt(-4), end: TODAY });
+    expect(recent?.chart.highlight).toEqual({ start: "Apr 24", end: "Apr 28" });
   });
 
   it("names both months when a streak crosses New Year's Day", () => {
@@ -86,7 +86,9 @@ describe("personal_record", () => {
       const provider = metric === "distance_km" ? "apple" : "whoop";
       const rows = [sample(metric, dateAt(-76), previous, provider), sample(metric, TODAY, current, provider)];
       const record = cards(metric, rows).find(c => c.kind === "personal_record");
-      expect(record?.chart.highlight, metric).toEqual({ date: TODAY, value: metric === "distance_km" ? current / 1.609344 : current });
+      expect(record?.chart.highlight, metric).toEqual({
+        date: "Apr 28", label: "Apr 28", value: metric === "distance_km" ? current / 1.609344 : current,
+      });
       if (metric === "distance_km") expect(record?.title.measure).toContain("on foot");
     }
     const excluded: [Metric, number, number][] = [
@@ -105,7 +107,7 @@ describe("personal_record", () => {
       sample("steps", dateAt(-72), 12600), sample("steps", dateAt(-60), 12600),
     ];
     const fresh = cards("steps", rows).find(c => c.kind === "personal_record");
-    expect(fresh?.chart.highlight).toEqual({ date: dateAt(-60), value: 12600 });
+    expect(fresh?.chart.highlight).toEqual({ date: "Feb 28", label: "Feb 28", value: 12600 });
     expect(fresh?.subtitle).toBe("on Feb 28, tied for your most this year");
     const stale = [...rows.slice(0, -1), sample("steps", dateAt(-61), 12600), sample("steps", TODAY, 8500)];
     expect(cards("steps", stale)).toHaveLength(0);
@@ -126,20 +128,25 @@ describe("personal_record", () => {
       title: { number: "12", measure: "miles on foot" },
       subtitle: "on Feb 9, your most this year",
       source_note: "Recorded on Feb 9. Based on 7 tracked days.",
-      chart: { unit: "miles", pills: ["Feb 9"], highlight: { date: "2034-02-09", value: 19 / 1.609344 } },
+      chart: { unit: "miles", pills: ["Feb 9"], highlight: { date: "Feb 9", label: "Feb 9", value: 19 / 1.609344 } },
     });
   });
 
   it("dates a sleep record and names the comparison window when the year changes", () => {
     const rows = [sample("sleep_deep_min", "2034-12-03", 76), sample("sleep_deep_min", "2034-12-19", 104)];
     const record = (asOf: string) => cards("sleep_deep_min", rows, asOf).find(card => card.kind === "personal_record");
-    expect(record("2034-12-22")).toMatchObject({
+    const december = record("2034-12-22");
+    const january = record("2035-01-06");
+    expect(december).toMatchObject({
       title: { number: "1h 44m", measure: "deep sleep" }, subtitle: "on Dec 19, your most this year",
+      chart: { highlight: { label: "Dec 19" }, pills: ["Dec 19"] },
     });
-    expect(record("2035-01-06")).toMatchObject({
+    expect(january).toMatchObject({
       subtitle: "on Dec 19, 2034, your most in the past 12 months",
       source_note: "Recorded on Dec 19, 2034. Based on 2 tracked days.",
+      chart: { highlight: { label: "Dec 19, 2034" }, pills: ["Dec 19, 2034"] },
     });
+    expect(january?.id).toBe(december?.id);
   });
 
   it("computes the steps record from the selected daily provider", () => {
@@ -149,6 +156,6 @@ describe("personal_record", () => {
     ];
     const record = cards("steps", rows).find(c => c.kind === "personal_record");
     expect(record?.title).toEqual({ number: "13,111", measure: "steps" });
-    expect(record?.chart.highlight).toEqual({ date: TODAY, value: 13111 });
+    expect(record?.chart.highlight).toEqual({ date: "Apr 28", label: "Apr 28", value: 13111 });
   });
 });

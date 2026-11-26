@@ -1,6 +1,6 @@
 import { healthMean14 } from "../../game/progress/health";
 import { metricInfo } from "./metrics";
-import { cardText, dayNumber, formatWinDate, mean } from "./shared";
+import { cardDateKey, cardText, dayNumber, formatWinDate, isDate, mean } from "./shared";
 import type { Candidate, DailySample, Filter, HealthWinRank, HealthWinRankResult, HealthWinsInput } from "./types";
 
 export interface PercentileCharts {
@@ -33,17 +33,18 @@ function cohortSubtitle(group: string): string {
   return `for ${cohort}`;
 }
 
-export function percentileCandidate(evidence: PercentileEvidence): Candidate | undefined {
+export function percentileCandidate(evidence: PercentileEvidence, today: string): Candidate | undefined {
   const { rank, value, id, label, unit, filter, date, observation } = evidence;
   if (!rank || !(rank.betterShare >= 70 && rank.betterShare <= 100)) return;
-  const source = cardText(rank.source);
+  const source = cardText(rank.source).replace(/\b\d{4}-\d{2}-\d{2}\b/gu,
+    date => isDate(date) ? formatWinDate(date, today) : date);
   const group = cardText(rank.group);
   if (!source || !group) return;
   const topPercent = Math.max(1, Math.ceil(100 - rank.betterShare));
   return {
     date, effect: rank.betterShare - 50, noise: 25,
     card: {
-      id: `percentile-${id}-${date}`, kind: "percentile", filter,
+      id: `percentile-${id}-${cardDateKey(date)}`, kind: "percentile", filter,
       title: { number: `Top ${topPercent}%`, measure: label },
       subtitle: cohortSubtitle(group),
       source_note: `${observation}. ${source}`,
@@ -88,7 +89,7 @@ export function percentileCandidates(input: HealthWinsInput, rows: readonly Dail
     const candidate = percentileCandidate({
       rank: rank(wearableRankMetrics[metric], reading.value, { member, unit, daily: reading.points }),
       value: reading.value, date: reading.date, observation: reading.observation, id: metric, label, unit, filter,
-    });
+    }, member.today);
     if (candidate) candidates.push(candidate);
   }
   return candidates;

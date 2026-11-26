@@ -1,6 +1,6 @@
 import { dailyAchievements, type DailyAchievementCharts } from "./daily-achievements";
 import { formatMetricValue, metricInfo, roundMetricValue } from "./metrics";
-import { formatNumber, formatWinMonth, mad, mean, median, milesFromKm } from "./shared";
+import { formatNumber, formatWinDate, formatWinMonth, mad, mean, median, milesFromKm } from "./shared";
 import type { Candidate, DailySample, Metric } from "./types";
 
 interface MonthlyPoint {
@@ -135,7 +135,8 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       title: { number: formatNumber(totalMiles, 0), measure: "miles on foot" },
       subtitle: "walking and running, this year",
       source_note: `Daily distance across ${series.length} tracked days, using one provider per day.`,
-      chart: { type: "map", series, totalMiles, days: series.length },
+      chart: { type: "map", totalMiles, days: series.length,
+        series: series.map(({ date, miles }) => ({ date: formatWinDate(date, today), miles })) },
     },
   }];
   const months = new Map<string, MonthlyPoint>();

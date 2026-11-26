@@ -1,5 +1,5 @@
 import { formatMetricValue, metricInfo } from "./metrics";
-import { dayNumber, formatNumber, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
+import { cardDateKey, dayNumber, formatNumber, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
 import type { Candidate, DailySample, Metric } from "./types";
 
 type Point = { date: string; value: number };
@@ -14,17 +14,17 @@ type SleepBars = {
 export type DailyAchievementCharts = {
   threshold_count: SleepBars;
   streak: SleepBars & { highlight: { start: string; end: string } };
-  personal_record: { type: "record"; unit: string; series: Point[]; highlight: Point; pills: string[] };
+  personal_record: { type: "record"; unit: string; series: Point[]; highlight: Point & { label: string }; pills: string[] };
 };
 
 const SLEEP_TARGET_MINUTES = 8 * 60;
 
-function sleepBars(rows: readonly DailySample[]): SleepBars {
+function sleepBars(rows: readonly DailySample[], today: string): SleepBars {
   return {
     type: "bars",
     unit: "min",
     threshold: SLEEP_TARGET_MINUTES,
-    series: rows.map(({ date, value }) => ({ date, value, passing: value >= SLEEP_TARGET_MINUTES })),
+    series: rows.map(({ date, value }) => ({ date: formatWinDate(date, today), value, passing: value >= SLEEP_TARGET_MINUTES })),
     pills: ["8 hours"],
   };
 }
@@ -45,7 +45,7 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
       title: { number: `${hits} of ${nights.length} nights`, measure: "8+ hours" },
       subtitle: `in ${formatWinMonth(today)} so far`,
       source_note: `Based on ${nights.length} tracked nights.`,
-      chart: sleepBars(nights),
+      chart: sleepBars(nights, today),
     },
   };
 }
@@ -86,13 +86,13 @@ function sleepStreak(rows: readonly DailySample[], today: string): Candidate | u
     effect: bestLength,
     noise: 5,
     card: {
-      id: `streak:sleep_total_min:${end}`,
+      id: `streak:sleep_total_min:${cardDateKey(end)}`,
       kind: "streak",
       filter: "Sleep",
       title: { number: `${bestLength} nights`, measure: "8+ hours" },
       subtitle: `in a row, ${streakDateRange(start, end, today)}`,
       source_note: `Longest recorded run in the last 90 days, ending ${formatWinDate(end, today)}.`,
-      chart: { ...sleepBars(nights), highlight: { start, end } },
+      chart: { ...sleepBars(nights, today), highlight: { start: formatWinDate(start, today), end: formatWinDate(end, today) } },
     },
   };
 }
@@ -119,7 +119,7 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
     effect: Math.abs(best.value - median(values)),
     noise: Math.max(trendStep ?? 1, mad(values)),
     card: {
-      id: `personal_record:${metric}:${best.date}`,
+      id: `personal_record:${metric}:${cardDateKey(best.date)}`,
       kind: "personal_record",
       filter,
       title: distance
@@ -129,8 +129,8 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
       source_note: `Recorded on ${dateLabel}. Based on ${year.length} tracked days.`,
       chart: {
         type: "record", unit: distance ? "miles" : unit,
-        series: year.map(({ date, value }) => ({ date, value: chartValue(value) })),
-        highlight: { date: best.date, value: chartValue(best.value) }, pills: [dateLabel],
+        series: year.map(({ date, value }) => ({ date: formatWinDate(date, today), value: chartValue(value) })),
+        highlight: { date: dateLabel, value: chartValue(best.value), label: dateLabel }, pills: [dateLabel],
       },
     },
   };

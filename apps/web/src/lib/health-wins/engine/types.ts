@@ -54,13 +54,30 @@ export interface Experiment {
   sensitiveCategory?: "medications" | "genetics" | "conditions" | "weight";
 }
 
+export interface GameStreakDay {
+  date: string;
+  state: "posted" | "missed" | "no_game";
+}
+
 export interface Game {
   exercise: string;
   total: number;
   unit: string;
+  /** Heights use feet from the Progress landmark bank. */
   landmarksPassed: readonly { id: string; height: number }[];
+  /** Height is in feet. The remaining exercise amount uses the game's unit. */
   next: { id: string; height: number; toGo: number } | null;
-  bestStreak: { days: number; start: string; end: string; missedOn: string | null } | null;
+  bestStreak: {
+    days: number;
+    start: string;
+    end: string;
+    missedOn: string | null;
+    /**
+     * Per-date outcomes across games for the Monday–Sunday weeks touched by the
+     * streak. Omitted dates have no settled outcome. Older summaries lack daily evidence.
+     */
+    calendar?: readonly GameStreakDay[];
+  } | null;
 }
 
 export type RankMetric = "restingHeartRate" | "steps" | "vo2Max" | LabNormMetric;

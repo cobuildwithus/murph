@@ -25,7 +25,15 @@ describe("game inputs for health wins", () => {
     const result = gameWinInputs(memberId, today, { facts: [source, other], states: new Map(), awards: [] }, null);
     expect(result.games).toHaveLength(1);
     expect(result.games[0]).toMatchObject({ exercise: "pushups", total: 352, unit: "reps" });
-    expect(result.gameStreak).toEqual({ start: "2026-11-01", end: "2026-11-03", days: 3, missedOn: "2026-11-04" });
+    expect(result.gameStreak).toMatchObject({ start: "2026-11-01", end: "2026-11-03", days: 3, missedOn: "2026-11-04" });
+    const streak = generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
+      games: result.games, gameStreak: result.gameStreak }).find(card => card.kind === "game_streak");
+    expect(streak?.chart.calendar?.map(day => [day.date, day.state])).toEqual([
+      ["Oct 26", "no_game"], ["Oct 27", "no_game"], ["Oct 28", "no_game"], ["Oct 29", "no_game"],
+      ["Oct 30", "no_game"], ["Oct 31", "no_game"], ["Nov 1", "posted"],
+      ["Nov 2", "posted"], ["Nov 3", "posted"], ["Nov 4", "missed"], ["Nov 5", "posted"],
+      ["Nov 6", "no_game"], ["Nov 7", "no_game"], ["Nov 8", "no_game"],
+    ]);
     expect(result.games[0].landmarksPassed.length).toBeGreaterThan(0);
     expect(result.games[0].landmarksPassed.every(item => item.height <= 352)).toBe(true);
     expect(result.games[0].next?.toGo).toBe(Math.ceil(result.games[0].next!.height - 352));
@@ -41,18 +49,40 @@ describe("game inputs for health wins", () => {
     post(other, 1, "photo", null);
     const snapshot = { facts: [source, other], states: new Map(), awards: [] };
     const original = gameWinInputs(memberId, today, snapshot, null);
-    expect(original.gameStreak).toEqual({ days: 3, start: "2026-11-01", end: "2026-11-03", missedOn: "2026-11-04" });
+    expect(original.gameStreak).toMatchObject({ days: 3, start: "2026-11-01", end: "2026-11-03", missedOn: "2026-11-04" });
     const unclassified = gameWinInputs(memberId, today, { ...snapshot, facts: [other] }, null);
     expect(unclassified.games).toEqual([]);
-    expect(unclassified.gameStreak).toEqual({ days: 1, start: "2026-11-02", end: "2026-11-02", missedOn: "2026-11-04" });
+    expect(unclassified.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02", missedOn: "2026-11-04" });
     expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
       games: unclassified.games, gameStreak: unclassified.gameStreak })).toMatchObject([
-      { kind: "game_streak", chart: { days: 1, missedOn: "2026-11-04" } },
+      { kind: "game_streak", chart: { days: 1, missedOn: "Nov 4", calendar: [
+        { date: "Nov 2", state: "posted" }, { date: "Nov 3", state: "no_game" }, { date: "Nov 4", state: "missed" },
+        { date: "Nov 5", state: "no_game" }, { date: "Nov 6", state: "no_game" }, { date: "Nov 7", state: "no_game" },
+        { date: "Nov 8", state: "no_game" },
+      ] } },
     ]);
 
     other.state.entries[0].incomplete = true;
     const corrected = gameWinInputs(memberId, today, snapshot, null);
-    expect(corrected.gameStreak).toEqual({ days: 1, start: "2026-11-03", end: "2026-11-03", missedOn: "2026-11-04" });
+    expect(corrected.gameStreak).toMatchObject({ days: 1, start: "2026-11-03", end: "2026-11-03", missedOn: "2026-11-04" });
+    expect(corrected.sourceRevision).not.toBe(original.sourceRevision);
+  });
+
+  it("revises the streak when a post outside the best run changes a dot, and leaves the open day unmarked", () => {
+    const source = game("synthetic-cadence", task("Movement practice", null));
+    source.now = new Date("2026-11-07T12:00:00Z");
+    for (const day of [0, 1, 2, 5]) post(source, day, "photo", null);
+    const read = () => gameWinInputs(memberId, "2026-11-07", { facts: [source], states: new Map(), awards: [] }, null);
+    const original = read();
+    source.state.entries.at(-1)!.incomplete = true;
+    const corrected = read();
+    for (const result of [original, corrected]) {
+      expect(result.games).toEqual([]);
+      expect(result.gameStreak).toMatchObject({ days: 3, start: "2026-11-01", end: "2026-11-03", missedOn: "2026-11-04" });
+      expect(result.gameStreak?.calendar).not.toContainEqual({ date: "2026-11-07", state: "missed" });
+    }
+    expect(original.gameStreak?.calendar).toContainEqual({ date: "2026-11-06", state: "posted" });
+    expect(corrected.gameStreak?.calendar).toContainEqual({ date: "2026-11-06", state: "missed" });
     expect(corrected.sourceRevision).not.toBe(original.sourceRevision);
   });
 
@@ -67,6 +97,21 @@ describe("game inputs for health wins", () => {
     expect(result.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02" });
     expect(gameWinInputs(memberId, today, snapshot, { days: [] }).games[0].total).toBe(3600);
     expect(gameWinInputs(memberId, today, { ...snapshot, facts: [] }, runs).games).toEqual([]);
+  });
+
+  it("shows heights and remaining reps for pull-ups and keeps timed exercise totals free of height landmarks", () => {
+    const pulls = game("synthetic-pull", task("Pull-up practice", { quantity: 41, unit: "reps", name: "pullups" }));
+    const stretch = game("synthetic-stretch", task("Yoga practice", { quantity: 15, unit: "minutes", name: "yoga" }));
+    for (const source of [pulls, stretch]) post(source, 0, "photo", null);
+    const { games, gameStreak } = gameWinInputs(memberId, today, { facts: [pulls, stretch], states: new Map(), awards: [] }, null);
+    const cards = generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, games, gameStreak });
+    expect(cards.find(card => card.id === "game_climb:pullups")?.chart).toMatchObject({
+      total: 41, unit: "reps", landmarksPassed: [{ id: "hollywood-sign", name: "Hollywood Sign", height: 45, heightUnit: "ft" }],
+      next: { id: "christ-the-redeemer", name: "Christ the Redeemer", height: 125, heightUnit: "ft", toGo: 22 },
+    });
+    expect(cards.find(card => card.id === "game_climb:yoga")?.chart).toMatchObject({
+      total: 900, unit: "seconds", landmarksPassed: [], next: null,
+    });
   });
 
   it("changes the member-bound revision after a correction, changed per-day measure, and award insertion", () => {

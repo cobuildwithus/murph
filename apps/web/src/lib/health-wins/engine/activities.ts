@@ -1,11 +1,14 @@
 import { BANK, ladder } from "../../game/progress/bank";
 import type { EXERCISES } from "../../game/progress/registry";
+import { addDays, weekdayOf } from "../../game/time";
 import { isMetric, metricInfo } from "./metrics";
-import { cardText, dayNumber, formatDuration, formatNumber, formatWinDate, formatWinMonth, isDate } from "./shared";
-import type { Candidate, Experiment, Game, HealthWinsInput, Metric, Session, SessionType } from "./types";
+import { cardDateKey, cardText, dayNumber, formatDuration, formatNumber, formatWinDate, formatWinMonth, isDate } from "./shared";
+import type { Candidate, Experiment, Game, GameStreakDay, HealthWinsInput, Metric, Session, SessionType } from "./types";
 
 type ExperimentBar = { label: "Before" | "During"; start: string; end: string; mean: number };
 type TimeRung = { id: string; name: string; seconds: number };
+type SkylineLandmark = { id: string; name: string; height: number; heightUnit: "ft" };
+type GameStreak = NonNullable<Game["bestStreak"]>;
 
 export interface ActivityCharts {
   experiment_result: {
@@ -23,8 +26,8 @@ export interface ActivityCharts {
     exercise: string;
     total: number;
     unit: string;
-    landmarksPassed: Game["landmarksPassed"];
-    next: Game["next"];
+    landmarksPassed: readonly SkylineLandmark[];
+    next: (SkylineLandmark & { toGo: number }) | null;
   } | {
     type: "ladder";
     exercise: "planks";
@@ -33,7 +36,7 @@ export interface ActivityCharts {
     rungsPassed: TimeRung[];
     next: (TimeRung & { toGo: number }) | null;
   };
-  game_streak: { type: "week_dots" } & NonNullable<Game["bestStreak"]>;
+  game_streak: { type: "week_dots" } & GameStreak;
   sessions: {
     type: "sessions";
     sessionType: SessionType;
@@ -129,15 +132,15 @@ function experimentCandidates(inputs: readonly Experiment[], today: string): Can
     candidates.push({
       date: intervention.end, effect: 0, noise: 1,
       card: {
-        kind: "experiment_result", id: `experiment_result:${slug}:${intervention.start}:${metric}`, filter: "Experiments",
+        kind: "experiment_result", id: `experiment_result:${slug}:${cardDateKey(intervention.start)}:${metric}`, filter: "Experiments",
         title: experimentHeadline(experiment, runningBlock),
         subtitle: `${outcome} ${progress}.${overlap ? ` Ran alongside ${overlap}.` : ""}`,
         source_note: `Experiment log · ${formatWinDate(baseline.start, today)} through ${formatWinDate(intervention.end, today)}`,
         chart: {
           type: "two_bars", barWidth: "thin", metric, unit, expectedDirection, adherence: { done: adherence.done, target: adherence.target },
           series: [
-            { label: "Before", start: baseline.start, end: baseline.end, mean: baselineMean },
-            { label: "During", start: intervention.start, end: intervention.end, mean: interventionMean },
+            { label: "Before", start: formatWinDate(baseline.start, today), end: formatWinDate(baseline.end, today), mean: baselineMean },
+            { label: "During", start: formatWinDate(intervention.start, today), end: formatWinDate(intervention.end, today), mean: interventionMean },
           ],
           ...(overlap ? { overlap } : {}),
         },
@@ -173,6 +176,11 @@ type Climb = { subtitle: string; chart: ActivityCharts["game_climb"] };
 
 const plankLadder = ladder("time", "plank");
 const firstHeightRung = ladder("height", "")[0];
+const heightLandmarks = new Map(BANK.filter(entry => entry.kind === "height").map(entry => [entry.id, entry]));
+
+function skylineLandmark({ id, height }: Game["landmarksPassed"][number]): SkylineLandmark {
+  return { id, name: heightLandmarks.get(id)?.name ?? "Landmark", height, heightUnit: "ft" };
+}
 
 function plankClimb(seconds: number): Climb {
   const rungs = plankLadder.map(({ id, name, at }) => ({ id, name, seconds: at }));
@@ -200,7 +208,7 @@ function skylineClimb(game: Game): Climb | null {
 
   const highest = landmarksPassed.reduce<(typeof landmarksPassed)[number] | null>(
     (best, row) => !best || row.height > best.height ? row : best, null);
-  const place = highest && BANK.find(entry => entry.kind === "height" && entry.id === highest.id);
+  const place = highest && heightLandmarks.get(highest.id);
   let subtitle = "your game total so far";
   if (place) {
     const takesArticle = /(?:Sign|Building|Monument|Needle|Arch|[Tt]owers?|Matterhorn|Taj Mahal)$|^(?:Great Pyramid|Statue of Liberty)/u;
@@ -210,8 +218,8 @@ function skylineClimb(game: Game): Climb | null {
   }
   return { subtitle, chart: {
     type: "skyline", exercise, unit, total,
-    landmarksPassed: landmarksPassed.map(({ id, height }) => ({ id, height })),
-    next: next ? { id: next.id, height: next.height, toGo: next.toGo } : null,
+    landmarksPassed: landmarksPassed.map(skylineLandmark),
+    next: next ? { ...skylineLandmark(next), toGo: next.toGo } : null,
   } };
 }
 
@@ -235,9 +243,19 @@ function gameClimb(game: Game, name: string, today: string): Candidate | null {
   };
 }
 
-function gameStreak(bestStreak: Game["bestStreak"], today: string): Candidate | null {
-  if (!bestStreak || !validWindow(bestStreak) || bestStreak.end > today) return null;
-  const { days, start, end, missedOn } = bestStreak;
+function streakCalendar(start: string, end: string, days: readonly GameStreakDay[], today: string): GameStreakDay[] {
+  const states = new Map(days.map(day => [day.date, day.state]));
+  const monday = addDays(start, -weekdayOf(start));
+  const length = dayNumber(end) - dayNumber(monday) + 7 - weekdayOf(end);
+  return Array.from({ length }, (_, index) => {
+    const date = addDays(monday, index);
+    return { date: formatWinDate(date, today), state: date <= today ? states.get(date) ?? "no_game" : "no_game" };
+  });
+}
+
+function gameStreak(bestStreak: GameStreak, today: string): Candidate | null {
+  if (!validWindow(bestStreak) || bestStreak.end > today) return null;
+  const { days, start, end, missedOn, calendar } = bestStreak;
   if (!Number.isSafeInteger(days) || days <= 0) return null;
   if (missedOn !== null && (!isDate(missedOn) || missedOn > today)) return null;
 
@@ -248,16 +266,29 @@ function gameStreak(bestStreak: Game["bestStreak"], today: string): Candidate | 
       title: { number: formatNumber(days, 0), measure: days === 1 ? "day" : "days" },
       subtitle: "posted in every game, your best run",
       source_note: `Game streak log · ${formatWinDate(start, today)} through ${formatWinDate(end, today)}`,
-      chart: { type: "week_dots", days, start, end, missedOn },
+      chart: {
+        type: "week_dots", days, start: formatWinDate(start, today), end: formatWinDate(end, today),
+        missedOn: missedOn === null ? null : formatWinDate(missedOn, today),
+        ...(calendar && { calendar: streakCalendar(start, end, calendar, today) }),
+      },
     },
   };
+}
+
+function streakKey({ days, start, end, missedOn }: GameStreak): string {
+  return `${days}:${start}:${end}:${missedOn}`;
 }
 
 function gameCandidates(input: HealthWinsInput, today: string): Candidate[] {
   const games = (input.games ?? []).filter(game => Object.hasOwn(exerciseNames, game.exercise));
   const climbs = games.map(game => gameClimb(game, exerciseNames[game.exercise as keyof typeof exerciseNames], today));
-  const streaks = input.gameStreak === undefined ? games.map(game => game.bestStreak) : [input.gameStreak];
-  return [...climbs, ...streaks.map(streak => gameStreak(streak, today))].filter(card => card !== null);
+  const summaries = input.gameStreak === undefined ? games.map(game => game.bestStreak) : [input.gameStreak];
+  const streaks = summaries.filter(streak => streak !== null);
+  // Older callers can repeat the same streak per exercise. Prefer its calendar when available.
+  const withCalendar = new Set(streaks.filter(streak => streak.calendar).map(streakKey));
+  const candidates = streaks.filter(streak => streak.calendar || !withCalendar.has(streakKey(streak)))
+    .map(streak => gameStreak(streak, today));
+  return [...climbs, ...candidates].filter(card => card !== null);
 }
 
 function sessionCandidates(sessions: readonly Session[], today: string): Candidate[] {
@@ -285,7 +316,8 @@ function sessionCandidates(sessions: readonly Session[], today: string): Candida
         title: { number: `${formatNumber(series.length, 0)} ${plural}`, measure: `in ${formatWinMonth(today)}` },
         subtitle: `${formatDuration(totalMinutes)} of ${activity}, the longest ${longest === 60 ? "a full hour" : formatDuration(longest)}`,
         source_note: `Session log · ${formatWinDate(`${month}-01`, today)} through ${formatWinDate(today, today)}`,
-        chart: { type: "sessions", sessionType: type, series, totalMinutes },
+        chart: { type: "sessions", sessionType: type, totalMinutes,
+          series: series.map(({ date, minutes }) => ({ date: formatWinDate(date, today), minutes })) },
       },
     });
   }

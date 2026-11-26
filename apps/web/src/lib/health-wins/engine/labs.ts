@@ -1,7 +1,7 @@
 import { REVIEWED_BIOMARKER_FALLBACK_RANGES } from "@murphai/health-metrics";
 import type { LabNormMetric } from "../../game/progress/norms";
 import { percentileCandidate } from "./percentiles";
-import { cardText, formatLabValue, formatNumber, formatWinDate, isDate, labUnitKey, mad, median } from "./shared";
+import { cardDateKey, cardText, formatLabValue, formatNumber, formatWinDate, isDate, labUnitKey, mad, median } from "./shared";
 import type { Analyte, Candidate, HealthWinRank, HealthWinsInput, LabDraw } from "./types";
 
 interface Bound { value: number; inclusive: boolean }
@@ -108,11 +108,11 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   return {
     date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
     card: {
-      id: `lab-change-${latest.analyte}-${latest.date}`, kind: "lab_change", filter: "Labs",
+      id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs",
       title: { number: `${delta > 0 ? "+" : "−"}${formatLabValue(effect, latest.unit === "%" ? "pp" : latest.unit)}`, measure: rule.label },
       subtitle: `compared with the median of ${values.length} prior draws`,
       source_note: `Latest draw on ${dateLabel}. ${fastingKnown ? "Fasting draws" : "Lab draws"} in ${latest.unit}.`,
-      chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },
+      chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: dateLabel, value: latest.value } },
     },
   };
 }
@@ -138,16 +138,16 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank): Cand
       value: latest.value,
       id: analyte, label: rule.label, unit: latest.unit, filter: "Labs", date: latest.date,
       observation: `Lab draw on ${dateLabel}`,
-    });
+    }, input.member.today);
     if (percentile) candidates.push(percentile);
     if (!change && !percentile && interval && within) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {
-        id: `lab-range-${analyte}-${latest.date}`, kind: "lab_range", filter: "Labs",
+        id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs",
         title: { number: formatLabValue(latest.value, latest.unit), measure: rule.label },
         subtitle: intervalSubtitle(interval, latest.unit),
         source_note: `${interval.source}. Draw on ${dateLabel}.`,
-        chart: { type: "gauge", value: latest.value, unit: latest.unit, range: interval, date: latest.date },
+        chart: { type: "gauge", value: latest.value, unit: latest.unit, range: interval, date: dateLabel },
       },
     });
   }

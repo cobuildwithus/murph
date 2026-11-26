@@ -15,12 +15,12 @@ function cards(daily: DailySample[], rank: HealthWinRank) {
 }
 
 describe("wearable percentiles", () => {
-  it("keeps arrows out of chart labels and source notes supplied by a ranker", () => {
+  it("formats chart labels and dated source notes supplied by a ranker", () => {
     const [card] = cards(series("vo2max", 43), () => ({ ...comparison, betterShare: 79,
-      group: "Age band ➜ adults", source: "Cohort --> validation sample" }));
+      group: "Age band ➜ adults", source: "Cohort --> validation sample, 2032-12-08 through 2033-01-17" }));
     expect(card.chart.group).toBe("Age band adults");
     expect(card.subtitle).toContain(card.chart.group);
-    expect(card.source_note).toContain("Cohort validation sample");
+    expect(card.source_note).toContain("Cohort validation sample, Dec 8, 2032 through Jan 17");
   });
 
   it.each([

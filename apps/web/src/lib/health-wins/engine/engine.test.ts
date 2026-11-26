@@ -162,7 +162,7 @@ it("ranks by effect versus noise, recency and record bonus, breaking ties by car
   }
   const record: Candidate = {
     ...base, card: { ...base.card, id: "record", kind: "personal_record",
-      chart: { type: "record", unit: "steps", series: [], highlight: { date: member.today, value: 7200 }, pills: [] } },
+      chart: { type: "record", unit: "steps", series: [], highlight: { date: "May 16", value: 7200, label: "May 16" }, pills: [] } },
   };
   function ids(...candidates: Candidate[]) {
     return rankCandidates(candidates, member.today).map(card => card.id);

@@ -16,8 +16,13 @@ export function dayNumber(date: string): number {
   return Date.parse(date) / 86_400_000;
 }
 
+const months = {
+  long: new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" }),
+  short: new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" }),
+};
+
 export function formatWinMonth(date: string, style: "long" | "short" = "long"): string {
-  return new Date(date).toLocaleDateString("en-US", { month: style, timeZone: "UTC" });
+  return months[style].format(new Date(date));
 }
 
 /** Display a validated local calendar day relative to the member's current year. */
@@ -25,6 +30,11 @@ export function formatWinDate(date: string, today: string): string {
   const year = date.slice(0, 4);
   const day = `${formatWinMonth(date, "short")} ${Number(date.slice(8, 10))}`;
   return year === today.slice(0, 4) ? day : `${day}, ${year}`;
+}
+
+/** A card ID keeps the observation's year even as the member's display year changes. */
+export function cardDateKey(date: string): string {
+  return date.replaceAll("-", "");
 }
 
 export function mean(values: readonly number[]): number {

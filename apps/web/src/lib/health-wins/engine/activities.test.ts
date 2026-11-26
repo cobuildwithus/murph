@@ -38,8 +38,8 @@ describe("finished experiments", () => {
         chart: {
           type: "two_bars", barWidth: "thin", unit: "points", metric: "sleep_score", expectedDirection: "increase",
           series: [
-            { label: "Before", ...baseExperiment.baseline, mean: 78.5 },
-            { label: "During", ...baseExperiment.intervention, mean: 81.75 },
+            { label: "Before", start: "Feb 1", end: "Feb 28", mean: 78.5 },
+            { label: "During", start: "Mar 2", end: "Mar 17", mean: 81.75 },
           ],
           adherence: { done: 3, target: 8 }, overlap: "Quiet drawing",
         },
@@ -163,8 +163,8 @@ describe("finished experiments", () => {
 describe("game achievements", () => {
   const game: Game = {
     exercise: "pullups", total: 317, unit: "reps",
-    landmarksPassed: [{ id: "spire", height: 265 }, { id: "overlook", height: 490 }],
-    next: { id: "viaduct", height: 690, toGo: 28 },
+    landmarksPassed: [{ id: "hollywood-sign", height: 45 }, { id: "space-needle", height: 605 }],
+    next: { id: "empire-state-building", height: 1250, toGo: 28 },
     bestStreak: { days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
   };
 
@@ -173,13 +173,53 @@ describe("game achievements", () => {
       expect.objectContaining({
         kind: "game_climb", title: { number: "317", measure: "pull-ups" },
         chart: { type: "skyline", exercise: "pullups", total: 317, unit: "reps",
-          landmarksPassed: game.landmarksPassed, next: game.next },
+          landmarksPassed: [
+            { id: "hollywood-sign", name: "Hollywood Sign", height: 45, heightUnit: "ft" },
+            { id: "space-needle", name: "Space Needle", height: 605, heightUnit: "ft" },
+          ],
+          next: { id: "empire-state-building", name: "Empire State Building", height: 1250, heightUnit: "ft", toGo: 28 } },
       }),
       expect.objectContaining({
         kind: "game_streak", title: { number: "9", measure: "days" },
-        chart: { type: "week_dots", ...game.bestStreak },
+        chart: { type: "week_dots", days: 9, start: "Jan 1", end: "Jan 9", missedOn: "Jan 10" },
       }),
     ]);
+  });
+
+  it("draws whole Monday–Sunday weeks from game-day evidence, including dates around the run", () => {
+    const bestStreak = {
+      days: 3, start: "2024-12-29", end: "2025-01-02", missedOn: "2025-01-03",
+      calendar: [
+        { date: "2025-01-07", state: "posted" },
+        { date: "2025-01-03", state: "missed" },
+        { date: "2025-01-02", state: "posted" },
+        { date: "2025-01-01", state: "no_game" },
+        { date: "2024-12-31", state: "posted" },
+        { date: "2024-12-29", state: "posted" },
+        { date: "2024-12-28", state: "missed" },
+        { date: "2024-12-27", state: "posted" },
+      ],
+    } as const;
+    const detailed = { ...game, bestStreak };
+    const streaks = (games: Game[]) => generateHealthWins({ member, games }).filter(card => card.kind === "game_streak");
+    const [streak] = streaks([detailed]);
+    expect(streak?.chart).toMatchObject({ days: 3, start: "Dec 29, 2024", end: "Jan 2", missedOn: "Jan 3" });
+    expect(streak?.chart.calendar?.map(day => [day.date, day.state])).toEqual([
+      ["Dec 23, 2024", "no_game"], ["Dec 24, 2024", "no_game"], ["Dec 25, 2024", "no_game"],
+      ["Dec 26, 2024", "no_game"], ["Dec 27, 2024", "posted"], ["Dec 28, 2024", "missed"], ["Dec 29, 2024", "posted"],
+      ["Dec 30, 2024", "no_game"], ["Dec 31, 2024", "posted"], ["Jan 1", "no_game"], ["Jan 2", "posted"],
+      ["Jan 3", "missed"], ["Jan 4", "no_game"], ["Jan 5", "no_game"],
+    ]);
+    const { calendar, ...summary } = bestStreak;
+    const legacy = { ...game, exercise: "squats", bestStreak: summary };
+    expect(streaks([legacy, detailed])).toEqual([streak]);
+    expect(streaks([detailed, legacy])).toEqual([streak]);
+    const otherCalendar = calendar.filter(day => day.date !== "2024-12-27");
+    expect(streaks([detailed, { ...legacy, bestStreak: { ...summary, calendar: otherCalendar } }])).toEqual([]);
+    expect(generateHealthWins({ member, games: [game], gameStreak: bestStreak })
+      .filter(card => card.kind === "game_streak")).toEqual([streak]);
+    expect(generateHealthWins({ member, games: [detailed], gameStreak: null })
+      .some(card => card.kind === "game_streak")).toBe(false);
   });
 
   it("shows a named exercise unit once, preserving grouping and distinct distance units", () => {
@@ -237,7 +277,7 @@ describe("game achievements", () => {
     const streaks = (games: Game[]) => generateHealthWins({ member, games }).filter(card => card.kind === "game_streak");
     expect(streaks([game, other])).toEqual([expect.objectContaining({
       subtitle: "posted in every game, your best run",
-      chart: { type: "week_dots", ...game.bestStreak },
+      chart: { type: "week_dots", days: 9, start: "Jan 1", end: "Jan 9", missedOn: "Jan 10" },
     })]);
     const different = { ...other, bestStreak: { days: 5, start: "2025-03-02", end: "2025-03-06", missedOn: null } };
     expect(streaks([game, different])).toEqual([]);
@@ -265,7 +305,7 @@ describe("monthly sessions", () => {
       kind: "sessions", title: { number: "3 runs", measure: "in April" },
       subtitle: "1h 6m of running, the longest 29 min",
       chart: { type: "sessions", sessionType: "run", totalMinutes: 65.5, series: [
-        { date: "2025-04-01", minutes: 21.5 }, { date: "2025-04-01", minutes: 29 }, { date: "2025-04-19", minutes: 15 },
+        { date: "Apr 1", minutes: 21.5 }, { date: "Apr 1", minutes: 29 }, { date: "Apr 19", minutes: 15 },
       ] },
     })]);
     expect(cards({ sessions: [...sessions].reverse() })).toEqual(result);
