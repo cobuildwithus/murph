@@ -1365,6 +1365,11 @@ receipts, which restore already replays from the receipt log, share that
 window's checkpoint. Any other durable effect, a follow-up checkpoint or a
 nearly full receipt log still voids the window. A finished page starts the next
 one only if it can finish inside the window, so no page starts just to be aborted.
+A job's runtime-local mailbox pointer with no outcome to publish is removed when
+its final apply commits. Losing that removal only reruns the apply, which
+finishes through its saved receipt, so a job end shares the window's checkpoint
+instead of forcing two of its own. A pointer carrying a change-proof record keeps
+the record-after-checkpoint path.
 After that checkpoint and its effect drain, an invocation whose only due work is
 requeued or due enrichment resumes the extractor and system work itself instead
 of returning to a restored successor, for at most ten minutes after the
