@@ -8,19 +8,17 @@ import { labelTarget, openGameTexts } from "../crypto";
 import { departedLabels } from "../row";
 import { gameMediaUrl } from "../views";
 import { gameHttpError } from "../http/errors";
+import { gamePartnersSql } from "../partners";
 import type { FriendSeries } from "./friends";
 
-type Db = Pick<Prisma.TransactionClient, "game" | "gamePlayer" | "gameBlock" | "gameProfile">;
+type Db = Pick<Prisma.TransactionClient, "$queryRaw" | "gamePlayer" | "gameBlock" | "gameProfile">;
 
 /** Current, unblocked players from games the member has played. */
 export async function friendCohortIds(memberId: string, db: Db) {
-  const games = await db.game.findMany({ where: { events: { none: { type: "cancelled" } },
-    status: { in: ["live", "settled"] }, players: { some: { memberId, leftAt: null, joinedAt: { not: null } } } },
-    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    select: { players: { take: 10, select: { memberId: true, joinedAt: true, leftAt: true,
-      profile: { select: { member: { select: { suspendedAt: true } } } } } } } });
-  const ids = [...new Set([memberId, ...games.flatMap(game => game.players.flatMap(player =>
-    player.memberId && player.joinedAt && !player.leftAt && !player.profile!.member.suspendedAt ? [player.memberId] : []))])];
+  const partners = await db.$queryRaw<Array<{ memberId: string }>>`
+    SELECT id AS "memberId" FROM hosted_member
+    WHERE suspended_at IS NULL AND id <> ${memberId} AND id IN (${gamePartnersSql(memberId)})`;
+  const ids = [memberId, ...partners.map(partner => partner.memberId)];
   const blocks = await readGameBlocks(db, memberId, ids);
   const latest = await db.gamePlayer.findFirst({
     where: { memberId: null, leftAt: { not: null }, departedLabel: { array_contains: [{ ownerMemberId: memberId }] },

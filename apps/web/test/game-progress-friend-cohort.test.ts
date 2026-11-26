@@ -1,20 +1,17 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ games: vi.fn(), blocks: vi.fn(), profiles: vi.fn(), open: vi.fn() }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
+const mocks = vi.hoisted(() => ({ partners: vi.fn(), blocks: vi.fn(), profiles: vi.fn(), open: vi.fn() }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $queryRaw: mocks.partners,
   gamePlayer: { findFirst: async () => null }, gameBlock: { findMany: mocks.blocks }, gameProfile: { findMany: mocks.profiles } }) }));
 vi.mock("@/src/lib/game/crypto", async importOriginal => ({ ...await importOriginal<typeof import("@/src/lib/game/crypto")>(), openGameTexts: mocks.open }));
 import { readFriendCohort } from "@/src/lib/game/progress/friend-cohort";
 
 const profiles = ["ava", "leo", "sam"].map(memberId => ({ memberId, firstNameEncrypted: `sealed-${memberId}`,
   photoKey: null, createdAt: new Date("2026-10-21T12:00:00Z"), timeZone: "UTC" }));
-const game = {
-  players: profiles.map(profile => ({ memberId: profile.memberId,
-    joinedAt: profile.createdAt, leftAt: null as Date | null, departedLabel: null, profile: { member: { suspendedAt: null } } })) };
 beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
-  mocks.games.mockResolvedValue([game]);
+  mocks.partners.mockResolvedValue(profiles.slice(1).map(({ memberId }) => ({ memberId })));
   mocks.blocks.mockResolvedValue([]);
   mocks.profiles.mockImplementation(({ where }: { where: { memberId: { in: string[] } } }) =>
     profiles.filter(profile => where.memberId.in.includes(profile.memberId)));
@@ -33,21 +30,6 @@ it.each(["blocked", "blockedBy"])("does not decrypt names across a %s boundary",
 
 it("opens the admitted names with one cohort and block read before the caller's final check", async () => {
   expect((await readFriendCohort("ava")).people.map(person => person.memberId)).toEqual(["ava", "leo", "sam"]);
-  expect(mocks.games).toHaveBeenCalledOnce();
+  expect(mocks.partners).toHaveBeenCalledOnce();
   expect(mocks.blocks).toHaveBeenCalledOnce();
-  expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: "ava", leftAt: null, joinedAt: { not: null } });
-});
-
-it("reads every game the member has played, past 500", async () => {
-  mocks.games.mockResolvedValue(Array.from({ length: 501 }, () => game));
-  expect((await readFriendCohort("ava")).people.map(person => person.memberId)).toEqual(["ava", "leo", "sam"]);
-  expect(mocks.games.mock.calls[0][0]).not.toHaveProperty("take");
-});
-
-
-it("leaves invitees and unplayed games out: only joined co-players of live or settled games", async () => {
-  await readFriendCohort("ava");
-  expect(mocks.games.mock.calls[0][0].where).toEqual({ events: { none: { type: "cancelled" } },
-    status: { in: ["live", "settled"] }, players: { some: { memberId: "ava", leftAt: null, joinedAt: { not: null } } } });
-  expect(mocks.games.mock.calls[0][0].select).not.toHaveProperty("invitees");
 });
