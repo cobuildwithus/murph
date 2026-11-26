@@ -1,3 +1,6 @@
+import "server-only";
+
+import { createHostedOpaqueDigest } from "../../hosted-onboarding/contact-privacy";
 import { decodePolyline, latitudeAt, mercatorY, type Coordinate } from "./route-geometry";
 
 const MAX_AREA_ZOOM = 15;
@@ -41,18 +44,15 @@ function tileFrame(tiles: number, x: number, y: number) {
   };
 }
 
-/** Rebuild a public frame from its canonical northwest tile. Only longitude wraps. */
-export function areaFrameFromKey(key: string) {
-  const match = /^area:v1:([1-9]\d?)\/(0|[1-9]\d{0,4})\/(0|[1-9]\d{0,4})$/u.exec(key);
-  if (!match) return null;
-  const z = Number(match[1]), x = Number(match[2]), y = Number(match[3]);
-  const tiles = 2 ** z;
-  if (z > MAX_AREA_ZOOM || x >= tiles || y + 2 > tiles) return null;
-  return tileFrame(tiles, x, y);
+export type AreaFrame = ReturnType<typeof tileFrame>;
+
+export function isAreaArtKey(key: string): boolean {
+  // A 32-byte MAC has 43 base64url characters. The last two bits are padding.
+  return /^area:v2:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u.test(key);
 }
 
 /** Fit the validated paths to three columns and two rows, with a minimum area at zoom 15. */
-export function areaFrame(paths: readonly string[]) {
+export function areaFrame(paths: readonly string[]): { frame: AreaFrame; art?: { key: string } } {
   const bounds = routeBounds(paths.flatMap(decodePolyline));
   const left = (bounds.west + 180) / 360;
   const right = (bounds.east + 180) / 360;
@@ -63,10 +63,14 @@ export function areaFrame(paths: readonly string[]) {
     const x = tileOrigin(left * tiles, right * tiles, 3);
     const y = Math.min(tiles - 2, tileOrigin(top * tiles, bottom * tiles, 2));
     if (x > left * tiles || y > top * tiles) continue;
-    return {
-      frame: tileFrame(tiles, x, y),
-      art: { key: `area:v1:${z}/${x}/${y}` },
-    };
+    const frame = tileFrame(tiles, x, y);
+    try {
+      const digest = createHostedOpaqueDigest("health-win-area", `${z}/${x}/${y}`);
+      return { frame, art: { key: `area:v2:${digest}` } };
+    } catch {
+      // An unavailable privacy keyring leaves the member's native map usable.
+      return { frame };
+    }
   }
   throw new RangeError("A route must fit within the map grid.");
 }

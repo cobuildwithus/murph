@@ -6059,7 +6059,8 @@ their separate lane owners.
 Progress persists awards, measure choices, picture and share ownership, and task
 inference. The following classification covers every column of exactly
 `GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
-`GameProgressTaskMeasure`, plus `GameProgressShare`, `GameProgressSharePhoto`, `GamePlaceArt` and `GamePlaceArtBudget`; it is not an audit of other game tables.
+`GameProgressTaskMeasure`, plus `GameProgressShare`, `GameProgressSharePhoto`,
+`GamePlaceArt`, `GamePlaceArtBudget` and `GameAreaArtMemberBudget`.
 
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
@@ -6069,19 +6070,22 @@ inference. The following classification covers every column of exactly
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `storage_key`: primary key, the random Progress object identity of one picture attempt; `member_id`: owner FK; `status`: generating, ready, failed or retired; `created_at`: admission time, also the public attempt id (base 36); `failure_code`: nullable generation_failed, timeout or refused |
 | `game_progress_share_photo` | None in the row; the prepared medal photo JPEG is sealed in the Progress store | None | `storage_key`: primary key, random Progress object identity; `member_id`: owner FK; `status`: pending, current or retired; `created_at`: pick time |
-| `game_place_art` | None: shared public art, plaintext `bytes` (JPEG) | None | `key`: `poster:v1:<Mapbox place id>`, `map:v1:<size>:<sha256 of route geometry>` or `area:v1:{z}/{x}/{y}` (northwest tile of a public three-by-two frame); `kind`: poster or map; `status`: making, ready or failed; `attempts`: claim fence, at most 3; `started_at`: claim time; `ready_at`: nullable completion time; `failure_code`: nullable generation_failed, timeout, refused or drifted |
+| `game_place_art` | None. Shared `bytes` hold a JPEG or place story. | For an area painting, `key` is `area:v2:<base64url HMAC of z/x/y>`. | Other keys are `poster:v1:<place id>`, `story:v1:<place id>` or `map:v1:<size>:<geometry hash>`. `kind` selects poster, story or map. `status` is available, making, ready or failed. `attempts` counts up to three charged claims and `released_claims` counts refunds. `started_at` and `ready_at` record claim and completion time. A failure sets `failure_code` to generation_failed, timeout, refused or drifted. |
 | `game_place_art_budget` | None | None | `day`: UTC date; `attempts`: admitted art attempts that day |
+| `game_area_art_member_budget` | None | None | `member_id` owns one counter. `day` and `attempts` count that member's area claims for the latest UTC day on which they claimed one. |
 
 Posters use a public Mapbox place name (`types=place`) and its place ID. Game
 route paintings use satellite imagery for legs of 50 km or more. The server
 draws the member's line on the painting per request. Health wins area paintings
-use the public tile frame and the phone draws the line. The shared JPEGs omit
+use the frame from the sealed card and the phone draws the line. The shared JPEGs omit
 route overlays and member details, so everyone requesting a key can reuse its
 painting. Members' route legs keep each town's place ID and name inside sealed
-`state_encrypted`. Ready bytes are immutable. An attempt finishes its row only
-while `attempts` still matches its claim. Every admitted attempt, including a
-retry, counts against the UTC day's `game_place_art_budget` row in the claim's
-transaction.
+`state_encrypted`. Ready bytes are immutable. A claim can finish or release
+its row only while its generation matches the sum of charged attempts and
+released claims. Image claims reserve a unit from the UTC day's shared budget.
+An area claim also reserves one of the member's five daily units.
+A skipped claim refunds the attempt and allowances
+in one transaction and the key becomes immediately available.
 
 Each share row is one picture attempt, keyed by its storage key, with the
 member/award foreign key. Change photo adds an attempt for the same award; the
@@ -6800,12 +6804,13 @@ selection order across recorded and suggested cards.
 Web accepts at most 360 per-minute heart-rate averages and up to eight final
 trimmed paths with at most 1,000 points in total as display data. Only a
 selected, sealed post card may persist the series or paths. The phone owns
-route privacy. Web checks plausibility and derives a public tile frame and
-area key for the route card. A committed post that keeps the map can start a
-shared area painting. Its `game_place_art` row uses the existing `map` kind.
-The public grid key and JPEG identify only a frame. Member identity, post ID,
-activity time and route geometry stay out of the row and provider requests.
-The connection between a post and its area key lives in the sealed card.
+route privacy. Web checks plausibility and derives a three-by-two tile frame.
+Only the sealed post card stores the frame. When the hosted opaque-ID keyring
+is available, the card also carries a deterministic painting key. The key
+reveals no location or member identity. Stateless previews omit it. A committed
+post that keeps the map can start a shared area painting from its card's frame.
+Its `game_place_art` row uses the existing `map` kind. Member identity, post ID,
+activity time and route paths stay out of the row and provider requests.
 Raw heart-rate samples (1 Hz) and GPS fixes stay on the phone. Save-without-posting
 accepts summary fields only. Settings export includes saved summaries under the
 member's account export authority, even after health consent withdrawal. Account

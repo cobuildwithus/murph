@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientUnits } from "../../companion/client-info";
 import { encodePolyline } from "../../game/progress/route-geometry";
 import { previewRecordedCandidate, resolveRecordedSelection } from "../card-options";
@@ -26,13 +26,15 @@ function cards(activity: RecordedActivity = run, units: ClientUnits = "metric") 
 }
 
 describe("recorded route cards", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("uses the moving clock for the headline and keeps separate path segments", () => {
     const [map, splits] = cards();
     expect(map).toMatchObject({
       kind: "activity_route", candidateId: `activity:${run.id}:activity_route`,
       title: { number: "2.5 km", measure: "run" }, subtitle: "in 15:00, 6:00 a km",
       source_note: "Recorded on Mar 12, morning",
-      chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"], art: { key: expect.stringMatching(/^area:v1:\d+\/\d+\/\d+$/u) } },
+      chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"] },
     });
     expect(splits).toMatchObject({
       kind: "activity_splits", title: map.title, subtitle: "fastest km 5:50",
@@ -45,6 +47,29 @@ describe("recorded route cards", () => {
       },
     });
     expect(JSON.stringify([map, splits])).not.toContain("08:23");
+  });
+
+  it("only gives the opaque art key to a published selection, including one with hidden numbers", () => {
+    const { candidates } = buildRecordedCards(run, context);
+    const preview = previewRecordedCandidate(candidates[0]);
+    expect(JSON.stringify(preview)).not.toContain("area:v2:");
+    for (const option of preview.change_options.filter(item => item.id !== "hide_map")) {
+      const frozen = resolveRecordedSelection(candidates, {
+        candidateId: preview.candidateId, option: option.id, specRevision: option.specRevision,
+      });
+      expect(frozen?.spec.chart).toMatchObject({ paths, art: { key: expect.stringMatching(/^area:v2:[\w-]{43}$/u) } });
+    }
+  });
+
+  it("retains the native map on publication when the privacy key is missing", () => {
+    vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "");
+    const { candidates } = buildRecordedCards(run, context);
+    const preview = previewRecordedCandidate(candidates[0]);
+    const frozen = resolveRecordedSelection(candidates, {
+      candidateId: preview.candidateId, option: "original", specRevision: preview.specRevision,
+    });
+    expect(frozen?.spec.chart).toMatchObject({ paths, frame: expect.any(Object) });
+    expect(frozen?.spec.chart).not.toHaveProperty("art");
   });
 
   it("keeps the splits and drops the map when trimming left no path", () => {

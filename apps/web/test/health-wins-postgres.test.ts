@@ -19,7 +19,9 @@ import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transp
 import * as board from "../src/lib/game/board";
 import * as gameCrypto from "../src/lib/game/crypto";
 import { GET as readArt } from "../app/api/game/v1/progress/art/[key]/route";
+import { claimArt } from "../src/lib/game/progress/place-art";
 import { encodePolyline } from "../src/lib/game/progress/route-geometry";
+import * as audience from "../src/lib/health-wins/audience";
 import * as crypto from "../src/lib/health-wins/crypto";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { getPrisma } from "../src/lib/prisma";
@@ -204,12 +206,14 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await (await publish()).json()).toEqual(await receipt.json());
     const shared = await readPost(partner, id);
     expect(shared.status).toBe(200);
-    expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision, spec: choice.spec }]);
+    expect((await shared.json()).post.cards).toEqual([{ id: map.candidateId, specRevision: choice.specRevision,
+      spec: { ...choice.spec, chart: { ...choice.spec.chart, art: { key: expect.stringMatching(/^area:v2:/u) } } } }]);
     expect(choice.spec.chart).toEqual({ ...map.chart, paths, chips: [] });
+    expect(map.chart).not.toHaveProperty("art");
     expect(deferred).toHaveLength(0);
   });
 
-  it.each(["removed map", "deleted post", "withdrawn before claim", "withdrawn before painting", "retained map"] as const)(
+  it.each(["removed map", "deleted post", "withdrawn before claim", "withdrawn before painting", "admission read failed", "retained map"] as const)(
     "rechecks post and consent after the route post commits: %s", async change => {
       const author = await person();
       vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", author.id);
@@ -224,8 +228,8 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
       const { cards } = await preview.json();
       const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
       const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
-      const key: string = map.chart.art.key;
-      areaKeys.push(key);
+      expect(map.chart).not.toHaveProperty("art");
+      expect(choice.spec.chart).not.toHaveProperty("art");
       expect(deferred).toHaveLength(0);
       const body = { id: randomUUID(), activity, caption: "An ocean fixture", cards: [
         { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision },
@@ -254,6 +258,9 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
       expect((await publish()).status).toBe(200);
       expect((await publish()).status).toBe(200);
       expect(deferred).toHaveLength(1);
+      const published = await (await readPost(author, body.id)).json();
+      const key: string = published.post.cards[0].spec.chart.art.key;
+      areaKeys.push(key);
       const painting = () => readArt(author.request("art"), { params: Promise.resolve({ key }) });
       expect((await painting()).status).toBe(404);
       expect(providers).toEqual([]);
@@ -267,8 +274,20 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
         const update = change === "removed map" ? { removeCardIds: [map.candidateId] } : { caption: "Revised fixture" };
         expect((await editPost(author.request(path, "PATCH", { expectedVersion: 1, ...update }), context(body.id))).status).toBe(200);
       }
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      if (change === "admission read failed") {
+        vi.spyOn(audience, "findVisibleHealthPost").mockRejectedValueOnce(new TypeError("Synthetic private payload", { cause: key }));
+      }
+      const day = new Date(new Date().toISOString().slice(0, 10));
+      const budget = async () => (await db.gamePlaceArtBudget.findUnique({ where: { day } }))?.attempts ?? 0;
+      const before = await budget();
       // The first callback claims the key and registers the painter with after().
       for (const task of deferred) await task();
+      if (change === "admission read failed") {
+        expect(log).toHaveBeenCalledExactlyOnceWith("Health wins area painting failed.", { errorClass: "TypeError" });
+      } else {
+        expect(log).not.toHaveBeenCalled();
+      }
       const response = await painting();
       if (change === "retained map") {
         expect(providers).toEqual(["api.mapbox.com", "api.openai.com"]);
@@ -279,7 +298,15 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
       } else {
         expect(providers).toEqual(change === "withdrawn before painting" ? ["api.mapbox.com"] : []);
         expect(response.status).toBe(404);
-        if (!providers.length) expect(await db.gamePlaceArt.findUnique({ where: { key } })).toBeNull();
+        const row = await db.gamePlaceArt.findUnique({ where: { key }, select: { status: true, attempts: true, failureCode: true } });
+        if (change === "withdrawn before painting") {
+          expect(row).toEqual({ status: "available", attempts: 0, failureCode: null });
+          expect(await budget()).toBe(before);
+          expect(await db.gameAreaArtMemberBudget.findUnique({ where: { memberId: author.id } })).toMatchObject({ attempts: 0 });
+          expect(await claimArt(key, "map", new Date(), undefined, author.id)).not.toBeNull();
+        } else {
+          expect(row).toBeNull();
+        }
       }
     },
   );

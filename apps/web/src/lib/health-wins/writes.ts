@@ -6,13 +6,16 @@ import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import type { ClientUnits } from "../companion/client-info";
 import { assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { invalidGameRequest } from "../game/http/errors";
+import { ArtSkipped } from "../game/progress/place-art";
+import type { AreaPainting } from "../game/progress/place-art-make";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { describeKnownLoggedErrorType } from "../http";
 import { getPrisma } from "../prisma";
 import { findVisibleHealthPost } from "./audience";
 import { type CachedHealthCandidate, type FrozenHealthCard, type HealthCardSelection, resolveRecordedSelection } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import type { RecordedActivity } from "./engine/types";
-import { assertHealthRecordEnabled } from "./flag";
+import { assertHealthRecordEnabled, healthRecordCapability } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
 import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
@@ -77,39 +80,42 @@ async function removeFrozenCards(memberId: string, id: string, encrypted: string
   return keep;
 }
 
-function routeArtKey(cards: readonly FrozenHealthCard[]) {
+function routePainting(cards: readonly FrozenHealthCard[]): AreaPainting | null {
   for (const { spec } of cards) {
-    if (spec.kind === "activity_route" && spec.chart.type === "route_map") return spec.chart.art.key;
+    if (spec.kind === "activity_route" && spec.chart.type === "route_map" && spec.chart.art) {
+      return { key: spec.chart.art.key, frame: spec.chart.frame };
+    }
   }
   return null;
 }
 
-/** The deferred job retains only the public key and the IDs needed to recheck its source. */
-function paintRouteAfterCommit(memberId: string, postId: string, key: string) {
+function paintRouteAfterCommit(memberId: string, postId: string, painting: AreaPainting) {
   const paint = async () => {
     const { ensureAreaArt } = await import("../game/progress/place-art-make");
     const db = getPrisma();
     // The insert committed the selected route card at version 1.
     let verifiedVersion = 1;
     const currentVersion = async () => {
-      assertHealthRecordEnabled(memberId, "route");
+      if (process.env.MURPH_HEALTH_PAINTED_RUNS !== "true" || !healthRecordCapability(memberId)?.route) throw new ArtSkipped();
       const current = await findVisibleHealthPost(db, memberId, postId);
-      if (current?.authorMemberId !== memberId) throw notFound();
+      if (current?.authorMemberId !== memberId) throw new ArtSkipped();
       return current.version;
     };
-    await ensureAreaArt(key, async () => {
+    await ensureAreaArt(painting, memberId, async () => {
       const version = await currentVersion();
       if (version === verifiedVersion) return;
       // Caption edits and removal of other cards may leave the route card intact.
       const row = await db.healthPost.findFirst({ where: { id: postId, version, deletedAt: null, authorMemberId: memberId },
         select: { cardsEncrypted: true } });
-      if (!row || routeArtKey(await openFrozenCards(memberId, postId, row.cardsEncrypted)) !== key) throw notFound();
-      if (await currentVersion() !== version) throw conflict();
+      if (!row || routePainting(await openFrozenCards(memberId, postId, row.cardsEncrypted))?.key !== painting.key) throw new ArtSkipped();
+      if (await currentVersion() !== version) throw new ArtSkipped();
       verifiedVersion = version;
     });
   };
   try {
-    after(() => paint().catch(() => undefined));
+    after(() => paint().catch((error: unknown) => {
+      if (!(error instanceof ArtSkipped)) console.error("Health wins area painting failed.", { errorClass: describeKnownLoggedErrorType(error) });
+    }));
   } catch {
     // A runtime without after() still returns the committed receipt and uses the native map.
   }
@@ -151,8 +157,8 @@ export async function createHealthPost(
     return { receipt: { id, version: 1 }, created: true };
   });
   if (created && input.activity?.route && process.env.MURPH_HEALTH_PAINTED_RUNS === "true") {
-    const key = routeArtKey(cards ?? []);
-    if (key) paintRouteAfterCommit(memberId, id, key);
+    const painting = routePainting(cards ?? []);
+    if (painting) paintRouteAfterCommit(memberId, id, painting);
   }
   return receipt;
 }

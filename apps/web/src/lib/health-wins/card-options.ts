@@ -140,11 +140,18 @@ export function previewHealthCandidate(candidate: CachedHealthCandidate, option 
     caption_tips: spec.share.caption_tips.length ? spec.share.caption_tips : ["What helped you get here?", "How did it feel?"] };
 }
 
-/** Recorded previews have no stored set or change endpoint, so send the exact alternate display here. */
+/** A preview can contain caller-chosen paths. Only a published card discloses the shared art handle. */
+function recordedPreviewDisplay<T extends FrozenHealthCard["spec"]>(spec: T) {
+  if (spec.chart.type !== "route_map") return spec;
+  const { type, paths, frame, chips } = spec.chart;
+  return { ...spec, chart: { type, paths, frame, chips } };
+}
+
+/** Recorded previews have no stored set or change endpoint, so include each alternate display. */
 export function previewRecordedCandidate(candidate: CachedHealthCandidate) {
-  return { ...previewHealthCandidate(candidate), candidateId: candidate.id,
+  return { ...recordedPreviewDisplay(previewHealthCandidate(candidate)), candidateId: candidate.id,
     change_options: candidate.variants.map(({ option, specRevision, spec }) => ({
-      id: option, label: labels[option], specRevision, ...(option === "original" ? {} : { spec }),
+      id: option, label: labels[option], specRevision, ...(option === "original" ? {} : { spec: spec && recordedPreviewDisplay(spec) }),
     })),
   };
 }

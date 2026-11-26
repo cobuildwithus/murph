@@ -2,7 +2,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import OpenAI, { toFile } from 'openai';
 import sharp from 'sharp';
-import { areaFrameFromKey } from './area-art';
+import { isAreaArtKey, type AreaFrame } from './area-art';
 import { coastAgreement } from './coast-check';
 import { satelliteImage } from './mapbox';
 import { ArtError, artState, ensureArt, readArtRows } from './place-art';
@@ -66,16 +66,16 @@ export async function makePaintedMap(polyline: string, size: MapQuery['size'], s
   return makePaintedFrame(routeBbox(decodePolyline(polyline), width, height), size, signal);
 }
 
-/** After publication, only the public area key supplies geography to the painter. */
-export async function ensureAreaArt(key: string, beforeProvider: () => Promise<void>): Promise<void> {
-  if (process.env.MURPH_HEALTH_PAINTED_RUNS !== 'true') return;
-  const frame = areaFrameFromKey(key);
-  if (!frame) return;
+export interface AreaPainting { key: string; frame: AreaFrame }
+
+/** The selected card supplies only its tiled frame and shared art ID. */
+export async function ensureAreaArt({ key, frame }: AreaPainting, memberId: string, beforeProvider: () => Promise<void>): Promise<void> {
+  if (process.env.MURPH_HEALTH_PAINTED_RUNS !== 'true' || !isAreaArtKey(key)) return;
   const rows = await readArtRows([key]);
   if (artState(rows.get(key), 'map')) return;
   await beforeProvider();
   const bbox: Bbox = [frame.west, frame.south, frame.east, frame.north];
-  await ensureArt([{ key, kind: 'map', make: signal => makePaintedFrame(bbox, 'area', signal, beforeProvider) }], rows);
+  await ensureArt([{ key, kind: 'map', areaMemberId: memberId, make: signal => makePaintedFrame(bbox, 'area', signal, beforeProvider) }], rows);
 }
 
 /** Paint the satellite canvas, crop it to the frame and verify that its coast lines up. */

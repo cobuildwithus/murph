@@ -101,5 +101,6 @@ available heart rate. The Companion API section of the product spec defines
 the submit, private-save and card-option shapes for iOS. A local PostgreSQL
 run verified the partner's number-free map, a private save followed by a
 splits-only post, a stale preview conflict and post replay after disabling
-route recording. The server emits a public tile key for the map. Companion
+route recording. The Health wins product spec defines the card's frame and
+optional opaque painting key. Companion
 capture and rendering, painting and session counting have separate owners.

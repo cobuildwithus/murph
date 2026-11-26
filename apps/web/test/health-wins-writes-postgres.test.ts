@@ -202,7 +202,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     const [card] = await openHealthTexts([{ memberId, table: "health_post", rowId: id, field: "card:0", value: post.cardsEncrypted[0]! }]);
     expect(JSON.parse(card!)).toMatchObject({ id: splits.candidateId, spec: { kind: "activity_splits" } });
     expect(card).not.toContain("paths");
-    expect(card).not.toContain("area:v1:");
+    expect(card).not.toContain("area:v2:");
     expect(await db.healthActivity.findUniqueOrThrow({ where: { id: activity.id } }))
       .toMatchObject({ summaryEncrypted: saved.summaryEncrypted, postId: id });
     vi.stubEnv("MURPH_HEALTH_ROUTE_MEMBER_IDS", "");

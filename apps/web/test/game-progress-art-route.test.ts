@@ -8,10 +8,11 @@ import { GET } from '../app/api/game/v1/progress/art/[key]/route';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 
 const get = (key: string) => GET(new Request(`https://example.test/api/game/v1/progress/art/${encodeURIComponent(key)}`), { params: Promise.resolve({ key }) });
+const areaKey = 'area:v2:' + Buffer.alloc(32, 251).toString('base64url');
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'member-ava' } }); mocks.art.mockResolvedValue(null); });
 describe('shared place art HTTP contract', () => {
   it.each([
-    'poster:v1:dplace-dm', 'map:v1:card:fixture', 'area:v1:15/4095/16384', 'area:v1:15/32767/16384', 'area:v1:1/0/0',
+    'poster:v1:dplace-dm', 'map:v1:card:fixture', areaKey,
   ])('serves ready %s to a signed-in member, cached for good', async key => {
     mocks.art.mockResolvedValue({ bytes: new Uint8Array([255, 216, 255]) });
     const response = await get(key);
@@ -22,15 +23,14 @@ describe('shared place art HTTP contract', () => {
     expect(mocks.art).toHaveBeenCalledWith({ where: { key, status: 'ready' }, select: { bytes: true } });
   });
   it('leaves a missing area unclaimed and schedules no work', async () => {
-    const key = 'area:v1:15/4095/16384';
-    expect((await get(key)).status).toBe(404);
-    expect(mocks.art).toHaveBeenCalledWith({ where: { key, status: 'ready' }, select: { bytes: true } });
+    expect((await get(areaKey)).status).toBe(404);
+    expect(mocks.art).toHaveBeenCalledWith({ where: { key: areaKey, status: 'ready' }, select: { bytes: true } });
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.after).not.toHaveBeenCalled();
   });
   it.each([
-    'area:v1:16/0/0', 'area:v1:0/0/0', 'area:v1:15/32768/16384', 'area:v1:15/4095/32767',
-    'area:v1:15/-1/0', 'area:v1:15/0.5/0', 'area:v1:15/01/0', 'area:v2:15/0/0', 'area:v1:15/0/0/1',
+    'area:v1:15/4095/16384', 'area:v2:15/4095/16384', 'area:v2:', areaKey.slice(0, -1),
+    areaKey + '=', areaKey.replace('-', '+'), areaKey.replace('_', '/'), areaKey.slice(0, -1) + 'B',
   ])('rejects invalid area key %s before looking up art', async key => {
     expect((await get(key)).status).toBe(404);
     expect(mocks.art).not.toHaveBeenCalled();

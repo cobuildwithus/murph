@@ -1,23 +1,26 @@
 import 'server-only';
 import { after } from 'next/server';
 import { Prisma } from '@prisma/client';
+import { describeKnownLoggedErrorType } from '../../http';
 import { getPrisma } from '../../prisma';
 
 /**
  * Shared place art: a poster per public place and a painting per route map,
  * each made once and reused by everyone. Rows hold no member and no route
- * text. Game maps use a geometry hash. Health win maps use a public tile frame.
+ * text. Game maps use a geometry hash. Health win maps use an opaque area ID.
  */
 export type ArtKind = 'poster' | 'map' | 'story';
 export type ArtFailure = 'generation_failed' | 'timeout' | 'refused' | 'drifted';
 export class ArtError extends Error {
   constructor(readonly code: ArtFailure) { super('Place art could not be made.'); }
 }
+export class ArtSkipped extends Error {}
 /** Null: show what you have (absent, failed, over budget or exhausted). */
 export type ArtState = { state: 'ready'; path: string } | { state: 'making'; startedAt: string; expiresAt: string; typicalSeconds: number } | null;
 
 export const ART_DEADLINE_MS = 240_000;
 const DAILY_ATTEMPTS = 150;
+const MEMBER_DAILY_AREA_ATTEMPTS = 5;
 export const MAX_ATTEMPTS = 3;
 const RETRY_AFTER_MS = 3_600_000;
 // Timed loaders only: readiness always comes from a later read. A little over
@@ -49,29 +52,40 @@ const IMAGE_RULES: ClaimRules = { deadlineMs: ART_DEADLINE_MS, retryAfterMs: RET
 
 /**
  * One attempt for one key, inside the UTC day's allowance, in one transaction.
- * Returns the attempt number that must finish it, or null when someone else
+ * Returns the claim version that must finish it, or null when someone else
  * holds it, it is ready, it has used its attempts, or today's allowance is spent.
  */
-export async function claimArt(key: string, kind: ArtKind, now = new Date(), rules: ClaimRules = IMAGE_RULES): Promise<number | null> {
+export async function claimArt(key: string, kind: ArtKind, now = new Date(), rules: ClaimRules = IMAGE_RULES, areaMemberId?: string): Promise<number | null> {
+  if (key.startsWith('area:') && !areaMemberId) return null;
+  const day = now.toISOString().slice(0, 10);
   const stale = new Date(now.getTime() - rules.deadlineMs), retry = new Date(now.getTime() - rules.retryAfterMs);
   try {
     return await getPrisma().$transaction(async tx => {
-      const claimed = await tx.$queryRaw<{ attempts: number }[]>(Prisma.sql`
+      const claimed = await tx.$queryRaw<{ version: number }[]>(Prisma.sql`
         INSERT INTO game_place_art (key, kind, status, attempts, started_at) VALUES (${key}, ${kind}, 'making', 1, ${now})
         ON CONFLICT (key) DO UPDATE SET status = 'making', attempts = game_place_art.attempts + 1, started_at = ${now}, failure_code = NULL
         WHERE game_place_art.attempts < ${MAX_ATTEMPTS} AND (
-          (game_place_art.status = 'making' AND game_place_art.started_at < ${stale})
+          game_place_art.status = 'available'
+          OR (game_place_art.status = 'making' AND game_place_art.started_at < ${stale})
           OR (game_place_art.status = 'failed' AND game_place_art.started_at < ${retry}))
-        RETURNING attempts`);
+        RETURNING attempts + released_claims AS version`);
       if (!claimed.length) return null;
-      if (!rules.budgeted) return claimed[0]!.attempts;
-      const allowed = await tx.$queryRaw<unknown[]>(Prisma.sql`
-        INSERT INTO game_place_art_budget (day, attempts) VALUES (${now.toISOString().slice(0, 10)}::date, 1)
+      if (areaMemberId) {
+        // A later UTC day replaces the one counter. A delayed claim cannot move it back.
+        const charged = await tx.$executeRaw`
+          INSERT INTO game_area_art_member_budget AS budget (member_id, day, attempts) VALUES (${areaMemberId}, ${day}::date, 1)
+          ON CONFLICT (member_id) DO UPDATE SET day = EXCLUDED.day,
+            attempts = CASE WHEN budget.day < EXCLUDED.day THEN 1 ELSE budget.attempts + 1 END
+          WHERE budget.day < EXCLUDED.day OR (budget.day = EXCLUDED.day AND budget.attempts < ${MEMBER_DAILY_AREA_ATTEMPTS})`;
+        if (!charged) throw new OverBudget();
+      }
+      if (!rules.budgeted) return claimed[0]!.version;
+      const allowed = await tx.$executeRaw`
+        INSERT INTO game_place_art_budget (day, attempts) VALUES (${day}::date, 1)
         ON CONFLICT (day) DO UPDATE SET attempts = game_place_art_budget.attempts + 1
-        WHERE game_place_art_budget.attempts < ${DAILY_ATTEMPTS}
-        RETURNING attempts`);
-      if (!allowed.length) throw new OverBudget();
-      return claimed[0]!.attempts;
+        WHERE game_place_art_budget.attempts < ${DAILY_ATTEMPTS}`;
+      if (!allowed) throw new OverBudget();
+      return claimed[0]!.version;
     });
   } catch (error) {
     if (error instanceof OverBudget) return null;
@@ -80,13 +94,29 @@ export async function claimArt(key: string, kind: ArtKind, now = new Date(), rul
 }
 
 /** Only the attempt that claimed the row may finish it; ready bytes never change. */
-export async function finishArt(key: string, attempt: number, result: { bytes: Buffer } | { failure: ArtFailure }): Promise<boolean> {
-  const done = 'bytes' in result
-    ? await getPrisma().gamePlaceArt.updateMany({ where: { key, attempts: attempt, status: 'making' },
-      data: { status: 'ready', bytes: new Uint8Array(result.bytes), readyAt: new Date() } })
-    : await getPrisma().gamePlaceArt.updateMany({ where: { key, attempts: attempt, status: 'making' },
-      data: { status: 'failed', failureCode: result.failure } });
-  return done.count === 1;
+export async function finishArt(key: string, version: number, result: { bytes: Buffer } | { failure: ArtFailure }): Promise<boolean> {
+  const outcome = 'bytes' in result
+    ? Prisma.sql`status = 'ready', bytes = ${result.bytes}, ready_at = ${new Date()}`
+    : Prisma.sql`status = 'failed', failure_code = ${result.failure}`;
+  const done = await getPrisma().$executeRaw`
+    UPDATE game_place_art SET ${outcome}
+    WHERE key = ${key} AND attempts + released_claims = ${version} AND status = 'making'`;
+  return done === 1;
+}
+
+/** Refund the claiming UTC day and make a declined job immediately claimable again. */
+async function releaseArt(key: string, version: number, startedAt: Date, areaMemberId?: string): Promise<void> {
+  const day = new Date(startedAt.toISOString().slice(0, 10));
+  await getPrisma().$transaction(async tx => {
+    const released = await tx.$executeRaw`
+      UPDATE game_place_art SET status = 'available', attempts = attempts - 1, released_claims = released_claims + 1
+      WHERE key = ${key} AND attempts + released_claims = ${version} AND status = 'making'`;
+    if (!released) return;
+    if (areaMemberId) {
+      await tx.gameAreaArtMemberBudget.updateMany({ where: { memberId: areaMemberId, day }, data: { attempts: { decrement: 1 } } });
+    }
+    await tx.gamePlaceArtBudget.update({ where: { day }, data: { attempts: { decrement: 1 } } });
+  });
 }
 
 export async function readArtBytes(key: string): Promise<Buffer | null> {
@@ -94,7 +124,11 @@ export async function readArtBytes(key: string): Promise<Buffer | null> {
   return row?.bytes ? Buffer.from(row.bytes) : null;
 }
 
-export interface ArtJob { key: string; kind: ArtKind; make: (signal: AbortSignal) => Promise<Buffer> }
+export interface ArtJob { key: string; kind: ArtKind; areaMemberId?: string; make: (signal: AbortSignal) => Promise<Buffer> }
+
+function logClaimError(error: unknown): void {
+  console.error('Place art claim update failed.', { errorClass: describeKnownLoggedErrorType(error) });
+}
 
 /**
  * Claims up to `limit` missing pieces and makes them after the response, each
@@ -106,21 +140,28 @@ export async function ensureArt(jobs: readonly ArtJob[], rows: ReadonlyMap<strin
   const now = Date.now();
   const wanted = jobs.filter(job => {
     const row = rows.get(job.key);
-    return !row || (row.status === 'making' && row.startedAt.getTime() + ART_DEADLINE_MS <= now)
+    return !row || row.status === 'available' || (row.status === 'making' && row.startedAt.getTime() + ART_DEADLINE_MS <= now)
       || (row.status === 'failed' && row.startedAt.getTime() + RETRY_AFTER_MS <= now);
   }).slice(0, limit);
   for (const job of wanted) {
     const startedAt = new Date();
-    const attempt = await claimArt(job.key, job.kind, startedAt).catch(() => null);
-    if (attempt === null) continue;
+    const version = await claimArt(job.key, job.kind, startedAt, IMAGE_RULES, job.areaMemberId).catch(error => {
+      if (job.areaMemberId) logClaimError(error);
+      return null;
+    });
+    if (version === null) continue;
     started.set(job.key, { key: job.key, status: 'making', startedAt });
     after(async () => {
       const signal = AbortSignal.timeout(ART_DEADLINE_MS);
       try {
-        await finishArt(job.key, attempt, { bytes: await job.make(signal) });
+        await finishArt(job.key, version, { bytes: await job.make(signal) });
       } catch (error) {
+        if (error instanceof ArtSkipped) {
+          await releaseArt(job.key, version, startedAt, job.areaMemberId).catch(logClaimError);
+          return;
+        }
         const failure = signal.aborted ? 'timeout' : error instanceof ArtError ? error.code : 'generation_failed';
-        await finishArt(job.key, attempt, { failure }).catch(() => undefined);
+        await finishArt(job.key, version, { failure }).catch(() => undefined);
       }
     });
   }

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { encodePolyline } from "../../game/progress/route-geometry";
 import { generateHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
@@ -92,7 +92,11 @@ function syntheticInput(): HealthWinsInput {
   };
 }
 
+afterEach(() => vi.unstubAllEnvs());
+
 it("exports one synthetic card of every rendered shape", () => {
+  vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", "v1");
+  vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", "v1:" + Buffer.alloc(32, 37).toString("base64"));
   const recording: RecordedActivity = {
     id: "a013dd82-5f77-4dba-91d5-bb32734bb164", kind: "cold_plunge",
     startedAt: "2036-11-18T09:13:00Z", elapsedSec: 180, movingSec: 180, timerSec: 240,
