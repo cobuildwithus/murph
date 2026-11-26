@@ -67,7 +67,8 @@ delete their own posts and comments.
 
 ## Responding
 
-A member can cheer once per post and undo the cheer. Comments default to
+A member can cheer once per post. Adding or removing a cheer requires the
+viewer's current health consent. Comments default to
 **Everyone**, meaning people who can open the post. **Just the poster** limits
 a comment to its writer and the poster. Hides and blocks apply to the comment
 writer as well as the poster. A partner’s comment disappears for all readers

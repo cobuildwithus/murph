@@ -222,8 +222,9 @@ export async function setHealthCheer(auth: Auth, postId: string, enabled: boolea
   const actor = auth.member.id;
   const notification = await getPrisma().$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
+    await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
     if (!enabled) {
-      // The owner can retract an existing cheer after a hide or consent withdrawal.
+      // The viewer can retract an existing cheer after a hide.
       const removed = await tx.healthPostCheer.deleteMany({ where: { postId, memberId: actor } });
       if (!removed.count && !await findVisibleHealthPost(tx, actor, postId)) throw notFound();
       return null;

@@ -11,6 +11,7 @@ import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/prof
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { POST as post } from "../app/api/game/v1/health/posts/route";
 import { DELETE as deletePost, GET as openPost, PATCH as editPost } from "../app/api/game/v1/health/posts/[id]/route";
+import { DELETE as uncheer, PUT as cheer } from "../app/api/game/v1/health/posts/[id]/cheer/route";
 import { GET as comments, POST as comment } from "../app/api/game/v1/health/posts/[id]/comments/route";
 import { DELETE as deleteComment } from "../app/api/game/v1/health/comments/[id]/route";
 import { GET as listHides } from "../app/api/game/v1/health/hides/route";
@@ -451,6 +452,25 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect((await readPost(reader, authorPost)).status).toBe(404);
     expect((await profile(reader.request(`people/${author.id}/profile`), memberContext(author.id))).status).toBe(404);
     expect(await commentIds(reader, readerPost)).toEqual([]);
+  });
+
+  it("requires the viewer's current health consent to add or remove a cheer", async () => {
+    const author = await person(), viewer = await person();
+    await pair(author, viewer);
+    const first = await share(author), second = await share(author);
+    expect((await cheer(viewer.request(`posts/${first}/cheer`, "PUT"), context(first))).status).toBe(204);
+    await revokeHostedConsentScope({ memberId: viewer.id, scope: "launch.health-data", prisma: db });
+
+    const add = await cheer(viewer.request(`posts/${second}/cheer`, "PUT"), context(second));
+    const remove = await uncheer(viewer.request(`posts/${first}/cheer`, "DELETE"), context(first));
+    for (const response of [add, remove]) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "HOSTED_CONSENT_REQUIRED" } });
+    }
+    expect(await db.healthPostCheer.findMany({ where: { memberId: viewer.id }, select: { postId: true } }))
+      .toEqual([{ postId: first }]);
+    expect(await db.healthPost.findUniqueOrThrow({ where: { id: second }, select: { cheerPushClaimedAt: true } }))
+      .toEqual({ cheerPushClaimedAt: null });
   });
 
   it("keeps only the author's deletion receipt when health consent is withdrawn", async () => {
