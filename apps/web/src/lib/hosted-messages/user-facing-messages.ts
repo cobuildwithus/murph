@@ -44,7 +44,7 @@ export type UserFacingMessageTemplateKey =
 
 const MINIMUM_VARIANTS_BY_KEY: Partial<Record<UserFacingMessageTemplateKey, number>> = {
   "linq.home_redirect": HOME_REDIRECT_MESSAGE_MIN_VARIANT_COUNT,
-  // The founder pilot has one approved lock-screen question.
+  // Health win texts use one approved lock-screen question.
   "linq.health_win": 1,
 }
 

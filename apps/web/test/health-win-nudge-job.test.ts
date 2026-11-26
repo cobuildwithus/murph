@@ -32,6 +32,12 @@ const direct = {
 };
 const enrolled = { memberId, member: { gameProfile: { timeZone: "UTC" } }, lastEvaluatedDay: null };
 
+function enrollmentPage(start = 0) {
+  return Array.from({ length: 25 }, (_, offset) => ({
+    ...enrolled, memberId: `sweep-${String(start + offset).padStart(2, "0")}`,
+  }));
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -63,16 +69,17 @@ beforeEach(() => {
   m.append.mockResolvedValue({ inserted: true, item: { id: "item", lane: "system", laneSeq: "9" } });
 });
 
-afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
 describe("health win text sweep", () => {
-  it.each(["", "*"])("makes no database reads when the founder list is %j", async ids => {
-    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", ids);
+  it("makes no database reads when the win text list is empty", async () => {
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "");
     expect(await drainHealthWinTexts()).toMatchObject({ claimed: 0 });
     expect(m.prisma).not.toHaveBeenCalled();
   });
 
-  it("requires cron authorization before reading the founder list", async () => {
+  it("requires cron authorization before sweeping enrollments", async () => {
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "*");
     vi.stubEnv("CRON_SECRET", "synthetic-cron-credential");
     const request = new Request("https://example.test/api/internal/health/win-texts/cron");
     expect((await GET(request)).status).toBe(401);
@@ -159,5 +166,55 @@ describe("health win text sweep", () => {
     expect(await drainHealthWinTexts()).toMatchObject({ claimed: 25, ineligible: 25 });
     expect(m.enrollments).toHaveBeenCalledOnce();
     expect(m.enrollments.mock.calls[0]![0].where.memberId.in).toHaveLength(25);
+  });
+
+  it("pages past evaluated members and claims only feed members due on their local day", async () => {
+    vi.setSystemTime(new Date("2030-04-18T23:30:00Z"));
+    const member = { gameProfile: { timeZone: "Pacific/Auckland" } };
+    const evaluated = enrollmentPage().map(row => ({ ...row, member, lastEvaluatedDay: "2030-04-19" }));
+    const due = { ...enrolled, memberId: "sweep-26", member, lastEvaluatedDay: "2030-04-18" };
+    const disabled = { ...due, memberId: "sweep-25" };
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "*");
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", [...evaluated, due].map(row => row.memberId).join(","));
+    m.enrollments.mockResolvedValue([]).mockResolvedValueOnce(evaluated).mockResolvedValueOnce([disabled, due]);
+    m.inbound.mockResolvedValue(false);
+
+    expect(await drainHealthWinTexts()).toMatchObject({ claimed: 1, ineligible: 1 });
+    expect(m.claim).toHaveBeenCalledOnce();
+    expect(m.claim.mock.calls[0]![1]).toMatchObject({ memberId: due.memberId, day: "2030-04-19" });
+    const firstFilter = m.enrollments.mock.calls[0]![0].where?.memberId;
+    expect(firstFilter?.gt).toBeUndefined();
+    expect(firstFilter?.in).toBeUndefined();
+    const page = { orderBy: { memberId: "asc" }, take: 25 };
+    expect(m.enrollments).toHaveBeenNthCalledWith(1, expect.objectContaining(page));
+    expect(m.enrollments).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      ...page, where: { memberId: { gt: "sweep-24" } },
+    }));
+    expect(m.enrollments).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps wildcard claims across pages when another sweep wins a claim", async () => {
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "*");
+    m.enrollments.mockResolvedValue([]).mockResolvedValueOnce(enrollmentPage()).mockResolvedValueOnce(enrollmentPage(25));
+    m.claim.mockResolvedValueOnce(false);
+    m.inbound.mockResolvedValue(false);
+
+    expect(await drainHealthWinTexts()).toMatchObject({ claimed: 25, ineligible: 25 });
+    expect(m.claim).toHaveBeenCalledTimes(26);
+    expect(m.claim.mock.lastCall![1]).toMatchObject({ memberId: "sweep-25" });
+    expect(m.enrollments).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops wildcard claims and page reads when the sweep budget expires", async () => {
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    vi.stubEnv("MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", "*");
+    m.enrollments.mockResolvedValue([]).mockResolvedValueOnce(enrollmentPage());
+    m.inbound.mockImplementationOnce(async () => { deadline.abort(); return false; });
+
+    expect(await drainHealthWinTexts()).toMatchObject({ claimed: 1, ineligible: 1 });
+    expect(timeout).toHaveBeenCalledWith(240_000);
+    expect(m.claim).toHaveBeenCalledOnce();
+    expect(m.enrollments).toHaveBeenCalledOnce();
   });
 });

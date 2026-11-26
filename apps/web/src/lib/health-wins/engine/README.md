@@ -2,7 +2,7 @@
 
 `generateHealthWins(input)` returns up to 24 `CardSpec` objects for one member, newest achievement first.
 `detectHealthWins(input)` returns the cards in engine rank order and a map of achievement descriptors keyed by card ID,
-which the win-text pilot uses to recognize previously seen achievements.
+which Murph uses to recognize previously seen achievements when choosing a win to text.
 Pass local calendar dates as `YYYY-MM-DD` and set `member.today` explicitly. Each
 card carries its title, source note, filter, theme, and a chart typed by `kind`.
 Titles and subtitles round for display. Numeric chart data retains its original precision.
