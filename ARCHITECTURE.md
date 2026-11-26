@@ -384,9 +384,11 @@ negative controls and active accounts filter automatic plans during projection.
 Unrecognized policy suppresses automatic context until the ledger is normalized.
 The same ledger places its compact JSON controls on the first body line and
 source mappings below it, so bounded policy reads do not depend on history size.
-Successful connected-app disconnection removes the returned exact account from
+An assistant-initiated disconnect removes the returned exact account from
 that ledger through the canonical Knowledge writer; its receipt invalidates the
-snapshot. Canonical timing tags remain in projected navigation, including when
+snapshot. Companion removal revokes the provider account. Its saved plans can
+remain in upcoming context until Morning Journal reconciles a complete inventory.
+Canonical timing tags remain in projected navigation, including when
 details are omitted.
 
 Private conversations and ordinary scheduled turns read this snapshot, expire

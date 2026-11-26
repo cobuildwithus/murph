@@ -44,6 +44,7 @@ type ComposioSessionSearchParams = SessionSearchParams & {
 };
 
 export interface ComposioConnectedAccount {
+  createdAt: string | null;
   alias: string | null;
   id: string;
   isDisabled: boolean;
@@ -362,6 +363,7 @@ function parseConnectedAccount(
   }
   return [{
     alias: normalizeNonEmptyString(record?.alias),
+    createdAt: normalizeNonEmptyString(record?.created_at),
     id,
     isDisabled: record?.is_disabled === true,
     status: normalizeNonEmptyString(record?.status) ?? "UNKNOWN",

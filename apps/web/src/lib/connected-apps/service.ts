@@ -5,6 +5,7 @@ import { getHostedConnectedAppsReadPolicy, wrapHostedConnectedAppsReadResult } f
 
 import { createHash, randomBytes } from "node:crypto";
 
+import type { DeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   compactHostedConnectedAppsResult,
@@ -43,6 +44,7 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
+import { presentCompanionConnectedApps } from "./companion-catalog";
 import { getPrisma } from "@/src/lib/prisma";
 
 const CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE =
@@ -333,7 +335,24 @@ function isMissingConnectedAppsWriteArgument(
     || (Array.isArray(value) && value.length === 0);
 }
 
+export async function startCompanionConnectedApp(input: {
+  appReturn: DeviceSyncAppConnectReturn;
+  memberId: string;
+  toolkit: string;
+}) {
+  const toolkit = assertHostedConnectedAppToolkit(readHostedConnectedAppsConfig(), input.toolkit);
+  const prisma = getPrisma();
+  const { claim } = await createHostedConnectedAppIntent({
+    alias: null, memberId: input.memberId, prisma, toolkit,
+  });
+  const { redirectUrl } = await startHostedConnectedAppConnection({
+    appReturn: input.appReturn, claim, memberId: input.memberId, prisma,
+  });
+  return { authorizationUrl: redirectUrl };
+}
+
 export async function startHostedConnectedAppConnection(input: {
+  appReturn?: DeviceSyncAppConnectReturn;
   claim: string;
   fetchImpl?: typeof fetch;
   memberId: string;
@@ -359,7 +378,7 @@ export async function startHostedConnectedAppConnection(input: {
       memberId: input.memberId,
       prisma,
     });
-    const callbackUrl = buildHostedConnectedAppCallbackUrl(input.claim);
+    const callbackUrl = buildHostedConnectedAppCallbackUrl(input.claim, input.appReturn);
     providerLinkAttempted = true;
     const link = await client.createLink({
       ...(intent.alias ? { alias: intent.alias } : {}),
@@ -506,20 +525,11 @@ async function executeConnectedAppsManagement(input: {
       const toolkit = input.input.toolkit
         ? assertHostedConnectedAppToolkit(input.config, input.input.toolkit)
         : undefined;
-      const accounts = await input.client.listAccounts({
-        ...(toolkit ? { toolkit } : {}),
-        ...(toolkit ? {} : { toolkits: null }),
-        userId: input.memberId,
-      });
-      const completionTimes = await readConnectedAppCompletionTimes({
-        accountIds: accounts.map((account) => account.id),
-        memberId: input.memberId,
-        prisma: input.prisma,
-      });
+      const accounts = await listOwnedConnectedAccounts(input, toolkit);
       return {
-        accounts: accounts.map((account) => ({
+        accounts: accounts.map(({ account, connectedAt }) => ({
           ...presentConnectedAccount(account, input.config),
-          connectedAt: completionTimes.get(account.id) ?? null,
+          connectedAt,
         })),
         toolkits: input.config.toolkits.map((slug) => ({
           label: formatHostedConnectedAppToolkitLabel(slug),
@@ -573,6 +583,47 @@ async function executeConnectedAppsManagement(input: {
       };
     }
   }
+}
+
+async function listOwnedConnectedAccounts(input: {
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  memberId: string;
+  prisma: PrismaClient;
+}, toolkit?: string) {
+  const accounts = await input.client.listAccounts({
+    ...(toolkit ? { toolkit } : { toolkits: null }),
+    userId: input.memberId,
+  });
+  const completionTimes = await readConnectedAppCompletionTimes({
+    accountIds: accounts.map((account) => account.id),
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  return accounts.map(account => ({ account, connectedAt: completionTimes.get(account.id) ?? null }));
+}
+
+export async function listCompanionConnectedApps(memberId: string) {
+  const config = readHostedConnectedAppsConfig();
+  const client = createComposioConnectedAppsClient({ config });
+  try {
+    const accounts = await listOwnedConnectedAccounts({ client, memberId, prisma: getPrisma() });
+    return presentCompanionConnectedApps(config, accounts);
+  } catch (error) {
+    throw mapConnectedAppsError(error);
+  }
+}
+
+export async function disconnectCompanionConnectedApp(memberId: string, accountId: string) {
+  const client = createComposioConnectedAppsClient({ config: readHostedConnectedAppsConfig() });
+  try {
+    const accounts = await client.listAccounts({ accountIds: [accountId], statuses: null, toolkits: null, userId: memberId });
+    const account = accounts.find(candidate => candidate.id === accountId);
+    if (!account) throw connectedAppAccountNotFound();
+    await client.disconnectAccount(account.id);
+  } catch (error) {
+    throw mapConnectedAppsError(error);
+  }
+  return listCompanionConnectedApps(memberId);
 }
 
 async function readConnectedAppCompletionTimes(input: {
@@ -645,7 +696,7 @@ async function createHostedConnectedAppIntent(input: {
   memberId: string;
   prisma: PrismaClient;
   toolkit: string;
-}): Promise<{ connectUrl: string; expiresAt: string }> {
+}): Promise<{ claim: string; connectUrl: string; expiresAt: string }> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + CONNECTED_APP_INTENT_TTL_MS);
   const claim = `${CONNECTED_APP_INTENT_PREFIX}${randomBytes(CONNECTED_APP_INTENT_BYTES).toString("base64url")}`;
@@ -677,6 +728,7 @@ async function createHostedConnectedAppIntent(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return {
+    claim,
     connectUrl: new URL(
       `/integrations/connect/${encodeURIComponent(claim)}`,
       `${baseUrl}/`,
@@ -782,7 +834,11 @@ async function resolveOwnedConnectedAccount(input: {
       message: "More than one connected account matches that name. List accounts and choose an exact account id.",
     });
   }
-  throw hostedOnboardingError({
+  throw connectedAppAccountNotFound();
+}
+
+function connectedAppAccountNotFound() {
+  return hostedOnboardingError({
     code: "CONNECTED_APPS_ACCOUNT_NOT_FOUND",
     httpStatus: 404,
     message: "That connected account was not found for this Murph member.",
@@ -855,7 +911,7 @@ function presentConnectedAccount(
   };
 }
 
-function buildHostedConnectedAppCallbackUrl(claim: string): string {
+function buildHostedConnectedAppCallbackUrl(claim: string, appReturn?: DeviceSyncAppConnectReturn): string {
   const baseUrl = resolveHostedPublicBaseUrl();
   if (!baseUrl) {
     throw hostedOnboardingError({
@@ -867,6 +923,7 @@ function buildHostedConnectedAppCallbackUrl(claim: string): string {
   }
   const url = new URL("/integrations/connect/complete", `${baseUrl}/`);
   url.searchParams.set("claim", claim);
+  if (appReturn) url.searchParams.set("appReturn", appReturn);
   return url.toString();
 }
 
