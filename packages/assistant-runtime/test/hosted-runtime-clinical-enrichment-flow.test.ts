@@ -35,7 +35,7 @@ const hasPoppler = ["pdfinfo", "pdftoppm", "pdftotext"].every((command) => {
 });
 
 // One synthetic text line per page; no patient fixture.
-function textPdf(lines: readonly string[]): Buffer {
+function textPdf(lines: readonly string[]) {
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>",
     `<< /Type /Pages /Kids [${lines.map((_, index) => `${4 + index * 2} 0 R`).join(" ")}] /Count ${lines.length} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
