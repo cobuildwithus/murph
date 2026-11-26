@@ -97,19 +97,19 @@
       "effectiveDate": "2026-04-29",
       "id": "subprocessors",
       "latest": {
-        "bytes": 30681,
+        "bytes": 29833,
         "path": "/legal/subprocessors.pdf",
-        "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
+        "sha256": "df467e1aac5df80ffb6db974ab0b37116f3e69469d4e0889c3024e17ce8df9bb"
       },
-      "lastUpdated": "2026-11-12",
+      "lastUpdated": "2026-11-26",
       "source": "apps/web/legal/subprocessors.md",
       "title": "Murph Subprocessors, Model Providers, and Connected Services",
-      "version": "2026-11-12",
+      "version": "2026-11-26",
       "versions": [
         {
-          "bytes": 30681,
-          "path": "/legal/subprocessors-2026-11-12.pdf",
-          "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
+          "bytes": 29833,
+          "path": "/legal/subprocessors-2026-11-26.pdf",
+          "sha256": "df467e1aac5df80ffb6db974ab0b37116f3e69469d4e0889c3024e17ce8df9bb"
         }
       ]
     },
@@ -120,17 +120,17 @@
       "latest": {
         "bytes": 4615,
         "path": "/legal/legal-documents.pdf",
-        "sha256": "149a513a1d57da751ecc999d2481e1481cb2557c68c2ffc2e542ed788034b77f"
+        "sha256": "352f876be67804f23355597715fbb2cd2a396347efc3040dfede06cb52e2594d"
       },
-      "lastUpdated": "2026-11-12",
+      "lastUpdated": "2026-11-26",
       "source": "apps/web/legal/legal-documents.md",
       "title": "Murph Legal Documents",
-      "version": "2026-11-12",
+      "version": "2026-11-26",
       "versions": [
         {
           "bytes": 4615,
-          "path": "/legal/legal-documents-2026-11-12.pdf",
-          "sha256": "149a513a1d57da751ecc999d2481e1481cb2557c68c2ffc2e542ed788034b77f"
+          "path": "/legal/legal-documents-2026-11-26.pdf",
+          "sha256": "352f876be67804f23355597715fbb2cd2a396347efc3040dfede06cb52e2594d"
         }
       ]
     }

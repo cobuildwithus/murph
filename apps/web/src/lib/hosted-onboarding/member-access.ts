@@ -612,6 +612,7 @@ export async function readHostedRuntimeAiAccessDecision(input: {
  * falling back to the owner-only sweep approximation.
  */
 export async function readHostedRuntimeAiAllowedMemberIds(input: {
+  forRuntimeStart?: boolean;
   sponsorshipOnly?: boolean;
   memberIds: readonly string[];
   now?: Date;
@@ -631,6 +632,7 @@ export async function readHostedRuntimeAiAllowedMemberIds(input: {
     select: hostedRuntimeAiBatchMemberAccessSelect,
     where: {
       id: { in: memberIds },
+      ...(input.forRuntimeStart ? { runtimeDormantAt: null } : {}),
     },
   });
   const containerMemberIds = members

@@ -349,6 +349,7 @@ async function readHostedRuntimeProgressObservation(input: {
     const allowedRuntimeKeys = visiblePage.length === 0
       ? new Set<string>()
       : await readHostedRuntimeAiAllowedMemberIds({
+          forRuntimeStart: true,
           memberIds: [...new Set(visiblePage.map((row) => row.runtimeKey))],
           now,
           prisma,

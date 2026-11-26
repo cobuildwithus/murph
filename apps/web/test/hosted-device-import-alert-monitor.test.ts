@@ -182,7 +182,7 @@ describe("bounded import diagnostic observation", () => {
 
   it("uses current admission authority and hashed subjects for the separate log database", async () => {
     await readDeviceImportHealth({ now });
-    expect(mocks.allowed).toHaveBeenCalledWith(expect.objectContaining({ memberIds: ["synthetic-active", "synthetic-inactive"] }));
+    expect(mocks.allowed).toHaveBeenCalledWith(expect.objectContaining({ forRuntimeStart: true, memberIds: ["synthetic-active", "synthetic-inactive"] }));
     expect(mocks.logQuery.mock.calls[0]?.[1][0]).toEqual([hostedRuntimeLogSubjectKey("synthetic-active")]);
     expect(mocks.logQuery.mock.calls[0]?.[1][3]).toBe(DEVICE_IMPORT_EVENT_LIMIT + 1);
     expect(mocks.query).toHaveBeenCalledTimes(2);

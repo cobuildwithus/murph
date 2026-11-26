@@ -835,10 +835,12 @@ export class PrismaHostedDirtyConnectionStore {
     limit: number;
   }): Promise<Array<{ connectionId: string; userId: string }>> {
     return this.prisma.$queryRaw<Array<{ connectionId: string; userId: string }>>(Prisma.sql`
-      SELECT "connection_id" AS "connectionId", "user_id" AS "userId"
-      FROM "device_sync_dirty_connection"
-      WHERE "wake_deferred_until" <= ${input.dueAt}
-      ORDER BY "wake_deferred_until" ASC, "connection_id" ASC
+      SELECT dirty.connection_id AS "connectionId", dirty.user_id AS "userId"
+      FROM device_sync_dirty_connection AS dirty
+      JOIN hosted_member AS member ON member.id = dirty.user_id
+      WHERE dirty.wake_deferred_until <= ${input.dueAt}
+        AND member.runtime_dormant_at IS NULL
+      ORDER BY dirty.wake_deferred_until ASC, dirty.connection_id ASC
       LIMIT ${input.limit}
     `);
   }

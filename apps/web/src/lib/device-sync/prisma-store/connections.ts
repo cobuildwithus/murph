@@ -1233,6 +1233,7 @@ export class PrismaHostedConnectionStore {
         and "connection"."next_reconcile_at" is not null
         and "connection"."next_reconcile_at" <= ${input.dueAt}
         and "member"."suspended_at" is null
+        and "member"."runtime_dormant_at" is null
         and ${activeHostedPersonAccessSql(Prisma.sql`"member"`)}
         -- A missing historical grant remains compatible with legacy members.
         -- Only an explicit withdrawal removes scheduled-sync authority.
