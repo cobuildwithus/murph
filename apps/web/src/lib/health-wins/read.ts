@@ -9,7 +9,7 @@ import { gameMediaUrl } from "../game/views";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { getPrisma } from "../prisma";
-import { eligibleHealthAuthorsSql, findVisibleHealthPost, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
+import { eligibleHealthAuthorsSql, findVisibleHealthPost, healthPostAudienceSql, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
 import { openHealthTexts } from "./crypto";
 import type { FrozenHealthCard } from "./card-options";
 import { openHealthCursor, sealHealthCursor, type HealthPagePosition } from "./cursor";
@@ -74,7 +74,8 @@ export function healthPostPageSql(viewerId: string, filter: PostFilter) {
     ORDER BY p.deleted_at, p.created_at DESC, p.id DESC LIMIT ${limit}` : Prisma.sql`
     SELECT recent.* FROM (${eligibleHealthAuthorsSql(viewerId)}) authors
     CROSS JOIN LATERAL (
-      SELECT p.id, p.created_at FROM health_post p WHERE p.author_member_id = authors.member_id AND p.deleted_at IS NULL ${seek}
+      SELECT p.id, p.created_at FROM health_post p WHERE p.author_member_id = authors.member_id AND p.deleted_at IS NULL
+        AND ${healthPostAudienceSql(viewerId)} ${seek}
       ORDER BY p.deleted_at, p.created_at DESC, p.id DESC LIMIT ${limit}
     ) recent ORDER BY recent.created_at DESC, recent.id DESC LIMIT ${limit}`;
   return Prisma.sql`WITH page AS MATERIALIZED (${page})

@@ -1,4 +1,4 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import type { ExperimentOutcome } from "@murphai/contracts";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -55,6 +55,8 @@ beforeEach(() => {
   mock.games.mockResolvedValue({ games: [], sourceRevision: "game-state", complete: true });
   mock.authority.mockResolvedValue(undefined);
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 it("selects a single source and method before daily collapse, ignoring unusable readings", () => {
   const rows = [
@@ -190,6 +192,26 @@ it("distinguishes an empty vault from a published replica that failed to open", 
   expect(empty.complete).toBe(true);
   expect(partial.complete).toBe(false);
   expect(empty.sourceRevision).not.toBe(partial.sourceRevision);
+});
+
+it("reads meal days only when generating Diet wins and keys the source revision to that choice", async () => {
+  const days = vi.fn(() => [{ date: today, meals: [{ proteinGrams: 17.25, fiberGrams: 3 }] }]);
+  mock.session.mockResolvedValue({ state: "ready", client: {
+    replica: { source: { dataVersion: "meal-fixture" }, meals: { timeZone: "UTC", get days() { return days(); } },
+      experimentOutcomes: [] },
+    entities: { list: () => [] }, metrics: { series: () => [] }, labResults: { list: () => [] },
+  } });
+  vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+  vi.stubEnv("MURPH_GAME_ENABLED", "true");
+  vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", "");
+  const off = await readHealthWinInputs(memberId, mock.authority, today, signal);
+  expect(off.input.meals).toBeUndefined();
+  expect(days).not.toHaveBeenCalled();
+  vi.stubEnv("MURPH_HEALTH_DIET_MEMBER_IDS", memberId);
+  const on = await readHealthWinInputs(memberId, mock.authority, today, signal);
+  expect(on.input.meals).toEqual([{ date: today, proteinG: 17.25, fiberG: 3 }]);
+  expect(days).toHaveBeenCalledOnce();
+  expect(on.sourceRevision).not.toBe(off.sourceRevision);
 });
 
 it("keeps canonical outcomes when a legacy replica lacks a lab shard or health time zone", async () => {

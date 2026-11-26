@@ -1109,5 +1109,296 @@
       ],
       "fastest": null
     }
+  },
+  {
+    "id": "best_month:protein_g:2036-11",
+    "kind": "best_month",
+    "filter": "Diet",
+    "title": {
+      "number": "5,320",
+      "measure": "g protein"
+    },
+    "subtitle": "November, your most this year",
+    "source_note": "Logged on 28 of 28 days this month so far. Compared with 3 qualifying monthly totals. A day counts when every meal has protein.",
+    "chart": {
+      "type": "monthly_bars",
+      "series": [
+        {
+          "month": "2036-08",
+          "days": 25,
+          "value": 4350
+        },
+        {
+          "month": "2036-09",
+          "days": 25,
+          "value": 4650
+        },
+        {
+          "month": "2036-10",
+          "days": 25,
+          "value": 5140
+        },
+        {
+          "month": "2036-11",
+          "days": 28,
+          "value": 5320
+        }
+      ],
+      "unit": "g",
+      "highlight": "2036-11"
+    },
+    "theme": "diet",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "streak:fiber_g:20361116",
+    "kind": "streak",
+    "filter": "Diet",
+    "title": {
+      "number": "6 days",
+      "measure": "30 g+ fiber"
+    },
+    "subtitle": "in a row, Nov 11 to 16",
+    "source_note": "Longest run in the last 90 days, ending Nov 16. A day counts when every meal has fiber.",
+    "chart": {
+      "type": "bars",
+      "unit": "g",
+      "threshold": 30,
+      "series": [
+        {
+          "date": "2036-11-02",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-03",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-04",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-05",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-06",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-07",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-08",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-09",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-10",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-11",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-12",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-13",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-14",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-15",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-16",
+          "value": 33.25,
+          "passing": true
+        },
+        {
+          "date": "2036-11-17",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-18",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-19",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-20",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-21",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-22",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-23",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-24",
+          "value": 12,
+          "passing": false
+        },
+        {
+          "date": "2036-11-25",
+          "value": 12,
+          "passing": false
+        }
+      ],
+      "pills": [
+        "30 g"
+      ],
+      "highlight": {
+        "start": "2036-11-11",
+        "end": "2036-11-16"
+      }
+    },
+    "theme": "diet",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "month_total:fiber_g:2036-10",
+    "kind": "month_total",
+    "filter": "Diet",
+    "title": {
+      "number": "490",
+      "measure": "g fiber"
+    },
+    "subtitle": "in October",
+    "source_note": "Logged on 25 of 31 days in October. A day counts when every meal has fiber. One avocado ≈ 10 g fiber (USDA FoodData Central).",
+    "chart": {
+      "type": "tally",
+      "nutrient": "fiber",
+      "total": 490,
+      "unit": "g",
+      "item": {
+        "id": "avocado",
+        "name": "avocado",
+        "plural": "avocados",
+        "perItem": 10
+      },
+      "count": 49,
+      "partial": 1
+    },
+    "theme": "diet",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "month_total:protein_g:2036-10",
+    "kind": "month_total",
+    "filter": "Diet",
+    "title": {
+      "number": "5,140",
+      "measure": "g protein"
+    },
+    "subtitle": "in October",
+    "source_note": "Logged on 25 of 31 days in October. A day counts when every meal has protein. One rotisserie chicken ≈ 180 g protein (USDA FoodData Central, meat only).",
+    "chart": {
+      "type": "tally",
+      "nutrient": "protein",
+      "total": 5140,
+      "unit": "g",
+      "item": {
+        "id": "rotisserie_chicken",
+        "name": "rotisserie chicken",
+        "plural": "rotisserie chickens",
+        "perItem": 180
+      },
+      "count": 29,
+      "partial": 0.56
+    },
+    "theme": "diet",
+    "share": {
+      "caption_tips": []
+    }
+  },
+  {
+    "id": "game:g_canal_loop",
+    "kind": "game_result",
+    "filter": "Challenges",
+    "theme": "challenges",
+    "title": {
+      "number": "8–6",
+      "measure": ""
+    },
+    "subtitle": "Walk the canal path · 9 days",
+    "source_note": "Final score, Nov 4 to 12.",
+    "chart": {
+      "type": "game_result",
+      "contest": "Walk the canal path",
+      "lengthDays": 9,
+      "players": [
+        {
+          "memberId": "m_indigo",
+          "firstName": "Luma",
+          "score": 8,
+          "won": true
+        },
+        {
+          "memberId": "m_topaz",
+          "firstName": "Oriel",
+          "score": 6,
+          "won": false
+        }
+      ],
+      "stake": {
+        "kind": "dare",
+        "item": "wear a paper crown to brunch"
+      },
+      "paid": true
+    },
+    "share": {
+      "caption_tips": [
+        "How did it go down?",
+        "Rematch?"
+      ]
+    }
   }
 ]

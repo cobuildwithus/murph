@@ -39,6 +39,38 @@ Progress route painting when available.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
 
+## Diet wins
+
+Murph counts protein and fiber separately. A day counts for a nutrient when
+every logged meal has a known amount. A month qualifies when at least 80% of
+its days count. During the following month a tally can show the previous
+month's logged grams as a food equivalent, with 10 to 50 icons. The food is
+a comparison for scale. **Hide my numbers** removes both the grams and the
+icons and leaves “Diet milestone.”
+
+From day 14, a current month with 80% coverage can earn a best-month card
+when it matches or exceeds every qualifying prior month. Murph compares
+against this year's completed months when at least three qualify, otherwise
+against the preceding 12 months when at least three qualify. A fiber streak
+requires five consecutive days at or above 30 g. The longest streak in the
+last 90 days qualifies when it ended within 60 days. A missing day or
+incomplete fiber reading breaks the streak.
+
+## Posting a payoff
+
+For seven days after a two-player game settles, the winner can post a photo
+with the final score and the agreed dare or prize. Both players must still
+hold joined seats, the ticket must be owed to the winner, and a block in
+either direction prevents posting. Shared rewards, ties and legacy stake
+types are ineligible. The result uses each player's own profile first name.
+Posting marks the ticket paid. An already redeemed ticket can still be shared.
+
+The post is visible only to its author and the other current player under
+the usual Health wins access rules. Either player can hide the other. The
+author can edit the caption or delete the post. Deleting it allows another
+payoff post while the game still qualifies. Deleting the game restricts the
+post and photo to the author.
+
 ## Texting a new win
 
 An explicitly enrolled member can receive one iMessage about a new win per
@@ -134,6 +166,7 @@ when recording is disabled.
 | Route | Request and result |
 | --- | --- |
 | `GET wins` | Returns `{day, setRevision, candidates}`. Ordinary reads reuse today's set for an hour. `?refresh=1` recomputes immediately, once per minute per member. Additional refreshes during that minute return the stored set. A timeout can return a previous day's set. Use the returned day and revision together. |
+| `GET payoffs` | Returns `{cards}` with up to 24 eligible original-only game previews, newest settlement first. A feed member outside the payoff allowlist receives an empty list. Each preview includes its `candidateId` and `specRevision`. |
 | `POST wins/{candidateId}/change` | Send `{setRevision, option}` using an ID from the candidate's `change_options`. Returns `{card}` for preview. |
 | `PUT photos/{id}` | Upload a JPEG up to 2 MiB and 2048 pixels per side under a client-generated UUID. Each member can have 20 unpublished uploads. A new upload over the limit returns 409. Use the returned `attachmentId` at publication. `DELETE` discards an unpublished upload. `GET` reads an authorized published photo. |
 | `POST activities/kind` | Send `{name}` when the member chooses a custom name. Returns `{name, kind, timer, decided}` with the cleaned name. Send that name back unchanged on preview, save and post. |
@@ -148,6 +181,13 @@ when recording is disabled.
 | `GET people/{memberId}/profile` | Returns `{memberId, firstName, avatarUrl, numbers, posts, nextCursor}`. Numbers come from the pair board and are null when unavailable. |
 | `GET hides` | Returns `{people: [{memberId, firstName, avatarUrl}]}` for the viewer’s outgoing hides, newest first. Name and avatar can be null when the profile is unavailable to the viewer. |
 | `PUT / DELETE hides/{memberId}` | Hide a visible partner or comment writer, or clear an existing hide. Returns `{hidden}`. |
+
+To publish a payoff, send one `game:<gameId>` pick with `option: "original"`,
+its previewed `specRevision` and a ready `attachmentId`. A payoff needs no
+`setRevision`. A changed spec returns 409 `HEALTH_PAYOFF_CHANGED`. A different
+live post for the game returns 409 `HEALTH_PAYOFF_EXISTS`. An ineligible game
+returns 404. Retrying the original post ID returns its receipt. PATCH accepts
+only caption edits on a payoff and rejects game selections on all posts.
 
 ### Recorded activity fields
 
@@ -302,7 +342,15 @@ for their own posts. A cumulative distance card’s map chart may contain
 
 ## Rollout
 
-The feed and recording allowlists take member IDs, or `*` for every member.
+`MURPH_HEALTH_DIET_MEMBER_IDS` controls suggestion generation. Existing
+offers remain usable until their cached set is replaced. A client that lacks
+the tally chart can still show its update prompt. `MURPH_HEALTH_PAYOFF_MEMBER_IDS`
+controls payoff eligibility and publication for feed members. Apply the
+`health_post.game_id` migration and deploy the scoped readers with the writer
+disabled. Wait for every older reader to drain before enabling payoffs. Keep
+the scoped readers on every rollback once any payoff has been posted.
+
+The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's

@@ -6770,6 +6770,12 @@ versions. The encrypted cursor binds the last scanned date and ID to its
 viewer and collection, so a page that loses every post during decryption can
 still advance. There is no limit on the number of partners who can qualify.
 
+For a payoff post, PostgreSQL also checks that the viewer is its author or
+holds a joined, present seat in the post's game. The feed applies that check
+before its per-author limit. Profile, detail, photo, interaction and delivery
+reads reapply it through the shared post predicate. Deleting a game removes
+its seats and leaves only the author eligible to see the post.
+
 Each comment requires access to the live parent post. A poster-only comment
 is visible to the poster and its writer. Blocks and hides also apply between
 the reader and the commenter and between the poster and the commenter. A
@@ -6795,6 +6801,12 @@ outcome metric and units.
 Game inputs reuse Progress day, contribution, round-total, ladder and vault-run
 calculations. An over-limit game history withholds game cards to avoid
 presenting a partial lifetime total. Reading suggestions never settles an award.
+
+The Diet detector reads protein and fiber from the meal replica under the same
+vault authority. It keeps one sum per day and nutrient when every logged meal
+has a finite value. Meal descriptions, photos and times stay in the replica.
+The source revision includes the Diet generation flag. Generated Diet specs
+use the existing sealed suggestion set and frozen post envelopes.
 
 The pure engine ranks up to 24 eligible cards and balances the first 12 across
 available categories. With `MURPH_HEALTH_WINS_RANKING=true`,
@@ -6843,6 +6855,17 @@ sealed chart. Looking up that painting only reads existing route state and art.
 Clients render unknown charts with the title, subtitle and an update note.
 The server stores no card images.
 
+The payoff endpoint reads up to 24 recent settled pair-game obligations, with
+result, current stake, ticket and the players' own profile names. It opens at
+most 72 fields in a batch and rechecks access and the selected facts before
+returning each original-only card with a digest of its exact spec. To publish,
+Web prepares the sealed card before opening a
+transaction. Under member authority and the existing game lock it verifies the
+payoff facts, inserts the scoped post, binds its ready photo and redeems the
+ticket. The usual game redeem command shares the transaction-aware redemption
+step. A committed replay returns the original receipt. A second live payoff
+for the same game is a conflict.
+
 ### Recorded activities
 
 Recording requires the intersection of the Health wins feed and timed recording
@@ -6882,7 +6905,7 @@ database transactions.
 
 | Table | Encrypted content | Approved operational metadata |
 | --- | --- | --- |
-| `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `posted_card_keys` holds opaque keyed digests of the author's member ID and each selected suggestion's candidate ID. Recorded activity cards have no digest. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
+| `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card, including payoff scores, profile names and stake text) | `id` is the client's replay key. `author_member_id` owns it. Nullable `game_id` scopes a payoff to its game. Only cards selected from suggestion sets enter `posted_card_keys`, as opaque keyed digests of the author's member ID and each candidate ID. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
 | `health_activity` | `summary_encrypted` holds the activity kind, optional name, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
 | `health_activity_kind_decision` | None | Shared across members. `key` contains the prompt version, privacy key version and a purpose-specific HMAC of the NFKC-normalized, lowercased name. `kind`, `route` and `timer` hold the classifier's answer before member capability checks. `created_at` records insertion. The table excludes raw names, member references and fallback answers. |
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
@@ -6897,6 +6920,13 @@ tombstone so delayed requests cannot recreate content. Post edits compare
 `expectedVersion` with the stored version. The mutation that creates a
 comment or admits an hourly cheer notification also claims its push.
 `deliverGamePush` rechecks health access after commit.
+
+The partial unique index permits one live payoff per game. Deletion retains
+the game ID on the tombstone and releases the live slot. The game ID has no
+foreign key so game deletion can proceed and can never clear the post's scope.
+Deploy the migration first, then the audience-aware readers. Enable the payoff
+writer only after older readers have drained. Once a scoped post exists, this
+audience-aware revision is the rollback floor.
 
 Web strips photo metadata and registers a random exclusive key before
 uploading the sealed JPEG to the Progress store. The reservation transaction

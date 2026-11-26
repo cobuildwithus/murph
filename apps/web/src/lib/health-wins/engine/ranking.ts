@@ -3,7 +3,7 @@ import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthW
 
 const themes = {
   Sleep: "sleep", Fitness: "fitness", Heart: "heart",
-  Labs: "labs", Challenges: "challenges", Experiments: "experiments",
+  Labs: "labs", Diet: "diet", Challenges: "challenges", Experiments: "experiments",
 } as const satisfies Record<Filter, CardSpec["theme"]>;
 
 const dailyKindOrder: Partial<Record<CardKind, number>> = {

@@ -15,7 +15,7 @@ const labels: Record<Option, string> = {
 
 const hiddenTitles = {
   Sleep: "Sleep milestone", Heart: "Heart health milestone", Fitness: "Fitness milestone",
-  Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone",
+  Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone", Diet: "Diet milestone",
 } satisfies Record<CardSpec["filter"], string>;
 
 function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
@@ -131,7 +131,7 @@ export function prepareHealthCandidates(
 }
 
 /** Hash the spec as it will be sealed. Preserve array order and sort JSON object keys at every depth. */
-function specDigest(spec: FrozenHealthCard["spec"] | null): string {
+export function specDigest(spec: FrozenHealthCard["spec"] | null): string {
   const canonical = JSON.stringify(spec, (_key, value: unknown) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
     return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));

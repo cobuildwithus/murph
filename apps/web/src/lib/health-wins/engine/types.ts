@@ -3,6 +3,9 @@ import type { ExperimentMetricResult } from "@murphai/query";
 import type { LabNormMetric } from "../../game/progress/norms";
 import type { ActivityCharts } from "./activities";
 import type { DailyCharts } from "./daily";
+import type { DietCharts } from "./diet";
+import type { Nutrient } from "./foods";
+import type { GameResultCharts } from "./game-result";
 import type { LabCharts } from "./labs";
 import type { PercentileCharts } from "./percentiles";
 import type { RouteCharts } from "./route-cards";
@@ -57,6 +60,12 @@ export interface DailySample {
   provider: string;
   date: string;
   value: number;
+}
+
+export interface MealDay {
+  date: string;
+  proteinG: number | null;
+  fiberG: number | null;
 }
 
 export type SessionType = "run" | "walk" | "sauna" | "hiit" | "basketball" | "other";
@@ -150,6 +159,7 @@ export interface HealthWinsInput {
     wearableProvider: string | null;
   };
   daily?: readonly DailySample[];
+  meals?: readonly MealDay[];
   sessions?: readonly Session[];
   labs?: readonly LabDraw[];
   experiments?: readonly Experiment[];
@@ -159,8 +169,8 @@ export interface HealthWinsInput {
   rank?: HealthWinRank;
 }
 
-export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments";
-type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts & RouteCharts;
+export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments" | "Diet";
+type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts & RouteCharts & DietCharts & GameResultCharts;
 export type CardKind = keyof Charts;
 
 type DetectedCard = {
@@ -182,7 +192,8 @@ export type CardSpec = DetectedCard & {
 
 /** Private detector evidence. The period is the observed month, event day, or intervention start. */
 export type HealthWinAchievement = (
-  | { kind: "trend_change" | "best_month" | "threshold_count" | "personal_record"; subject: Metric }
+  | { kind: "trend_change" | "threshold_count" | "personal_record"; subject: Metric }
+  | { kind: "best_month"; subject: Metric | `${Nutrient}_g` }
   | { kind: "sessions"; subject: SessionType }
   | { kind: "lab_change" | "lab_percentile"; subject: Analyte }
   | { kind: "experiment_result"; subject: string }

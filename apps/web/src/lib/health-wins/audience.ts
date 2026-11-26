@@ -54,9 +54,17 @@ export function visibleHealthPersonSql(viewerId: string, subject: Prisma.Sql, ac
     AND ${healthPersonAllowedSql(viewerId, subject, access)}`;
 }
 
+/** Scoped posts retain their game ID even after the game and its seats are deleted. */
+export function healthPostAudienceSql(viewerId: string) {
+  return Prisma.sql`(p.game_id IS NULL OR p.author_member_id = ${viewerId} OR EXISTS (
+    SELECT 1 FROM game_player gp WHERE gp.game_id = p.game_id AND gp.member_id = ${viewerId}
+      AND gp.joined_at IS NOT NULL AND gp.left_at IS NULL))`;
+}
+
 /** Queries using these clauses alias the parent post p and the comment c. */
 export function visibleHealthPostSql(viewerId: string, access: PostAccess = "content") {
-  return Prisma.sql`p.deleted_at IS NULL AND ${visibleHealthPersonSql(viewerId, Prisma.sql`p.author_member_id`, access)}`;
+  return Prisma.sql`p.deleted_at IS NULL AND ${healthPostAudienceSql(viewerId)}
+    AND ${visibleHealthPersonSql(viewerId, Prisma.sql`p.author_member_id`, access)}`;
 }
 
 function commentContextOnPostSql(viewerId: string, poster: Prisma.Sql) {
