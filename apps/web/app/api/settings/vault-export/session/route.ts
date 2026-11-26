@@ -134,7 +134,9 @@ export const POST = withJsonError(async (request: Request) => {
   if (processingAllowed && (!session || refreshPending)) {
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
   }
-  if (!session && !activityRecords) {
+  // Only a withdrawn member may download saved activities without a replica: an active member's
+  // refresh is already queued, so keep the approval and ask them to retry.
+  if (!session && (processingAllowed || !activityRecords)) {
     throw processingAllowed ? browserVaultSessionNotFreshError() : browserVaultRetainedReplicaUnavailableError();
   }
   const shareRecords = await progressEffect("prepare_share_export", () => prepareProgressShareExport(auth.member.id, assertCurrent));

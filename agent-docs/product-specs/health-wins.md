@@ -105,7 +105,7 @@ recording is disabled.
 | Field | Meaning |
 | --- | --- |
 | `id`, `kind` | Client UUID and one of `sauna`, `cold_plunge`, `lift`, `other`, `run`, or `walk`. Run and walk currently produce timed cards. |
-| `startedAt` | ISO timestamp with an offset or UTC designator. The card discloses only the day in the member’s game-profile time zone and AM or PM. |
+| `startedAt` | ISO timestamp with an offset or UTC designator. The card discloses only the day in the member’s game-profile time zone and the part of day (night before 5:00, morning, afternoon from 12:00, evening from 17:00), never the start time. |
 | `elapsedSec`, `movingSec`, `timerSec?` | Whole seconds. Elapsed time and an optional timer must be positive and at most six hours. Moving time is between zero and elapsed time. |
 | `heartRate?` | Summary with `avgBpm`, `lowBpm`, and `peakBpm`, ordered low to average to peak within 30–230 bpm. For preview and post, also send `perMinute` with whole-number averages or `null` for gaps. Omit the series on a private save. |
 

@@ -131,6 +131,10 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(await createHealthPost(owner, { ...input, cards: [changed] })).toEqual({ id: input.id, version: 1 });
     expect(state.resolve).not.toHaveBeenCalled();
     state.keysAvailable = true;
+    // A committed post keeps its receipt even after the member leaves the recording allowlist.
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", "");
+    expect(await createHealthPost(owner, input, "metric")).toEqual({ id: input.id, version: 1 });
+    vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", memberId);
 
     async function storedCards() {
       const row = await db.healthPost.findUniqueOrThrow({ where: { id: input.id } });

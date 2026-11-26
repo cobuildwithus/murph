@@ -80,7 +80,6 @@ export async function createHealthPost(
   auth: Auth, input: Content & { id: string; attachmentId?: string; activity?: RecordedActivity }, units: ClientUnits = "us",
 ) {
   const db = getPrisma(), memberId = auth.member.id, id = input.id.toLowerCase();
-  if (input.activity) assertHealthRecordEnabled(memberId);
   const previous = await db.healthPost.findUnique({ where: { id }, select: { id: true } });
   if (previous) {
     return db.$transaction(async tx => {
@@ -92,6 +91,8 @@ export async function createHealthPost(
   }
   if (!input.caption?.trim() && !input.cards?.length && !input.attachmentId) throw invalidGameRequest("Add words, a card, or a photo.");
   await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
+  // After the replay branch, so a committed post still returns its receipt if the flag is turned off.
+  if (input.activity) assertHealthRecordEnabled(memberId);
   const recording = input.activity ? await prepareHealthActivity(auth, input.activity, units) : undefined;
   const { cards, day } = await resolvePostCards(auth, input, recording?.candidates);
   const data = await sealPostContent(memberId, id, input.caption, cards);

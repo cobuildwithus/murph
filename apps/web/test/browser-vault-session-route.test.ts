@@ -835,6 +835,34 @@ describe("browser vault session route", () => {
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 
+  it("asks an active member with saved summaries to retry while the replica is prepared", async () => {
+    const findMany = vi.fn().mockResolvedValue([{
+      memberId: "member_123", id: "c52cc66f-0d1e-4f4a-9a3b-000000000001", day: "2030-09-12",
+      createdAt: new Date("2030-09-12T16:04:00.000Z"), postId: null, summaryEncrypted: "sealed-summary",
+    }]);
+    mocks.getPrisma.mockReturnValue({ healthActivity: { findMany } });
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultExportSession: vi.fn() });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        includeRecordedActivities: true,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(mocks.openHealthTexts).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "BROWSER_VAULT_SESSION_NOT_FRESH", retryable: true },
+    });
+  });
+
   it("preserves the retained-replica response for an older export client after withdrawal", async () => {
     const healthActivity = { findMany: vi.fn() };
     mocks.getPrisma.mockReturnValue({ healthActivity });
