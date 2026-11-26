@@ -139,6 +139,16 @@ async function extractClinicalEnrichmentPage({ input, work, state, now }: {
   }
 }
 
+/**
+ * Live evaluation on synthetic pages: Luna at high effort matches the member's
+ * model on document labs and measurements at a fraction of the cost, but it
+ * dropped and inverted document history facts, so history keeps the member's model.
+ */
+function resolveClinicalExtractionLeafModel(work: ExtractionWork, family: ClinicalDocumentExtractionFamily, memberModel: string | null) {
+  if (work.source.resource) return { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, reasoningEffort: "medium" as const };
+  return family === "history" ? { model: memberModel } : { model: HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, reasoningEffort: "high" as const };
+}
+
 async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal, peers, usages, deadlineAt, onHandoff }: {
   input: HostedClinicalEnrichmentInput;
   work: ExtractionWork;
@@ -164,8 +174,7 @@ async function extractClinicalEnrichmentFamilies({ input, work, prepared, signal
           signal.throwIfAborted();
         },
         codexHome: input.codexHome, env: { ...input.env },
-        model: work.source.resource ? HOSTED_ASSISTANT_GPT_6_LUNA_MODEL : input.model, modelProvider: input.modelProvider,
-        ...(work.source.resource ? { reasoningEffort: "medium" as const } : {}),
+        ...resolveClinicalExtractionLeafModel(work, family, input.model ?? null), modelProvider: input.modelProvider,
         workspaceRoot: input.vaultRoot, source: work.source, documentPath: work.documentPath,
         timeZone: work.timeZone,
         deadlineAt,

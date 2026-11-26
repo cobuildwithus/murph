@@ -1346,10 +1346,13 @@ and the existing canonical writer still own exclusion and mutation safety.
 
 A detached controller extracts one document page at a time, with at most three
 confined read-only model leaves for labs, measurements and history and a shared
-120-second provider timeout. Text and rendered PDF/image pages are untrusted
-source evidence. Foreground replies can proceed during extraction. The controller
-aborts and joins its exact owned children before snapshots, workspace release,
-fence loss or shutdown; cancellation leaves durable work available to retry.
+120-second provider timeout. The labs and measurements leaves run GPT-6 Luna at
+high reasoning; the history leaf keeps the member's chat model, because Luna
+dropped and inverted history facts in live evaluation. Text and rendered PDF/image
+pages are untrusted source evidence. Foreground replies can proceed during
+extraction. The controller aborts and joins its exact owned children before
+snapshots, workspace release, fence loss or shutdown; cancellation leaves
+durable work available to retry.
 A page's clinical change receipt digest binds its frozen proposal, so the
 accepted job is committed through the canonical write log before that receipt.
 Restore replays both in order and finishes an applied page through its saved
