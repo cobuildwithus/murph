@@ -32,6 +32,7 @@ import worker from "../src/index.ts";
 import { createWorkerFetchHandler } from "../src/worker/fetch-handler.ts";
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import {
+  deploySmokeRoutes,
   handleDeployContainerSmokeRoute,
   readDeployContainerSmokeAttempt,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
@@ -4808,6 +4809,36 @@ function createSmokeHarness(bank: "primary" | "next", failure?: "prepare" | "ret
 }
 
 describe("deployment standby serving proof", () => {
+  it("refuses promotion when matching image fingerprints report an older clinical reader", async () => {
+    const h = createSmokeHarness("primary");
+    const env = { ...h.context.env, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({
+      active: h.active, previous: null, candidate: { ...h.candidate, clinicalNoticeRevision: 3 },
+    }) };
+    h.prepareStandbySlot.mockImplementationOnce(async input => ({ ...input, prepared: true,
+      runnerImage: { ...h.candidate, clinicalNoticeRevision: 2 } }));
+    expect((await handleDeployContainerSmokeRoute({ ...h.context, env })).status).toBe(500);
+    expect(h.smokeHealth).not.toHaveBeenCalled();
+  });
+
+  it("attests only its promoted runner and serving port over the protected route", async () => {
+    const h = createSmokeHarness("primary");
+    const route = deploySmokeRoutes.find(entry => entry.name === "clinical-notice-readers")!;
+    expect(route.authorization).toBe("vercel-oidc");
+    const nonce = crypto.randomUUID();
+    h.context.url.searchParams.set("nonce", nonce);
+    const env = { ...h.context.env, HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: h.active, candidate: h.candidate, previous: null }),
+      CF_VERSION_METADATA: { id: "synthetic-serving-version" } };
+    const attest = () => route.handle({ ...h.context, env }, {});
+    expect((await attest()).status).toBe(503);
+    for (const revision of [undefined, 2, 3]) {
+      env.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: { ...h.active,
+        clinicalNoticeRevision: revision }, candidate: null, previous: null });
+      const response = await attest();
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toMatchObject({ nonce, runner: revision ?? 0, cloudflarePort: 3 });
+    }
+  });
+
   for (const bank of ["primary", "next"] as const) {
     it.each([undefined, "prepare", "retire", "old-image", "mixed-image", "missing-image"] as const)(
       `requires a fresh ${bank} serving proof despite full cached transition inventory (failure=%s)`,

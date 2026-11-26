@@ -17,6 +17,11 @@ export function setClinicalProcessorApproval(auth: HostedNativeMemberAuth, proce
       await assertActiveHostedMemberAccessAllowed({ memberId, prisma: tx });
       await assertHostedLaunchRequiredConsentGranted({ memberId, prisma: tx });
     }
+    if (!approved && await tx.hostedConsentGrant.findFirst({ where: { memberId, scope: clinicalProcessorScope(processor),
+      status: "granted" }, select: { memberId: true } })) {
+      // Re-approval starts a new policy epoch. Outstanding replies cannot regain authority.
+      await tx.hostedMember.update({ where: { id: memberId }, data: { clinicalRecordMessageRevision: { increment: 1 } } });
+    }
     await recordHostedConsentDecisionTx({ tx, memberId, scope: clinicalProcessorScope(processor),
       decision: approved ? "allow" : "deny", source: "clinical-records.companion", now: new Date(), metadata: null,
       expectedDocumentVersions: { [processor.id]: processor.version }, acceptedDocumentVersions: { [processor.id]: version } });

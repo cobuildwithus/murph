@@ -1978,9 +1978,7 @@ async function sendHostedLinqNotificationText(text: string, deliveryIdempotencyK
   vi.doMock('../src/assistant/service-turn-routes.js', () => ({
     resolveAssistantTurnRoute: mocks.resolveAssistantTurnRoute,
   }))
-  vi.doMock('../src/assistant/turns.js', () => ({
-    createAssistantTurnId: () => 'turn-hosted-linq-notification',
-  }))
+  vi.doUnmock('../src/assistant/turns.js')
   vi.doMock('../src/assistant/channel-adapters.js', async () => {
     const actual = await vi.importActual<
       typeof import('../src/assistant/channel-adapters.ts')
@@ -2062,15 +2060,17 @@ test('sendAssistantNotificationLocal sends each --- bubble of a Linq notificatio
 test('private scheduled detail stamps each outbox bubble with the originating run', async () => {
   const finalKey = 'clinical-change:v1:synthetic-run:detail'
   const calls = await sendHostedLinqNotificationText('Synthetic first.\n---\nSynthetic second.\n---\nSynthetic last.', finalKey)
-  expect(calls.map(call => call.deliveryIdempotencyKey)).toEqual([`${finalKey}:bubble:0`, `${finalKey}:bubble:1`, finalKey])
+  const key = calls.at(-1)!.deliveryIdempotencyKey
+  expect(key).toMatch(/^clinical-change:v1:synthetic-run:detail:turn_[a-f0-9]{32}$/u)
+  expect(calls.map(call => call.deliveryIdempotencyKey)).toEqual([`${key}:bubble:0`, `${key}:bubble:1`, key])
 })
 
 test('a downgrade between detail bubbles leaves just the first reply in the outbox', async () => {
   const finalKey = 'clinical-change:v1:synthetic-run:detail'
   const staged: string[] = []
   await expect(sendHostedLinqNotificationText('Synthetic first.\n---\nSynthetic second.\n---\nSynthetic last.', finalKey,
-    key => key === `${finalKey}:bubble:0`, staged)).rejects.toThrow()
-  expect(staged).toEqual([`${finalKey}:bubble:0`])
+    key => Boolean(key?.endsWith(':bubble:0')), staged)).rejects.toThrow()
+  expect(staged).toEqual([expect.stringMatching(/^clinical-change:v1:synthetic-run:detail:turn_[a-f0-9]{32}:bubble:0$/u)])
 })
 
 test('sendAssistantNotificationLocal derives hosted notification keys from resolved delivery target', async () => {

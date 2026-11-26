@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { HostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import { parseHostedExecutionSnapshotRef, parseHostedBrowserVaultReplicaRef, isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_SNAPSHOT_RECOVERY_RETENTION_MS } from "@murphai/hosted-execution/runtime-resources";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
 import { requireRuntimeResourcesPublishableTx, recordRuntimeOrphansTx, snapshotOrphanCandidates, replicaOrphanCandidate } from "../hosted-execution/runtime-orphans";
@@ -20,7 +20,9 @@ type RuntimePublication = {
 };
 
 export async function checkpointHostedRuntimeWorkspace(
-  input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication,
+  input: Omit<Parameters<typeof checkpointHostedWorkspaceTx>[0], "tx"> & RuntimePublication & {
+    clinicalReplies?: readonly { runId: string; turnId: string }[];
+  },
 ) {
   const operations: PrismaOperationTiming[] = [];
   const poolAcquisitions: PrismaPoolAcquisitionTiming[] = [];
@@ -42,6 +44,9 @@ export async function checkpointHostedRuntimeWorkspace(
           // A status-only checkpoint creates no new resource obligation.
           // Publication/migration already registered the unchanged archive.
           if (owner && result.status === "updated" && !isDeepStrictEqual(snapshot, result.replacedSnapshotRef)) {
+            if (isHostedWorkspaceSnapshotV2Ref(snapshot)) {
+              await bindClinicalRepliesToSnapshotTx(tx, input.userId, snapshot.snapshotId, input.clinicalReplies ?? []);
+            }
             const candidates = snapshotOrphanCandidates(snapshot);
             const previous = result.replacedSnapshotRef;
             // Only a newly accepted archive with explicit retention evidence earns
@@ -111,4 +116,15 @@ export async function publishHostedRuntimeBrowserVaultReplica(
     if (owner && replica && result.status === "published") await recordRuntimeOrphansTx(tx, input.userId, [replicaOrphanCandidate(replica)], new Date());
     return result;
   });
+}
+
+/** Called only after the active owner's encrypted archive wins workspace publication. */
+export async function bindClinicalRepliesToSnapshotTx(tx: Prisma.TransactionClient, memberId: string, snapshotId: string,
+  replies: readonly { runId: string; turnId: string }[]) {
+  for (const reply of replies) {
+    await tx.clinicalRecordRetrievalRun.updateMany({
+      where: { id: reply.runId, memberId, notificationCoverage: "published", notificationTurnId: null },
+      data: { notificationTurnId: reply.turnId, notificationSnapshotId: snapshotId },
+    });
+  }
 }

@@ -3310,6 +3310,7 @@ export type HostedIdleCheckpointTrigger =
   (typeof HOSTED_IDLE_CHECKPOINT_TRIGGERS)[number];
 
 export interface HostedWorkspaceCheckpointRequest {
+  clinicalReplies?: { runId: string; turnId: string }[];
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;

@@ -914,7 +914,7 @@ async function sendLinqVoiceMemoDelivery(input: {
           input.dependencies.signal ? { signal: input.dependencies.signal } : {},
         )
   } catch (error) {
-    if (fallbackText) {
+    if (canSendVoiceTranscript(fallbackText, input.idempotencyKey, error)) {
       try {
         const deliveredFallback = await sendLinqVoiceMemoFallbackText({
           answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
@@ -1116,6 +1116,12 @@ function createLinqVoiceMemoAmbiguousDeliveryFailure(input: {
     target: input.target,
     targetKind: input.targetKind,
   })
+}
+
+function canSendVoiceTranscript(text: string | null | undefined, key: string | null | undefined, error: unknown): text is string {
+  if (!text || !key?.startsWith('clinical-change:')) return Boolean(text)
+  return !isAmbiguousLinqVoiceMemoDeliveryError(error)
+    && !(error instanceof Error && 'deliveryMayHaveSucceeded' in error && error.deliveryMayHaveSucceeded === true)
 }
 
 function isAmbiguousLinqVoiceMemoDeliveryError(error: unknown): boolean {

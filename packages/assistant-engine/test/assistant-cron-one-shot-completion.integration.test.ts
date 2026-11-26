@@ -137,7 +137,7 @@ async function expectTomorrow(context: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('one-shot completion against real registries', () => {
-  it.each(['complete', 'withdraw during generation'] as const)('clinical detail reply and restored wake: %s', async scenario => {
+  it.each(['complete', 'withdraw during generation', 'pause before save'] as const)('clinical detail reply and restored wake: %s', async scenario => {
     const { parentRoot, vaultRoot: vault } = await createTempVaultContext('clinical-detail-')
     roots.push(parentRoot)
     await initializeVault({ vaultRoot: vault })
@@ -152,7 +152,7 @@ describe('one-shot completion against real registries', () => {
     const generate = boundary.provider.getMockImplementation()!
     boundary.provider.mockImplementationOnce(async args => {
       const result = await generate(args)
-      if (scenario === 'withdraw during generation') authorized = false
+      if (scenario !== 'complete') authorized = false
       return result
     })
     boundary.deliver.mockResolvedValue({ kind: 'sent', deliveryError: null, session: null,
@@ -161,21 +161,29 @@ describe('one-shot completion against real registries', () => {
     const result = await runAssistantCronJobNow({ vault, job: job!.jobId, trigger: 'scheduled', executionContext: context })
     expect(boundary.provider).toHaveBeenCalledOnce()
     expect(boundary.provider.mock.calls[0]![0].input.prompt).toContain(job!.clinicalChange!.receiptRef)
-    if (scenario === 'withdraw during generation') {
+    if (scenario !== 'complete') {
       expect(boundary.deliver).not.toHaveBeenCalled()
       expect(result.run.outcome).toBe('skipped_gate')
+      if (scenario === 'pause before save') {
+        authorized = true
+        await queueClinicalChange(input)
+        const later = await runAssistantCronJobNow({ vault, job: job!.jobId, trigger: 'scheduled', executionContext: context })
+        expect(later.run.outcome).toBe('delivered')
+        expect(boundary.provider).toHaveBeenCalledTimes(2)
+        expect(boundary.deliver).toHaveBeenCalledTimes(1)
+      }
       return
     }
     expect(result.run.outcome).toBe('delivered')
     expect(boundary.deliver).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       channel: 'linq', bindingDelivery: { kind: 'thread', target: threadId },
-      deliveryIdempotencyKey: 'clinical-change:v1:synthetic-origin:detail',
+      deliveryIdempotencyKey: expect.stringMatching(/^clinical-change:v1:synthetic-origin:detail:turn_[a-f0-9]{32}$/u),
     }))
     const restored = path.join(parentRoot, 'restored')
     await cp(vault, restored, { recursive: true })
-    await queueClinicalChange({ ...input, vault: restored })
+    await queueClinicalChange({ ...input, vault: restored, decision: { mode: 'off' } })
     const store = await cronStore.readAssistantCronStore(resolveAssistantStatePaths(restored))
-    expect(store.jobs).toMatchObject([{ jobId: job!.jobId, enabled: false }])
+    expect(store.jobs).toEqual([])
     expect(await processDueAssistantCronJobsLocal({ vault: restored, executionContext: context, limit: 1 }))
       .toEqual({ processed: 0, failed: 0, succeeded: 0 })
     expect(boundary.provider).toHaveBeenCalledTimes(1)

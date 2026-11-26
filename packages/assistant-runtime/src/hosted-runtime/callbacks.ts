@@ -1,4 +1,4 @@
-import { CLINICAL_TEXT_TRANSPORT_BLOCK } from "@murphai/hosted-execution/clinical-records-boundary";
+import { clinicalBlockDisposition, CLINICAL_TEXT_TRANSPORT_BLOCK, CLINICAL_REPLY_DEFERRED } from "@murphai/hosted-execution/clinical-records-boundary";
 import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
@@ -488,6 +488,7 @@ function hostedAssistantIntentRetryNeedsPublishedClaim(
   intent: AssistantOutboxIntent,
   workspaceCheckpointedAt: string | null | undefined,
 ): boolean {
+  if (intent.deliveryIdempotencyKey?.startsWith("clinical-change:")) return true;
   return !intent.deliveryTransportIdempotent
     && intent.operation?.kind !== "message-reaction"
     && hostedAssistantIntentOwesProviderSend(intent)
@@ -966,6 +967,11 @@ async function preflightClinicalDispatch(input: HostedAssistantDispatchPreflight
         directRecipientPhoneNumber: null, fromPhoneNumber: null, homeRouteFallbackAllowed: false,
         idempotencyKey: intent.deliveryIdempotencyKey, intentId: intent.intentId, replyToMessageId: intent.replyToMessageId,
         signal: input.signal, target, targetKind: "thread",
+      }).catch((error: unknown) => {
+        if (error instanceof VaultCliError && error.code === "ASSISTANT_CLINICAL_REPLY_AUTHORITY_UNAVAILABLE") {
+          return { deliveryBlockCode: CLINICAL_TEXT_TRANSPORT_BLOCK } as HostedRuntimeLinqRecentInboundEngagementResult;
+        }
+        throw error;
       }) : null;
   // An older host can return a valid ordinary route without any clinical policy.
   if (authority?.clinicalReplyAuthorized && !authority.deliveryBlockCode
@@ -975,8 +981,17 @@ async function preflightClinicalDispatch(input: HostedAssistantDispatchPreflight
     return preflightHostedAssistantApprovals(input);
   }
   const block = authority?.deliveryBlockCode ?? CLINICAL_TEXT_TRANSPORT_BLOCK;
+  const deferred = target && authority && !authority.clinicalReplyAuthorized
+    && clinicalBlockDisposition(block) === "hold";
+  if (deferred) {
+    const { intent: parked } = await saveAssistantOutboxIntentIfUnchanged({ vault: input.vaultRoot,
+      expectedDedupeKey: intent.dedupeKey, expectedStatus: intent.status, expectedUpdatedAt: intent.updatedAt,
+      intent: { ...intent, status: "retryable", updatedAt: input.now.toISOString(), nextAttemptAt: null,
+        lastError: { code: CLINICAL_REPLY_DEFERRED, message: "Waiting for the next authorized private delivery." } } });
+    return { action: "stop", intent: parked };
+  }
   const failed = await markAssistantOutboxIntentMirrorTerminalById({
-    error: createAssistantDeliveryTerminalError(`ASSISTANT_LINQ_EGRESS_${block.toUpperCase()}`, "Clinical notification delivery is blocked."),
+    error: createAssistantDeliveryTerminalError( `ASSISTANT_LINQ_EGRESS_${block.toUpperCase()}`, "Clinical notification delivery is blocked."),
     intentId: intent.intentId, onEvent: input.onEvent, onlyCurrentStatuses: ["pending", "retryable"],
     status: "failed", vault: input.vaultRoot,
   });
@@ -1997,6 +2012,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
   intent: AssistantOutboxIntent,
   now: Date,
 ): string | null {
+  if (intent.lastError?.code === CLINICAL_REPLY_DEFERRED) return null;
   switch (intent.status) {
     case "awaiting_approval":
     case "pending":
@@ -5282,6 +5298,53 @@ function createHostedAssistantLinqSendDependency(input: {
       targetKind: providerTargetKind,
       threadIsDirect: resolvedRoute.threadIsDirect,
     });
+    async function recordSendFailure(error: unknown): Promise<never> {
+      const failedProviderAttempt = readProviderAttempt();
+      if (!failedProviderAttempt) {
+        throw error;
+      }
+      const partialRichLinkResult =
+        readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
+      if (partialRichLinkResult) {
+        await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
+          effectsPort,
+          outcome: buildDeliveryOutcome({
+            attemptedAt: failedProviderAttempt.attemptedAt,
+            answeredMailboxItemIds: [],
+            failedAt: new Date(),
+            failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
+            failureReason: null,
+            idempotencyKey: failedProviderAttempt.idempotencyKey,
+            providerThreadId: partialRichLinkResult.providerThreadId ?? null,
+            result: partialRichLinkResult,
+          }),
+        });
+        throw markHostedDeliveryMayHaveSucceeded(error);
+      }
+      const skipped = hostedDeliveryErrorProvesProviderWasSkipped(error);
+      const ambiguous = isHostedLinqProviderOutcomeAmbiguous(error);
+      if (skipped || ambiguous && !failedProviderAttempt.idempotencyKey?.startsWith("clinical-change:")) {
+        throw markHostedLinqDeliveryMayHaveSucceeded({
+          error,
+          hasVerifiedVaultAttachment,
+        });
+      }
+      await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
+        effectsPort,
+        outcome: buildDeliveryOutcome({
+          attemptedAt: failedProviderAttempt.attemptedAt,
+          answeredMailboxItemIds,
+          failedAt: new Date(),
+          failureCode: ambiguous ? "clinical_handoff_unconfirmed" : readHostedAssistantLinqDeliveryFailureCode(error),
+          failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error, failedProviderAttempt.idempotencyKey),
+          idempotencyKey: failedProviderAttempt.idempotencyKey,
+          providerThreadId: null,
+          result: null,
+        }),
+      });
+      if (ambiguous) throw markHostedLinqDeliveryMayHaveSucceeded({ error, hasVerifiedVaultAttachment });
+      throw error;
+    }
     let result: HostedRuntimeLinqSendResponse;
     try {
       result = await sendHostedProviderLinqMessage({
@@ -5374,51 +5437,7 @@ function createHostedAssistantLinqSendDependency(input: {
           : {}),
       });
     } catch (error) {
-      const failedProviderAttempt = readProviderAttempt();
-      if (!failedProviderAttempt) {
-        throw error;
-      }
-      const partialRichLinkResult =
-        readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
-      if (partialRichLinkResult) {
-        await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
-          effectsPort,
-          outcome: buildDeliveryOutcome({
-            attemptedAt: failedProviderAttempt.attemptedAt,
-            answeredMailboxItemIds: [],
-            failedAt: new Date(),
-            failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
-            failureReason: null,
-            idempotencyKey: failedProviderAttempt.idempotencyKey,
-            providerThreadId: partialRichLinkResult.providerThreadId ?? null,
-            result: partialRichLinkResult,
-          }),
-        });
-        throw markHostedDeliveryMayHaveSucceeded(error);
-      }
-      if (
-        hostedDeliveryErrorProvesProviderWasSkipped(error)
-        || isHostedLinqProviderOutcomeAmbiguous(error)
-      ) {
-        throw markHostedLinqDeliveryMayHaveSucceeded({
-          error,
-          hasVerifiedVaultAttachment,
-        });
-      }
-      queueHostedAssistantLinqDeliveryOutcomeWrite({
-        effectsPort,
-        outcome: buildDeliveryOutcome({
-          attemptedAt: failedProviderAttempt.attemptedAt,
-          answeredMailboxItemIds,
-          failedAt: new Date(),
-          failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
-          failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
-          idempotencyKey: failedProviderAttempt.idempotencyKey,
-          providerThreadId: null,
-          result: null,
-        }),
-      });
-      throw error;
+      return recordSendFailure(error);
     }
     const acceptedAt = new Date();
     const acceptedProviderAttempt = readProviderAttempt();
@@ -5981,6 +6000,7 @@ async function recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort(input: 
 function shouldRequireHostedAssistantLinqDeliveryOutcomeWrite(
   outcome: HostedRuntimeLinqDeliveryOutcomeRequest,
 ): boolean {
+  if (outcome.idempotencyKey?.startsWith("clinical-change:")) return true;
   const richLinkPartial = Boolean(outcome.failedAt)
     && outcome.failureCode
       === HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE;
@@ -6423,8 +6443,9 @@ function requireHostedLinqProviderAttemptedAt(value: Date | null): Date {
 }
 
 function readTrustedHostedAssistantLinqDeliveryFailureReason(
-  error: unknown,
+  error: unknown, key?: string | null,
 ): string | null {
+  if (key?.startsWith("clinical-change:")) return null;
   if (!(error instanceof VaultCliError)) {
     return null;
   }
@@ -6588,30 +6609,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   assertHostedAssistantProgressUpdateNotAcknowledged({ ...input, result: normalized });
   assertGameRematchEgressSupported(input.idempotencyKey, normalized);
   assertClinicalReplyAuthority(input.idempotencyKey, input.target, normalized);
-  if (input.authorityCheckOnly !== true && normalized.deliveryBlockCode) {
-    const code = `ASSISTANT_LINQ_EGRESS_${
-      normalized.deliveryBlockCode.toUpperCase()
-    }`;
-    if (normalized.deliveryBlockCode === "chat_opted_out") {
-      throw createAssistantDeliveryTerminalError(
-        code,
-        "Hosted Linq delivery is blocked because this chat opted out.",
-      );
-    }
-    throw createAssistantDeliveryBlockedError(
-      code,
-      "Hosted Linq delivery is blocked by current outreach or delivery policy.",
-      {
-        blockKind: normalized.deliveryBlockCode,
-        resume: normalized.deliveryBlockCode === "operator_disabled"
-          ? "manual_ops"
-          : normalized.deliveryBlockCode === "chat_critical"
-            || normalized.deliveryBlockCode === "automation_engagement_paused"
-            ? "recipient_inbound"
-            : "line_health_change",
-      },
-    );
-  }
+  if (!input.authorityCheckOnly) assertSendPolicy(input.idempotencyKey, normalized.deliveryBlockCode);
   if (
     input.authorityCheckOnly !== true
     && normalized.assistantAskFallbackRequired !== true
@@ -7856,4 +7854,35 @@ function buildHostedAssistantDeliveryDetails(input: {
     userId: input.userId,
     ...(input.extra ?? {}),
   };
+}
+
+function assertSendPolicy(key: string | null, block: HostedRuntimeLinqRecentInboundEngagementResult["deliveryBlockCode"]) {
+  if (!block) return;
+  const code = `ASSISTANT_LINQ_EGRESS_${
+    block.toUpperCase()
+  }`;
+  if (key?.startsWith("clinical-change:")) {
+    const permanent = clinicalBlockDisposition(block) === "close";
+    throw markHostedDeliveryPreProvider(createAssistantDeliveryTerminalError(permanent ? code : CLINICAL_REPLY_DEFERRED,
+      "Clinical reply authority changed before provider entry."));
+  }
+  if (block === "chat_opted_out") {
+    throw createAssistantDeliveryTerminalError(
+      code,
+      "Hosted Linq delivery is blocked because this chat opted out.",
+    );
+  }
+  throw createAssistantDeliveryBlockedError(
+    code,
+    "Hosted Linq delivery is blocked by current outreach or delivery policy.",
+    {
+      blockKind: block,
+      resume: block === "operator_disabled"
+        ? "manual_ops"
+        : block === "chat_critical"
+          || block === "automation_engagement_paused"
+          ? "recipient_inbound"
+          : "line_health_change",
+    },
+  );
 }

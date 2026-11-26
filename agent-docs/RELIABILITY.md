@@ -3799,13 +3799,15 @@ Current product admission, delivery and native runtime safety rules remain.
 - Hosted generated voice memo turns must treat ElevenLabs generation, Linq attachment upload, or Telegram delivery-time generation failures as structured tool or delivery failures. When response media carries a transcript, the existing final channel adapter uses that transcript as the text fallback if audio preparation or delivery fails and reports success only after either audio or fallback text is accepted; it adds no queue or delivery owner. Linq derives the fallback provider-effect identity from the persisted delivery key, or from the attachment identity when no delivery intent exists, so the fallback crosses the existing dispatch fence without reusing the text or native-voice claim. Final Linq and Telegram voice memo sends are not replay-safe unless the provider later documents idempotency for those native voice-message endpoints, so outbox transport idempotency must stay false for voice memo media and retries must follow the confirmation-pending/fail-closed path when the fallback is absent or also fails.
 - Linq group-icon PUT acceptance means only that the asynchronous mutation was requested. A completed non-OK HTTP response proves that request was rejected, while a transport exception leaves it unconfirmed because Linq may already have accepted it. The existing provider-event ledger records the subscribed success or failure callback with the private chat correlation, terminal provider timestamp and status, and documented numeric failure code. Missing callbacks remain observable absence rather than inferred success or failure. This diagnostic projection never retries the mutation, wakes the runtime, appends mailbox work, or becomes user-facing group state.
 - Hosted clinical-record retrieval is finite by page size, per-page resource count, attachment bytes and descriptors, while page batches continue until every granted query slice finishes or reports an explicit error. Its durable work identity is the pointer-only mailbox `{runId, generation}`; exact validated page URLs—not randomized cursor ciphertext—own logical provider-page identity. Web owns run-bound opaque cursors and provider claims, while vault-usecases atomically checkpoints each accepted bounded page under `.runtime/operations/clinical-records/**` before honoring foreground preemption. A retry resumes at the next unfinished cursor without replaying completed pages. Raw pages plus each batch manifest commit atomically only after semantic validation and a fresh web authority check; canonical mutation receives a second authority check. Byte-identical replays are idempotent, conflicting replay bytes fail closed, and terminal completion or rejection clears the operational checkpoint. `authorization-required` ends provider access. A surviving checkpoint may publish same-generation saved counts without restoring access.
-- The ordered system mailbox checkpoints a fixed hospital notice and drains the
-  exact keyed outbox intent. Restore looks up the same intent. A completed
-  detail job remains disabled under its originating run ID in the private cron
-  store. Replaying the pointer after that checkpoint leaves it disabled.
-  Each leading bubble and the final reply carry the run key through the Web
-  dispatch fence and terminal retry exclusion. Production Web keeps the send
-  gate closed until provider-attempt accounting and quiet-hours recovery ship.
+- Web preserves the first encrypted detail reply's snapshot and turn references on
+  the accepted run. A restored private runtime can drain only its saved bubbles.
+  Missing saved output closes the occurrence silently. Individual provider
+  fences survive local job cleanup and prohibit replay after an ambiguous send.
+  A definite provider failure consumes coverage. Quiet hours persist a safe wake,
+  while an unknown region waits for verified contact information. A transient
+  handoff gets one timed retry. Each connection keeps only the newest eligible
+  occurrence. An occurrence expires 24 hours after acceptance. A chat opt-out
+  ends it immediately.
 - Clinical retrieval plans are frozen per run. Query-aware work is ordered by
   stable query/slice identity, bounded windows must be non-overlapping, and
   checkpoint completion is recorded per slice while resource-family outcome

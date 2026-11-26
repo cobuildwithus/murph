@@ -615,7 +615,7 @@ export interface HostedRuntimeDeviceSyncPort {
 }
 
 export interface HostedRuntimeClinicalRecordsPort {
-  readNotification?(request: HostedClinicalRecordsReadRunRequest, options?: { signal?: AbortSignal | null }): Promise<ClinicalNotificationDecision>;
+  readNotification?(request: HostedClinicalRecordsReadRunRequest & { savedReplyResult?: { turnId: string; status: "missing" | "drained" } }, options?: { signal?: AbortSignal | null }): Promise<ClinicalNotificationDecision>;
   createConnectLink?(
     options?: HostedClinicalRecordsConnectLinkRequest & {
       signal?: AbortSignal | null

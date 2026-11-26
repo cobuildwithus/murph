@@ -186,10 +186,7 @@ export const POST = withJsonError(async (request: Request) => {
         }
         return recorded;
       }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS)
-    : await recordHostedLinqRuntimeDeliveryOutcomeTx({
-        ...outcomeInput,
-        prisma,
-      });
+    : await recordRuntimeOutcome(outcomeInput, prisma);
 
   await admitHostedLinqTerminalRecovery({ acceptedAt, recorded: result.recorded,
     chatId: linqChatId, messageIds: providerMessageIds, prisma });
@@ -499,4 +496,15 @@ function parseOptionalHostedLinqDeliveryDate(
 function readOptionalBodyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
+}
+
+async function recordRuntimeOutcome(input: Omit<Parameters<typeof recordHostedLinqRuntimeDeliveryOutcomeTx>[0], "prisma">,
+  prisma: ReturnType<typeof getPrisma>) {
+  if (!input.idempotencyKey?.startsWith("clinical-change:")) return recordHostedLinqRuntimeDeliveryOutcomeTx({ ...input, prisma });
+  const { recordClinicalProviderAttempt } = await import("@/src/lib/clinical-records/notification");
+  return prisma.$transaction(async tx => {
+    const recorded = await recordHostedLinqRuntimeDeliveryOutcomeTx({ ...input, failureReason: null, prisma: tx });
+    if (recorded.recorded) await recordClinicalProviderAttempt(tx, input.userId, input.idempotencyKey ?? null);
+    return recorded;
+  });
 }

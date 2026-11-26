@@ -1,3 +1,4 @@
+import { CLINICAL_DAILY_NOTICE_REVISION } from "@murphai/hosted-execution/clinical-records-boundary";
 import { retainedAdmissionVariables } from "./deploy-model-admission.ts";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -117,6 +118,7 @@ export async function stageHostedRunnerRelease(input: {
   assertStableServingImage(serving.live, active, input.requireStableServingImage);
   const specification = runnerApplicationSpecification(serving.rendered, logsEnabled);
   const artifact = {
+    clinicalNoticeRevision: CLINICAL_DAILY_NOTICE_REVISION,
     releaseSha: input.releaseSha,
     bundleFingerprint: requiredString(vars.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT),
     sourceFingerprint: requiredString(vars.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT),
@@ -213,7 +215,7 @@ function prepareImageTransition({ active, liveDeployment, artifact, specificatio
     active, candidate, previous: liveDeployment?.previous ?? null,
   };
   const promoted: HostedRunnerDeployment = retainServingRunner ? deployment : {
-    active: candidate ?? { ...active, ...artifact, image: specification.configuration.image,
+    active: candidate ?? { ...active, ...artifact, clinicalNoticeRevision: active.clinicalNoticeRevision, image: specification.configuration.image,
       executionIdentity: runnerApplicationExecutionIdentity(specification) },
     candidate: null, previous: deployment.previous,
   };

@@ -1,3 +1,4 @@
+import { CLINICAL_REPLY_DEFERRED } from '@murphai/hosted-execution/clinical-records-boundary'
 import {
   assistantDeliveryErrorSchema,
   type AssistantDeliveryError,
@@ -64,6 +65,7 @@ export function shouldDispatchAssistantOutboxIntent(
   intent: AssistantOutboxIntent,
   now: Date,
 ): boolean {
+  if (intent.lastError?.code === CLINICAL_REPLY_DEFERRED) return false
   switch (intent.status) {
     case 'pending':
     case 'retryable': {

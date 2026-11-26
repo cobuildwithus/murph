@@ -1,3 +1,4 @@
+import { clinicalReplyTurnKey } from '@murphai/hosted-execution/clinical-records-boundary'
 import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from '@murphai/runtime-state/assistant-ids'
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
 import { prepareRecapExecution } from './recap-execution.js'
@@ -1777,7 +1778,9 @@ async function deliverAssistantNotificationMessage(input: {
     input: input.input,
     turnId: input.turnId,
   })
-  const bubbleKeyPrefix = hostedDelivery.deliveryIdempotencyKey ?? input.dedupeToken
+  const baseKey = hostedDelivery.deliveryIdempotencyKey
+  const replyKey = baseKey?.startsWith('clinical-change:') ? clinicalReplyTurnKey(baseKey, input.turnId) : baseKey
+  const bubbleKeyPrefix = replyKey ?? input.dedupeToken
   const leading = await deliverAssistantNotificationLeadingBubbles({
     count: bubbles.length - 1,
     send: async (index, session) => {
@@ -1820,7 +1823,7 @@ async function deliverAssistantNotificationMessage(input: {
       message: bubbles.at(-1)!,
       media: bubbleMedia.at(-1)!,
       dedupeToken: input.dedupeToken,
-      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryIdempotencyKey: replyKey,
       deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
       recapVideo: outboxRecapVideo(input.recapVideo),
       ...(input.privateCompletionContinuitySessionId === undefined
