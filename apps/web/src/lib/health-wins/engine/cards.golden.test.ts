@@ -38,6 +38,7 @@ function syntheticInput(): HealthWinsInput {
     for (let day = 1; day <= 16; day++) {
       const date = `2036-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       daily.push({ metric: "floors", date, provider: "garmin", value: month + 3 });
+      if (month <= 7 && day <= 13) daily.push({ metric: "steps", date, provider: "garmin", value: 6300 });
       if (month === 11) daily.push({ metric: "rhr_bpm", date, provider: "garmin", value: 54 });
       if (month >= 8) {
         const usualNight = day % 2 === 0 ? 441 : 425;

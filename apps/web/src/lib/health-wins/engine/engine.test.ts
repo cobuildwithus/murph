@@ -30,7 +30,9 @@ describe("generateHealthWins", () => {
 
   it("uses cleaned wearable evidence for the record and sourced percentile cards", () => {
     const daily: HealthWinsInput["daily"] = [
-      { metric: "steps", date: "2034-05-14", provider: "garmin", value: 3845 },
+      ...Array.from({ length: 27 }, (_, i): DailySample => ({
+        metric: "steps", date: `2034-04-${String(i + 1).padStart(2, "0")}`, provider: "garmin", value: 3845,
+      })),
       { metric: "steps", date: member.today, provider: "whoop", value: 8150 },
       { metric: "steps", date: member.today, provider: "apple", value: 12020 },
       { metric: "vo2max", date: member.today, provider: "garmin", value: 46 },

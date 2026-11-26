@@ -18,6 +18,7 @@ export type DailyAchievementCharts = {
 };
 
 const SLEEP_TARGET_MINUTES = 8 * 60;
+const MIN_RECORD_DAYS = 28;
 
 function sleepBars(rows: readonly DailySample[]): SleepBars {
   return {
@@ -103,9 +104,9 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
   const anniversary = String(Number(today.slice(0, 4)) - 1).padStart(4, "0") + today.slice(4);
   const distance = metric === "distance_km";
   const calendarYear = rows.filter(({ date }) => date.startsWith(today.slice(0, 4)));
-  const withinCalendarYear = distance || calendarYear.length >= 2;
+  const withinCalendarYear = distance || calendarYear.length >= MIN_RECORD_DAYS;
   const year = withinCalendarYear ? calendarYear : rows.filter(({ date }) => date > anniversary);
-  if (year.length < 2) return;
+  if (year.length < MIN_RECORD_DAYS) return;
   const best = year.reduce((a, b) => b.value * direction >= a.value * direction ? b : a);
   if ((!distance && dayNumber(today) - dayNumber(best.date) > 60) || year.every(({ value }) => value === best.value)) return;
   const values = year.map(({ value }) => value);

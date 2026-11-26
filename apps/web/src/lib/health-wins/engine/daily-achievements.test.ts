@@ -6,8 +6,8 @@ import type { DailySample, Metric } from "./types";
 const TODAY = "2032-04-28";
 const SLEEP = "sleep_total_min";
 
-function dateAt(offset: number): string {
-  const date = new Date(`${TODAY}T00:00:00Z`);
+function dateAt(offset: number, asOf = TODAY): string {
+  const date = new Date(`${asOf}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + offset);
   return date.toISOString().slice(0, 10);
 }
@@ -77,14 +77,19 @@ describe("streak", () => {
 });
 
 describe("personal_record", () => {
-  it("limits records to unambiguous metrics and takes the lowest RHR", () => {
+  function trackedMonth(metric: Metric, start: number, end: number, lastDay = TODAY) {
+    return Array.from({ length: 28 }, (_, index) =>
+      sample(metric, dateAt(index - 27, lastDay), Math.round(start + (end - start) * index / 27)));
+  }
+
+  it("requires 28 tracked days for each record metric and takes the lowest RHR", () => {
     const cases: [Metric, number, number][] = [
       ["sleep_deep_min", 75, 88], ["rhr_bpm", 70, 66], ["hrv_ms", 43, 49],
       ["steps", 3500, 7200], ["distance_km", 3, 9],
     ];
     for (const [metric, previous, current] of cases) {
-      const provider = metric === "distance_km" ? "apple" : "whoop";
-      const rows = [sample(metric, dateAt(-76), previous, provider), sample(metric, TODAY, current, provider)];
+      const rows = trackedMonth(metric, previous, current);
+      expect(cards(metric, rows.slice(1)).some(c => c.kind === "personal_record"), metric).toBe(false);
       const record = cards(metric, rows).find(c => c.kind === "personal_record");
       expect(record?.chart.highlight, metric).toEqual({
         date: TODAY, label: "Apr 28", value: metric === "distance_km" ? current / 1.609344 : current,
@@ -95,7 +100,7 @@ describe("personal_record", () => {
       [SLEEP, 420, 710], ["sleep_score", 78, 83], ["floors", 3, 9], ["vo2max", 43, 46],
     ];
     for (const [metric, a, b] of excluded) {
-      const rows = [sample(metric, dateAt(-5), a, "apple"), sample(metric, TODAY, b, "apple")];
+      const rows = trackedMonth(metric, a, b);
       expect(cards(metric, rows).some(c => c.kind === "personal_record"), metric).toBe(false);
     }
   });
@@ -103,7 +108,7 @@ describe("personal_record", () => {
   it("labels tied records and requires recent wins for steps", () => {
     const rows = [
       sample("steps", "2031-04-28", 28000), sample("steps", "2031-04-29", 7000),
-      sample("steps", dateAt(-86), 6300),
+      ...Array.from({ length: 26 }, (_, index) => sample("steps", dateAt(index - 106), 6300)),
       sample("steps", dateAt(-72), 12600), sample("steps", dateAt(-60), 12600),
     ];
     const fresh = cards("steps", rows).find(c => c.kind === "personal_record");
@@ -118,22 +123,26 @@ describe("personal_record", () => {
     const asOf = "2034-09-19";
     const rows = [
       sample("distance_km", "2033-12-29", 40),
-      ...[1, 2, 3, 4, 5].map(day => sample("distance_km", `2034-02-0${day}`, 3)),
+      ...Array.from({ length: 26 }, (_, index) => sample("distance_km", dateAt(index, "2034-01-01"), 3)),
       sample("distance_km", "2034-02-09", 19, "apple"),
       sample("distance_km", "2034-02-09", 30, "garmin"),
       sample("distance_km", asOf, 4),
     ];
+    expect(cards("distance_km", rows.slice(0, -1), asOf)).toHaveLength(0);
     const record = cards("distance_km", rows, asOf).find(card => card.kind === "personal_record");
     expect(record).toMatchObject({
       title: { number: "12", measure: "miles on foot" },
       subtitle: "on Feb 9, most this year",
-      source_note: "Recorded on Feb 9. Based on 7 tracked days.",
+      source_note: "Recorded on Feb 9. Based on 28 tracked days.",
       chart: { unit: "miles", pills: ["Feb 9"], highlight: { date: "2034-02-09", label: "Feb 9", value: 19 / 1.609344 } },
     });
   });
 
   it("dates a sleep record and names the comparison window when the year changes", () => {
-    const rows = [sample("sleep_deep_min", "2034-12-03", 76), sample("sleep_deep_min", "2034-12-19", 104)];
+    const rows = [
+      ...trackedMonth("sleep_deep_min", 76, 104, "2034-12-19"),
+      sample("sleep_deep_min", "2035-01-02", 90), sample("sleep_deep_min", "2035-01-04", 87),
+    ];
     const record = (asOf: string) => cards("sleep_deep_min", rows, asOf).find(card => card.kind === "personal_record");
     const december = record("2034-12-22");
     const january = record("2035-01-06");
@@ -143,7 +152,7 @@ describe("personal_record", () => {
     });
     expect(january).toMatchObject({
       subtitle: "on Dec 19, 2034, most in the past 12 months",
-      source_note: "Recorded on Dec 19, 2034. Based on 2 tracked days.",
+      source_note: "Recorded on Dec 19, 2034. Based on 30 tracked days.",
       chart: { highlight: { label: "Dec 19, 2034" }, pills: ["Dec 19, 2034"] },
     });
     expect(january?.id).toBe(december?.id);
@@ -151,7 +160,7 @@ describe("personal_record", () => {
 
   it("computes the steps record from the selected daily provider", () => {
     const rows = [
-      sample("steps", dateAt(-7), 5000), sample("steps", TODAY, 13111),
+      ...trackedMonth("steps", 5000, 13111),
       sample("steps", TODAY, 22007, "apple"),
     ];
     const record = cards("steps", rows).find(c => c.kind === "personal_record");
