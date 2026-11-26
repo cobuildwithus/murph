@@ -16,12 +16,13 @@ function keys(overlap = false, retired = false) {
 describe.skipIf(!enabled)("Linq blinded group evidence and blocks", () => {
   const prisma = getPrisma();
   let chatId: string;
-  beforeEach(() => { keys(); chatId = randomUUID(); });
-  afterEach(async () => {
+  // Earlier files in the same worker database can leave Linq rows behind; these assertions count whole tables.
+  const clear = async () => {
     await prisma.hostedLinqGroupHandle.deleteMany(); await prisma.hostedLinqGroupSighting.deleteMany();
     await prisma.hostedLinqGroupLeave.deleteMany(); await prisma.hostedLinqHandleBlock.deleteMany();
-    vi.unstubAllEnvs();
-  });
+  };
+  beforeEach(async () => { await clear(); keys(); chatId = randomUUID(); });
+  afterEach(async () => { await clear(); vi.unstubAllEnvs(); });
   const observe = (at: Date, value = "synthetic@example.invalid", via: "sender" | "roster" = "sender") => prisma.$transaction(tx => observeHostedLinqGroupRiskTx({
     chatId, observedAt: at, handles: [{ contact: parseHostedLinqBlockContact(value), via }], prisma: tx,
   }));
