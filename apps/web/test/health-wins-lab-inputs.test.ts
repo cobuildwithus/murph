@@ -20,6 +20,7 @@ it.each<Partial<BrowserVaultLabResultRow>>([
   { parentResultStatus: "unknown" },
   { parentResultStatus: "mixed", flag: "normal" },
   { parentResultStatus: "abnormal", flag: "normal" },
+  { parentResultStatus: "mixed", referenceRange: { low: 70, high: 99 } },
 ])("keeps an eligible result regardless of other results in its panel (%j)", updates => {
   const labs = readHealthWinLabs([first, second, { ...latest, ...updates }], today);
   expect(labs.map(draw => draw.value)).toEqual([128, 134, 95]);
@@ -28,6 +29,7 @@ it.each<Partial<BrowserVaultLabResultRow>>([
 
 it.each<Partial<BrowserVaultLabResultRow>>([
   { parentResultStatus: "abnormal" }, { parentResultStatus: "mixed" }, { flag: "abnormal" },
+  { parentResultStatus: "mixed", referenceRange: { low: 70, high: 90 } },
   { parentResultStatus: "pending" }, { drawId: null }, { flag: "critical" }, { flag: "low" },
   { flag: "high" }, { comparator: "<" }, { normalizedValue: null }, { referenceRange: { high: 80 } },
   { referenceRange: { text: "<80" } }, { normalizedUnit: "unknown" },

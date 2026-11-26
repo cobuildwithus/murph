@@ -58,7 +58,7 @@ function reportedRange(row: BrowserVaultLabResultRow): LabDraw["referenceRange"]
 function normalExactResult(row: BrowserVaultLabResultRow) {
   if (row.comparator !== null || !row.unit) return false;
   if (row.flag !== null) return row.flag === "normal";
-  return row.parentResultStatus === "normal" || row.parentResultStatus === "unknown";
+  return row.parentResultStatus === "normal" || row.parentResultStatus === "unknown" || row.parentResultStatus === "mixed";
 }
 
 function eligibleDraw(analyte: Analyte, row: BrowserVaultLabResultRow): LabDraw | null {
@@ -68,6 +68,8 @@ function eligibleDraw(analyte: Analyte, row: BrowserVaultLabResultRow): LabDraw 
   if (row.normalizedUnit !== normalizeUnit(unit) || value === null || !Number.isFinite(value) || value < 0) return null;
   const referenceRange = reportedRange(row);
   if (referenceRange === null || value < (referenceRange?.low ?? -Infinity) || value > (referenceRange?.high ?? Infinity)) return null;
+  // A lab flags the result that is out of range. An unflagged result beside a flagged one counts only inside its own range.
+  if (row.flag === null && row.parentResultStatus === "mixed" && !referenceRange) return null;
   // Supplying a specimen enables the engine's published fallback. An unreadable
   // lab range still permits change and percentile cards, but rules out that fallback.
   const specimen = row.referenceRange && !referenceRange ? undefined : row.specimenKind ?? undefined;
