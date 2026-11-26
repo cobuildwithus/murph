@@ -10,7 +10,7 @@ import { readHostedAuthSession } from "../src/lib/better-auth/session";
 // setup-env's existing secure-box codec and these database ports are synthetic.
 const db = {
   hostedAuthRecord: { findMany: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
-  hostedMember: { findUnique: vi.fn() },
+  hostedMember: { findUnique: vi.fn(), updateMany: vi.fn() },
 };
 // The exercised owners use only these explicit synthetic database methods.
 const prisma = db as never;
@@ -265,6 +265,9 @@ describe("session failure observations before Better Auth masking", () => {
     expect(db.hostedAuthRecord.updateMany).toHaveBeenCalledTimes(1);
     const credential = browserCredential(renewed.headers);
     const browser = await read({ credential, transport: "browser" });
+    expect(db.hostedMember.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { runtimeDormant: false, runtimeLastInteractionAt: expect.any(Date) },
+    }));
     expect(browser.session?.sessionId).toBe(sessionId);
     expect(browser.session?.expiresAt).toEqual(renewed.session?.expiresAt);
     const unchanged = await read({ credential, transport: "browser", refresh: true });

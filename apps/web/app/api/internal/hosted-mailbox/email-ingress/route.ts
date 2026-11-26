@@ -18,6 +18,8 @@ import {
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readOptionalJsonObject, readRawBodyBuffer } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import { interactionMemberId } from "@/src/lib/hosted-execution/runtime-dormancy";
 import { getPrisma } from "@/src/lib/prisma";
 
 const HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES = 64 * 1024;
@@ -52,7 +54,9 @@ export const POST = withJsonError(async (request: Request) => {
     userId,
   });
 
-  const response = await getPrisma().$transaction((tx) => {
+  const response = await getPrisma().$transaction(async (tx) => {
+    // Personal message writers take the member lock before mailbox sequencing.
+    if (interactionMemberId(envelope)) await lockHostedMemberRow(tx, userId, { noKeyUpdate: true });
     return appendHostedMailboxEnvelopeTx({
       envelope,
       tx,

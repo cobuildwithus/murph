@@ -1,3 +1,5 @@
+Personal container dormancy and member return are owned by [Hosted Postgres runtime ownership](references/hosted-postgres-runtime.md#claim-launch-completion-and-recovery).
+
 # Murph Agent Docs Index
 
 A directory of the durable docs. Find the row for your task and read that doc;

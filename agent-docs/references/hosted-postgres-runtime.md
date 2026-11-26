@@ -125,6 +125,21 @@ Warm containers keep their existing media HTTP protocol unchanged.
 
 ## Claim, launch, completion, and recovery
 
+When a personal member's physical target retires, Web checks 60 days of
+inactivity in the same transaction that releases the target. Warm completion
+keeps the assignment. Stale retirement notices cannot change dormancy.
+Dormancy blocks every processing mode, including retention. Shared rooms have
+their own lifecycle. Billing, consent and suspension retain their separate gates.
+
+A fresh accepted member message, authenticated browser use or session issuance
+clears dormancy. A foreground companion heartbeat clears it in its existing
+presence update. Background heartbeats and system mailbox items leave it alone.
+Accepted conversation receipts keep message replay from renewing activity.
+Existing accounts also use retained conversation, inbound Linq, foreground
+companion and session evidence. Expired or deleted historical browser sessions
+can leave an earlier visit unknown. Rollout requires the additive primary
+database migration before Web. Workers use their existing admission protocol.
+
 Fresh runtime attempts consume one per-member start-budget unit in the existing
 claim transaction, including attempts that fail before execution. The owner row's
 nullable `start_debt_until` holds the debt; existing claims, release, retirement

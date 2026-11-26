@@ -6,6 +6,7 @@ import { Prisma, type HostedRuntimeOwner as StoredHostedRuntimeOwner, type Prism
 import type { HostedWorkspaceInvocationProcessingMode } from "@murphai/hosted-execution/runtime-control";
 
 import { activeHostedMemberAccessWithParticipantsWhere, hostedRuntimeMemberEligibleWhere, readGameChatAllowanceBeneficiary } from "../hosted-onboarding/member-access";
+import { markDormantRuntimeAfterStop } from "./runtime-dormancy";
 import { isGameEnabled } from "../game/access";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -313,9 +314,13 @@ export async function releaseHostedRuntimeAfterRetirement(input: {
   identity: HostedRuntimeIdentity;
   runnerContainerName: string | null;
 }): Promise<boolean> {
-  return input.prisma.$transaction(tx => releaseHostedRuntimeTx(tx, input.identity,
-    { phase: "retiring", runnerContainerName: input.runnerContainerName }, IDLE_OWNER_WITHOUT_ASSIGNMENT,
-  ), OWNER_TRANSACTION_OPTIONS);
+  return input.prisma.$transaction(async tx => {
+    await lockHostedMemberRow(tx, input.identity.userId, { noKeyUpdate: true });
+    const released = await releaseHostedRuntimeTx(tx, input.identity,
+      { phase: "retiring", runnerContainerName: input.runnerContainerName }, IDLE_OWNER_WITHOUT_ASSIGNMENT);
+    if (released && input.runnerContainerName !== null) await markDormantRuntimeAfterStop(tx, input.identity.userId);
+    return released;
+  }, OWNER_TRANSACTION_OPTIONS);
 }
 
 /** A terminal native invocation receipt permits reuse of the member-bound
@@ -376,7 +381,7 @@ async function readRuntimeAdmissionTx(
   const member = await tx.hostedMember.findUnique({
     select: { id: true },
     where: {
-      id: userId,
+      id: userId, runtimeDormant: false,
       AND: [
         hostedRuntimeMemberEligibleWhere(),
         ...(processingMode === "inbox_media_retention" ? [] : [activeHostedMemberAccessWithParticipantsWhere(now, false)]),
@@ -389,7 +394,7 @@ async function readRuntimeAdmissionTx(
   // Preserve the ordinary fast path and the source member's consent boundary.
   const eligibleMember = await tx.hostedMember.findUnique({
     select: { id: true },
-    where: { id: userId, threadContainer: { isNot: null }, AND: [hostedRuntimeMemberEligibleWhere()] },
+    where: { id: userId, runtimeDormant: false, threadContainer: { isNot: null }, AND: [hostedRuntimeMemberEligibleWhere()] },
   });
   if (!eligibleMember) return null;
   const allowanceBeneficiaryMemberId = await readGameChatAllowanceBeneficiary({ memberId: userId, now, prisma: tx });
@@ -466,9 +471,11 @@ export async function authorizeHostedRuntimeProvider(input: {
  * matching makes delayed notifications harmless to a replacement assignment. */
 export async function recordHostedRuntimeTargetRetired(input: { prisma: PrismaClient; userId: string; runnerContainerName: string }): Promise<boolean> {
   return input.prisma.$transaction(async tx => {
+    await lockHostedMemberRow(tx, input.userId, { noKeyUpdate: true });
     const current = await lockHostedRuntimeOwnerRowTx(tx, input.userId);
     if (!current || current.runnerContainerName !== input.runnerContainerName) return false;
     await tx.hostedRuntimeOwner.update({ where: { userId: input.userId }, data: IDLE_OWNER_WITHOUT_ASSIGNMENT });
+    await markDormantRuntimeAfterStop(tx, input.userId);
     if (current.attemptId) await drainHostedRuntimeReplicaPutsTx(tx, {
       userId: input.userId, attemptId: current.attemptId, generation: current.generation.toString(),
     });

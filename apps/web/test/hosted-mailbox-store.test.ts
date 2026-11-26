@@ -2531,6 +2531,7 @@ function createHostedMailboxTx(input: {
   hostedThreadRoute?: { findFirst: ReturnType<typeof vi.fn> };
 }) {
   return Object.assign(Object.create(null), {
+    hostedMember: { updateMany: vi.fn() },
     $executeRaw: vi.fn(async () => 1),
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join("?");

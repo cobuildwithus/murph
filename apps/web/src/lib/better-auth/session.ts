@@ -7,6 +7,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+import { recordRuntimeMemberInteraction } from "../hosted-execution/runtime-dormancy";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
 import { hostedBetterAuthOptions } from "./auth";
@@ -45,6 +46,7 @@ export async function readHostedAuthSession(input: {
   // Suspension fences runtime access, but must not prevent an authenticated
   // owner from finishing deletion after a provider failure.
   if (input.purpose !== "account-deletion") assertHostedMemberNotSuspended(member);
+  if (input.transport === "browser" && !input.purpose) await recordRuntimeMemberInteraction(input.prisma, user.id);
   const proof: HostedAuthSessionProof = {
     credentialDigest: credentialDigest(input.credential), expiresAt: current.expiresAt, row,
   };

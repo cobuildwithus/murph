@@ -91,6 +91,7 @@ export async function readHostedRuntimeReconciliationFacts(
   const now = normalizeHostedRuntimeReconciliationDate(input.now);
   const [hasActiveAccess, workspace] = await Promise.all([
     readActiveHostedMemberAccess({
+      forRuntimeStart: true,
       memberId: input.userId,
       prisma,
     }),
@@ -326,7 +327,7 @@ async function buildHostedRuntimeInactiveFacts(input: {
   const retentionEligible = workspace?.inboxMediaRetentionWakeAt != null
     && await prisma.hostedMember.findUnique({
       select: { id: true },
-      where: { id: input.userId, AND: [hostedRuntimeMemberEligibleWhere()] },
+      where: { id: input.userId, runtimeDormant: false, AND: [hostedRuntimeMemberEligibleWhere()] },
     });
   const retentionWakeAt = retentionEligible ? workspace.inboxMediaRetentionWakeAt : null;
   return buildHostedRuntimeBlockedFacts({

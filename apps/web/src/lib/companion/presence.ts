@@ -20,7 +20,7 @@ export async function recordCompanionHeartbeat(
     const now = new Date();
     await tx.hostedMember.update({
       where: { id: memberId }, data: { companionLastContactAt: now,
-        ...(state === "foreground" ? { companionLastForegroundAt: now } : {}),
+        ...(state === "foreground" ? { companionLastForegroundAt: now, runtimeDormant: false } : {}),
         ...(clientInfo ? {
           companionAppPlatform: clientInfo.platform,
           companionAppVersion: clientInfo.version,

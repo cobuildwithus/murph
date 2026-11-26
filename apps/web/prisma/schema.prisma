@@ -629,6 +629,8 @@ model AppleHealthReopenPush {
 }
 
 model HostedMember {
+  runtimeLastInteractionAt       DateTime?                       @map("runtime_last_interaction_at")
+  runtimeDormant                 Boolean                         @default(false) @map("runtime_dormant")
   clinicalRecordMessageMode      ClinicalRecordMessageMode       @default(notice) @map("clinical_record_message_mode")
   clinicalRecordMessageRevision  Int                             @default(0) @map("clinical_record_message_revision")
   accountDeletionRequest HostedAccountDeletionRequest?

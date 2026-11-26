@@ -1,5 +1,6 @@
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { interactionMemberId, recordRuntimeMemberInteraction } from "../hosted-execution/runtime-dormancy";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
@@ -237,6 +238,7 @@ export type PreparedHostedMailboxEnvelopeAppend =
       payloadStorage: HostedMailboxEncryptedPayloadStorage;
       sourceMessageLookupKey: string | null;
       userId: string;
+      interactionMemberId: string | null;
       mode: "prepared";
     };
 
@@ -846,6 +848,7 @@ export async function prepareHostedMailboxEnvelopeAppend(input: {
     payloadStorage,
     sourceMessageLookupKey: null,
     userId: envelope.userId,
+    interactionMemberId: interactionMemberId(envelope),
     mode: "prepared",
   };
 }
@@ -942,6 +945,7 @@ export async function appendPreparedHostedMailboxEnvelopeTx(input: {
       },
     });
   }
+  if (prepared.interactionMemberId) await recordRuntimeMemberInteraction(input.tx, prepared.interactionMemberId, prepared.occurredAt);
   return { mailboxItemId };
 }
 
@@ -1003,7 +1007,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
       )
     : null;
 
-  return appendHostedMailboxItemWithEncryptionTx({
+  const result = await appendHostedMailboxItemWithEncryptionTx({
     ...(input.acceptRuntimeOwnedRetiredDuplicate === undefined
       ? {}
       : {
@@ -1025,6 +1029,9 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     tx: input.tx,
     userId: envelope.userId,
   });
+  const memberId = result.inserted && interactionMemberId(envelope);
+  if (memberId) await recordRuntimeMemberInteraction(input.tx, memberId, new Date(envelope.occurredAt));
+  return result;
 }
 
 export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {

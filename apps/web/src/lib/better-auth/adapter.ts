@@ -4,6 +4,7 @@ import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
 import type { BetterAuthOptions } from "better-auth";
 import { createAdapterFactory, type CleanedWhere, type CustomAdapter, type DBAdapter } from "better-auth/adapters";
 import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/domain-root-unwrap-cache";
+import { recordRuntimeMemberInteraction } from "../hosted-execution/runtime-dormancy";
 import { authRecordOwner, requireAuthModel, type AuthRecord, type AuthModel } from "./record";
 import { openAuthRecord, sealAuthRecord } from "./record-crypto";
 import { AUTH_RECORD_LIMIT, authRecordSelector, matchesAuthRecord } from "./record-query";
@@ -103,7 +104,15 @@ function makeOperations(root: PrismaClient, client: Client, inTransaction: boole
   return {
     create: async ({ model, data }) => {
       const row = await sealAuthRecord(requireAuthModel(model), data, client);
-      await client.hostedAuthRecord.create({ data: row });
+      if (row.model === "session" && row.memberId) {
+        const memberId = row.memberId;
+        await commit(async tx => {
+          await recordRuntimeMemberInteraction(tx, memberId);
+          await tx.hostedAuthRecord.create({ data: row });
+        });
+      } else {
+        await client.hostedAuthRecord.create({ data: row });
+      }
       return data;
     },
     findOne: async <T>({ model, where, join }: Parameters<CustomAdapter["findOne"]>[0]) => {

@@ -89,6 +89,19 @@ describe.skipIf(!enabled)("Postgres mailbox sequence allocation", () => {
   }
 
   describe.each(["envelope", "prepared"] as const)("%s append", mode => {
+    it("the first returning message clears dormancy in the mailbox transaction and a duplicate cannot clear it again", async () => {
+      const append = await appender(mode, "returning-member");
+      const dormant = () => observer.hostedMember.update({ where: { id: userId }, data: { runtimeDormant: true } });
+      await dormant();
+      await owner.$transaction(append, options);
+      expect(await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).toMatchObject({
+        runtimeDormant: false, runtimeLastInteractionAt: expect.any(Date),
+      });
+      await dormant();
+      await contender.$transaction(append, options);
+      expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(true);
+    });
+
     it.each([true, false])("waits before touching counters (seeded=%s) and allocates in commit order", async seeded => {
       if (seeded) await seed();
       const first = await appender(mode, "first");
