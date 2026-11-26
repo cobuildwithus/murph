@@ -30,12 +30,12 @@ describe("recorded route cards", () => {
     const [map, splits] = cards();
     expect(map).toMatchObject({
       kind: "activity_route", candidateId: `activity:${run.id}:activity_route`,
-      title: { number: "2.5 km", measure: "run" }, subtitle: "in 15:00, 6:00 a kilometer",
+      title: { number: "2.5 km", measure: "run" }, subtitle: "in 15:00, 6:00 a km",
       source_note: "Recorded on Mar 12, morning",
       chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"], art: { key: expect.stringMatching(/^area:v1:\d+\/\d+\/\d+$/u) } },
     });
     expect(splits).toMatchObject({
-      kind: "activity_splits", title: map.title, subtitle: "fastest kilometer 5:50",
+      kind: "activity_splits", title: map.title, subtitle: "fastest km 5:50",
       chart: {
         type: "splits", unit: "km", fastest: 1, splits: [
           { label: "Km 1", seconds: 375, text: "6:15" },
@@ -45,6 +45,13 @@ describe("recorded route cards", () => {
       },
     });
     expect(JSON.stringify([map, splits])).not.toContain("08:23");
+  });
+
+  it("keeps the splits and drops the map when trimming left no path", () => {
+    const trimmed = buildRecordedCards({ ...run, route: { ...run.route!, paths: [] } }, { ...context, units: "metric" })
+      .candidates.map(previewRecordedCandidate);
+    expect(trimmed.map(card => card.kind)).toEqual(["activity_splits"]);
+    expect(trimmed[0]).toMatchObject({ subtitle: "fastest km 5:50", title: { number: "2.5 km", measure: "run" } });
   });
 
   it.each(["us", "uk"] as const)("presents distance and pace in %s units while preserving the recorded splits", units => {

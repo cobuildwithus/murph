@@ -137,7 +137,7 @@ level. All recording JSON shares the
 
 - `distanceM` is the phone's moving distance in metres, greater than zero and at most 100,000. `climbM` is from zero through 3,000 metres.
 - Send one to 100 splits in recording order. Full splits use one unit throughout, either 1,000 metres or 1,609.344 metres. Only the last may be shorter. Each duration is a positive whole number of seconds. Split distances must total within 1% of `distanceM`, and durations must total at most `movingSec + 1`.
-- Send one to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. Omit `route` when no shareable path remains.
+- Send zero to eight precision-5 Google encoded polylines, at most 1,000 decoded points in total. Every coordinate must fall on the 0.0001-degree grid. The phone trims the ends, cuts private zones and simplifies the paths before submission. When no shareable path remains, send `paths: []`: the run keeps its splits card and gets no map.
 - Each path may cover at most `distanceM` plus the larger of 16 metres and 1% of `distanceM`. The diagonal of the bounding box across all paths must fit within `distanceM`. Average moving pace must be 150–1,200 seconds per kilometre for runs or 300–2,400 for walks, inclusive.
 
 The `activity_route` card's `route_map` chart contains `paths`, `frame: {west, south, east, north}`,

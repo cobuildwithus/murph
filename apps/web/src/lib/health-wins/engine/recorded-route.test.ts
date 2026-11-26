@@ -69,7 +69,9 @@ describe("recorded route admission", () => {
   it("bounds the segment count and the total point count across segments", () => {
     const paths = Array<string>(8).fill(route.paths[0]);
     expect(() => check({ paths })).not.toThrow();
-    for (const invalid of [[], [...paths, paths[0]]]) expect(() => check({ paths: invalid })).toThrow("paths");
+    // Trimming can leave no path at all; the run keeps its splits without a map.
+    expect(() => check({ paths: [] })).not.toThrow();
+    expect(() => check({ paths: [...paths, paths[0]] })).toThrow("paths");
     const repeated = (count: number) => path(...Array<number>(count).fill(0));
     expect(() => check({ paths: [repeated(750), repeated(250)] })).not.toThrow();
     expect(() => check({ paths: [repeated(750), repeated(251)] })).toThrow("paths");

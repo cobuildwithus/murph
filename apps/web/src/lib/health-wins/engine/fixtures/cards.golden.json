@@ -928,7 +928,7 @@
     },
     "id": "activity:238bba63-f944-4fe7-a508-295fe7789afa:activity_route",
     "kind": "activity_route",
-    "subtitle": "in 12:30, 10:00 a kilometer",
+    "subtitle": "in 12:30, 10:00 a km",
     "source_note": "Recorded on Mar 12, afternoon",
     "chart": {
       "type": "route_map",
@@ -962,12 +962,12 @@
     },
     "id": "activity:238bba63-f944-4fe7-a508-295fe7789afa:activity_splits",
     "kind": "activity_splits",
-    "subtitle": "fastest kilometer 10:00",
-    "source_note": "Recorded on Mar 12, afternoon. Splits by kilometer.",
+    "subtitle": "fastest km 10:00",
+    "source_note": "Recorded on Mar 12, afternoon. Splits by km.",
     "chart": {
       "type": "splits",
       "unit": "km",
-      "line": "12:30 · 10:00 a kilometer · 16 m up",
+      "line": "12:30 · 10:00 a km · 16 m up",
       "splits": [
         {
           "label": "Km 1",

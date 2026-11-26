@@ -34,7 +34,9 @@ function validateSplits(route: RecordedRouteSummary, movingSec: number) {
 function validatePaths(paths: string[], movingDistance: number) {
   const invalid = () => invalidGameRequest("Check the recorded paths.");
   const maxPoints = 1000;
-  if (paths.length === 0 || paths.length > 8) throw invalid();
+  if (paths.length > 8) throw invalid();
+  // Privacy trimming can leave nothing to draw: the run still has its distance and splits.
+  if (paths.length === 0) return;
   const points: Coordinate[] = [];
   for (const path of paths) {
     // At precision five each legal coordinate delta occupies at most six characters.

@@ -35,7 +35,7 @@ const activitySummary = z.strictObject({
 });
 const activityWithDisplay = activitySummary.extend({
   heartRate: heartRateSummary.extend({ perMinute: z.array(bpm.int().nullable()).max(360) }).optional(),
-  route: routeSummary.extend({ paths: z.array(z.string().min(1)).min(1).max(8) }).optional(),
+  route: routeSummary.extend({ paths: z.array(z.string().min(1)).max(8) }).optional(),
 });
 export const sealedActivitySummary = activitySummary.extend({
   route: routeTotals.extend({ splitSec: z.array(splitSeconds).min(1).max(100) }).optional(),

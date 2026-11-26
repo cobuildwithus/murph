@@ -12,7 +12,7 @@ export interface RouteCharts {
   activity_splits: { type: "splits"; unit: DistanceUnit; line: string; splits: SplitRow[]; fastest: number | null };
 }
 
-const unitName = { mi: "mile", km: "kilometer" } as const;
+const unitName = { mi: "mile", km: "km" } as const;
 
 function clock(seconds: number): string {
   const rounded = Math.round(seconds);
@@ -51,11 +51,13 @@ export function routeCards(activity: RecordedActivity, recorded: string, units: 
   }
   const line = [duration, paceLabel, `${formatHeight(route.climbM / 0.3048, units)} up`];
   if (activity.heartRate) line.push(`${formatNumber(activity.heartRate.avgBpm, 0)} bpm`);
-  return [{
+  // No map when trimming left no path; the splits still tell the run.
+  const map: CardSpec[] = route.paths.length ? [{
     ...base, id: `activity:${activity.id}:activity_route`, kind: "activity_route",
     subtitle: `in ${duration}, ${paceLabel}`, source_note: recorded,
     chart: { type: "route_map", paths: [...route.paths], ...areaFrame(route.paths), chips: [distance, `${pace} /${displayUnit}`] },
-  }, {
+  }] : [];
+  return [...map, {
     ...base, id: `activity:${activity.id}:activity_splits`, kind: "activity_splits",
     subtitle: fastest === null ? `in ${duration}, ${paceLabel}` : `fastest ${unitName[unit]} ${splits[fastest].text}`,
     source_note: `${recorded}. Splits by ${unitName[unit]}.`,
