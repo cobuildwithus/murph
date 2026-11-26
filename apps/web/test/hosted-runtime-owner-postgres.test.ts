@@ -243,6 +243,29 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     expect((await first.hostedMember.findUniqueOrThrow({ where: { id } })).runtimeDormant).toBe(true);
   });
 
+  it("a returning member wins a concurrent shutdown", async () => {
+    const { userId, target } = await launchedRuntime();
+    await first.hostedMember.update({ where: { id: userId }, data: { createdAt: new Date(Date.now() - 70 * 86_400_000) } });
+    await Promise.all([
+      recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: target }),
+      recordRuntimeMemberInteraction(second, userId),
+    ]);
+    expect(await claimHostedRuntime({ prisma: observer, userId, processingMode: "default" })).toMatchObject({ status: "claimed" });
+  });
+
+  it("uses retained inbound history for older members and ignores outbound-only days", async () => {
+    const { userId, target } = await launchedRuntime();
+    await first.hostedMember.update({ where: { id: userId }, data: { createdAt: new Date(Date.now() - 70 * 86_400_000) } });
+    const now = new Date();
+    const dayUtc = new Date(now.toISOString().slice(0, 10));
+    await first.hostedLinqDailyState.create({ data: { memberId: userId, dayUtc, firstSeenAt: now, lastSeenAt: now, inboundCount: 1 } });
+    await recordHostedRuntimeTargetRetired({ prisma: first, userId, runnerContainerName: target });
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(false);
+    await first.hostedLinqDailyState.update({ where: { memberId_dayUtc: { memberId: userId, dayUtc } }, data: { inboundCount: 0, outboundCount: 1 } });
+    await observer.$transaction(tx => markDormantRuntimeAfterStop(tx, userId, now));
+    expect((await observer.hostedMember.findUniqueOrThrow({ where: { id: userId } })).runtimeDormant).toBe(true);
+  });
+
   async function gameFundingRooms(now: Date) {
     const primary = await member();
     const duplicate = await member();

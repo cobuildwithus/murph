@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-26",
+  "order": 100,
+  "item": {
+    "id": "pause-after-inactivity",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Background work pauses when you’re away",
+    "summary": "After 60 days without a message, an app visit or a signed-in website visit, Murph pauses background work in your personal workspace the next time it shuts down.",
+    "details": "Send Murph a message, open the signed-in iOS app or use the website while signed in to resume. Your saved workspace stays available.",
+    "relevanceTags": ["workspace"],
+    "sourcePullRequests": [5344]
+  }
+}
