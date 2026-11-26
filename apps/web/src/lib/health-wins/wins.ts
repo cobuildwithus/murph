@@ -23,7 +23,7 @@ import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v5";
+const DETECTOR_VERSION = "v6";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 const INPUT_BUDGET_MS = 8_000;
 

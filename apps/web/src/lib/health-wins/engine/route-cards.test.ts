@@ -109,6 +109,13 @@ describe("recorded route cards", () => {
     });
   });
 
+  it("shows moving time and pace when just one split is full", () => {
+    const [, splits] = cards({ ...run, movingSec: 510, route: {
+      ...route, distanceM: 1500, splits: [{ distanceM: 1000, seconds: 360 }, { distanceM: 500, seconds: 150 }],
+    } });
+    expect(splits).toMatchObject({ subtitle: "in 8:30, 5:40 a km", chart: { fastest: null } });
+  });
+
   it("makes no fastest full-split claim for a short walk", () => {
     const activity = { ...run, kind: "walk" as const, movingSec: 270, route: {
       ...route, distanceM: 500, splits: [{ distanceM: 500, seconds: 270 }],
