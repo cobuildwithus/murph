@@ -23,9 +23,10 @@ describe("health allowlists", () => {
 
   it("layers recording and routes on the feed, each with *", () => {
     const all = { ...on, MURPH_HEALTH_FEED_MEMBER_IDS: "*", MURPH_HEALTH_RECORD_MEMBER_IDS: "*" };
-    expect(healthRecordCapability("member-a", all)).toEqual({ timed: true, route: false });
+    expect(healthRecordCapability("member-a", all)).toEqual({ timed: true, route: false, named: true });
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_ROUTE_MEMBER_IDS: "*" }))
-      .toEqual({ timed: true, route: true });
+      .toEqual({ timed: true, route: true, named: true });
+    expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_RECORD_MEMBER_IDS: "" })).toBeUndefined();
     expect(healthRecordCapability("member-a", { ...all, MURPH_HEALTH_FEED_MEMBER_IDS: "member-b" })).toBeUndefined();
   });
 });

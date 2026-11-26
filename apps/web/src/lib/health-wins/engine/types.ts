@@ -22,6 +22,7 @@ export interface RecordedRoute extends RecordedRouteSummary {
 export interface RecordedActivitySummary {
   id: string;
   kind: RecordedActivityKind;
+  name?: string;
   startedAt: string;
   elapsedSec: number;
   movingSec: number;

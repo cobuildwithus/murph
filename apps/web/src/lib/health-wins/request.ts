@@ -2,6 +2,7 @@ import * as z from "@murphai/contracts/zod-runtime";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 
 import { readJsonObject } from "../http";
+import { hasActivityNameLength } from "./activity-name";
 
 export type HealthIdContext = { params: Promise<{ id: string }> };
 export type HealthMemberContext = { params: Promise<{ memberId: string }> };
@@ -26,6 +27,8 @@ const routeSummary = routeTotals.extend({
 const activitySummary = z.strictObject({
   id: uuid,
   kind: z.enum(["sauna", "cold_plunge", "lift", "other", "run", "walk"]),
+  // Sealed summaries share this shape. Only new content goes through name admission.
+  name: z.string().refine(hasActivityNameLength).optional(),
   startedAt: z.iso.datetime({ offset: true }),
   elapsedSec: seconds.positive(),
   movingSec: seconds,
@@ -41,6 +44,7 @@ export const sealedActivitySummary = activitySummary.extend({
   route: routeTotals.extend({ splitSec: z.array(splitSeconds).min(1).max(100) }).optional(),
 });
 
+export const activityKindBody = z.strictObject({ name: z.string().max(200) });
 export const previewActivityBody = z.strictObject({ activity: activityWithDisplay });
 export const saveActivityBody = z.strictObject({ activity: activitySummary });
 const postFields = {
