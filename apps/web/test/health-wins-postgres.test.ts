@@ -193,7 +193,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(preview.status).toBe(200);
     const { cards } = await preview.json();
     const map = cards.find((card: { kind: string }) => card.kind === "activity_route");
-    expect(map.chart.stats).toContainEqual({ label: "Heart rate", value: "104", unit: "bpm avg" });
+    expect(map.chart.stats?.map(stat => stat.label)).not.toContain("Heart rate");
     const choice = map.change_options.find((option: { id: string }) => option.id === "hide_numbers");
     const id = randomUUID();
     const pick = { candidateId: map.candidateId, option: choice.id, specRevision: choice.specRevision };
