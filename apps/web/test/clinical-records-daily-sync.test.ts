@@ -1,3 +1,5 @@
+import * as hostedControl from "@/src/lib/hosted-execution/control";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import { signerPem } from "./clinical-records-synthetic-signer";
 
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
@@ -43,7 +45,7 @@ function fixture() {
   };
   const connection = {
     findFirst: vi.fn(async () => ({ ...row })),
-    findMany: vi.fn(async () => [{ id: row.id, memberId: row.memberId }]),
+    findMany: vi.fn(async () => [{ id: row.id, memberId: row.memberId, requiresProcessorApprovals: true }]),
     update: vi.fn(async ({ data }: { data: object }) => Object.assign(row, data)),
     updateMany: vi.fn(async ({ where, data }: { where: { refreshLeaseId?: string }; data: object }) => {
       if (where.refreshLeaseId && where.refreshLeaseId !== row.refreshLeaseId) return { count: 0 };
@@ -51,7 +53,7 @@ function fixture() {
     }),
   };
   const create = vi.fn();
-  const tx = { clinicalRecordConnection: connection, clinicalRecordRetrievalRun: { create } };
+  const tx = { clinicalRecordConnection: connection, clinicalRecordRetrievalRun: { create, findMany: async () => [], findFirst: async () => null } };
   const prisma = { ...tx, $transaction: async <T>(fn: (value: typeof tx) => Promise<T>) => fn(tx) };
   mocks.prisma.mockReturnValue(prisma);
   return { row, connection, create };
@@ -72,6 +74,29 @@ beforeEach(() => {
 });
 
 describe("daily clinical admission", () => {
+  it.each(["fetch_failed", "port_unavailable", "stale_evidence"] as const)("refreshes reader evidence and emits one bounded summary for %s", async reason => {
+    const f = fixture();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let clock = Date.now();
+    const time = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      if (reason === "fetch_failed") throw new Error("synthetic transport failure");
+      if (reason === "port_unavailable") return new Response("{}", { status: 503 });
+      return Response.json({ nonce: new URL(String(url)).searchParams.get("nonce"), version: "synthetic", runner: 3, cloudflarePort: 3 });
+    });
+    const control = vi.spyOn(hostedControl, "readHostedExecutionControlClientIfConfigured").mockReturnValue(
+      createCloudflareHostedControlClient({ baseUrl: "https://port.example.test", getBearerToken: async () => "synthetic", fetchImpl }));
+    f.connection.findMany.mockResolvedValue(Array(2).fill({ id: f.row.id, memberId: f.row.memberId, requiresProcessorApprovals: true }));
+    if (reason === "stale_evidence") mocks.signal.mockImplementationOnce(async () => { clock += 30_001; });
+    try {
+      await runClinicalDailySyncSweep({ now, deadlineMs: clock + 120_000 });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledExactlyOnceWith("Clinical daily admission reader evidence", expect.objectContaining({
+        [reason]: reason === "stale_evidence" ? 1 : 2, candidatesWithoutEvidence: reason === "stale_evidence" ? 0 : 2, checked: 2,
+      }));
+    } finally { warn.mockRestore(); time.mockRestore(); control.mockRestore(); }
+  });
+
   it("does not write a second date after successful admission", async () => {
     const f = fixture();
     expect(await runClinicalDailySyncSweep({ now })).toEqual({ checked: 1, queued: 1, failed: 0 });

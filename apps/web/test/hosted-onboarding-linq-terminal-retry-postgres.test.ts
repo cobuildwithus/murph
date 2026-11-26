@@ -1,4 +1,4 @@
-import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
+import { clinicalChangeDeliveryKey, clinicalReplyTurnKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { buildAssistantReplyBubbleDeliveryIdempotencyKey } from "@murphai/runtime-state/assistant-ids";
 import { randomInt, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -105,10 +105,11 @@ async function seed(bubble?: number | "final") {
   const chatId = `retry-chat-${nonce}`;
   const messageId = `retry-original-${nonce}`;
   const retryId = `retry-replacement-${nonce}`;
-  const finalKey = clinicalChangeDeliveryKey(nonce, "detail");
+  const turnId = "turn_" + nonce.replaceAll("-", "");
+  const finalKey = clinicalReplyTurnKey(clinicalChangeDeliveryKey(nonce, "detail"), turnId);
   const idempotencyKey = bubble === undefined ? `retry-intent-${nonce}`
     : bubble === "final" ? finalKey
-    : buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: finalKey, turnId: nonce, index: bubble });
+    : buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: finalKey, turnId, index: bubble });
   const phoneNumber = `+1555000${randomInt(1000, 9999)}`;
   const chatKey = createHostedLinqChatLookupKey(chatId)!;
   const lineKey = createHostedPhoneLookupKey(phoneNumber)!;

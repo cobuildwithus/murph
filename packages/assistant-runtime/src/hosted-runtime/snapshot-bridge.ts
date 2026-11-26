@@ -789,6 +789,8 @@ async function createHostedWorkspaceV2Snapshot(
       run: async () => await workspaceSnapshotPort.completeSnapshotSession({
         checkpointRequest: {
           ...checkpointRequest,
+          ...(assistantGeneratedDeliveryPruneResult?.clinicalReplies?.length
+            ? { clinicalReplies: assistantGeneratedDeliveryPruneResult.clinicalReplies } : {}),
           redactedStatus: {
             ...checkpointRequest.redactedStatus,
             // Never carry a prior snapshot's witness forward. Failed or

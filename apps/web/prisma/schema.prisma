@@ -368,6 +368,10 @@ model ClinicalRecordRetrievalRun {
   notificationSettingRevision Int? @map("notification_setting_revision")
   // Private proof can precede acceptance. Published and scheduled survive mailbox retention.
   notificationCoverage String? @map("notification_coverage")
+  notificationTurnId String? @map("notification_turn_id")
+  notificationSnapshotId String? @map("notification_snapshot_id")
+  notificationDeferral String? @map("notification_deferral")
+  notificationRetryAt DateTime? @map("notification_retry_at")
   id                   String                           @id
   memberId             String                           @map("member_id")
   connectionId         String                           @map("connection_id")

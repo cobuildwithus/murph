@@ -6,6 +6,7 @@ export interface HostedRunnerRelease {
   /** Immutable published artifact; retained across an interrupted native rollout. */
   image?: string;
   executionIdentity?: string;
+  clinicalNoticeRevision?: number;
   releaseSha?: string;
   bundleFingerprint: string;
   id: string;
@@ -87,6 +88,7 @@ export function readHostedRunnerBankFromName(name: string): HostedRunnerBank {
 
 function isRelease(value: unknown): value is HostedRunnerRelease {
   return isRecord(value)
+    && (value.clinicalNoticeRevision === undefined || Number.isSafeInteger(value.clinicalNoticeRevision))
     && isOptionalImmutableImage(value.image)
     && (value.releaseSha === undefined || (typeof value.releaseSha === "string" && /^[a-f0-9]{40}$/u.test(value.releaseSha)))
     && (value.executionIdentity === undefined || (typeof value.executionIdentity === "string" && /^[a-f0-9]{64}$/u.test(value.executionIdentity)))

@@ -92,7 +92,7 @@ export interface HostedRunnerSlotLifecycle {
   }): Promise<{
     prepared: true;
     /** Additive attestation; older Workers may omit it. Deploy smoke requires it. */
-    runnerImage?: { bundleFingerprint: string; sourceFingerprint: string };
+    runnerImage?: { bundleFingerprint: string; sourceFingerprint: string; clinicalNoticeRevision?: number };
     releaseId: string;
     region: HostedRunnerRegion;
     slotName: string;

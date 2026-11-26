@@ -104,6 +104,9 @@ export async function recoverHostedWorkspaceCheckpoint(input: {
       redactedStatusJson: { ...redactedStatusJson, checkpointPartialRecovery: true },
     });
     if (result.status !== "updated" || !result.workspace) conflict();
+    // A recovered archive must present the bound reply again, or explicitly close the lost occurrence.
+    await tx.clinicalRecordRetrievalRun.updateMany({ where: { memberId: input.userId, notificationCoverage: { in: ["published", "attempted"] },
+      notificationTurnId: { not: null }, OR: [{ notificationDeferral: null }, { notificationDeferral: { not: "route" } }] }, data: { notificationRetryAt: now } });
     await recordRuntimeOrphansTx(tx, input.userId, snapshotOrphanCandidates(source), now);
     return { status: "published", workspaceVersion: result.workspace.version };
   }, { maxWait: 5_000, timeout: 5_000 });

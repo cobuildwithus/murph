@@ -1,3 +1,4 @@
+import { CLINICAL_DAILY_NOTICE_REVISION } from "@murphai/hosted-execution/clinical-records-boundary";
 import { readHostedRunnerDeployment, scopeHostedRunnerReleaseEnvironment } from "../../hosted-runner-release.ts";
 import {
   deriveHostedExecutionErrorCode,
@@ -59,6 +60,22 @@ const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
 const TEMPORAL_WORKER_BINDING_ADMISSION_BODY_LIMIT_BYTES = 0;
 
 export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorization: "vercel-oidc",
+    match: matchExactPath("/internal/clinical-notice-readers"),
+    methods: ["GET"],
+    name: "clinical-notice-readers",
+    handle(context) {
+      const deployment = readHostedRunnerDeployment(context.env);
+      const nonce = context.url.searchParams.get("nonce");
+      const version = readWorkerVersionId(context.env);
+      if (!version || !nonce || !/^[a-f0-9-]{36}$/u.test(nonce) || !deployment || deployment.candidate) {
+        return json({ ok: false }, 503);
+      }
+      return Response.json({ nonce, version, runner: deployment.active.clinicalNoticeRevision ?? 0,
+        cloudflarePort: CLINICAL_DAILY_NOTICE_REVISION }, { headers: { "cache-control": "no-store" } });
+    },
+  },
   {
     authorization: "web-callback-signature",
     handle: handleTemporalWorkerBindingAdmissionRoute,
@@ -254,7 +271,8 @@ async function proveDeployRunnerTarget(env: WorkerEnvironmentSource): Promise<vo
       slotName,
       timeoutMs: HOSTED_STANDBY_READY_TIMEOUT_MS,
     });
-    if (proof.runnerImage?.bundleFingerprint !== release.bundleFingerprint
+    if ((release.clinicalNoticeRevision !== undefined && proof.runnerImage?.clinicalNoticeRevision !== release.clinicalNoticeRevision)
+      || proof.runnerImage?.bundleFingerprint !== release.bundleFingerprint
       || proof.runnerImage?.sourceFingerprint !== release.sourceFingerprint) {
       throw new Error("Deploy runner target image proof does not match the candidate.");
     }

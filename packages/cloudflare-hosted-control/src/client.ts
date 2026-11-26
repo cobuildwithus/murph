@@ -227,6 +227,7 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  readClinicalNoticeReaders(): Promise<{ runner: number; cloudflarePort: number }>;
   enqueueDeviceWebhook(
     envelope: DeviceWebhookQueueEnvelopeV1,
   ): Promise<{ accepted: true; transportId: string }>;
@@ -490,6 +491,23 @@ export function createCloudflareHostedControlClient(
   };
 
   return {
+    readClinicalNoticeReaders() {
+      const nonce = crypto.randomUUID();
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl, fetchImpl, getAuthorizationHeader, timeoutMs: options.timeoutMs,
+        label: "clinical notice serving revisions", path: "/internal/clinical-notice-readers",
+        request: { method: "GET", search: `nonce=${nonce}`, headers: { "cache-control": "no-store" } },
+        parse(value) {
+          const row = requireRecord(value, "Clinical notice serving revisions");
+          if (row.nonce !== nonce || typeof row.version !== "string" || !row.version
+            || typeof row.runner !== "number" || !Number.isSafeInteger(row.runner)
+            || typeof row.cloudflarePort !== "number" || !Number.isSafeInteger(row.cloudflarePort)) {
+            throw new ContractValidationError("Invalid serving revision evidence.");
+          }
+          return { runner: row.runner, cloudflarePort: row.cloudflarePort };
+        },
+      });
+    },
     enqueueDeviceWebhook(envelope) {
       const request = parseDeviceWebhookQueueEnvelope(envelope);
       return requestHostedExecutionAuthorizedJson({

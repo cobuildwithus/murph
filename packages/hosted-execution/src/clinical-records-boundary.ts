@@ -258,3 +258,44 @@ export const CLINICAL_TEXT_TRANSPORT_BLOCK = "clinical_imessage_only_unavailable
 export function clinicalChangeDeliveryKey(runId: string, mode: "notice" | "detail"): string {
   return `clinical-change:v1:${runId}:${mode}`;
 }
+
+export function clinicalReplyTurnKey(baseKey: string, turnId: string): string {
+  return `${baseKey}:${turnId}`;
+}
+
+/** Only the final bubble has no suffix. Its presence certifies that staging reached the end. */
+export function parseClinicalDeliveryKey(key: string | null | undefined) {
+  const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):(notice|detail)(?::(turn_[a-f0-9]{32}))?((?::bubble:(?:0|[1-9][0-9]*))?(?::(?:voice|transcript|fallback|link))?)$/u.exec(key ?? "");
+  if (!match || (match[2] === "notice" && (match[3] || match[4]))) return null;
+  return { runId: match[1]!, mode: match[2]!, turnId: match[3] ?? null, suffix: match[4]! };
+}
+
+export const CLINICAL_DAILY_NOTICE_REVISION = 3;
+
+/** Only Web's durable wake can re-arm a clinical reply stopped before provider entry. */
+export const CLINICAL_REPLY_DEFERRED = "ASSISTANT_CLINICAL_REPLY_DEFERRED";
+
+/** Member-controlled authority loss ends an occurrence. Service health and rollout blocks can clear on their own. */
+export function clinicalBlockDisposition(code: import("./routes.js").HostedRuntimeLinqDeliveryBlockCode) {
+  switch (code) {
+    case "clinical_authority_unavailable":
+    case "chat_opted_out":
+      return "close";
+    case "automation_engagement_paused":
+    case "clinical_checkpoint_pending":
+    case "clinical_window_closed":
+    case "clinical_imessage_only_unavailable":
+    case "operator_disabled":
+    case "line_flagged":
+    case "line_critical":
+    case "line_at_risk_new_conversation":
+    case "chat_critical":
+    case "delivery_unhealthy":
+    case "delivery_warning_new_conversation":
+      return "hold";
+    default: {
+      const unclassified: never = code;
+      throw new ContractValidationError("Unknown clinical dispatch policy: " + unclassified);
+    }
+  }
+}

@@ -228,6 +228,12 @@ describe("executeHostedMailboxEvent", () => {
       expect(await listAssistantOutboxIntents(workspace.vaultRoot)).toMatchObject([{
         message: "New records came in. Want me to go through them?",
       }]);
+      const savedTurnId = "turn_" + "a".repeat(32);
+      readNotification.mockResolvedValueOnce({ mode: "detail", threadId: "synthetic-thread", savedTurnId })
+        .mockResolvedValueOnce({ mode: "off" });
+      expect((await consume()).deliveryIntentIds ?? []).toHaveLength(0);
+      expect(readNotification.mock.calls.at(-1)?.[0]).toEqual({ generation: 2, runId: wake.runId,
+        savedReplyResult: { status: "missing", turnId: savedTurnId } });
       expect(mocks.prepareHostedWakeContext).not.toHaveBeenCalled();
       expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     } finally { await workspace.cleanup(); }

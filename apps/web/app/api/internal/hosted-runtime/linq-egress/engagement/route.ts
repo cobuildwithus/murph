@@ -171,6 +171,8 @@ export const POST = withJsonError(async (request: Request) => {
       : { playerMemberIds: gameChatAuthority.audience.memberIds, audience: gameChatAuthority.audience, groupMissedPolicy: gameChatAuthority.policy }
     : { audience: gameChatAuthority };
 
+  const clinicalWindowPhone = clinicalKey
+    ? await (await import("@/src/lib/clinical-records/notification")).readClinicalWindowPhone(userId) : null;
   const assertion = await prisma.$transaction(async (tx) => {
     await lockGameEgressRouteTx({ tx, targetKind, expectedResolvedRoute, target: lockTarget, userId });
 
@@ -256,7 +258,13 @@ export const POST = withJsonError(async (request: Request) => {
       target: finalAuthority.resolvedRoute.target,
       targetKind: finalAuthority.resolvedRoute.targetKind,
     });
+    async function recordClinicalBlock(code: import("@murphai/hosted-execution/routes").HostedRuntimeLinqDeliveryBlockCode) {
+      if (!clinicalKey) return;
+      const { recordClinicalPolicyBlock } = await import("@/src/lib/clinical-records/notification");
+      await recordClinicalPolicyBlock(tx, userId, clinicalKey, code, finalAuthority.resolvedRoute);
+    }
     if (health.policy.kind === "block") {
+      await recordClinicalBlock(health.policy.code);
       return {
         assistantAskFallbackRequired: false,
         asserted: finalAuthority,
@@ -299,6 +307,7 @@ export const POST = withJsonError(async (request: Request) => {
       now: new Date(),
       prisma: tx,
     })) {
+      await recordClinicalBlock("automation_engagement_paused");
       return {
         assistantAskFallbackRequired: false,
         asserted: finalAuthority,
@@ -311,11 +320,7 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     if (clinicalKey) {
-      const { clinicalEgressBlock } = await import("@/src/lib/clinical-records/notification");
-      const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
-        route: finalAuthority.resolvedRoute });
-      return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
-        deliveryPosture: null, ackReaction: null, progressUpdateSuppressed: false, providerDispatchClaimed: null };
+      return authorizeClinicalDispatch(tx, userId, clinicalKey, clinicalWindowPhone, finalAuthority, authorityCheckOnly, body.deliveryPurpose, intentId);
     }
     const dispatch = await claimHostedLinqEngagementProviderDispatchTx({
       assistantAskFallbackRequired:
@@ -348,6 +353,7 @@ export const POST = withJsonError(async (request: Request) => {
   const resolvedRoute = assertion.asserted.resolvedRoute;
   return jsonOk({
     ok: true,
+    ...("clinicalReplyAuthorized" in assertion && assertion.clinicalReplyAuthorized === true ? { clinicalReplyAuthorized: true } : {}),
     ...(idempotencyKey?.startsWith("game-rematch:") ? { gameRematchAuthorityChecked: true } : {}),
     ...(assertion.assistantAskFallbackRequired
       ? { assistantAskFallbackRequired: true }
@@ -673,4 +679,19 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
   }
 
   return itemIds;
+}
+
+async function authorizeClinicalDispatch(tx: Prisma.TransactionClient, userId: string, clinicalKey: string, windowPhone: string | null,
+  finalAuthority: Awaited<ReturnType<typeof assertHostedLinqRecentInboundEngagementForRuntime>>,
+  authorityCheckOnly: boolean, deliveryPurpose: unknown, intentId: string | null) {
+  const { clinicalEgressBlock, recordClinicalDispatchClaim } = await import("@/src/lib/clinical-records/notification");
+  const deliveryBlockCode = await clinicalEgressBlock(tx, { key: clinicalKey, memberId: userId,
+    windowPhone, route: finalAuthority.resolvedRoute, providerEntry: !authorityCheckOnly });
+  const dispatch = deliveryBlockCode ? { progressUpdateSuppressed: false, providerDispatchClaimed: null }
+    : await claimHostedLinqEngagementProviderDispatchTx({ assistantAskFallbackRequired: false, authorityCheckOnly,
+      deliveryPurpose, idempotencyKey: clinicalKey, intentId, resolvedRoute: finalAuthority.resolvedRoute, tx });
+  // The native memo API has no replay key. This grant is its last provable handoff.
+  if (typeof dispatch.providerDispatchClaimed === "boolean") await recordClinicalDispatchClaim(tx, userId, clinicalKey, dispatch.providerDispatchClaimed);
+  return { assistantAskFallbackRequired: false, asserted: finalAuthority, deliveryBlockCode,
+    clinicalReplyAuthorized: deliveryBlockCode === null, deliveryPosture: null, ackReaction: null, ...dispatch };
 }

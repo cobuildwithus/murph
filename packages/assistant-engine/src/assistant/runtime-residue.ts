@@ -1,3 +1,4 @@
+import { parseClinicalDeliveryKey, CLINICAL_REPLY_DEFERRED } from '@murphai/hosted-execution/clinical-records-boundary'
 import { hasRetainedAssistantInputMedia } from './input-media-retention.js'
 import { createHash } from 'node:crypto'
 import { createReadStream, type Dirent, type Stats } from 'node:fs'
@@ -63,6 +64,7 @@ const ASSISTANT_INPUT_EVENT_RETENTION_LIMIT = 1_000
 const ASSISTANT_RUNTIME_RESIDUE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 
 export interface AssistantGeneratedDeliveryResiduePruneResult {
+  clinicalReplies?: { runId: string; turnId: string }[]
   outboxQuiescent: boolean
   generatedDeliveryActiveFilesMissing: number
   generatedDeliveryActiveFilesRetained: number
@@ -219,7 +221,13 @@ export async function pruneAssistantGeneratedDeliveryResidue(input: {
         signal: input.signal,
         vault: input.vault,
       })
+      const clinicalReplies = outbox.trusted ? outbox.records.flatMap(({ record }) => {
+        const key = parseClinicalDeliveryKey(record.deliveryIdempotencyKey)
+        return key?.turnId && key.turnId === record.turnId && !key.suffix && isActiveAssistantOutboxIntent(record)
+          ? [{ runId: key.runId, turnId: key.turnId }] : []
+      }) : []
       return {
+        ...(clinicalReplies.length ? { clinicalReplies } : {}),
         outboxQuiescent: outbox.trusted
           && !outbox.records.some(({ record }) => isActiveAssistantOutboxIntent(record)),
         generatedDeliveryActiveFilesMissing: plan.activeFilesMissing,
@@ -991,6 +999,7 @@ function isPrunableTerminalAssistantTurnReceipt(
 
 function isActiveAssistantOutboxIntent(intent: AssistantOutboxIntent): boolean {
   return (
+    intent.lastError?.code === CLINICAL_REPLY_DEFERRED ||
     intent.deliveryConfirmationPending ||
     intent.status === 'awaiting_approval' ||
     intent.status === 'pending' ||
