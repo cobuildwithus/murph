@@ -88,7 +88,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
         card: {
           id: `trend_change:${metric}:${currentMonth}`, kind: "trend_change", filter,
           title: { number: formatMetricValue(metric, displayedDelta, "delta"), measure: label },
-          subtitle: `a ${filter === "Sleep" ? "night" : "day"}, vs usual`,
+          subtitle: filter === "Heart" ? "on average, vs usual" : `a ${filter === "Sleep" ? "night" : "day"}, vs usual`,
           source_note: `${current.days} tracked days this month. Usual is the median of the previous three monthly averages.`,
           chart: {
             type: "trend", unit, series: [...baselineMonths, current], baseline, delta,
