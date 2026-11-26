@@ -74,8 +74,8 @@ export function greatCircle(a: Coordinate, b: Coordinate): Coordinate[] {
   });
 }
 
-const mercatorY = (latitude: number) => Math.log(Math.tan(Math.PI / 4 + radians(Math.max(-85.051129, Math.min(85.051129, latitude))) / 2));
-const latitudeAt = (y: number) => degrees(2 * Math.atan(Math.exp(y)) - Math.PI / 2);
+export const mercatorY = (latitude: number) => Math.log(Math.tan(Math.PI / 4 + radians(Math.max(-85.051129, Math.min(85.051129, latitude))) / 2));
+export const latitudeAt = (y: number) => degrees(2 * Math.atan(Math.exp(y)) - Math.PI / 2);
 
 /** Fit in Mercator at the requested aspect, so Mapbox cannot add implicit padding. */
 export function routeBbox(points: readonly Coordinate[], width: number, height: number): Bbox {
