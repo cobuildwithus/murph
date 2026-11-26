@@ -330,7 +330,11 @@ export interface ClinicalExtractionUnit {
   extractedText?: string;
 }
 
-const cursorRefOf = (attachmentIndex: number, resourceIndex: number | undefined, page: number) => `${attachmentIndex}:${resourceIndex ?? 0}:${page}`;
+// A cursor names its kind: documents come first, then the job's structured resources.
+const documentCursorRef = (attachmentIndex: number, page: number) => `document:${attachmentIndex}:${page}`;
+const resourceCursorRef = (resourceIndex: number) => `resource:${resourceIndex}`;
+const jobCursorRef = (job: Job, attachmentCount: number) => job.attachmentIndex < attachmentCount
+  ? documentCursorRef(job.attachmentIndex, job.page) : resourceCursorRef(job.resourceIndex ?? 0);
 
 /**
  * Lists uncached extraction units in queue order, each job's cursor first.
@@ -381,7 +385,7 @@ async function* planClinicalJobUnits(
     if (!attested?.parent.eligible) continue;
     const cursor = job.attachmentIndex >= attachmentCount && resourceIndex === (job.resourceIndex ?? 0);
     if (cursor && job.status === "prepared") continue;
-    const unit = await unplannedClinicalUnit(input.vaultRoot, job, attested, { locator, page: 1, timeZone, cursor, attachmentCount });
+    const unit = await unplannedClinicalUnit(input.vaultRoot, job, attested, { locator, page: 1, timeZone, cursor });
     if (unit) yield unit;
   }
 }
@@ -412,13 +416,13 @@ async function unplannedClinicalUnit(
   vaultRoot: string,
   job: Job,
   attested: Awaited<ReturnType<typeof attestClinicalUnitSource>>,
-  unit: { locator: ClinicalExtractionUnit["locator"]; page: number; timeZone: string; cursor: boolean; attachmentCount?: number },
+  unit: { locator: ClinicalExtractionUnit["locator"]; page: number; timeZone: string; cursor: boolean },
 ): Promise<ClinicalExtractionUnit | null> {
   const cachePath = extractionCachePath(vaultRoot, attested.cacheSha256, attested.source.mediaType, unit.page, attested.parent.clinicalOccurredAt);
   if (await stat(cachePath).then(() => true, () => false)) return null;
   const cursorRef = "resourceIndex" in unit.locator
-    ? cursorRefOf(unit.attachmentCount ?? 0, unit.locator.resourceIndex, 1)
-    : cursorRefOf(unit.locator.attachmentIndex, job.resourceIndex, unit.page);
+    ? resourceCursorRef(unit.locator.resourceIndex)
+    : documentCursorRef(unit.locator.attachmentIndex, unit.page);
   return {
     key: path.relative(rootPath(vaultRoot), cachePath), jobId: job.jobId, cursor: unit.cursor, cursorRef, locator: unit.locator,
     cacheSha256: attested.cacheSha256, page: unit.page, failures: unit.cursor ? job.failures : 0,
@@ -871,19 +875,29 @@ export async function readClinicalEnrichmentStatus(input: { vaultRoot: string; j
   return { status: job.status, counts: job.counts, nextAttemptAt: job.nextAttemptAt, reason: job.reason, holdReasons: job.holdReasons };
 }
 
-/** A failure settles only while the job's cursor still points at the failed unit. */
-function cursorMoved(job: Job, cursorRef: string | undefined): boolean {
-  return cursorRef !== undefined && (job.status !== "pending" || cursorRefOf(job.attachmentIndex, job.resourceIndex, job.page) !== cursorRef);
+/**
+ * A failure settles only while the job's cursor still points at the failed
+ * unit, and holds it by the unit's own kind. The kind comes from the manifest,
+ * never from a source the apply wake may not have initialized yet. Null means
+ * the cursor moved; undefined means the caller named no unit.
+ */
+async function settledCursorKind(vaultRoot: string, job: Job, cursorRef: string | undefined): Promise<boolean | undefined | null> {
+  if (cursorRef === undefined) return undefined;
+  if (job.status !== "pending") return null;
+  const manifest = await readJobManifest(vaultRoot, job);
+  const attachmentCount = "documentAttachments" in manifest ? manifest.documentAttachments?.length ?? 0 : 0;
+  return jobCursorRef(job, attachmentCount) === cursorRef ? cursorRef.startsWith("resource:") : null;
 }
 
 export async function deferClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string; nextAttemptAt: string; cursorRef?: string }) {
   return locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
-    if (cursorMoved(job, input.cursorRef)) return { status: job.status, nextAttemptAt: job.nextAttemptAt };
+    const structured = await settledCursorKind(input.vaultRoot, job, input.cursorRef);
+    if (structured === null) return { status: job.status, nextAttemptAt: job.nextAttemptAt };
     if (job.status !== "pending") throw new Error("Only unprepared clinical enrichment can defer extraction.");
     job.failures++;
     job.reason = input.reason;
-    if (job.failures >= 3) holdCurrentSource(job, "Clinical extraction exceeded three provider attempts.");
+    if (job.failures >= 3) holdCurrentSource(job, "Clinical extraction exceeded three provider attempts.", structured);
     else job.nextAttemptAt = input.nextAttemptAt;
     await saveJob(input.vaultRoot, job);
     return { status: job.status, nextAttemptAt: job.nextAttemptAt };
@@ -908,10 +922,12 @@ function holdCurrentSource(job: Job, reason: string, structured?: boolean) {
 export async function blockClinicalEnrichment(input: { vaultRoot: string; jobId: string; reason: string; cursorRef?: string }): Promise<void> {
   await locked(input.vaultRoot, async () => {
     const job = await readJob(input.vaultRoot, input.jobId);
-    if (job.status === "complete" || cursorMoved(job, input.cursorRef)) return;
+    if (job.status === "complete") return;
+    const structured = await settledCursorKind(input.vaultRoot, job, input.cursorRef);
+    if (structured === null) return;
     if (job.status === "prepared") throw new Error("Accepted clinical enrichment proposals must be applied before blocking.");
     job.reason = input.reason;
-    holdCurrentSource(job, input.reason);
+    holdCurrentSource(job, input.reason, structured);
     await saveJob(input.vaultRoot, job);
   });
 }

@@ -6,7 +6,7 @@ import { hashClinicalFhirBaseUrl, hashClinicalFhirPatientId, type ClinicalDocume
 import { initializeVault } from "@murphai/core";
 import { listCanonicalEntities } from "@murphai/query";
 import { importClinicalFhirSnapshot, type ClinicalFhirSnapshotImportInput } from "@murphai/vault-usecases/clinical-records";
-import { applyClinicalEnrichmentProposals, enqueueClinicalEnrichment, readNextClinicalEnrichment, readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
+import { applyClinicalEnrichmentProposals, deferClinicalEnrichment, enqueueClinicalEnrichment, planClinicalExtractionUnits, readNextClinicalEnrichment, readClinicalEnrichmentStatus } from "@murphai/vault-usecases/clinical-enrichment";
 import { runCursorClinicalEnrichment } from "./clinical-enrichment-source.fixture.ts";
 import type { HostedClinicalEnrichmentInput } from "../src/hosted-runtime/clinical-enrichment.ts";
 
@@ -343,4 +343,25 @@ it.each([
   }] });
   await runCursorClinicalEnrichment(f.runtime);
   expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({ canonical: null, counts: { held: 1 } });
+});
+
+it("exhausts a structured resource's retries by resource before its cursor source is initialized", async () => {
+  const f = await fixture([source("first-narrative"), source("second-narrative")]);
+  const plan = () => planClinicalExtractionUnits({ vaultRoot: f.vaultRoot, limit: 10, countPages: async () => 1,
+    now: new Date("2030-01-01T00:00:00.000Z") });
+  // No cursor read first: the apply wake has not initialized the job's source.
+  const [first, second] = await plan();
+  expect([first?.cursorRef, first?.cursor, second?.cursorRef, second?.cursor]).toEqual(["resource:0", true, "resource:1", false]);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await deferClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId: f.jobId, reason: "Synthetic invalid output.",
+      nextAttemptAt: "2026-07-01T12:01:00.000Z", cursorRef: first!.cursorRef });
+  }
+  // The exhausted resource is held and the cursor moves to the next resource, not a phantom attachment.
+  expect(await readClinicalEnrichmentStatus(f)).toMatchObject({ status: "pending", counts: { held: 1 }, nextAttemptAt: undefined });
+  const [next] = await plan();
+  expect(next).toMatchObject({ cursorRef: "resource:1", cursor: true, failures: 0 });
+  expect(await readNextClinicalEnrichment(f)).toMatchObject({ status: "extract", source: { resource: { resourceId: "second-narrative" } } });
+  // The next resource keeps normal retry handling.
+  expect(await deferClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId: f.jobId, reason: "Synthetic retry.",
+    nextAttemptAt: "2026-07-01T12:02:00.000Z", cursorRef: next!.cursorRef })).toMatchObject({ nextAttemptAt: "2026-07-01T12:02:00.000Z" });
 });

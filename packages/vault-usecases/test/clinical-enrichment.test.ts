@@ -507,7 +507,7 @@ describe("clinical extraction lookahead", () => {
   it("plans the cursor first, then later pages, skipping cached and excluded units", async () => {
     const input = await fixture();
     const units = await plan(input);
-    expect(units.map((unit) => [unit.page, unit.cursor, unit.cursorRef, unit.failures])).toEqual([[1, true, "0:0:1", 0], [2, false, "0:0:2", 0], [3, false, "0:0:3", 0]]);
+    expect(units.map((unit) => [unit.page, unit.cursor, unit.cursorRef, unit.failures])).toEqual([[1, true, "document:0:1", 0], [2, false, "document:0:2", 0], [3, false, "document:0:3", 0]]);
     expect(units.every((unit) => unit.jobId === input.jobId && unit.source.sha256 === input.sha256)).toBe(true);
     expect(await saveClinicalExtraction({ vaultRoot: input.vaultRoot, unit: units[1]!, totalPages: 3, outputs: vitals(2) })).toBe("saved");
     expect((await plan(input)).map((unit) => unit.page)).toEqual([1, 3]);
