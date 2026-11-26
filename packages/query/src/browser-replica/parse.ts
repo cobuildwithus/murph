@@ -57,10 +57,16 @@ import {
   requireBrowserVaultMetricBucketId,
   type BrowserVaultMetricBucketId,
 } from "./metric-buckets.ts";
-import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
+import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA, labFastingStatus, labParentResultStatus } from "./lab-results.ts";
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
 
 /** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+const activitySessionsSchema = z.array(z.object({
+  type: z.enum(["run", "walk", "sauna", "hiit", "basketball", "other"]),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  minutes: z.number().positive().max(1440),
+}).strict());
+
 const companionRunsProjectionSchema = z.object({
   schemaVersion: z.literal(1),
   days: z.array(z.object({
@@ -105,6 +111,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
@@ -148,6 +155,7 @@ export function parseBrowserVaultCoreShard(
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
@@ -541,6 +549,8 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
     biomarkerKey: readNullableString(record.biomarkerKey),
     comparator: readNullableMetricComparator(record.comparator, `${label}.comparator`),
     date: requireString(record.date, `${label}.date`),
+    drawId: record.drawId == null ? null : requireString(record.drawId, `${label}.drawId`),
+    fastingStatus: labFastingStatus(record.fastingStatus),
     flag: readNullableString(record.flag),
     id: requireString(record.id, `${label}.id`),
     labName: readNullableString(record.labName),
@@ -548,6 +558,7 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
     normalizedUnit,
     normalizedValue,
     observedAt: requireString(record.observedAt, `${label}.observedAt`),
+    parentResultStatus: labParentResultStatus(record.parentResultStatus),
     referenceRange: readNullableReferenceRange(record.referenceRange, `${label}.referenceRange`),
     rowSchema,
     sourceLabel: readNullableString(record.sourceLabel),

@@ -6716,6 +6716,110 @@ journeys after corrections. A new route resolves at most eleven provider calls,
 at most two concurrently, before its authority-checked state write. The ordered award snapshot preserves historical presentation. All vault,
 provider and cryptographic work stays outside committing transactions.
 
+## Health wins
+
+Web owns suggestions, posts, comments, cheers, hides and photo attachments under
+`/api/game/v1/health`. The authenticated member's `health_feed` flag gates the
+routes. Disabled routes return 404. Reading private suggestions also requires
+Browser Vault authority.
+
+### Audience and disclosure
+
+A post is visible to its author and current game partners. Web checks for joined,
+present seats in the same live or settled game, excludes cancelled games, and
+applies current account eligibility, the rollout allowlist and the author's
+health consent. A game block or health-feed hide in either direction excludes
+the other member. The feed evaluates eligibility in SQL and returns up to 20
+posts, ordered by `created_at` and `id` descending. PostgreSQL seeks up to 21 rows per
+eligible author and merges those results before fetching post content. The
+feed opens up to 20 captions, 240 cards and 20 profile names in batches. A
+final database check considers only the selected posts and verifies their
+versions. The encrypted cursor binds the last scanned date and ID to its
+viewer and collection, so a page that loses every post during decryption can
+still advance. There is no limit on the number of partners who can qualify.
+
+Each comment requires access to the live parent post. A poster-only comment
+is visible to the poster and its writer. Blocks and hides also apply between
+the reader and the commenter and between the poster and the commenter. A
+commenter must be the poster or the poster's current game partner. Web pages
+comments and rechecks their visibility after opening the content. Post details,
+attachment reads and push delivery use the same access decisions. Profile numbers come from
+`readPairBoard` under existing per-person grants. After consent withdrawal,
+members can list their own post IDs, timestamps and versions for deletion.
+Post content stays sealed. Members can also delete their own comments.
+Members can hide a visible game partner or the writer of a visible comment.
+Settings lists up to 500 outgoing hides. Each target ID remains available for
+undo. Name and avatar appear while the viewer would otherwise see that person.
+
+### Preparing and publishing cards
+
+A request shares one Browser Vault decode across its wearable, lab and
+experiment readers. Wearables select provider and measurement method before
+daily aggregation. Browser Vault projection generation 20 carries draw
+identity, fasting state and parent result status. Older replicas can omit these fields, in which
+case the affected claim is withheld. Each experiment result uses its recorded
+outcome metric and units.
+Game inputs reuse Progress day, contribution, round-total, ladder and vault-run
+calculations. An over-limit game history withholds game cards to avoid
+presenting a partial lifetime total. Reading suggestions never settles an award.
+
+The pure engine ranks up to 24 eligible cards and balances the first 12 across
+available categories. With `MURPH_HEALTH_WINS_RANKING=true`,
+Decisions receives one call with the fixed category and detector labels and a
+three-second deadline. Failures use the engine's order. A source failure can
+omit that source. An input timeout returns the last available set, or a retryable
+503 if the member has none. Loss of member authority ends the read.
+Health reads recheck session validity without taking member or session row
+locks. Writes retain those locks through commit.
+Daily candidate sets track the replica, game inputs, ready route painting
+and detector version. The keyed lookup `health_win_set.source_revision` binds
+those inputs' revisions to the member. A conditional write publishes a replacement
+only if the revision observed before computation is still current.
+
+To publish a card the client submits its candidate ID, option and opaque set
+revision. A superseded set returns 409. The post freezes each selected spec
+and its revision in one envelope. Removing numbers removes the underlying
+values, chart points and tooltip values before publication. For cumulative
+distance, Web includes a ready Progress painting's immutable URL inside the
+sealed chart. Looking up that painting only reads existing route state and art.
+Clients render unknown charts with the title, subtitle and an update note.
+The server stores no card images.
+
+### Storage and lifecycle
+
+The classification below covers the six Health wins tables. Approved metadata
+supports ownership, access, ordering and retry checks. Content is sealed under
+the author's member-private-field key with the `health-post` scope and the
+table, row and field bound to the envelope. Web batches crypto outside
+database transactions.
+
+| Table | Encrypted content | Approved operational metadata |
+| --- | --- | --- |
+| `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card) | `id` is the client's replay key. `author_member_id` owns it. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
+| `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
+| `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
+| `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
+| `health_win_set` | `candidates_encrypted`, including unpublished card specs and options | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
+| `health_post_attachment` | `storage_key_encrypted` identifies the reserved Progress object. Its sealed JPEG bytes live in the object store. | `id` identifies the attachment, `member_id` owns it, nullable `post_id` binds it to a post, `status` tracks its lifecycle and `created_at` records admission. |
+
+Post and comment IDs bind a retry to its actor and target. Deletion keeps a
+tombstone so delayed requests cannot recreate content. Post edits compare
+`expectedVersion` with the stored version. The mutation that creates a
+comment or admits an hourly cheer notification also claims its push.
+`deliverGamePush` rechecks health access after commit.
+
+Web strips photo metadata and registers a random exclusive key before
+uploading the sealed JPEG to the Progress store. The reservation transaction
+admits up to 20 pending or ready unpublished photos per member. Publication
+binds the ready attachment to its owner's post. Retirement closes reads before
+purge. Account deletion retires and purges the member's attachments before
+member-owned rows and keys cascade.
+A failed purge preserves its cleanup record for retry. Deploy the compatible
+Progress store and deletion-aware Web server before enabling uploads, and
+retain that cleanup capability on rollback.
+
+See the [Health wins product spec](agent-docs/product-specs/health-wins.md).
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`

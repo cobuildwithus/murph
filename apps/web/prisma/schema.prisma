@@ -739,6 +739,13 @@ model HostedMember {
   progressPics                   GameProgressPic[]
   progressShares                 GameProgressShare[]
   progressSharePhotos            GameProgressSharePhoto[]
+  healthPosts                    HealthPost[]
+  healthPostComments             HealthPostComment[]
+  healthPostCheers               HealthPostCheer[]
+  healthPostAttachments          HealthPostAttachment[]
+  healthFeedHides                HealthFeedHide[]                @relation("HealthHideOwner")
+  healthFeedHiddenBy             HealthFeedHide[]                @relation("HealthHideSubject")
+  healthWinSets                  HealthWinSet[]
   progressTaskMeasures           GameProgressTaskMeasure[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
@@ -3291,6 +3298,94 @@ model GameProgressSharePhoto {
 
   @@index([memberId, status])
   @@map("game_progress_share_photo")
+}
+
+model HealthPost {
+  id                 String                @id @db.Uuid
+  authorMemberId     String                @map("author_member_id")
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt          DateTime?             @map("deleted_at") @db.Timestamptz(3)
+  version            Int                   @default(1)
+  captionEncrypted   String?               @map("caption_encrypted")
+  cardsEncrypted     String[]              @default([]) @map("cards_encrypted")
+  cheerPushClaimedAt DateTime?             @map("cheer_push_claimed_at") @db.Timestamptz(3)
+  author             HostedMember          @relation(fields: [authorMemberId], references: [id], onDelete: Cascade)
+  cheers             HealthPostCheer[]
+  comments           HealthPostComment[]
+  attachment         HealthPostAttachment?
+
+  @@index([deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorMemberId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("health_post")
+}
+
+model HealthPostCheer {
+  postId    String       @map("post_id") @db.Uuid
+  memberId  String       @map("member_id")
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  post      HealthPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  member    HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([postId, memberId])
+  @@index([memberId])
+  @@map("health_post_cheer")
+}
+
+model HealthPostComment {
+  id             String       @id @db.Uuid
+  postId         String       @map("post_id") @db.Uuid
+  authorMemberId String       @map("author_member_id")
+  visibility     String       @default("everyone")
+  bodyEncrypted  String?      @map("body_encrypted")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(3)
+  pushClaimedAt  DateTime?    @map("push_claimed_at") @db.Timestamptz(3)
+  author         HostedMember @relation(fields: [authorMemberId], references: [id], onDelete: Cascade)
+  post           HealthPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([authorMemberId])
+  @@map("health_post_comment")
+}
+
+model HealthFeedHide {
+  memberId       String       @map("member_id")
+  hiddenMemberId String       @map("hidden_member_id")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  member         HostedMember @relation("HealthHideOwner", fields: [memberId], references: [id], onDelete: Cascade)
+  hiddenMember   HostedMember @relation("HealthHideSubject", fields: [hiddenMemberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, hiddenMemberId])
+  @@index([hiddenMemberId, memberId])
+  @@map("health_feed_hide")
+}
+
+model HealthWinSet {
+  memberId            String       @map("member_id")
+  day                 String       @db.VarChar(10)
+  revision            String       @db.Uuid
+  sourceRevision      String       @map("source_revision")
+  candidatesEncrypted String       @map("candidates_encrypted")
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  checkedAt           DateTime     @default(now()) @map("checked_at") @db.Timestamptz(3)
+  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, day])
+  @@map("health_win_set")
+}
+
+model HealthPostAttachment {
+  id                  String       @id @db.Uuid
+  memberId            String       @map("member_id")
+  postId              String?      @unique @map("post_id") @db.Uuid
+  storageKeyEncrypted String       @map("storage_key_encrypted")
+  status              String
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  member              HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  post                HealthPost?  @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, status, createdAt])
+  @@map("health_post_attachment")
 }
 
 /// Shared, non-personal place art: one poster per public place, one painting per route map.

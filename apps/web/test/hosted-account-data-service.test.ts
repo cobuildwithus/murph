@@ -57,6 +57,7 @@ const serviceMocks = vi.hoisted(() => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx: vi.fn(),
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   prepareGameAccountDeletion: vi.fn(),
+  deleteHealthAttachmentsForAccount: vi.fn(),
   deleteProgressPicsForAccount: vi.fn(),
   deleteProgressSharesForAccount: vi.fn(),
   deleteSharePhotosForAccount: vi.fn(),
@@ -199,6 +200,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 
 vi.mock("@/src/lib/game/progress/share-cleanup", () => ({ deleteProgressSharesForAccount: serviceMocks.deleteProgressSharesForAccount,
   deleteSharePhotosForAccount: serviceMocks.deleteSharePhotosForAccount }));
+vi.mock("@/src/lib/health-wins/media", () => ({ deleteHealthAttachmentsForAccount: serviceMocks.deleteHealthAttachmentsForAccount }));
 vi.mock("@/src/lib/game/progress/pics", () => ({ deleteProgressPicsForAccount: serviceMocks.deleteProgressPicsForAccount }));
 
 vi.mock("@/src/lib/game/account-deletion", () => ({
@@ -239,6 +241,12 @@ import {
 } from "@/src/lib/hosted-privacy/account-data-service";
 
 const REQUIRED_STORE_SLUGS = [
+  "prisma.health_post",
+  "prisma.health_post_comment",
+  "prisma.health_post_cheer",
+  "prisma.health_feed_hide",
+  "prisma.health_win_set",
+  "prisma.health_post_attachment",
   "prisma.hosted_member",
   "prisma.hosted_sensitive_action_challenge",
   "prisma.hosted_member_identity",
@@ -551,6 +559,8 @@ beforeEach(() => {
   serviceMocks.deleteProgressSharesForAccount.mockResolvedValue(undefined);
   serviceMocks.deleteSharePhotosForAccount.mockReset();
   serviceMocks.deleteSharePhotosForAccount.mockResolvedValue(undefined);
+  serviceMocks.deleteHealthAttachmentsForAccount.mockReset();
+  serviceMocks.deleteHealthAttachmentsForAccount.mockResolvedValue(undefined);
   serviceMocks.deleteProgressPicsForAccount.mockReset();
   serviceMocks.deleteProgressPicsForAccount.mockResolvedValue(undefined);
   serviceMocks.prepareGameAccountDeletion.mockReset();
@@ -1060,17 +1070,24 @@ describe("deleteHostedAccountData", () => {
     );
   });
 
-  it("retires Progress objects before member cascades and stops deletion when retirement fails", async () => {
+  it("retires health and Progress objects before member cascades and stops deletion when retirement fails", async () => {
     const order: string[] = [];
+    serviceMocks.deleteHealthAttachmentsForAccount.mockImplementation(async () => { order.push("retire:health-photos"); });
     serviceMocks.deleteProgressSharesForAccount.mockImplementation(async () => { order.push("retire:progress-shares"); });
     serviceMocks.deleteSharePhotosForAccount.mockImplementation(async () => { order.push("retire:share-photos"); });
     serviceMocks.deleteProgressPicsForAccount.mockImplementation(async () => { order.push("retire:progress-pics"); });
     const prisma = createHostedAccountDeletionPrismaForTest({ onTransaction: () => {}, operationOrder: order });
     await deleteHostedAccountData({ memberId: "member_123", prisma, request: new Request("https://join.example.test/settings") });
-    expect(order.indexOf("retire:progress-shares")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("retire:health-photos")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("retire:health-photos")).toBeLessThan(order.indexOf("retire:progress-shares"));
     expect(order.indexOf("retire:progress-shares")).toBeLessThan(order.indexOf("retire:share-photos"));
     expect(order.indexOf("retire:share-photos")).toBeLessThan(order.indexOf("retire:progress-pics"));
     expect(order.indexOf("retire:progress-pics")).toBeLessThan(order.indexOf("delete:hostedMember"));
+    order.length = 0;
+    serviceMocks.deleteHealthAttachmentsForAccount.mockRejectedValueOnce(new Error("Attachment purge interrupted."));
+    await expect(deleteHostedAccountData({ memberId: "member_123", prisma: createHostedAccountDeletionPrismaForTest({ onTransaction: () => {}, operationOrder: order }),
+      request: new Request("https://join.example.test/settings") })).rejects.toThrow("Attachment purge interrupted.");
+    expect(order).not.toContain("delete:hostedMember");
     order.length = 0;
     serviceMocks.deleteProgressSharesForAccount.mockRejectedValueOnce(new Error("Share retirement failed."));
     await expect(deleteHostedAccountData({ memberId: "member_123", prisma: createHostedAccountDeletionPrismaForTest({ onTransaction: () => {}, operationOrder: order }),

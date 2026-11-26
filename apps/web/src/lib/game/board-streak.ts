@@ -4,7 +4,7 @@ import type { Day } from "./progress/contract";
 interface StreakDay { date: Day; done: boolean; ended: boolean }
 
 /** One date succeeds only when every game obligation on it succeeds. */
-function obligationDays(games: readonly GameDaysSource[], memberId: string): StreakDay[] | null {
+export function obligationDays(games: readonly GameDaysSource[], memberId: string): StreakDay[] | null {
   const dates = new Map<Day, StreakDay>();
   for (const game of games) {
     const days = gameDays(game, memberId);

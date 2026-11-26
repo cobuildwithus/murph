@@ -127,31 +127,10 @@ export async function readSavedCompanionBody(memberId: string, signal: AbortSign
 
 async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: readonly MetricId[] = allMetrics, replicaState?: ReplicaState) {
   try {
-    const workspace = replicaState === undefined ? await readHostedBrowserVaultReplicaState({ userId: memberId }) : replicaState;
-    const replicaRef = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Companion numbers replica");
-    if (!replicaRef) return null;
-    const control = readHostedExecutionControlClientIfConfigured();
-    if (!control) throw numbersUnavailable("control_unconfigured");
-    const requestedMetricBuckets = [...new Set(await Promise.all(
-      metrics.map(id => getBrowserVaultMetricBucketId(COMPANION_HEALTH_METRICS[id].key)),
-    ))].sort();
-    const keys = await generateHostedUserRecipientKeyPair();
-    const session = parseBrowserVaultSessionResponse({
-      ...await control.createBrowserVaultSession({
-        browserPublicKeyJwk: keys.publicKeyJwk, replicaRef, requestedShards, requestedMetricBuckets, userId: memberId,
-      }),
-      freshness: assessBrowserVaultReplicaFreshness({ now: new Date().toISOString(), replicaRef }).freshness,
-      refreshPending: false,
-      deviceSyncImportPending: false,
-      workspaceVersion: workspace?.version ?? null,
+    const saved = await loadPublishedCompanionMetricReplica({
+      memberId, signal, metricKeys: metrics.map(id => COMPANION_HEALTH_METRICS[id].key), requestedShards, replicaState,
     });
-    if (session.state !== "ready") return null;
-    const loaded = await decodeReadyBrowserVaultSession({
-      session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId,
-      requestedShards, requestedMetricBuckets, signal,
-    });
-    if (!("metrics" in loaded.client)) throw numbersUnavailable("replica_metrics_missing");
-    return { client: loaded.client, freshness: session.freshness };
+    return saved.state === "ready" ? saved : null;
   } catch (error) {
     if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) return null;
     // Keep this read's own stage; every other failure stays a retryable 503.
@@ -159,6 +138,42 @@ async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: 
     // Decrypt/transport failures may contain private paths or signed URLs.
     throw numbersUnavailable(describeCompanionProjectionFailure(error));
   }
+}
+
+/** Shared saved-replica transport. Callers own the authority checks on both sides of this load. */
+export async function loadPublishedCompanionMetricReplica({
+  memberId, signal, metricKeys, requestedShards, replicaState, timeoutMs,
+}: {
+  memberId: string; signal: AbortSignal; metricKeys: readonly string[];
+  requestedShards: readonly ("core" | "metricsIndex" | "labs")[]; replicaState?: ReplicaState; timeoutMs?: number;
+}) {
+  const workspace = replicaState === undefined ? await readHostedBrowserVaultReplicaState({ userId: memberId }) : replicaState;
+  const replicaRef = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Companion numbers replica");
+  if (!replicaRef) return { state: "unpublished" } as const;
+  const control = readHostedExecutionControlClientIfConfigured(timeoutMs);
+  if (!control) throw numbersUnavailable("control_unconfigured");
+  const requestedMetricBuckets = [...new Set(await Promise.all(
+    metricKeys.map(key => getBrowserVaultMetricBucketId(key)),
+  ))].sort();
+  signal.throwIfAborted();
+  const keys = await generateHostedUserRecipientKeyPair();
+  const session = parseBrowserVaultSessionResponse({
+    ...await control.createBrowserVaultSession({
+      browserPublicKeyJwk: keys.publicKeyJwk, replicaRef, requestedShards, requestedMetricBuckets, userId: memberId,
+    }),
+    freshness: assessBrowserVaultReplicaFreshness({ now: new Date().toISOString(), replicaRef }).freshness,
+    refreshPending: false,
+    deviceSyncImportPending: false,
+    workspaceVersion: workspace?.version ?? null,
+  });
+  if (session.state !== "ready") return { state: "not_ready" } as const;
+  signal.throwIfAborted();
+  const loaded = await decodeReadyBrowserVaultSession({
+    session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId,
+    requestedShards, requestedMetricBuckets, signal,
+  });
+  if (!("metrics" in loaded.client)) throw numbersUnavailable("replica_metrics_missing");
+  return { state: "ready", client: loaded.client, freshness: session.freshness } as const;
 }
 
 export type RawHealthPoint = { date: string; value: number; source: string | null; observedAt: string };

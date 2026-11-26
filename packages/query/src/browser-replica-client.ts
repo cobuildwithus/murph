@@ -1,3 +1,4 @@
+export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
 export {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,

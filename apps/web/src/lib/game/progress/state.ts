@@ -5,7 +5,7 @@ import { getPrisma } from "../../prisma";
 import { hostedOnboardingError } from "../../hosted-onboarding/errors";
 import type { Day } from "./contract";
 import type { FoundEntry } from "./bank";
-import { openProgress, progressLookup, sealProgress } from "./crypto";
+import { openProgress, openProgressMany, progressLookup, sealProgress } from "./crypto";
 
 export type BeforeProgressMutation = (tx: Prisma.TransactionClient) => Promise<void>;
 export interface RouteLeg {
@@ -32,6 +32,17 @@ export interface MeasureState {
   vaultRuns?: { savedAt: string; days: [Day, number][] };
   /** Running only: vault runs count from this day, the member's join day, as Steps do. Absent: every vault run counts. */
   runsFrom?: Day;
+}
+
+/** Read only the requested measures. An unset measure has empty state. */
+export async function readMeasureStates(memberId: string, ids: readonly string[], signal?: AbortSignal): Promise<Map<string, MeasureState>> {
+  const lookups = ids.map(id => progressLookup(memberId, "measure", [id]));
+  const rows = await getPrisma().gameProgressMeasure.findMany({ where: { memberId, lookup: { in: lookups } },
+    take: ids.length, select: { lookup: true, stateEncrypted: true } });
+  const opened = await openProgressMany<MeasureState>(rows.map(row => ({ memberId, table: "game_progress_measure",
+    rowId: row.lookup, field: "state", value: row.stateEncrypted })), false, signal);
+  const byLookup = new Map(rows.map((row, index) => [row.lookup, opened[index]]));
+  return new Map(ids.map((id, index) => [id, byLookup.get(lookups[index]) ?? {}]));
 }
 
 /** One state writer. Fields replace whole fields; an eligible baseline freezes once. */

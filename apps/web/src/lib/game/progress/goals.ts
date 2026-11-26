@@ -18,6 +18,7 @@ import { cumulativePoints, type MeasureSeries } from "./series";
 import { readOwnSeries } from "./vault-runs";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import { readRouteGoals, setRouteGoal } from "./routes";
+import type { AchievementContext } from "./registry";
 import { progressLookup } from "./crypto";
 import { memberPlaceFixer } from "./place-fix";
 
@@ -37,6 +38,18 @@ export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id
       if (value > total) return values;
     }
   }
+}
+
+export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
+  return { measures: measures.map(measure => {
+    const points = cumulativePoints(measure.amounts);
+    const total = points.at(-1)?.[1] ?? 0;
+    return { id: measure.id, unit: measure.unit, noun: measure.unit === "days" ? measure.label.toLowerCase() : measure.noun, pending: measure.pending, points,
+      rungs: measureRungs(measure, states.get(measure.id) ?? {}),
+      legs: states.get(measure.id)?.legs ?? [],
+      rounds: roundValues(total, measure).filter(at => at <= total),
+    };
+  }) };
 }
 
 export function projection(measure: MeasureSeries, today: string, units: ClientUnits) {

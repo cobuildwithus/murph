@@ -158,6 +158,9 @@ test("browser vault projects all live lab history without widening the wearable 
   assert.equal(oldestHba1c.normalizedValue, 5.4);
   assert.equal(oldestHba1c.normalizedUnit, "percent");
   assert.equal(oldestHba1c.specimenKind, "serum");
+  assert.equal(oldestHba1c.fastingStatus, "fasting");
+  assert.ok(oldestHba1c.drawId);
+  assert.equal(new Set(client.labResults.list({ metricKey: "hba1c" }).map((row) => row.drawId)).size, 4);
   assert.deepEqual(oldestHba1c.referenceRange, {
     high: 5.6,
     low: 4,
@@ -513,6 +516,9 @@ test("lab projection keeps every analyte from one multi-result panel joined by r
     sourceBundleHash: "b".repeat(64),
     vault,
   });
+  const rows = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica)).labResults.list();
+  assert.match(rows[0]?.drawId ?? "", /^draw:[0-9a-f]{16}$/u);
+  assert.equal(rows[1]?.drawId, rows[0]?.drawId);
 
   assert.deepEqual(
     replica.labResultRows
@@ -573,6 +579,11 @@ test("browser vault parser defaults a missing additive lab collection and reject
   );
   const row = replica.labResultRows[0];
   assert.ok(row);
+  const { drawId, fastingStatus, parentResultStatus, ...legacyRow } = row;
+  const parsed = parseBrowserVaultReplica({ ...replica, labResultRows: [legacyRow] });
+  assert.equal(parsed.labResultRows[0]?.drawId, null);
+  assert.equal(parsed.labResultRows[0]?.fastingStatus, "unknown");
+  assert.equal(parsed.labResultRows[0]?.parentResultStatus, "unknown");
   assert.throws(
     () =>
       parseBrowserVaultReplica({

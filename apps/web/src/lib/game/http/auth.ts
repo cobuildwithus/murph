@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../../better-auth/native-auth";
+import { assertHostedNativeMemberAuthCurrentForRead, assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../../better-auth/native-auth";
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { requireHostedMemberAuthFromBearerToken } from "../../hosted-onboarding/request-auth";
 import { hasHostedConsentAtPublishedVersions, readHostedConsentStatus } from "../../legal/consent";
@@ -34,6 +34,10 @@ export async function assertGameMemberAuthCurrentTx(auth: HostedNativeMemberAuth
   } catch (error) {
     throwGameAuthError(error);
   }
+}
+
+export function assertGameMemberAuthCurrentForRead(auth: HostedNativeMemberAuth, db: Prisma.TransactionClient): Promise<void> {
+  return assertHostedNativeMemberAuthCurrentForRead(auth, db).catch(throwGameAuthError);
 }
 
 function throwGameAuthError(error: unknown): never {

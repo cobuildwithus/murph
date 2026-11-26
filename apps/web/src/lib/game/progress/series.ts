@@ -133,29 +133,38 @@ export function cumulativePoints(amounts: readonly DayAmount[]): [string, number
   return [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => [date, total += amount]);
 }
 
-/** Own history survives departure and a game's voiding. */
-export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming(), stateIds: readonly string[] = []) {
+export interface GameSeriesLimits { games: number; entries: number; awards: number; measures: number }
+
+/** All-or-nothing limits keep lifetime totals from becoming plausible partial totals. */
+export async function readGameSeriesFacts(memberId: string, clock: Date, timing: ProgressReadTiming,
+  stateIds: readonly string[], limits?: GameSeriesLimits, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const db = getPrisma();
   const games = await db.game.findMany({
     where: { players: { some: { memberId, dayOne: { not: null } } }, status: { in: ["live", "settled", "void"] } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    ...(limits && { take: limits.games + 1 }),
     select: { id: true, createdBy: true, status: true, maxPlayers: true, lengthDays: true, terms: true,
       termsWordsEncrypted: true, wordsOwnerMemberId: true, startsOn: true, settledAt: true, devClockOffsetMs: true,
       events: { where: { type: { in: ["cancelled", "blocked"] } }, orderBy: { id: "desc" }, take: 1, select: { createdAt: true } },
       players: { take: 10, select: { memberId: true, seat: true, dayOne: true, timeZone: true, joinedAt: true, leftAt: true } } },
   });
+  signal?.throwIfAborted();
+  if (limits && games.length > limits.games) throw new Error("Game series exceeds its game budget.");
   timing.counts.games = games.length;
   const entries = await db.gameEntry.findMany({ where: { memberId, gameId: { in: games.map(game => game.id) } },
     orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
+    ...(limits && { take: limits.entries + 1 }),
     select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
       receivedAt: true, withdrawnAt: true, payloadEncrypted: true },
   });
+  if (limits && entries.length > limits.entries) throw new Error("Game series exceeds its entry budget.");
   timing.counts.entries = entries.length;
   const typed = entries.filter(entry => entry.attempt > 0 && !entry.incomplete && !entry.withdrawnAt && ["reps", "route"].includes(entry.kind));
   const plain = await openGameTexts([
     ...games.map(game => ({ memberId: game.wordsOwnerMemberId, table: "game" as const, rowId: game.id, field: "terms_words", value: game.termsWordsEncrypted })),
     ...typed.map(entry => ({ memberId, table: "game_entry" as const, rowId: entry.id, field: "payload", value: entry.payloadEncrypted })),
-  ]);
+  ], signal);
   const payloads = new Map(typed.map((entry, i) => [entry.id, JSON.parse(plain[games.length + i]!) as GameEntryData]));
   const tasks = new Map<string, ProgressTask>();
   const facts: ProgressGame[] = games.map((game, i) => {
@@ -186,8 +195,9 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
       entries: entries.filter(entry => entry.gameId === game.id).map(entry => ({ ...entry, kind: entry.kind as GameEntryKind, mediaKeys: [], blurHash: null })) },
     };
   });
+  if (limits && tasks.size > limits.measures) throw new Error("Game series exceeds its task budget.");
   const cached = await db.gameProgressTaskMeasure.findMany({ where: { memberId, lookup: { in: [...tasks.keys()] } }, select: { lookup: true, measureEncrypted: true } });
-  const inferred = await openProgressMany<InferredMeasure>(cached.map(row => ({ memberId, table: "game_progress_task_measure", rowId: row.lookup, field: "measure", value: row.measureEncrypted })));
+  const inferred = await openProgressMany<InferredMeasure>(cached.map(row => ({ memberId, table: "game_progress_task_measure", rowId: row.lookup, field: "measure", value: row.measureEncrypted })), false, signal);
   const byLookup = new Map(cached.map((row, i) => [row.lookup, inferred[i]]));
   for (const game of facts) for (const task of game.tasks.values()) task.inferred = byLookup.get(task.lookup) ?? null;
   const ids = new Set(facts.flatMap(game => [...game.tasks.values()].flatMap(task => [taskMeasureId(task), `${task.inferred?.name ?? `h${task.lookup.slice(-12)}`}.reps`])));
@@ -195,14 +205,21 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
     if ("count" in payload) ids.add(READERS[0].measureId(payload));
     else if ("distanceM" in payload) ids.add(READERS[1].measureId(payload));
   }
-  const awards = await timing.measure("awards", () => readAwards(memberId));
+  const awards = await timing.measure("awards", () => readAwards(memberId, limits?.awards, signal));
   const savedMeasures = new Set(awards.flatMap(award => award.measureId && ["landmark", "time", "route"].includes(award.kind)
     && ["reps", "seconds", "meters", "steps"].includes(award.measureId.split(".")[1]) ? [award.measureId] : []));
   for (const id of [...savedMeasures, ...stateIds]) ids.add(id);
+  if (limits && ids.size > limits.measures) throw new Error("Game series exceeds its measure budget.");
   const lookups = new Map([...ids].map(id => [progressLookup(memberId, "measure", [id]), id]));
   const stateRows = await db.gameProgressMeasure.findMany({ where: { memberId, lookup: { in: [...lookups.keys()] } }, select: { lookup: true, stateEncrypted: true } });
-  const openedStates = await openProgressMany<MeasureState>(stateRows.map(row => ({ memberId, table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })));
+  const openedStates = await openProgressMany<MeasureState>(stateRows.map(row => ({ memberId, table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })), false, signal);
   const states = new Map(stateRows.map((row, i) => [lookups.get(row.lookup)!, openedStates[i]]));
+  return { facts, states, awards, savedMeasures, tasks, byLookup };
+}
+
+/** Own history survives departure and a game's voiding. */
+export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming(), stateIds: readonly string[] = []) {
+  const { facts, states, awards, savedMeasures, tasks, byLookup } = await readGameSeriesFacts(memberId, clock, timing, stateIds);
   const untyped = new Set<string>();
   for (const game of facts) {
     const entries = indexGameEntries(game.state.entries);

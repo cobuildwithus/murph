@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-11-16
+Last verified: 2026-11-25
 
 ## Purpose
 
@@ -144,6 +144,11 @@ The Settings vault export does not include:
    source/target identity, routing, and email-authorization snapshot, then
    allocates both mailbox sequences and inserts the prepared row atomically
    with the other database-only mutations.
+   After suspension and before cascading Health wins rows or deleting their
+   owner's keys, Web retires the member's photo attachments and purges their
+   sealed objects from the Progress store. Each attempt handles up to 50
+   attachments per member and retains the record for any failed purge. A full
+   page with more work returns a retryable response before the cascade.
    The game owner prepares shared-word transfers and viewer-private departure
    labels before this transaction. Under ordered game locks it revalidates the
    snapshot, transfers encryption ownership to the lowest-seat survivor, deletes
@@ -165,6 +170,8 @@ The Settings vault export does not include:
 
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
+| Health wins posts, comments, cheers, hides and win sets | Cascade from member or parent post | Outside the vault-only Settings export | Deletes the member's posts and comments, activity on their posts, their cheers, hides involving them in either direction, and their suggestion sets. |
+| Health wins photo attachments and sealed Progress objects | Retire and purge before member cascade | Outside the vault-only Settings export | Attachment ownership and the sealed storage key survive a failed purge. The object lifecycle covers staged, published and retired photos. |
 | Weekly game replies (`game_reply`) | Cascade from author profile or parent entry/game | Not included in the vault-only Settings export | Encrypted text or inline AAC audio, no transcript. Report evidence is reporter-owned and follows report lifetime. |
 | `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row, including companion contact timestamps and latest client platform/version/build/OS/model, after explicit child cleanup. These diagnostics are omitted from the vault-only Settings export. Prisma cascade remains a safety net. |
 | `prisma.hosted_auth_record` | Member cascade | Not exported secret | Deletes member-bound login users, accounts and sessions. Independent pre-member verification/rate-limit records expire through bounded retention. No login record or bearer is exported. |

@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import {
   type HostedConsentGrant,
-  type Prisma,
+  Prisma,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -554,6 +554,21 @@ export async function assertHostedLaunchRequiredConsentGranted(input: {
       message: "Accept the current Murph legal consent before continuing.",
     });
   }
+}
+
+/** Set-based launch authority for reads that must filter authors before pagination. */
+export function hostedLaunchConsentGrantedSql(memberId: Prisma.Sql): Prisma.Sql {
+  return Prisma.join(HOSTED_LAUNCH_SCOPES.map(scope => {
+    const accepted = getHostedConsentScopeDefinition(scope).documentIds.map(id => {
+      const recorded = Prisma.sql`grant_row.document_versions_json ->> ${id}::text`;
+      return Prisma.sql`(jsonb_typeof(grant_row.document_versions_json -> ${id}::text) = 'string'
+        AND (${recorded}) ~ ${DATE_VERSION_PATTERN.source}
+        AND (${recorded}) COLLATE "C" >= ${HOSTED_CONSENT_MINIMUM_ACCEPTED_VERSIONS[id]})`;
+    });
+    return Prisma.sql`EXISTS (SELECT 1 FROM hosted_consent_grant grant_row
+      WHERE grant_row.member_id = ${memberId} AND grant_row.scope = ${scope}
+        AND grant_row.status = 'granted' AND ${Prisma.join(accepted, " AND ")})`;
+  }), " AND ");
 }
 
 export async function assertHostedHistoricalLaunchConsentGranted(input: {

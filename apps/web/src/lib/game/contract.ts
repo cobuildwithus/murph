@@ -545,6 +545,8 @@ export interface GameView {
 }
 
 export interface GameHomeView {
+  /** Present when this member can open Health wins. */
+  flags?: { health_feed: true };
   groupInvitations?: { gameId: string; token: string }[];
   canStartGroups?: boolean;
   me: { notForMe: string[]; memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
