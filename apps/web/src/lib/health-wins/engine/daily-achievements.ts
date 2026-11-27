@@ -1,5 +1,5 @@
 import { formatMetricValue, metricInfo } from "./metrics";
-import { cardDateKey, dayNumber, formatHealthWinDistance, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
+import { cardDateKey, dayNumber, formatHealthWinDistance, formatWinDate, formatWinMonthPeriod, mad, median, milesFromKm } from "./shared";
 import { longestStreak, streakDateRange, thresholdBars, type ThresholdBars } from "./streak";
 import type { Candidate, DailySample, Metric } from "./types";
 
@@ -33,7 +33,7 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
       kind: "threshold_count",
       filter: "Sleep",
       title: { number: `${hits} of ${nights.length} nights`, measure: "8+ hours" },
-      subtitle: `in ${formatWinMonth(today)} so far`,
+      subtitle: `in ${formatWinMonthPeriod(month, today)}`,
       source_note: `Based on ${nights.length} tracked nights.`,
       chart: sleepBars(nights),
     },
@@ -43,7 +43,7 @@ function sleepCount(rows: readonly DailySample[], today: string): Candidate | un
 function sleepStreak(rows: readonly DailySample[], today: string): Candidate | undefined {
   const run = longestStreak(rows, today, SLEEP_TARGET_MINUTES);
   if (!run) return;
-  const { start, end, length, window } = run;
+  const { start, end, length, chartRows } = run;
   return {
     date: end,
     effect: length,
@@ -55,7 +55,7 @@ function sleepStreak(rows: readonly DailySample[], today: string): Candidate | u
       title: { number: `${length} nights`, measure: "8+ hours" },
       subtitle: `in a row, ${streakDateRange(start, end, today)}`,
       source_note: `Longest recorded run in the last 90 days, ending ${formatWinDate(end, today)}.`,
-      chart: { ...sleepBars(window), highlight: { start, end } },
+      chart: { ...sleepBars(chartRows), highlight: { start, end } },
     },
   };
 }

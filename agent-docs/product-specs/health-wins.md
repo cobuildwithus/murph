@@ -57,7 +57,8 @@ when it matches or exceeds every qualifying prior month. Murph compares
 against this year's completed months when at least three qualify, otherwise
 against the preceding 12 months when at least three qualify. A fiber streak
 requires five consecutive days at or above 30 g. The longest streak in the
-last 90 days qualifies when it ended within 60 days. A missing day or
+last 90 days qualifies when it ended within 60 days. The card counts the whole
+recorded run, including consecutive days before that window. A missing day or
 incomplete fiber reading breaks the streak. Diet cards omit the measure used
 by See yours.
 

@@ -58,7 +58,7 @@ describe("streak", () => {
     expect(cards(SLEEP, nights(five.slice(1))).some(c => c.kind === "streak")).toBe(false);
   });
 
-  it("uses only the last ninety days, and the longest run must end within sixty days", () => {
+  it("selects by days inside the ninety-day window and requires the winner to end within sixty days", () => {
     const five = [485, 493, 511, 508, 492];
     const endedOnCutoff = nights(five, -64);
     expect(cards(SLEEP, endedOnCutoff).some(c => c.kind === "streak")).toBe(true);
@@ -67,6 +67,17 @@ describe("streak", () => {
     const crossingWindow = nights([...five, 488, 496], -93);
     const recent = cards(SLEEP, [...crossingWindow, ...nights(five)]).find(c => c.kind === "streak");
     expect(recent?.chart.highlight).toEqual({ start: "2032-04-24", end: "2032-04-28" });
+  });
+
+  it("counts consecutive nights before the window back to the last missing night", () => {
+    const earlier = nights(Array(8).fill(497), -120);
+    const run = nights(Array(108).fill(497), -111);
+    const result = cards(SLEEP, [...earlier, ...run]).find(card => card.kind === "streak");
+    expect(result).toMatchObject({
+      title: { number: "108 nights" }, subtitle: "in a row, Jan 8 to Apr 24",
+      chart: { highlight: { start: run[0].date, end: run.at(-1)!.date } },
+    });
+    expect(result?.chart.series).toHaveLength(run.length);
   });
 
   it("names both months when a streak crosses New Year's Day", () => {
