@@ -141,9 +141,14 @@ straight to reauthorization today (plan §7 corrected; no renewal-on-401 path).
   four values. A comma-separated list returned HTTP 500 on the open sandbox,
   while each single value (with and without the `_lastUpdated` window)
   returned a Bundle. The catalog therefore has one Encounter query per status.
-  **Merge gate for O3:** the `oracle:sandbox:offline` Encounter step must pass
-  on the secure sandbox; any catalog change before the first Oracle run is
-  free, afterwards add a new identity.
+  **Enable gate for Oracle starts:** the `oracle:sandbox:offline` Encounter
+  step must pass on the secure sandbox before `CLINICAL_RECORDS_ORACLE_STARTS`
+  is turned on for anyone. O3 can merge first because all Oracle egress stays
+  behind the flags and the sandbox key set has to be published before Oracle
+  can register it. Any catalog change before the first Oracle run is free;
+  afterwards a new query identity only reaches new connections (each daily
+  plan is built from the previous plan's slices), so existing connections need
+  a reconnect or an explicit migration.
 - O4: emit `ORACLE_ACQUISITION_POLICY` in `policies`, entries with `oracle-` +
   20 hex of sha256 of the exact tenant, `integration`, no client key; add
   `sources`. The parser already accepts that shape.
@@ -157,9 +162,13 @@ straight to reauthorization today (plan §7 corrected; no renewal-on-401 path).
 3. O3 with starts on for the allowlisted test member only.
 
 Before any Oracle OAuth session or row exists, the floor is current main.
-After the first production session, O1 is the floor; after the first sandbox
-session, O3 (older readers refuse sandbox profiles and ask to reconnect);
-after the first row, also #5372. Keep the Oracle JWKS published and the signer
+After the first Oracle session of either environment, O3 is the floor: older
+Web knows only the single `encounters` slice, so its daily sync drops the four
+`encounters-{status}` slices, refuses queued ones as `query-unavailable`
+(not retried), and the next plan is built without them, so that connection
+loses Encounters until the member reconnects even after rolling forward
+again. Older readers also refuse sandbox profiles and ask to reconnect.
+After the first row, #5372 is also a floor. Keep the Oracle JWKS published and the signer
 configured while any Oracle grant exists.
 
 ## Verification
