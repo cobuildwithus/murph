@@ -132,6 +132,40 @@ describe.runIf(enabled)("billing control hydration in real Chromium", () => {
     }
   });
 
+  it("opens the keyboard-accessible card method and checks its framed inputs without submitting", async () => {
+    const context = await browser.newContext();
+    const scratch = await mkdtemp(join(tmpdir(), "billing-browser-"));
+    try {
+      const page = await context.newPage();
+      await page.route("**/*", (route) => route.fulfill({
+        contentType: "text/html",
+        body: new URL(route.request().url()).hostname === "js.stripe.com"
+          ? '<input autocomplete="cc-number"><input autocomplete="cc-exp"><input autocomplete="cc-csc">'
+          : `<form onsubmit="event.preventDefault(); this.dataset.submitted = 'yes'">
+              <button type="button" aria-label="Pay with card" style="width:0;height:0;padding:0;border:0"
+                onclick="this.dataset.opens = Number(this.dataset.opens || 0) + 1; this.nextElementSibling.src = 'https://js.stripe.com/fields'"></button>
+              <iframe></iframe>
+              <button type="submit">Subscribe</button>
+            </form>`,
+      }));
+      await page.goto("https://checkout.stripe.com/synthetic");
+      const method = page.getByRole("button", { name: "Pay with card" });
+      expect(await method.isVisible()).toBe(false);
+      const driver = new HostedBillingBrowserDriver({
+        diagnosticsPath: join(scratch, "redacted.json"),
+        runId: "synthetic-card-selection",
+        timeoutMs: 3_000,
+        webBaseUrl: "https://murph.example.invalid",
+      });
+      await driver.assertStripeCheckoutReady({ context, page, close: () => context.close() });
+      await browserExpect(method).toHaveAttribute("data-opens", "1");
+      await browserExpect(page.locator("form")).not.toHaveAttribute("data-submitted");
+    } finally {
+      await context.close();
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+
   it.each([false, true])("rechecks current Checkout frames after detachment without accepting missing fields (missing=%s)", async (missing) => {
     const context = await browser.newContext();
     const scratch = await mkdtemp(join(tmpdir(), "billing-browser-"));

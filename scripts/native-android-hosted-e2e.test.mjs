@@ -167,6 +167,53 @@ test("Android canary resolves production, proves the pinned tag, and accepts one
   assert.deepEqual(calls, ["production", "tag", "dispatch", "status"]);
 });
 
+for (const { name, responses, elapsed, error } of [
+  { name: "new run becomes visible", responses: [404, "success"], elapsed: 5_000 },
+  { name: "visible run failed", responses: [404, "failure"], elapsed: 5_000, error: /completed with failure/u },
+  { name: "run stays missing", responses: Array(7).fill(404), elapsed: 30_000, error: /status failed with HTTP 404/u },
+  { name: "visible run disappears", responses: ["in_progress", 404], elapsed: 5_000, error: /status failed with HTTP 404/u },
+  { name: "status denied", responses: [403], elapsed: 0, error: /status failed with HTTP 403/u },
+]) {
+  test(`Android polls only the receipted run: ${name}`, async (t) => {
+    const startedAt = 2_000_000_000_000;
+    let nowMs = startedAt;
+    let reads = 0;
+    const actions = [];
+    t.mock.method(globalThis, "fetch", async (url) => {
+      if (String(url).includes("/git/ref/tags/")) return jsonResponse(privateTag());
+      assert.equal(url, "https://api.github.com/repos/example/murph-android/actions/runs/42");
+      if (actions.includes("cancel")) return jsonResponse(completedRun("cancelled"));
+      const response = responses[reads++];
+      if (typeof response === "number") return new Response(null, { status: response });
+      assert.ok(response, "unexpected extra status read");
+      const run = response === "in_progress" ? { ...completedRun(null), status: response } : completedRun(response);
+      return jsonResponse(run);
+    });
+    await withPrivateEnv(async () => {
+      const result = dispatchAndWait(canaryDispatch(), {
+        fetchImpl: async (url) => {
+          if (url.endsWith("/dispatches")) {
+            actions.push("dispatch");
+            return jsonResponse({ workflow_run_id: 42 });
+          }
+          assert.ok(url.endsWith("/actions/runs/42/cancel"));
+          actions.push("cancel");
+          return new Response(null, { status: 202 });
+        },
+        now: () => nowMs,
+        resolveWebSha: async () => WEB_SHA,
+        sleepImpl: async (ms) => { nowMs += ms; },
+        tokenSupplier: async () => "private-token",
+      });
+      if (error) await assert.rejects(result, error);
+      else await result;
+    });
+    assert.equal(reads, responses.length);
+    assert.equal(nowMs - startedAt, elapsed);
+    assert.deepEqual(actions, typeof responses.at(-1) === "number" ? ["dispatch", "cancel"] : ["dispatch"]);
+  });
+}
+
 for (const [name, dispatchResponse] of [
   ["lost response", () => { throw new Error("response lost"); }],
   ["invalid JSON", () => ({ ok: true, status: 200, json: async () => { throw new Error("invalid"); } })],
