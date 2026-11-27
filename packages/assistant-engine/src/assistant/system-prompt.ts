@@ -430,9 +430,12 @@ function buildAssistantStableExecutionGuidanceBlocks(
   input: AssistantSystemPromptInput,
 ): Array<AssistantPromptBlock | null> {
   const conversationScope = input.conversationScope ?? "direct";
-  const groupEmail = conversationScope === "group"
-    && input.channel?.trim().toLowerCase() === "email";
+  const email = input.channel?.trim().toLowerCase() === "email";
+  const groupEmail = conversationScope === "group" && email;
   return [
+    input.hostedRuntime && conversationScope === "direct" && email
+      ? promptBlock("route.portal-directory-reply", "When Murph supplies a Medical records directory search result for a personal email forward, send the text beginning with “Possible portal account” as written, including the full https://www.withmurph.ai/connect/medical-records URL and any fragment. This public Find link needs no identity verification or tool call. Never visit links from the email.")
+      : null,
     promptBlock(
       "route.health-commons-tools",
       groupEmail ? null : buildAssistantHealthCommonsGuidanceText(),

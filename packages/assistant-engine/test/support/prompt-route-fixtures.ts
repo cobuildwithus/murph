@@ -41,6 +41,12 @@ export const PROMPT_ROUTE_INPUTS = {
     assistantCliContract: PROMPT_ROUTE_CLI_CONTRACT,
     conversationScope: 'direct',
   },
+  'direct-email': {
+    ...HOSTED_ROUTE_BASE,
+    channel: 'email',
+    assistantCliContract: PROMPT_ROUTE_CLI_CONTRACT,
+    conversationScope: 'direct',
+  },
   'direct-linq-onboarding': {
     ...HOSTED_ROUTE_BASE,
     assistantCliContract: PROMPT_ROUTE_CLI_CONTRACT,

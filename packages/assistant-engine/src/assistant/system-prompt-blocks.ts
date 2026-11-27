@@ -72,6 +72,7 @@ export const ASSISTANT_PROMPT_BLOCK_DEFINITIONS = {
   "route.vault-file-sends": { layer: "route", audience: "private" },
   "route.health-commons-tools": { layer: "route", audience: "private-or-group" },
   "route.late-child-results": { layer: "route", audience: "group" },
+  "route.portal-directory-reply": { layer: "route", audience: "private" },
   "route.group-email-health": { layer: "route", audience: "group" },
   "route.skill-router": { layer: "route", audience: "private-or-group" },
   "route.execution-behavior": { layer: "route", audience: "private-or-group" },
