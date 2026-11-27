@@ -196,6 +196,21 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(deferred).toHaveLength(0);
   });
 
+  it("says when the viewer's own card for the measure is already in one of their posts", async () => {
+    const author = await person(), viewer = await person();
+    await pair(author, viewer);
+    const shared = await frozenLabPost(author);
+    const input = insulinReading(8.1, new Date().toISOString().slice(0, 10));
+    vi.spyOn(inputs, "readMeasureInputs").mockResolvedValue({ input, observed: true });
+    const first = await (await shared.read(viewer)).json();
+    expect(first).toMatchObject({ card: { candidateId: "mine:insulin:percentile" }, shared: false });
+    const original = first.card.change_options.find((option: { id: string }) => option.id === "original");
+    const posted = await post(viewer.request("posts", "POST", { id: randomUUID(),
+      cards: [{ candidateId: first.card.candidateId, option: "original", specRevision: original.specRevision }] }));
+    expect(posted.status).toBe(200);
+    expect(await (await shared.read(viewer)).json()).toMatchObject({ card: { id: first.card.id }, shared: true });
+  });
+
   it("opens only a visible partner's selected measure and rejects stale post versions after the replica read", async () => {
     const author = await person(), viewer = await person();
     await pair(author, viewer);
