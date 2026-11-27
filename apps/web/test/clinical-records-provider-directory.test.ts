@@ -7,6 +7,7 @@ import {
   parseClinicalProviderDirectory,
   searchClinicalProviderDirectorySnapshot,
 } from "@/src/lib/clinical-records/provider-directory";
+import { readLocationCell } from "@/src/lib/clinical-records/provider-search-input";
 import {
   EPIC_ACQUISITION_POLICY,
   EPIC_ACQUISITION_POLICY_ID,
@@ -241,6 +242,17 @@ describe("Clinical Records provider directory", () => {
     });
   });
 
+  it("accepts location cells across US states and territories and rejects others", () => {
+    for (const cell of [
+      { lat: 44.2, lon: -70.2 }, { lat: 18.4, lon: -66.1 }, { lat: 18.3, lon: -64.9 }, { lat: 61.2, lon: -149.9 },
+      { lat: 52.7, lon: 174.1 }, { lat: 13.5, lon: 144.8 }, { lat: 15.2, lon: 145.8 }, { lat: -14.3, lon: -170.7 },
+    ]) expect(readLocationCell(cell)).toEqual(cell);
+    for (const cell of [
+      { lat: 48.9, lon: 2.3 }, { lat: 35.7, lon: 139.7 }, { lat: -33.9, lon: 151.2 }, { lat: -15.1, lon: -170.7 },
+      { lat: 72.1, lon: -150 }, { lat: 44.25, lon: -70.2 },
+    ]) expect(() => readLocationCell(cell)).toThrow(/Invalid provider search/u);
+  });
+
   it("fails closed for duplicate ids and private provider endpoints", () => {
     const one = makeDirectory({});
     expect(() => parseClinicalProviderDirectory({
@@ -263,6 +275,11 @@ describe("Clinical Records provider directory", () => {
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       clientIdEnvironmentKey: "EPIC_SMART_OTHER_CLIENT_ID",
     }))).toThrow(/client-id configuration is unsupported/u);
+    // Connections hash the stored URL, so a rewritten one would strand them.
+    for (const fhirBaseUrl of ["https://FHIR.example.test/FHIR/R4", "https://fhir.example.test:443/FHIR/R4",
+      "https://fhir.example.test/FHIR/R4/", " https://fhir.example.test/FHIR/R4"]) {
+      expect(() => parseClinicalProviderDirectory(makeDirectory({ fhirBaseUrl }))).toThrow(/canonical form/u);
+    }
   });
 
   it("rejects obsolete schemas and unknown policy references", () => {

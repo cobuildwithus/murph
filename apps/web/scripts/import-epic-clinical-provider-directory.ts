@@ -84,8 +84,8 @@ async function main(): Promise<void> {
 }
 
 // Applies the shared refresh hold against the committed directory text: existing
-// entries keep their published endpoint, entries missing upstream stay as
-// published, new-host entries are left out, and the held changes go to a person.
+// entries keep their published connection fields, entries missing upstream stay
+// as published, held new entries are left out, and the held changes go to a person.
 export function refreshEpicProviderDirectory(
   source: string | Uint8Array,
   previousText: string,

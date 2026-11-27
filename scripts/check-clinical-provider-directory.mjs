@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   assertDirectoryRefreshCounts,
+  DIRECTORY_CONNECTION_FIELDS,
   holdDirectoryChangesForReview,
   parseProviderDirectoryArtifact,
 } from "../apps/web/src/lib/clinical-records/provider-directory-artifact.ts";
@@ -17,6 +18,8 @@ import {
 export const DIRECTORY = "apps/web/src/lib/clinical-records/provider-directory.v2.json";
 // GitHub rejects issue bodies over 65,536 characters.
 const REPORT_LIMIT = 60_000;
+const PRODUCTION_CLIENT_KEY = "EPIC_SMART_CLIENT_ID";
+const CLIENT_KEYS = new Set([PRODUCTION_CLIENT_KEY, "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"]);
 
 // Required CI runs the production parser on every committed directory, so a
 // committed directory's embedded policies are the policies its code owns. An
@@ -31,9 +34,9 @@ function parseDirectory(value, policySource = value) {
 
 function describeChanges(changes) {
   const describe = {
-    endpoint: ({ current, candidate }) => `endpoint ${current} -> ${candidate}`,
+    connection: ({ field, current, candidate }) => `${field} ${current} -> ${candidate}`,
     removal: ({ current }) => `removed (${current})`,
-    "new-host": ({ candidate }) => `new entry on a new host (${candidate})`,
+    addition: ({ candidate, clientIdEnvironmentKey }) => `new entry (${candidate}, ${clientIdEnvironmentKey})`,
   };
   return changes.map(change => `- ${change.id}: ${describe[change.kind](change)}`).join("\n");
 }
@@ -51,44 +54,74 @@ export function checkPublication({ currentText, candidateText, heldText, allowCo
 
 export function checkPullRequest({ authorType, baseText, headText }) {
   const { held } = holdDirectoryChangesForReview(parseDirectory(JSON.parse(baseText)), parseDirectory(JSON.parse(headText)));
-  if (!held.length) return "Every existing entry keeps its endpoint and new entries use known hosts.";
+  if (!held.length) return "Every existing entry keeps its connection and new entries use a known production host and client.";
   if (authorType === "Bot") {
     throw new Error(`An automated pull request cannot make these directory changes:\n${describeChanges(held)}`);
   }
   return `A person authored these directory changes:\n${describeChanges(held)}`;
 }
 
-// Each held change must describe what the candidate kept: an existing entry on
-// its current endpoint, or a new entry on an unknown host left out.
+// Each held change must describe what the candidate kept: an existing entry
+// with its published connection, or a new entry left out for a reason the
+// rule names. Upstream values themselves cannot be verified here.
 function parseHeldReport(value, current, candidate) {
   if (!Array.isArray(value)) throw new TypeError("Held directory report must be an array.");
   const directories = {
     candidateById: new Map(candidate.entries.map(entry => [entry.id, entry])),
     currentById: new Map(current.entries.map(entry => [entry.id, entry])),
-    currentHosts: new Set(current.entries.map(entry => new URL(entry.fhirBaseUrl).origin)),
+    productionHosts: new Set(current.entries.filter(entry => entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY)
+      .map(entry => new URL(entry.fhirBaseUrl).origin)),
   };
   const seen = new Set();
   return value.map(change => {
-    const held = change && typeof change === "object" ? parseHeldChange(change, directories) : null;
-    if (!held || seen.has(held.id)) throw new TypeError("Held directory report does not match the candidate directory.");
-    seen.add(held.id);
+    const parse = HELD_CHANGE_PARSERS.get(change?.kind);
+    const held = parse ? parse(change, directories) : null;
+    const key = `${held?.id} ${held?.field}`;
+    if (!held || seen.has(key)) throw new TypeError("Held directory report does not match the candidate directory.");
+    seen.add(key);
     return held;
   });
 }
 
-function parseHeldChange({ brandName, candidate: upstream, current: kept, id, kind }, directories) {
+// The published value, which the candidate must still carry.
+function keptValue({ id, field }, { candidateById, currentById }) {
+  const prior = currentById.get(id);
+  const kept = prior?.[field] ?? null;
+  return prior && (candidateById.get(id)?.[field] ?? null) === kept ? { kept, prior } : null;
+}
+
+const UPSTREAM_VALUE = {
+  clientIdEnvironmentKey: value => (value === null || CLIENT_KEYS.has(value) ? value : undefined),
+  fhirBaseUrl: value => plainHttpsUrl(value)?.href,
+  policyId: value => (isEntryId(value) ? value : undefined),
+};
+
+function parseConnectionChange({ candidate: upstream, current, field, id }, directories) {
+  if (!DIRECTORY_CONNECTION_FIELDS.includes(field)) return null;
+  const published = keptValue({ field, id }, directories);
+  const candidate = UPSTREAM_VALUE[field](upstream);
+  return published && published.kept === current && candidate !== undefined && upstream !== current
+    ? { brand: published.prior.brandName, candidate, current, field, id, kind: "connection" }
+    : null;
+}
+
+function parseRemoval({ candidate, current, id }, directories) {
+  const published = keptValue({ field: "fhirBaseUrl", id }, directories);
+  return published && published.kept === current && candidate === undefined
+    ? { brand: published.prior.brandName, current, field: "removal", id, kind: "removal" }
+    : null;
+}
+
+function parseAddition({ brandName, candidate: upstream, clientIdEnvironmentKey: key, id }, directories) {
   const url = plainHttpsUrl(upstream);
-  if (kind === "endpoint" || kind === "removal") {
-    const prior = directories.currentById.get(id);
-    const keptUnchanged = prior !== undefined && prior.fhirBaseUrl === kept
-      && directories.candidateById.get(id)?.fhirBaseUrl === kept;
-    const upstreamMatches = kind === "endpoint" ? url !== null && upstream !== kept : upstream === undefined;
-    return keptUnchanged && upstreamMatches ? { brand: prior.brandName, candidate: url?.href, current: kept, id, kind } : null;
-  }
-  const leftOut = kind === "new-host" && isEntryId(id) && !directories.currentById.has(id) && !directories.candidateById.has(id);
-  const newHost = url !== null && !directories.currentHosts.has(url.origin);
-  return leftOut && newHost && typeof brandName === "string" && brandName.length <= 160
-    ? { brand: brandName, candidate: url.href, id, kind }
+  const leftOut = isEntryId(id) && !directories.currentById.has(id) && !directories.candidateById.has(id);
+  const reasons = [
+    ...(url && !directories.productionHosts.has(url.origin) ? ["on a new host"] : []),
+    ...(key !== PRODUCTION_CLIENT_KEY ? [`using ${key ?? "no Epic client"}`] : []),
+  ];
+  const described = typeof brandName === "string" && brandName.length <= 160 && (key === null || CLIENT_KEYS.has(key));
+  return leftOut && url && described && reasons.length
+    ? { brand: brandName, candidate: url.href, field: "addition", id, kind: "addition", label: `New entry ${reasons.join(" and ")}` }
     : null;
 }
 
@@ -101,21 +134,28 @@ function plainHttpsUrl(value) {
   return url?.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash ? url : null;
 }
 
+const HELD_CHANGE_PARSERS = new Map([
+  ["addition", parseAddition], ["connection", parseConnectionChange], ["removal", parseRemoval],
+]);
+
 function renderHeldReport(held) {
   if (!held.length) return "";
   const code = text => (text ? `\`${String(text).replace(/[`|\r\n]/gu, "")}\`` : "");
-  const labels = { endpoint: "Endpoint change", removal: "Removed upstream", "new-host": "New entry on a new host" };
+  const labels = {
+    clientIdEnvironmentKey: "Client key change", fhirBaseUrl: "Endpoint change", policyId: "Policy change", removal: "Removed upstream",
+  };
   const header = [
-    "The weekly refresh held these directory changes. A connection is bound to its entry's exact endpoint, so only a person may change an existing entry's endpoint, remove an entry, or add an entry on a host the directory does not use yet.",
-    "Confirm each change with the health system, then make it in a reviewed pull request. Until then the directory keeps the published entry and leaves new-host entries out.",
+    "The weekly refresh held these directory changes. A member's connection is bound to its entry's endpoint, client key and policy, so only a person may change those on an existing entry, remove an entry, or add an entry outside a known production host and client.",
+    "Upstream values and new entries come from the refresh job and are unverified: re-check each one against open.epic.com before applying it.",
+    "Confirm each change with the health system, then make it in a reviewed pull request. Until then the directory keeps the published entry and leaves held new entries out.",
     "",
-    "| Entry | Brand | Held change | Published endpoint | Upstream endpoint |",
+    "| Entry | Brand | Held change | Published | Upstream |",
     "| --- | --- | --- | --- | --- |",
   ].join("\n");
   const rows = [];
   let length = header.length;
-  for (const { brand, candidate, current: kept, id, kind } of held) {
-    const row = `| ${code(id)} | ${code(brand)} | ${labels[kind]} | ${code(kept)} | ${code(candidate)} |`;
+  for (const { brand, candidate, current, field, id, label } of held) {
+    const row = `| ${code(id)} | ${code(brand)} | ${label ?? labels[field]} | ${code(current)} | ${code(candidate)} |`;
     if (length + row.length + 200 > REPORT_LIMIT) break;
     rows.push(row);
     length += row.length + 1;

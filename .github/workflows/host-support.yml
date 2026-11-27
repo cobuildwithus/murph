@@ -125,8 +125,9 @@ jobs:
         run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
 
       # The weekly refresh merges itself, so a bot may update facilities and add
-      # entries on known hosts, but only a person may change an existing entry's
-      # FHIR endpoint, remove an entry or add an entry on a new host.
+      # production entries on known production hosts, but only a person may
+      # change an existing entry's endpoint, client key or policy, remove an
+      # entry, or add any other entry.
       - name: Hold automated clinical directory changes for a person
         if: ${{ github.event_name == 'pull_request' }}
         env:

@@ -64,16 +64,26 @@ export interface OwnedDirectoryPolicy {
   integration?: typeof ORACLE_INTEGRATION_ID;
 }
 
+/** What a member's stored connection is bound to: its endpoint, OAuth client and acquisition policy. */
+export const DIRECTORY_CONNECTION_FIELDS = ["fhirBaseUrl", "clientIdEnvironmentKey", "policyId"] as const;
+export type DirectoryConnectionField = (typeof DIRECTORY_CONNECTION_FIELDS)[number];
+const PRODUCTION_CLIENT_KEY: ClinicalProviderClientIdEnvironmentKey = "EPIC_SMART_CLIENT_ID";
+
 /** A refresh change only a person may publish. */
 export type HeldDirectoryChange =
-  | { kind: "endpoint"; id: string; current: string; candidate: string }
+  | {
+    kind: "connection"; id: string; field: DirectoryConnectionField;
+    current: string | null; candidate: string | null;
+  }
   | { kind: "removal"; id: string; current: string }
-  | { kind: "new-host"; id: string; brandName: string; candidate: string };
+  | { kind: "addition"; id: string; brandName: string; candidate: string; clientIdEnvironmentKey: string | null };
 
-interface DirectoryEndpointEntry {
+interface DirectoryRefreshEntry {
   brandName: string;
+  clientIdEnvironmentKey?: string;
   fhirBaseUrl: string;
   id: string;
+  policyId: string;
 }
 
 export function parseProviderDirectoryArtifact(
@@ -128,19 +138,21 @@ export function assertDirectoryRefreshCounts(previous: ClinicalProviderDirectory
 }
 
 /**
- * The one rule for automatic directory refreshes. A connection is bound to its entry's exact
- * endpoint URL, so an existing entry keeps its endpoint and is never removed automatically, and a new entry
- * publishes only on an endpoint host the directory already uses. Everything else is held: the
- * returned entries keep the current state and `held` lists what upstream asked for. A candidate
- * that is safe to publish automatically holds nothing against the directory it replaces.
+ * The one rule for automatic directory refreshes. Names, aliases and facilities publish. A member's
+ * connection is bound to its entry's connection fields, so an existing entry keeps them and is never
+ * removed automatically, and a new entry publishes only with the production client on a host a
+ * production entry already uses. Everything else is held: the returned entries keep the published
+ * state and `held` lists what upstream asked for. A candidate that is safe to publish automatically
+ * holds nothing against the directory it replaces.
  */
-export function holdDirectoryChangesForReview<Entry extends DirectoryEndpointEntry>(
+export function holdDirectoryChangesForReview<Entry extends DirectoryRefreshEntry>(
   current: { entries: readonly Entry[] },
   upstream: { entries: readonly Entry[] },
 ): { entries: Entry[]; held: HeldDirectoryChange[] } {
   const upstreamById = new Map(upstream.entries.map(entry => [entry.id, entry]));
   const currentIds = new Set(current.entries.map(entry => entry.id));
-  const currentHosts = new Set(current.entries.map(entry => new URL(entry.fhirBaseUrl).origin));
+  const productionHosts = new Set(current.entries.filter(entry => entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY)
+    .map(entry => new URL(entry.fhirBaseUrl).origin));
   const held: HeldDirectoryChange[] = [];
   const entries = current.entries.map(entry => {
     const next = upstreamById.get(entry.id);
@@ -148,14 +160,24 @@ export function holdDirectoryChangesForReview<Entry extends DirectoryEndpointEnt
       held.push({ kind: "removal", id: entry.id, current: entry.fhirBaseUrl });
       return entry;
     }
-    if (next.fhirBaseUrl === entry.fhirBaseUrl) return next;
-    held.push({ kind: "endpoint", id: entry.id, current: entry.fhirBaseUrl, candidate: next.fhirBaseUrl });
-    return { ...next, fhirBaseUrl: entry.fhirBaseUrl };
+    for (const field of DIRECTORY_CONNECTION_FIELDS) {
+      if (next[field] === entry[field]) continue;
+      held.push({ kind: "connection", id: entry.id, field, current: entry[field] ?? null, candidate: next[field] ?? null });
+    }
+    return {
+      ...next, clientIdEnvironmentKey: entry.clientIdEnvironmentKey, fhirBaseUrl: entry.fhirBaseUrl, policyId: entry.policyId,
+    };
   });
   for (const entry of upstream.entries) {
     if (currentIds.has(entry.id)) continue;
-    if (currentHosts.has(new URL(entry.fhirBaseUrl).origin)) entries.push(entry);
-    else held.push({ kind: "new-host", id: entry.id, brandName: entry.brandName, candidate: entry.fhirBaseUrl });
+    if (entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY && productionHosts.has(new URL(entry.fhirBaseUrl).origin)) {
+      entries.push(entry);
+    } else {
+      held.push({
+        kind: "addition", id: entry.id, brandName: entry.brandName, candidate: entry.fhirBaseUrl,
+        clientIdEnvironmentKey: entry.clientIdEnvironmentKey ?? null,
+      });
+    }
   }
   return { entries: entries.sort((left, right) => left.id.localeCompare(right.id)), held };
 }
@@ -296,7 +318,10 @@ function requireCanonicalPublicHttpsUrl(value: unknown, label: string): string {
     throw new TypeError(`${label} must not target a private host.`);
   }
   url.pathname = url.pathname.replace(/\/+$/u, "");
-  return url.toString().replace(/\/$/u, "");
+  const canonical = url.toString().replace(/\/$/u, "");
+  // A rewritten URL would no longer match the hash stored for its connections.
+  if (canonical !== value) throw new TypeError(`${label} must be written in canonical form.`);
+  return canonical;
 }
 
 function isPrivateIpLiteral(hostname: string): boolean {

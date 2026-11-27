@@ -83,14 +83,14 @@ describe("Epic Clinical Records provider directory importer", () => {
     expect(() => parseClinicalProviderDirectory(artifact)).toThrow(/coordinate/u);
   });
 
-  it("holds endpoint changes, removals and new hosts, and publishes new entries on known hosts", () => {
+  it("holds connection changes, removals and new entries off known production hosts", () => {
     const current = "https://fhir.example.test/FHIR/R4";
     const previousArtifact = buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle()));
     const previous = JSON.stringify(previousArtifact);
-    const refresh = (change: (bundle: ReturnType<typeof makeBundle>) => void) => {
+    const refresh = (change: (bundle: ReturnType<typeof makeBundle>) => void, prior = previous) => {
       const bundle = makeBundle();
       change(bundle);
-      return refreshEpicProviderDirectory(JSON.stringify(bundle), previous);
+      return refreshEpicProviderDirectory(JSON.stringify(bundle), prior);
     };
     const entry = (artifact: ReturnType<typeof refresh>["artifact"], id: string) =>
       artifact.entries.find(candidate => candidate.id === id);
@@ -99,9 +99,22 @@ describe("Epic Clinical Records provider directory importer", () => {
       "https://fhir.example.test/v2/FHIR/R4", "https://moved.example.test/FHIR/R4", "https://fhir.example.test:8443/FHIR/R4",
     ]) {
       const moved = refresh(bundle => { bundle.entry[0]!.resource.address = address; });
-      expect(moved.held).toEqual([{ kind: "endpoint", id: "epic-brand-123", current, candidate: address }]);
+      expect(moved.held).toEqual([
+        { kind: "connection", id: "epic-brand-123", field: "fhirBaseUrl", current, candidate: address },
+      ]);
       expect(entry(moved.artifact, "epic-brand-123")?.fhirBaseUrl).toBe(current);
     }
+
+    // A published client key is never replaced, in either direction.
+    const sandboxKeyed = JSON.parse(previous);
+    sandboxKeyed.entries[0].clientIdEnvironmentKey = "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
+    const keyed = refresh(() => {}, JSON.stringify(sandboxKeyed));
+    expect(keyed.held).toEqual([{
+      kind: "connection", id: "epic-brand-123", field: "clientIdEnvironmentKey",
+      current: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", candidate: "EPIC_SMART_CLIENT_ID",
+    }]);
+    expect(entry(keyed.artifact, "epic-brand-123")?.clientIdEnvironmentKey).toBe("EPIC_SMART_NON_PRODUCTION_CLIENT_ID");
+    expect(entry(keyed.artifact, "epic-sandbox")).toEqual(previousArtifact.entries.find(item => item.id === "epic-sandbox"));
 
     const removed = refresh(bundle => { bundle.entry[1]!.resource.active = false; });
     expect(removed.held).toEqual([{ kind: "removal", id: "epic-brand-123", current }]);
@@ -110,10 +123,15 @@ describe("Epic Clinical Records provider directory importer", () => {
     const added = refresh(bundle => {
       bundle.entry.push(...makeBrand("brand-456", "https://new.example.test/FHIR/R4"));
       bundle.entry.push(...makeBrand("brand-789", "https://fhir.example.test/FHIR/R4/other"));
+      // The sandbox host is not a production host.
+      bundle.entry.push(...makeBrand("brand-999", "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4"));
     });
-    expect(added.held).toEqual([{
-      kind: "new-host", id: "epic-brand-456", brandName: "Second Health", candidate: "https://new.example.test/FHIR/R4",
-    }]);
+    expect(added.held).toEqual([
+      { kind: "addition", id: "epic-brand-456", brandName: "Second Health", candidate: "https://new.example.test/FHIR/R4",
+        clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" },
+      { kind: "addition", id: "epic-brand-999", brandName: "Second Health",
+        candidate: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4", clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" },
+    ]);
     expect(entry(added.artifact, "epic-brand-456")).toBeUndefined();
     expect(entry(added.artifact, "epic-brand-789")?.fhirBaseUrl).toBe("https://fhir.example.test/FHIR/R4/other");
     expect(added.artifact.entries.map(item => item.id)).toEqual(["epic-brand-123", "epic-brand-789", "epic-sandbox"]);

@@ -15,7 +15,7 @@ Update the public facilities members can find when connecting medical records.
 
 ## Non-obvious affected surfaces
 
-Existing entries keep their published FHIR endpoints, so existing connections still reconnect. Endpoint changes, removals and new-host entries wait in the "Clinical directory changes need review" issue.
+Existing entries keep their published FHIR endpoints, client keys and policies, so existing connections still reconnect. Connection changes, removals and held new entries wait in the "Clinical directory changes need review" issue.
 
 ## Hot reply path impact
 

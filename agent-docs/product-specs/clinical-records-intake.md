@@ -359,16 +359,21 @@ workflow manually with `allow_count_drop` checked; scheduled runs always keep
 the floor. It checks the tracked output and requires a nonempty source.
 
 A member's connection is bound to its entry id and a hash of that entry's
-exact FHIR base URL, so a changed URL would refuse every later reconnect.
+exact FHIR base URL, and connects with the OAuth client and policy the entry
+names, so the parser rejects any URL not already in canonical form and the
+refresh never changes those connection fields automatically.
 `holdDirectoryChangesForReview` in `provider-directory-artifact.ts` is the one
-refresh rule. Upstream facility and name updates publish. Three changes are
-held: any change to an existing entry's URL, path included, keeps the current
-URL; an existing entry missing upstream stays as published; a new entry whose
-endpoint origin the directory does not already use is left out. A new entry on
-a known origin publishes. The run opens or updates the GitHub issue “Clinical
-directory changes need review” listing every held change; a report over the
-issue size limit ends with a count of unlisted rows. To accept one, a person
-changes the committed directory in their own pull request.
+refresh rule. Upstream names, aliases and facilities publish. Three changes are
+held: any change to an existing entry's URL (path included), client key or
+policy keeps the published value; an existing entry missing upstream stays as
+published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
+on an endpoint origin a production entry already uses. The sandbox host does
+not count as a production host. The run opens or updates the GitHub issue
+“Clinical directory changes need review” listing every held change. The issue
+says its upstream values are unverified and must be re-checked against
+open.epic.com, and a report over the issue size limit ends with a count of
+unlisted rows. To accept one, a person changes the committed directory in
+their own pull request.
 
 The publish job installs no dependencies and never sees the Epic download.
 With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
