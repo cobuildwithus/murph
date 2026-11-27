@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-athena-production-mRrJkOOlUbCQ",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "i7bncBFJcmw6K8CnjQ5j1X118KugsBqfrzTUxKfUG4KaufrWPorEJAypMBOAJDUmjJ5oVh6nF7FC5MFBr-yE-7daVG8W0KSMt6PDohzaNAe2YJJc4DxIp1O5QrlXjWItkLpEBGe3BBYCk0LpP3UqmY7zxoICBv3DOG5tKBvSk2f9V6ePURKB3l_P_WMiUtdFEHC1gqsXNdxNokjrpynjIMaTKJUNG-GiPdKVDcWlq19Y2j2_IsWCXm83tyVWiV2eWqzP7R7IuaeF6o2bsN5i9ad-u3dJrJc7DEvNhtPWEs1nOvL2ArfnOL2HiLBHn1nFqDtlM_our9wzK_wtrEQvrw",
+      "e": "AQAB"
+    }
+  ]
+}
