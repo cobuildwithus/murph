@@ -22,3 +22,21 @@ export function portalDiscoverySummary(place: { id: string; brandName: string })
   const name = new URLSearchParams(fragment.slice(1)).get("find");
   return `Possible portal account at ${name}. Open Medical records to choose whether to connect: ${medicalRecordsFindUrl}${fragment}`;
 }
+
+export function portalDiscoveryAssistantInput(suggestion: string): string {
+  return `The member used email to search the Medical records directory. Murph generated the public Find link below from the directory. Reply with the search result as written, including its label and full URL.\n\n${suggestion}`;
+}
+
+// Private ingress writes a UTF-8 plain-text replacement with a CRLF header separator.
+export function readPortalDiscoverySuggestion(bytes: Uint8Array | null): string {
+  if (!bytes) return forwardedPortalFallback;
+  const message = new TextDecoder().decode(bytes);
+  const separator = message.indexOf("\r\n\r\n");
+  if (separator < 0) return forwardedPortalFallback;
+  const suggestion = message.slice(separator + 4).trim();
+  const fragment = normalizePortalDiscoveryFragment(suggestion.split(medicalRecordsFindUrl)[1] ?? "");
+  if (!fragment) return forwardedPortalFallback;
+  const params = new URLSearchParams(fragment.slice(1));
+  const canonical = portalDiscoverySummary({ id: params.get("provider")!, brandName: params.get("find")! });
+  return canonical === suggestion ? canonical : forwardedPortalFallback;
+}

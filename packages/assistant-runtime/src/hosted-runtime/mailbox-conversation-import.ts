@@ -219,6 +219,7 @@ export interface HostedConversationMailboxAssistantInputStageResult {
 }
 
 export type HostedConversationMailboxAssistantInputStager = (input: {
+  portalDiscoveryText?: string | null;
   assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   vaultRoot: string;
@@ -455,7 +456,8 @@ async function stageHostedConversationMailboxItem(
     assistantTarget,
     item: input.item,
     vaultRoot: input.vaultRoot,
-    wake: await readPortalForwardForAssistant(decoded.wake, input.runtime.platform.effectsPort),
+    wake: decoded.wake,
+    portalDiscoveryText: await readPortalForwardForAssistant(decoded.wake, input.runtime.platform.effectsPort),
   });
   const foregroundAssistantInputId =
     pendingReplyEligible && input.item.durablyConsumed !== true
@@ -1346,6 +1348,7 @@ function loadHostedConversationEventsModule(): Promise<HostedConversationEventsM
 }
 
 async function stageHostedConversationAssistantInputEvent(input: {
+  portalDiscoveryText?: string | null;
   assistantTarget: AssistantModelTarget | null;
   item: HostedMailboxResolvedImportItem;
   vaultRoot: string;
@@ -1364,10 +1367,7 @@ async function stageHostedConversationAssistantInputEvent(input: {
     ? linqWake?.message.groupReactionContext
     : undefined;
   const event = await upsertAssistantInputEvent({
-    event: createHostedConversationAssistantInputEvent({
-      item: input.item,
-      wake: input.wake,
-    }),
+    event: createHostedConversationAssistantInputEvent(input),
     vault: input.vaultRoot,
   });
   const selfAuthoredLinq =
@@ -1637,6 +1637,7 @@ function isUsefulHostedAttachmentEvidence(
 }
 
 function createHostedConversationAssistantInputEvent(input: {
+  portalDiscoveryText?: string | null;
   item: HostedMailboxResolvedImportItem;
   wake: HostedExecutionConversationMessageWake;
 }): UpsertAssistantInputEventInput {
@@ -1647,6 +1648,7 @@ function createHostedConversationAssistantInputEvent(input: {
   const content = createHostedConversationAssistantInputContent(
     input.wake,
     identifierBlind,
+    input.portalDiscoveryText,
   );
 
   return {
@@ -1699,8 +1701,9 @@ function createHostedConversationAssistantInputEvent(input: {
 function createHostedConversationAssistantInputContent(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
+  portalDiscoveryText?: string | null,
 ): UpsertAssistantInputEventInput["content"] {
-  const text = createHostedConversationAssistantInputText(wake);
+  const text = portalDiscoveryText ?? createHostedConversationAssistantInputText(wake);
   return {
     attachmentDescriptors: createHostedConversationAssistantInputAttachmentDescriptors(
       wake,

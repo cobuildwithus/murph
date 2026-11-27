@@ -1,3 +1,4 @@
+import { forwardedPortalFallback, portalDiscoveryAssistantInput, portalDiscoverySummary } from "@murphai/clinical-records/portal-discovery-link";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5559,6 +5560,32 @@ describe("hosted mailbox conversation import adapter", () => {
     );
     assert.equal(listed.events[0]?.projection.status, "failed");
     assert.ok(listed.events[0]?.projection.lastAttemptedAt);
+  });
+
+  test.each(["matched", "unmatched"])("stages the %s directory reply outside untrusted email content", async kind => {
+    const root = await mkdtemp(path.join(tmpdir(), "murph-portal-input-"));
+    tempRoots.push(root);
+    const vaultRoot = path.join(root, "vault");
+    const suggestion = kind === "matched"
+      ? portalDiscoverySummary({ id: "epic-sample", brandName: "Copper Basin Clinic" })
+      : forwardedPortalFallback;
+    const raw = new TextEncoder().encode(`Content-Type: text/plain; charset=utf-8\r\n\r\n${suggestion}`);
+    const runtime = createRuntime();
+    vi.spyOn(runtime.platform.effectsPort, "readRawEmailMessage").mockResolvedValue(raw);
+    const wake = createConversationWake({ message: {
+      channel: "email", from: "forwarder@example.test", identityId: "synthetic-route",
+      rawMessageKey: "synthetic-object", subject: "Forwarded patient portal notice",
+      textPreview: forwardedPortalFallback, threadIsDirect: true,
+    } });
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(wake), item: createResolvedConversationMailboxItem(),
+      async prepareWakeContext() {},
+      async importConversationWake() { return { captureId: null, metrics: { nextWakeAt: null, parserProcessed: 0 } }; },
+      runtime, vaultRoot,
+    });
+    expect(outcome.status).toBe("imported");
+    const { events } = await listAssistantInputEvents({ vault: vaultRoot });
+    expect(events[0]?.content.text).toBe(portalDiscoveryAssistantInput(suggestion));
   });
 
   test("stages hosted email input with minimized prompt-ready metadata and body preview", async () => {

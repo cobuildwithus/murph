@@ -1,3 +1,4 @@
+import { forwardedPortalFallback, portalDiscoveryAssistantInput, readPortalDiscoverySuggestion } from "@murphai/clinical-records/portal-discovery-link";
 import { isHostedEmailConversationMessageWake } from "@murphai/hosted-execution";
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 import {
@@ -42,17 +43,8 @@ export async function readHostedRawEmailMessage(
 export async function readPortalForwardForAssistant(wake: HostedExecutionConversationMessageWake, effectsPort: Pick<HostedRuntimeEffectsPort, "readRawEmailMessage">) {
   if (!isHostedEmailConversationMessageWake(wake) || !wake.message.threadIsDirect
     || parseHostedEmailThreadTarget(wake.message.threadTarget)?.targetKind === "group"
-    || wake.message.subject !== "Forwarded patient portal notice") return wake;
-  const { forwardedPortalFallback, medicalRecordsFindUrl, normalizePortalDiscoveryFragment, portalDiscoverySummary }
-    = await import("@murphai/clinical-records/portal-discovery-link");
-  if (wake.message.textPreview !== forwardedPortalFallback) return wake;
+    || wake.message.subject !== "Forwarded patient portal notice") return null;
+  if (wake.message.textPreview !== forwardedPortalFallback) return null;
   const bytes = await effectsPort.readRawEmailMessage(wake.message.rawMessageKey);
-  if (!bytes) return wake;
-  const { readHostedEmailConversationBody } = await import("@murphai/inboxd/connectors/hosted-conversation");
-  const summary = readHostedEmailConversationBody(bytes)?.trim() ?? "";
-  const fragment = summary.split(medicalRecordsFindUrl)[1] ?? "";
-  if (!normalizePortalDiscoveryFragment(fragment)) return wake;
-  const params = new URLSearchParams(fragment.slice(1));
-  if (summary !== portalDiscoverySummary({ id: params.get("provider")!, brandName: params.get("find")! })) return wake;
-  return { ...wake, message: { ...wake.message, textPreview: summary } };
+  return portalDiscoveryAssistantInput(readPortalDiscoverySuggestion(bytes));
 }

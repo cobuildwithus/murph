@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { forwardedPortalFallback, portalDiscoverySummary } from "@murphai/clinical-records/portal-discovery-link";
+import { forwardedPortalFallback, portalDiscoveryAssistantInput, portalDiscoverySummary } from "@murphai/clinical-records/portal-discovery-link";
 import type { HostedExecutionConversationMessageWake } from "@murphai/hosted-execution";
 import { readPortalForwardForAssistant } from "../src/hosted-runtime/events/email.ts";
 
@@ -13,12 +13,12 @@ it("hydrates the private Find suggestion only for a direct portal wake and falls
   const readRawEmailMessage = vi.fn(async (_key: string): Promise<Uint8Array | null> => bytes);
   const port = { readRawEmailMessage };
   const group = { ...wake, message: { ...wake.message, threadIsDirect: false } };
-  expect(await readPortalForwardForAssistant(group, port)).toBe(group);
+  expect(await readPortalForwardForAssistant(group, port)).toBeNull();
   expect(readRawEmailMessage).not.toHaveBeenCalled();
-  expect((await readPortalForwardForAssistant(wake, port)).message).toMatchObject({ textPreview: summary });
+  expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(summary));
   expect(readRawEmailMessage).toHaveBeenCalledExactlyOnceWith("opaque");
   readRawEmailMessage.mockResolvedValueOnce(null);
-  expect(await readPortalForwardForAssistant(wake, port)).toBe(wake);
+  expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(forwardedPortalFallback));
   readRawEmailMessage.mockResolvedValueOnce(new TextEncoder().encode(`Content-Type: text/plain\r\n\r\n${summary} https://untrusted.test`));
-  expect(await readPortalForwardForAssistant(wake, port)).toBe(wake);
+  expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(forwardedPortalFallback));
 });

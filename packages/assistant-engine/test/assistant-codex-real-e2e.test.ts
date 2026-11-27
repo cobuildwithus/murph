@@ -1,4 +1,4 @@
-import { medicalRecordsFindUrl, portalDiscoveryFragment, portalDiscoverySummary } from '@murphai/clinical-records/portal-discovery-link'
+import { forwardedPortalFallback, medicalRecordsFindUrl, portalDiscoveryAssistantInput, portalDiscoveryFragment, portalDiscoverySummary } from '@murphai/clinical-records/portal-discovery-link'
 import { MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL } from '../src/assistant-codex/dynamic-tools/clinical-records.js'
 import { prepareJournalConnectedContext } from '../src/assistant/journal-connected-context-prepare.js'
 import { MURPH_JOURNAL_SOURCE_READ_TOOL } from '../src/assistant-codex/dynamic-tools/journal-source-read.js'
@@ -1409,11 +1409,12 @@ describeRealCodex('real Codex reaction on an already-tapped message', () => {
 })
 
 describeRealCodex('portal discovery by personal email', () => {
-  it('replies to a forwarded portal notice with the possible account and Find link', async () => {
+  it.each(['matched', 'unmatched'] as const)('replies to a forwarded portal notice (%s) with the possible account and Find link', async kind => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-portal-forward-'))
     const place = { id: 'epic-synthetic-basin', brandName: 'Copper Basin Clinic' }
-    const link = medicalRecordsFindUrl + portalDiscoveryFragment(place)
+    const link = kind === 'matched' ? medicalRecordsFindUrl + portalDiscoveryFragment(place) : medicalRecordsFindUrl
+    const suggestion = kind === 'matched' ? portalDiscoverySummary(place) : forwardedPortalFallback
     try {
       const result = await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -1422,7 +1423,7 @@ describeRealCodex('portal discovery by personal email', () => {
         developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], null, false, 'email'),
         dynamicTools: [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL],
         env: config.env, model: config.model, modelProvider: config.modelProvider,
-        prompt: `Received an email message.\nEmail subject: Forwarded patient portal notice\nEmail body preview - ${portalDiscoverySummary(place)}`,
+        prompt: portalDiscoveryAssistantInput(suggestion),
         reasoningEffort: 'low', sandbox: 'read-only', workingDirectory,
       })
       process.stdout.write(`[portal-discovery] ${JSON.stringify({ reply: result.finalMessage })}\n`)
@@ -1430,7 +1431,11 @@ describeRealCodex('portal discovery by personal email', () => {
       expect(readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'command'
         && /curl|wget|https?:\/\/|vault-cli/iu.test(action.command))).toHaveLength(0)
       expect(result.finalMessage).toMatch(/possible portal account/iu)
-      expect(result.finalMessage).toContain(place.brandName)
+      if (kind === 'matched') expect(result.finalMessage).toContain(place.brandName)
+      else {
+        expect(result.finalMessage).toMatch(/search|look up/iu)
+        expect(result.finalMessage).not.toContain('#find=')
+      }
       expect(result.finalMessage).toContain(link)
       expect(result.finalMessage).not.toMatch(/(?:verified|confirmed) (?:your|the) account|records (?:are|have been) connected/iu)
     } finally {
