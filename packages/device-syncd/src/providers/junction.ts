@@ -1175,9 +1175,7 @@ export function createJunctionDeviceSyncProvider(
   ): JunctionReconcileProof | null {
     if (job.kind !== "reconcile" || job.payload.sourceProviderSlug
       || !context.vaultTimeZone
-      || !isCurrentScheduledClosedWindow(resolveJobWindow(job, context.now, reconcileDays), context.now, reconcileDays)
-      || (summaryResources.includes("profile") && !hasCheckedJunctionProfileSummary(context.account.metadata))
-      || shouldImportClosedTimeseriesForReconcile(context.account.lastSyncCompletedAt, floorUtcDayTimestamp(context.now))) return null;
+      || !isCurrentScheduledClosedWindow(resolveJobWindow(job, context.now, reconcileDays), context.now, reconcileDays)) return null;
     const binding = reconcileProofBinding(context.account, providers);
     if (job.payload.summaryResourceCursor || job.payload.summaryPhaseComplete) {
       const prior = readJunctionReconcileProof(job.payload.reconcileProof);
@@ -1225,10 +1223,41 @@ export function createJunctionDeviceSyncProvider(
 
   function buildReconcileProofMetadata(
     proof: JunctionReconcileProof | null, skipped: readonly JunctionSkippedOptionalResource[],
+    pending?: DeviceSyncJobInput | null,
   ): Record<string, unknown> {
-    return proof && skipped.length === 0
+    return proof && completedReconcileProof(proof, skipped, pending)
       ? { [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: encodeJunctionReconcileProof(proof) }
       : {};
+  }
+
+  function completedReconcileProof(
+    proof: JunctionReconcileProof | null, skipped: readonly JunctionSkippedOptionalResource[],
+    pending?: DeviceSyncJobInput | null,
+  ): JunctionReconcileProof | null {
+    return skipped.length === 0 && !pending ? proof : null;
+  }
+
+  function resumeReconcileRepairProof(
+    context: ProviderJobContext, job: DeviceSyncJobRecord,
+    window: { windowStart: string; windowEnd: string },
+  ): JunctionReconcileProof | null {
+    const proof = readJunctionReconcileProof(job.payload.reconcileProof);
+    return job.kind === "reconcile" && !job.payload.sourceProviderSlug
+      && proof && proof.timeZone === context.vaultTimeZone
+      && proof.validUntil > context.now
+      && isCurrentScheduledClosedWindow(window, context.now, reconcileDays)
+      ? proof : null;
+  }
+
+  function isReconcileRepairProofWindow(
+    proof: JunctionReconcileProof | null, resource: string, now: string,
+    window: { windowStart: string; windowEnd: string },
+    importWindow: { windowStart: string; windowEnd: string },
+  ): boolean {
+    if (!proof || !JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)) return false;
+    const expected = resolveLatestGloballyClosedProviderDayWindow(window.windowStart, window.windowEnd, now);
+    return Boolean(expected && importWindow.windowStart === expected.windowStart
+      && importWindow.windowEnd === expected.windowEnd);
   }
 
   // Same collection readers as ingestion; this context cannot write sources or
@@ -2192,6 +2221,7 @@ export function createJunctionDeviceSyncProvider(
       );
     const timeseriesContinuation = shouldScheduleTimeseries && historicalProofStillCurrent
       ? buildFullJobTimeseriesContinuationJob({
+          reconcileProof: completedReconcileProof(reconcileProof, skippedOptionalResources),
           deferredEmptyBackfillAttempts:
             readDeferredEmptyBackfillAttempts(backfillFollowUp),
           historicalProviderRecordsSeen,
@@ -2223,6 +2253,7 @@ export function createJunctionDeviceSyncProvider(
           },
           {
             ...profileMetadataPatch,
+            ...buildReconcileProofMetadata(reconcileProof, skippedOptionalResources, timeseriesContinuation),
             ...(temporalContinuationJobs.length > 0
               ? { [JUNCTION_TEMPORAL_SWEEP_METADATA_KEY]: temporalSweepKey }
               : {}),
@@ -5732,6 +5763,9 @@ export function createJunctionDeviceSyncProvider(
       context.now,
       job.kind === "backfill" ? summaryBackfillDays : reconcileDays,
     );
+    // A completed summary phase already owns this digest. Repair appends only
+    // the same closed-day collections the probe reads, without renewing expiry.
+    let reconcileProof = resumeReconcileRepairProof(context, job, window);
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(
           window.windowStart,
@@ -5893,6 +5927,11 @@ export function createJunctionDeviceSyncProvider(
             };
         if (Date.parse(importWindow.windowStart) < Date.parse(importWindow.windowEnd)) {
           const timeseriesImport = await importJunctionTimeseriesResourceSnapshot({
+            ...(isReconcileRepairProofWindow(reconcileProof, resource, context.now, window, importWindow)
+              ? { onFetchedSnapshot: (snapshots: Record<string, unknown[]>) => {
+                  if (reconcileProof) reconcileProof = appendReconcileSnapshots(reconcileProof, "timeseries", snapshots);
+                } }
+              : {}),
             collectionWorkLimit: JUNCTION_FULL_JOB_TIMESERIES_COLLECTION_WORK_LIMIT,
             context,
             dateQueryFormat: timeseriesWindowHours === 1 ? "datetime" : "date",
@@ -5939,6 +5978,7 @@ export function createJunctionDeviceSyncProvider(
 
     return buildFullJobTimeseriesContinuationResult({
       context,
+      reconcileProof,
       historicalProviderRecordsSeen,
       historicalRecordsSeen,
       job,
@@ -5963,6 +6003,7 @@ export function createJunctionDeviceSyncProvider(
     dateQueryFormat: JunctionDateQueryFormat;
     deferEmptySourceCheck?: (fence: JunctionSourceLifecycleFence) => void;
     resource: string;
+    onFetchedSnapshot?: (snapshots: Record<string, unknown[]>) => void;
     collectionWorkLimit?: JunctionCollectionWorkLimit;
     skippedOptionalResources: JunctionSkippedOptionalResource[];
     sourceProviderSlug?: string | null;
@@ -5986,11 +6027,9 @@ export function createJunctionDeviceSyncProvider(
         input.windowEnd,
         input.context.now,
       );
-      if (
-        !Number.isFinite(windowEndMs)
-        || !Number.isFinite(globallyClosedProviderDayEnd)
-        || windowEndMs > globallyClosedProviderDayEnd
-      ) {
+      // Both readers return finite epoch timestamps or NaN. This comparison
+      // rejects invalid timestamps as well as windows that are not closed yet.
+      if (!(windowEndMs <= globallyClosedProviderDayEnd)) {
         return { yieldedAt: null };
       }
     }
@@ -6008,14 +6047,9 @@ export function createJunctionDeviceSyncProvider(
       input.skippedOptionalResources,
       input.sourceProviderSlug,
       {
-        ...(input.authorizedLocalDay
-          ? {
-              authorizedLocalDay: input.authorizedLocalDay,
-              // A lossy successful response must never be certified as an
-              // authoritative empty or partial complete-day replacement.
-              requireStructurallyCompleteCollection: true,
-            }
-          : {}),
+        authorizedLocalDay: input.authorizedLocalDay,
+        // Lossy successful responses cannot certify authority or content proof.
+        requireStructurallyCompleteCollection: Boolean(input.authorizedLocalDay || input.onFetchedSnapshot),
         collectionWorkLimit: input.collectionWorkLimit,
         dateQueryFormat: input.dateQueryFormat,
       },
@@ -6039,6 +6073,9 @@ export function createJunctionDeviceSyncProvider(
       hasCanonicalWork: records.length > 0 || Boolean(input.authorizedLocalDay),
       sourceLifecycleFence,
     });
+    // Empty collections belong in the digest too. Their deferred source fence
+    // is checked by the batch owner before any result can be checkpointed.
+    input.onFetchedSnapshot?.({ [input.resource]: fetched.records });
     if (!currentSources) {
       return {
         historicalProviderRecordsSeen: providerRecordsSeen,
@@ -6643,6 +6680,7 @@ export function createJunctionDeviceSyncProvider(
 
   async function buildFullJobTimeseriesContinuationResult(input: {
     context: ProviderJobContext;
+    reconcileProof?: JunctionReconcileProof | null;
     continuation: JunctionFullJobTimeseriesContinuation | null;
     historicalProviderRecordsSeen: boolean;
     historicalRecordsSeen: boolean;
@@ -6665,6 +6703,7 @@ export function createJunctionDeviceSyncProvider(
       );
     const continuationJob = input.continuation && historicalProofStillCurrent
       ? buildFullJobTimeseriesContinuationJob({
+          reconcileProof: completedReconcileProof(input.reconcileProof ?? null, input.skippedOptionalResources),
           deferredEmptyBackfillAttempts:
             readHistoricalBackfillJobEmptyAttempts(input.job),
           historicalProviderRecordsSeen: input.historicalProviderRecordsSeen,
@@ -6694,6 +6733,9 @@ export function createJunctionDeviceSyncProvider(
         input.context,
         {
           ...(scheduledJob ? { scheduledJobs: [scheduledJob] } : {}),
+          ...(!scheduledJob && input.reconcileProof
+            ? { metadataPatch: buildReconcileProofMetadata(input.reconcileProof, input.skippedOptionalResources) }
+            : {}),
           nextReconcileAt: resolveJunctionNextReconcileAt(
             input.context.account,
             input.context.now,
@@ -6709,6 +6751,7 @@ export function createJunctionDeviceSyncProvider(
   }
 
   function buildFullJobTimeseriesContinuationJob(input: {
+    reconcileProof?: JunctionReconcileProof | null;
     deferredEmptyBackfillAttempts: number;
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
@@ -6756,6 +6799,7 @@ export function createJunctionDeviceSyncProvider(
     return buildExactWindowJob({
       kind: input.job.kind,
       payload: {
+        ...(input.reconcileProof ? { reconcileProof: encodeJunctionReconcileProof(input.reconcileProof) } : {}),
         ...(input.deferredEmptyBackfillAttempts > 0
           ? { emptyBackfillAttempts: input.deferredEmptyBackfillAttempts }
           : {}),
