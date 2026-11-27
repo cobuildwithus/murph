@@ -1205,14 +1205,18 @@ export async function readHostedGroupBoardData(input: {
   viewerId: string;
   otherId: string;
   otherMetric?: "steps" | "sleep";
+  includeSleepTimes?: boolean;
   now: Date;
   prisma?: PrismaClient;
 }) {
   const prisma = input.prisma ?? getPrisma();
   const scopeKeys = HOSTED_GROUP_BOARD_SCOPES.map(buildHostedVaultShareProjectionScopeKey);
   const requestedScope = input.otherMetric && scopeKeys[input.otherMetric === "steps" ? 2 : 1];
+  const timingScope = buildHostedVaultShareProjectionScopeKey(hostedVaultShareProjectionKindToScope("sleep-times.v0"));
+  const scopeFilter = { projectionScopeKey: { in: requestedScope ? [requestedScope] : scopeKeys } };
+  const grantLimit = input.includeSleepTimes ? 9 : 8;
   const ids = [input.viewerId, input.otherId];
-  const captureAuthority = (includeSharingRevision = false) => prisma.$transaction(async tx => {
+  const readAuthority = async (tx: Prisma.TransactionClient, includeSharingRevision = false) => {
     const group = await tx.hostedGroup.findUnique({ where: { id: input.groupId },
       select: { runtimeMemberId: true, members: { where: { memberId: { in: ids } },
         take: 2, select: { id: true, memberId: true } } } });
@@ -1221,21 +1225,23 @@ export async function readHostedGroupBoardData(input: {
     const grants = await tx.hostedVaultShare.findMany({
       where: { destinationMemberId: input.runtimeMemberId, status: "granted",
         grantorMemberId: { in: group.members.map(member => member.memberId).filter(id => !requestedScope || id === input.otherId) },
-        projectionScopeKey: { in: requestedScope ? [requestedScope] : scopeKeys },
+        ...(input.includeSleepTimes ? { OR: [scopeFilter, { grantorMemberId: input.otherId, projectionScopeKey: timingScope }] } : scopeFilter),
         grantor: { AND: [{ suspendedAt: null }, hostedHealthDataConsentNotRevokedWhere()] } },
-      take: 8, orderBy: { id: "asc" },
+      take: grantLimit, orderBy: { id: "asc" },
       select: { id: true, destinationMemberId: true, grantorMemberId: true,
         grantedAt: true, projectionKind: true, projectionScopeKey: true, projectionScopeJson: true },
     });
     const readable = runtimeActive ? await tx.hostedVaultShare.findMany({
       where: { id: { in: grants.map(grant => grant.id) }, grantor: { AND: [
         activeHostedMemberAccessWhere(), hostedHealthDataConsentNotRevokedWhere(),
-      ] } }, take: 8, select: { id: true },
+      ] } }, take: grantLimit, select: { id: true },
     }) : [];
     const sharingRevision = includeSharingRevision
       ? (await readBoardSharingState(tx, input.viewerId, input.runtimeMemberId)).revision : undefined;
     return { members: group.members, grants, sharingRevision, readableIds: new Set(readable.map(grant => grant.id)) };
-  }, { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  };
+  const captureAuthority = (includeSharingRevision = false) => prisma.$transaction(tx => readAuthority(tx, includeSharingRevision),
+    { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 
   const captured = await captureAuthority();
   if (!captured) return null;
@@ -1257,37 +1263,42 @@ export async function readHostedGroupBoardData(input: {
     throw hostedOnboardingError({ code: "BOARD_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Shared numbers are temporarily unavailable." });
   });
-  const current = await captureAuthority(!requestedScope);
-  if (!current) return null;
-  const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
-  if (viewerMembership !== membershipId) return null;
-  return {
-    membershipId,
-    sharingRevision: current.sharingRevision,
-    myScopes: current.grants.filter(grant => grant.grantorMemberId === input.viewerId).map(grant => grant.projectionScopeKey),
-    people: ids.map(memberId => {
-      const membership = current.members.find(member => member.memberId === memberId);
-      const sameMembership = membership && captured.members.some(member => member.id === membership.id);
-      const ageGroups: HostedVaultShareAgeGroup[] = [];
-      const projections = scopeKeys.map(projectionScopeKey => {
-        let projection: HostedGroupBoardProjection;
-        const grant = current.grants.find(grant => grant.grantorMemberId === memberId && grant.projectionScopeKey === projectionScopeKey);
-        if (!grant) projection = { state: "not_granted", records: [] };
-        else {
-          const exact = grants.some(previous => previous.id === grant.id && previous.grantedAt.getTime() === grant.grantedAt.getTime());
-          const records = exact && sameMembership && current.readableIds.has(grant.id)
-            ? snapshots?.recordsByMemberAndScope.get(memberId)?.get(projectionScopeKey) : null;
-          ageGroups.push(...readableBoardAgeGroup(records,
-            snapshots?.ageGroupsByMemberAndScope, memberId, projectionScopeKey));
-          projection = { state: records == null ? "pending" : records.length ? "available" : "missing", records: records ?? [] };
-        }
-        return { projectionScopeKey, ...projection };
-      });
-      const demographics = consistentBoardAgeGroup(ageGroups);
-      return { memberId, member: Boolean(membership), projections,
-        ...(demographics ? { demographics } : {}) };
-    }),
-  };
+  const projectCurrent = (current: Awaited<ReturnType<typeof readAuthority>>) => {
+    if (!current) return null;
+    const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
+    if (viewerMembership !== membershipId) return null;
+    return {
+      membershipId,
+      sharingRevision: current.sharingRevision,
+      myScopes: current.grants.filter(grant => grant.grantorMemberId === input.viewerId).map(grant => grant.projectionScopeKey),
+      people: ids.map(memberId => {
+        const membership = current.members.find(member => member.memberId === memberId);
+        const sameMembership = membership && captured.members.some(member => member.id === membership.id);
+        const ageGroups: HostedVaultShareAgeGroup[] = [];
+        const projectionFor = (projectionScopeKey: string) => {
+          let projection: HostedGroupBoardProjection;
+          const grant = current.grants.find(grant => grant.grantorMemberId === memberId && grant.projectionScopeKey === projectionScopeKey);
+          if (!grant) projection = { state: "not_granted", records: [] };
+          else {
+            const exact = grants.some(previous => previous.id === grant.id && previous.grantedAt.getTime() === grant.grantedAt.getTime());
+            const records = exact && sameMembership && current.readableIds.has(grant.id)
+              ? snapshots?.recordsByMemberAndScope.get(memberId)?.get(projectionScopeKey) : null;
+            if (projectionScopeKey !== timingScope) ageGroups.push(...readableBoardAgeGroup(records,
+              snapshots?.ageGroupsByMemberAndScope, memberId, projectionScopeKey));
+            projection = { state: records == null ? "pending" : records.length ? "available" : "missing", records: records ?? [] };
+          }
+          return { projectionScopeKey, ...projection };
+        };
+        const projections = scopeKeys.map(projectionFor);
+        const demographics = consistentBoardAgeGroup(ageGroups);
+        return { memberId, member: Boolean(membership), projections,
+          ...(input.includeSleepTimes && memberId === input.otherId && { sleepTimes: projectionFor(timingScope) }),
+          ...(demographics ? { demographics } : {}) };
+      }),
+    };
+  }
+  const current = projectCurrent(await captureAuthority(!requestedScope));
+  return current && { ...current, atDisclosure: async (tx: Prisma.TransactionClient) => projectCurrent(await readAuthority(tx)) };
 }
 
 function readableBoardAgeGroup(

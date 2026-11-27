@@ -1,5 +1,5 @@
 import { isRetiredDeviceFeature } from "../retired-device-features.ts";
-import { HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
+import { combineStationBounds, HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER } from "@murphai/contracts";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
@@ -463,7 +463,10 @@ function measurementMetricPoints(entity: CanonicalEntity, sourceKind: MetricSour
     const unit = readString(record?.unit);
     if (!metric || value === null) return [];
     // Reported VO2 estimates are dated readings consumed by daily shares and Numbers.
-    const reportedDaily = resolveMetricDefinition(metric)?.key === "estimated-vo2-max";
+    const definition = resolveMetricDefinition(metric);
+    const reportedDaily = definition?.key === "estimated-vo2-max"
+      || definition?.key === "systolic-blood-pressure" || definition?.key === "diastolic-blood-pressure"
+      || Object.hasOwn(combineStationBounds, metric.replaceAll("-", "_"));
 
     return [scalarMetricPoint({
       confidence: eventConfidence(entity),

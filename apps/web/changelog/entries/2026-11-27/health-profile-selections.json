@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 100,
+  "item": {
+    "id": "health-profile-selections",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Choose what goes on your health profile",
+    "summary": "When profile editing is available to you, add a cover, pin up to three cards and choose the numbers you’re working on.",
+    "details": "A pinned milestone keeps its date. Game partners see progress for numbers you already share with them.",
+    "relevanceTags": ["health", "profile"],
+    "sourcePullRequests": []
+  }
+}

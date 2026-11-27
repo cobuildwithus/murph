@@ -146,9 +146,7 @@ export function createBrowserVaultSessionRoute() {
         return;
       }
       refreshScheduled = true;
-      scheduleAfterResponseOrFireAndForget(() =>
-        scheduleBrowserVaultRefreshBestEffort({ userId: auth.member.id }),
-      );
+      scheduleBrowserVaultRefresh(auth.member.id);
     };
 
     if (!replicaRef) {
@@ -338,6 +336,10 @@ function emptyBrowserVaultSession(input: {
     state: "empty" as const,
     workspaceVersion: input.workspaceVersion ?? null,
   });
+}
+
+export function scheduleBrowserVaultRefresh(userId: string) {
+  scheduleAfterResponseOrFireAndForget(() => scheduleBrowserVaultRefreshBestEffort({ userId }));
 }
 
 async function scheduleBrowserVaultRefreshBestEffort(input: {

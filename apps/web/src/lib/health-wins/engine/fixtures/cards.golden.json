@@ -55,7 +55,7 @@
       "number": "14",
       "measure": "floors"
     },
-    "subtitle": "November, best month this year",
+    "subtitle": "November so far, best month this year",
     "source_note": "16 tracked days this month so far. Compared across 6 qualifying monthly averages.",
     "chart": {
       "type": "monthly_bars",
@@ -521,7 +521,7 @@
     "filter": "Fitness",
     "title": {
       "number": "3 walks",
-      "measure": "in November"
+      "measure": "in November so far"
     },
     "subtitle": "1h 17m of walking, the longest 35 min",
     "source_note": "Session log · Nov 1 through Nov 18",
@@ -1127,7 +1127,7 @@
       "number": "5,320",
       "measure": "g protein"
     },
-    "subtitle": "November, your most this year",
+    "subtitle": "November so far, most this year",
     "source_note": "Logged on 28 of 28 days this month so far. Compared with 3 qualifying monthly totals. A day counts when every meal has protein.",
     "chart": {
       "type": "monthly_bars",

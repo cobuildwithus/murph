@@ -26,9 +26,9 @@ describe("lab draws", () => {
   );
 
   it.each<[Analyte, string, number, number]>([
-    ["triglycerides", "mg/dL", 112, 97], ["hdl", "mg/dL", 62, 67], ["ldl", "mg/dL", 108, 98],
+    ["triglycerides", "mg/dL", 121, 96], ["hdl", "mg/dL", 62, 67], ["ldl", "mg/dL", 108, 98],
     ["hs_crp", "mg/L", 1.2, 0.9], ["a1c", "%", 5.8, 5.6], ["insulin", "µIU/mL", 12, 10],
-    ["glucose", "mg/dL", 98, 93],
+    ["glucose", "mg/dL", 97, 87],
   ])("13. %s needs a favorable change of at least its own step", (analyte, unit, base, latest) => {
     const options = { analyte, unit, fasting: true };
     const history = [draw(base - 0.1, 1, options), draw(base + 0.1, 2, options)];
@@ -39,6 +39,24 @@ describe("lab draws", () => {
     }
   });
 
+  it("offers only the range for a sub-step fall in normal fasting glucose", () => {
+    const options = { analyte: "glucose", fasting: true, flag: "normal", referenceRange: { low: 71, high: 99 } } as const;
+    const history = [draw(93, 3, options), draw(97, 8, options)];
+    expect(cards([...history, draw(88, 17, options)])).toMatchObject([{ kind: "lab_range" }]);
+    expect(cards([...history, draw(85, 17, options)])).toMatchObject([{ kind: "lab_change", title: { number: "−10 mg/dL" } }]);
+  });
+
+  it("13. reads the usual value at the precision the lab reports", () => {
+    const options = { analyte: "triglycerides" as const, fasting: true };
+    expect(cards([draw(141, 1, options), draw(120, 2, options), draw(92, 3, options)])).toMatchObject([{
+      title: { number: "−39 mg/dL" }, chart: { baseline: { value: 131, draws: 2 }, latest: { value: 92 } },
+    }]);
+    const a1c = { analyte: "a1c" as const, unit: "%" };
+    expect(cards([draw(5.9, 1, a1c), draw(5.6, 2, a1c), draw(5.4, 3, a1c)])).toMatchObject([{
+      title: { number: "−0.4 points" }, chart: { baseline: { value: 5.8 } },
+    }]);
+  });
+
   it("13. audit 10 compares all eligible fasting draws to their median", () => {
     const options = { analyte: "triglycerides" as const, fasting: true };
     const labs = [draw(208, 1, options), draw(98, 2, options), draw(102, 3, options), draw(95, 8, options)];
@@ -46,7 +64,7 @@ describe("lab draws", () => {
     const rise = draw(181, 5, { ...options, fasting: false });
     const unknown = draw(199, 4, { ...options, fasting: undefined });
     expect(cards([unknown, rise, ...labs])).toEqual([]);
-    const latest = draw(80, 10, options);
+    const latest = draw(73, 10, options);
     expect(cards([...labs, unknown, rise, latest])).toMatchObject([{ chart: { baseline: { value: 100, draws: 4 } } }]);
     expect(cards([...labs, { ...latest, fasting: false }])).toEqual([]);
     expect(cards([...labs, { ...latest, fasting: undefined }])).toEqual([]);

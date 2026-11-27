@@ -4,5 +4,5 @@ import { healthMemberId, readHealthCursor, type HealthMemberContext } from "@/sr
 import { jsonOk } from "@/src/lib/hosted-onboarding/http";
 
 export const GET = withHealthRoute(async (request, auth, context: HealthMemberContext) => {
-  return jsonOk(await readHealthProfile(auth, await healthMemberId(context), readHealthCursor(request)));
+  return jsonOk(await readHealthProfile(auth, await healthMemberId(context), readHealthCursor(request), request.signal));
 });

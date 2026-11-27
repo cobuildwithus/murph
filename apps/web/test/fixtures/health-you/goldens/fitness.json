@@ -1,0 +1,122 @@
+{
+  "title": "Fitness",
+  "hero": {
+    "value": "12.7",
+    "unit": "peak METs",
+    "years": -0.9
+  },
+  "chart": {
+    "kind": "trend",
+    "points": [
+      {
+        "date": "2025-01-04",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-01-18",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-02-01",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-02-15",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-01",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-15",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-29",
+        "value": 44.333333333333336
+      }
+    ],
+    "unit": "mL/kg/min"
+  },
+  "factors": [
+    {
+      "key": "cardioFitness",
+      "label": "Cardio fitness",
+      "icon": "cardioFitness",
+      "group": "fitness",
+      "value": "12.7",
+      "unit": "peak METs",
+      "target": {
+        "text": "Comparison value 13 peak METs"
+      },
+      "years": -0.8,
+      "yearsText": "−0.8",
+      "whatItIs": "This estimates the body's peak oxygen use during exercise.",
+      "whatLowersIt": "Use the same device or repeat the same lab test.",
+      "rank": null,
+      "grade": "A",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "7,760",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 13,649 steps/day"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
+      "rank": {
+        "percentile": 48,
+        "label": "Average",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
+      "detail": "fitness",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [
+    {
+      "key": "balance",
+      "label": "Balance",
+      "icon": "balance",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "sitRise",
+      "label": "Sit and rise",
+      "icon": "sitRise",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "fitness_tests",
+      "label": "Fitness tests",
+      "icon": "fitness_tests",
+      "action": "combine",
+      "primary": false
+    }
+  ],
+  "tiles": [
+    {
+      "label": "Daily steps",
+      "value": "7,760 steps/day"
+    }
+  ]
+}

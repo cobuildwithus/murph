@@ -2,7 +2,7 @@ import { BANK, ladder } from "../../game/progress/bank";
 import type { EXERCISES } from "../../game/progress/registry";
 import { addDays, weekdayOf } from "../../game/time";
 import { isMetric, metricInfo } from "./metrics";
-import { cardDateKey, cardText, dayNumber, formatDuration, formatHealthWinDistance, formatNumber, formatWinDate, formatWinMonth, isDate, kmFromMiles } from "./shared";
+import { cardDateKey, cardText, dayNumber, formatDuration, formatHealthWinDistance, formatNumber, formatWinDate, formatWinMonthPeriod, isDate, kmFromMiles } from "./shared";
 import type { Candidate, CardSpec, Experiment, Game, GameStreakDay, HealthWinsInput, Metric, Session, SessionType } from "./types";
 
 type ExperimentBar = { label: "Before" | "During"; start: string; end: string; mean: number };
@@ -345,7 +345,7 @@ function sessionCandidates(sessions: readonly Session[], today: string): Candida
       achievement: { kind: "sessions", subject: type, period: month },
       card: {
         kind: "sessions", id: `sessions:${type}:${month}`, filter: "Fitness",
-        title: { number: `${formatNumber(series.length, 0)} ${plural}`, measure: `in ${formatWinMonth(today)}` },
+        title: { number: `${formatNumber(series.length, 0)} ${plural}`, measure: `in ${formatWinMonthPeriod(month, today)}` },
         subtitle: `${formatDuration(totalMinutes)} of ${activity}, the longest ${longest === 60 ? "a full hour" : formatDuration(longest)}`,
         source_note: `Session log · ${formatWinDate(`${month}-01`, today)} through ${formatWinDate(today, today)}`,
         chart: { type: "sessions", sessionType: type, totalMinutes, series },

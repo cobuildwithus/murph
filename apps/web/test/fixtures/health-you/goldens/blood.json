@@ -1,0 +1,291 @@
+{
+  "latest": "2025-01-23",
+  "years": 1.2,
+  "factors": [
+    {
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "group": "blood",
+      "value": "13.4",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 12.1 %"
+      },
+      "years": 1.3,
+      "yearsText": "+1.3",
+      "whatItIs": "This measures how much red blood cells vary in size.",
+      "whatLowersIt": "Looking at red cell size and hemoglobin alongside this result gives a fuller picture.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "rdw",
+      "state": "counted"
+    },
+    {
+      "key": "cholesterol",
+      "label": "Non-HDL cholesterol",
+      "icon": "cholesterol",
+      "group": "blood",
+      "value": "136",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 122.2 mg/dL"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This is total cholesterol minus HDL cholesterol from the same blood draw.",
+      "whatLowersIt": "Total cholesterol and HDL from the same draw give a comparable result.",
+      "rank": {
+        "percentile": 61,
+        "label": "Top 39%",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
+      "detail": "blood",
+      "state": "counted"
+    },
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "group": "blood",
+      "value": "4.2",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 4.6 g/dL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "whatItIs": "Albumin is the main protein in the liquid part of blood.",
+      "whatLowersIt": "Seeing albumin beside total protein gives the result more context.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "albumin",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [
+    {
+      "key": "acr",
+      "label": "Urine albumin-to-creatinine ratio",
+      "icon": "acr",
+      "action": "bloodWork",
+      "primary": true
+    },
+    {
+      "key": "alp",
+      "label": "Alp",
+      "icon": "alp",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "ast",
+      "label": "Ast",
+      "icon": "ast",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "calcium",
+      "label": "Calcium",
+      "icon": "calcium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "chloride",
+      "label": "Chloride",
+      "icon": "chloride",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "ggt",
+      "label": "Ggt",
+      "icon": "ggt",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "globulin",
+      "label": "Globulin",
+      "icon": "globulin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "hemoglobin",
+      "label": "Hemoglobin",
+      "icon": "hemoglobin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "homocysteine",
+      "label": "Homocysteine",
+      "icon": "homocysteine",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "cholesterol",
+      "label": "LDL cholesterol",
+      "icon": "cholesterol",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "lpa",
+      "label": "Lipoprotein(a)",
+      "icon": "lpa",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "lymph",
+      "label": "Lymph",
+      "icon": "lymph",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "mcv",
+      "label": "Mcv",
+      "icon": "mcv",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "phosphate",
+      "label": "Phosphate",
+      "icon": "phosphate",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "platelets",
+      "label": "Platelets",
+      "icon": "platelets",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "potassium",
+      "label": "Potassium",
+      "icon": "potassium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "sodium",
+      "label": "Sodium",
+      "icon": "sodium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "total_protein",
+      "label": "Total protein",
+      "icon": "total_protein",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "uric_acid",
+      "label": "Uric acid",
+      "icon": "uric_acid",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "vitamin_d_25oh",
+      "label": "Vitamin d 25oh",
+      "icon": "vitamin_d_25oh",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "wbc",
+      "label": "White blood cell count",
+      "icon": "wbc",
+      "action": "bloodWork",
+      "primary": false
+    }
+  ],
+  "unchanged": [
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "value": 4.2,
+      "unit": "g/dL",
+      "flag": null
+    },
+    {
+      "key": "hdl",
+      "label": "HDL cholesterol",
+      "value": 52,
+      "unit": "mg/dL",
+      "flag": null
+    },
+    {
+      "key": "total-cholesterol",
+      "label": "Total cholesterol",
+      "value": 188,
+      "unit": "mg/dL",
+      "flag": null
+    }
+  ],
+  "worthALook": [],
+  "all": {
+    "inRange": 4,
+    "total": 4,
+    "systems": [
+      {
+        "name": "Liver",
+        "markers": [
+          {
+            "key": "albumin",
+            "label": "Albumin",
+            "value": 4.2,
+            "unit": "g/dL",
+            "flag": null
+          }
+        ]
+      },
+      {
+        "name": "Other markers",
+        "markers": [
+          {
+            "key": "hdl",
+            "label": "HDL cholesterol",
+            "value": 52,
+            "unit": "mg/dL",
+            "flag": null
+          },
+          {
+            "key": "total-cholesterol",
+            "label": "Total cholesterol",
+            "value": 188,
+            "unit": "mg/dL",
+            "flag": null
+          }
+        ]
+      },
+      {
+        "name": "Blood counts",
+        "markers": [
+          {
+            "key": "rdw",
+            "label": "Red cell distribution width",
+            "value": 13.4,
+            "unit": "%",
+            "flag": null
+          }
+        ]
+      }
+    ]
+  }
+}
