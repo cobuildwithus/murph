@@ -61,7 +61,10 @@ for (const [name, kind, years] of [
       historyFrom: "2024-05-01",
       availability: {},
       markers,
-      lifts: [],
+      lifts: name === "complete" ? [asOf] : [],
+      needsWhoopAnswer: name === "wearable",
+      activeMinutes: name === "complete" ? [{ date: asOf, value: 28 }] : undefined,
+      bedtime: name === "complete" ? [{ date: asOf, inTarget: true }] : undefined,
     }),
   );
   const expectedState = name === "paused" || name === "building" ? name : "ready";

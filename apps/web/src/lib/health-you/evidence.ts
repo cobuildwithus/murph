@@ -20,6 +20,7 @@ export interface YouInputs {
   markers: MarkerInput[];
   /** First date for which this projection can supply any dated evidence. */
   historyFrom: string;
+  needsWhoopAnswer?: boolean;
   lifts?: string[];
   activeMinutes?: { date: string; value: number }[];
   bedtime?: { date: string; inTarget: boolean }[];

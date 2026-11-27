@@ -139,3 +139,81 @@ describe("dated private replica projections", () => {
     }
   });
 });
+
+describe("canonical check-in and sleep timing projections", () => {
+  it("reads the versioned response inside a checked assessment and suppresses an answered WHOOP prompt", () => {
+    const r = replica();
+    r.metricRows = r.metricRows.map((row) => ({ ...row, sourceLabel: "WHOOP" }));
+    Object.assign(r, { sleepTiming: [] });
+    expect(buildViews(read(structuredClone(r))).you.questions.map((q) => q.key)).toEqual(["whoopZones"]);
+    r.entities.push({
+      id: "synthetic-assessment",
+      family: "assessment",
+      kind: "assessment",
+      recordClass: "ledger",
+      date: offset(today, 1),
+      occurredAt: offset(today, 1) + "T02:00:00Z",
+      attributes: {
+        checkIn: {
+          date: today,
+          response: {
+            instrument: "you-answer",
+            instrumentVersion: 1,
+            answer: { key: "whoopZones", value: "notSure" },
+          },
+        },
+      },
+      tags: [],
+      lookupIds: [],
+      links: [],
+      title: null,
+      bodyPreview: null,
+      stream: null,
+      status: null,
+      experimentSlug: null,
+    });
+    const input = read(r);
+    expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_zones: "notSure" });
+    expect(buildViews(input).you.questions).toEqual([]);
+  });
+  it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
+    const r = replica();
+    const upper = {
+      ...r.metricRows[0]!,
+      id: "synthetic-upper",
+      metricKey: "systolic-blood-pressure",
+      value: 124,
+      unit: "mmHg",
+      sourceKind: "measurement" as const,
+      recordIds: ["synthetic-event"],
+    };
+    const lower = { ...upper, id: "synthetic-lower", metricKey: "diastolic-blood-pressure", value: 76 };
+    r.metricRows.push(upper, lower);
+    const input = read(r);
+    expect(input.evidence.bp).toMatchObject([{ systolic: 124, diastolic: 76, validated: false }]);
+    const bundle = buildViews(input);
+    expect(bundle.age?.events).toContainEqual({ date: today, kind: "bloodPressure", label: "Blood pressure" });
+    expect(bundle.you.factors.some((f) => f.key === "bloodPressure")).toBe(false);
+    const split = r.metricRows.map(row => row.id === lower.id ? { ...row, recordIds: ["other-synthetic-event"] } : row);
+    expect(read({ ...r, metricRows: split }).evidence.bp).toEqual([]);
+  });
+  it("uses observed nights on both sides of midnight for the weekly bedtime target", () => {
+    const r = replica();
+    const timing = Array.from({ length: 14 }, (_, i) => {
+      const date = offset(today, -i);
+      return {
+        date,
+        timeZone: "America/New_York",
+        startAt: date + (i % 2 ? "T04:50:00Z" : "T05:15:00Z"),
+        endAt: date + "T12:15:00Z",
+      };
+    });
+    Object.assign(r, { sleepTiming: timing });
+    const input = read(r);
+    expect(input.bedtime).toEqual([{ date: today, inTarget: true }]);
+    expect(buildViews(input).you.thisWeek).toContainEqual(
+      expect.objectContaining({ factor: "bedtime", value: 1 }),
+    );
+    expect(input.availability.sleep_regularity).not.toBe("counted");
+  });
+});

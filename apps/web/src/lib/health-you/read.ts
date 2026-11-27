@@ -16,7 +16,7 @@ import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-priva
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedBrowserVaultReplicaState } from "../hosted-workspace/store";
 import { openHealthTexts, sealHealthTexts } from "../health-wins/crypto";
-import { withInputAuthority } from "../health-wins/inputs";
+import { withInputAuthority } from "../health-wins/input-authority";
 import { assertHealthYouEnabled } from "../health-wins/flag";
 import { getPrisma } from "../prisma";
 import { bundleSchema, type Person } from "./contract";
@@ -26,7 +26,7 @@ import { buildViews, emptyYou } from "./views";
 import { readThisWeek } from "./this-week";
 
 const cacheSchema = z.object({ timeZone: z.string(), views: bundleSchema });
-export const YOU_SCHEMA_VERSION = 1;
+export const YOU_SCHEMA_VERSION = 2;
 type ReadKind = "you" | "age" | "week" | "sleep" | "fitness" | "blood" | "marker";
 function binding(memberId: string, revision: string) {
   return { memberId, table: "health_you_cache", rowId: revision, field: "views" } as const;

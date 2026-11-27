@@ -54,28 +54,5 @@
       "primary": false
     }
   ],
-  "questions": [
-    {
-      "key": "smoking",
-      "text": "Which best describes your cigarette use?",
-      "options": [
-        {
-          "value": "never",
-          "label": "Never smoked regularly"
-        },
-        {
-          "value": "former",
-          "label": "Former smoker"
-        },
-        {
-          "value": "current",
-          "label": "Currently smoke"
-        },
-        {
-          "value": "unknown",
-          "label": "Skip"
-        }
-      ]
-    }
-  ]
+  "questions": []
 }

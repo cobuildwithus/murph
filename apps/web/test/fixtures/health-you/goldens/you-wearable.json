@@ -152,24 +152,20 @@
   ],
   "questions": [
     {
-      "key": "smoking",
-      "text": "Which best describes your cigarette use?",
+      "key": "whoopZones",
+      "text": "Are your WHOOP heart rate zones set to the standard ranges?",
       "options": [
         {
-          "value": "never",
-          "label": "Never smoked regularly"
+          "value": "yes",
+          "label": "Yes"
         },
         {
-          "value": "former",
-          "label": "Former smoker"
+          "value": "no",
+          "label": "No"
         },
         {
-          "value": "current",
-          "label": "Currently smoke"
-        },
-        {
-          "value": "unknown",
-          "label": "Skip"
+          "value": "notSure",
+          "label": "Not sure"
         }
       ]
     }

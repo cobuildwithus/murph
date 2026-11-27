@@ -2,12 +2,11 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
-import { assertHostedNativeMemberAuthCurrentForRead, type HostedNativeMemberAuth } from "../better-auth/native-auth";
-import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
+import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { assertPrivateHealthAuthority, withInputAuthority } from "./input-authority";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
 import { readPaintedRouteArt } from "../game/progress/route-art";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
 import { isMetric } from "./engine/metrics";
 import type { HealthWinsInput, Measure, Metric } from "./engine/types";
@@ -77,16 +76,6 @@ async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, tod
   };
 }
 
-export async function withInputAuthority<T>(checkAuthority: () => Promise<void>, load: () => Promise<T>): Promise<T> {
-  await checkAuthority();
-  try {
-    return await load();
-  } finally {
-    // Authority loss always wins, including after a timeout or a failed independent input.
-    await checkAuthority();
-  }
-}
-
 export async function readHealthWinInputs(memberId: string, checkAuthority: () => Promise<void>, today: string, signal: AbortSignal) {
   return withInputAuthority(checkAuthority, async () => {
     const source = sources(signal);
@@ -148,12 +137,8 @@ export async function readMeasureInputs(auth: HostedNativeMemberAuth, today: str
   const deadline = AbortSignal.timeout(MEASURE_READ_BUDGET_MS);
   const signal = AbortSignal.any([requestSignal, deadline]);
   const memberId = auth.member.id;
-  const checkAuthority = () => getPrisma().$transaction(async tx => {
-    await assertHostedNativeMemberAuthCurrentForRead(auth, tx);
-    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-  });
   try {
-    const result = await withInputAuthority(checkAuthority, () => readMeasureSource(memberId, today, measure, signal));
+    const result = await withInputAuthority(() => assertPrivateHealthAuthority(auth), () => readMeasureSource(memberId, today, measure, signal));
     signal.throwIfAborted();
     return result;
   } catch (error) {

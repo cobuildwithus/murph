@@ -17,6 +17,7 @@ import { isRecord } from "../primitives";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
 import { canonicalProvider } from "../health-wins/engine/daily-clean";
 import { day, distance, fields, model, offset, rowDay, type MemberEvidence } from "./engine/model";
+import { bedtimeProgress } from "./bedtime";
 import { assessmentInputs, pressureInputs } from "./checkins";
 import { inputState, type MarkerInput, type YouInputs } from "./evidence";
 
@@ -116,7 +117,12 @@ export function projectYouInputs(
     }
   }
   readLabs(client.labResults.list({ from, to: asOf }), from, asOf, evidence, markers);
-  const assessments = assessmentInputs(client.entities.list({ families: ["assessment"], from, to: asOf }), asOf);
+  const assessments = assessmentInputs(
+    client.entities.list({ families: ["assessment"], from: offset(from, -1), to: offset(asOf, 1) }),
+    from,
+    asOf,
+    timeZone,
+  );
   evidence.checkins = assessments.checkins;
   evidence.fitness_tests = assessments.tests;
   evidence.bp = pressureInputs(
@@ -136,10 +142,21 @@ export function projectYouInputs(
     asOf,
   );
   const availability = inputAvailability(evidence, asOf, markers);
+  const timing = "sleepTiming" in replica ? replica.sleepTiming : undefined;
+  const bedtime = bedtimeProgress(timing, asOf);
+  if (bedtime)
+    availability.bedtime = inputState(
+      bedtime.map((night) => night.date),
+      asOf,
+      2,
+    );
+
   return {
     asOf,
     timeZone,
     evidence,
+    bedtime,
+    needsWhoopAnswer: Array.isArray(timing) && needsWhoopAnswer(evidence, asOf),
     availability,
     markers,
     lifts,
@@ -147,6 +164,13 @@ export function projectYouInputs(
     sourceRevision: replica.source.dataVersion,
     historyFrom: [from, evidence.joined!].sort().at(-1)!,
   };
+}
+
+function needsWhoopAnswer(evidence: MemberEvidence, asOf: string) {
+  const whoop = [...(evidence.daily ?? []), ...(evidence.sleep_sessions ?? [])].some(
+    (row) => row.source === "whoop" && distance(asOf, rowDay(row)) <= 42,
+  );
+  return whoop && !(evidence.checkins ?? []).some((row) => row.whoop_zones != null && rowDay(row) <= asOf);
 }
 
 export async function readYouInputs(
@@ -248,9 +272,11 @@ const sourceLabUnits = new Set([
   ].map(normalizeUnit),
 ]);
 function markerReading(row: BrowserVaultLabResultRow, unit: string | null, canonical: string | null) {
-  if (row.comparator !== null || row.normalizedValue === null || !Number.isFinite(row.normalizedValue) || !unit) return null;
+  if (row.comparator !== null || row.normalizedValue === null || !Number.isFinite(row.normalizedValue) || !unit)
+    return null;
   if (!sourceLabUnits.has(unit) && normalizeUnit(canonical) !== unit) return null;
-  const flag: MarkerInput["flag"] = row.flag === "high" || row.flag === "low" || row.flag === "normal" ? row.flag : null;
+  const flag: MarkerInput["flag"] =
+    row.flag === "high" || row.flag === "low" || row.flag === "normal" ? row.flag : null;
   return { value: row.normalizedValue, unit: unit === "percent" ? "%" : unit, flag };
 }
 
@@ -324,21 +350,7 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
         asOf,
         365,
       );
-  for (const [key, field, days] of [
-    ["smoking", "smoking", 3650],
-    ["disease", "serious_disease", 3650],
-    ["diabetes", "diabetes", 90],
-    ["health", "health", 90],
-    ["fibre", "habitual_fibre_g_day", 90],
-    ["alcohol", "alcohol_g_day", 90],
-  ] as const) {
-    availability[key] = inputState(
-      (evidence.checkins ?? []).filter((r) => r[field] != null).map(rowDay),
-      asOf,
-      days,
-    );
-  }
-  availability.sbp = inputState((evidence.bp ?? []).map(rowDay), asOf, 28);
+  if (evidence.bp?.length) availability.sbp = inputState(evidence.bp.map(rowDay), asOf, 28);
   return availability;
 }
 

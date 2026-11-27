@@ -1,52 +1,68 @@
+import { toLocalDayKey } from "@murphai/contracts";
 import type { BrowserVaultEntity, BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import { isRecord } from "../primitives";
 import { day, type MemberEvidence, type Observation } from "./engine/model";
 import { score } from "./engine";
 
-const answerValues: Record<string, readonly unknown[]> = {
-  smoking: ["current", "former", "never"],
-  diabetes: [true, false],
-  serious_disease: [true, false],
-  health: [1, 2, 3, 4, 5],
-  pregnant: [true, false],
-  postpartum: [true, false],
-};
-export function checkInAnswer(key: unknown, value: unknown, date: string): Observation | null {
-  if (typeof key !== "string" || !day(date)) return null;
-  if (Object.hasOwn(answerValues, key) && answerValues[key].includes(value)) return { date, [key]: value, source: "member-assessment" };
-  if (key === "alcohol_g_day" && typeof value === "number" && value >= 0 && value <= 300)
-    return { date, alcohol_g_day: value, source: "member-assessment" };
-  return null;
+function projectedAssessment(row: BrowserVaultEntity, from: string, asOf: string, timeZone: string) {
+  const entry = row.attributes.checkIn;
+  if (
+    !isRecord(entry) ||
+    typeof entry.date !== "string" ||
+    !day(entry.date) ||
+    entry.date < from ||
+    entry.date > asOf ||
+    !isRecord(entry.response) ||
+    entry.response.instrumentVersion !== 1 ||
+    !row.occurredAt
+  )
+    return null;
+  const reported = toLocalDayKey(row.occurredAt, timeZone);
+  if (reported > asOf) return null;
+  return {
+    response: entry.response,
+    value: { date: entry.date, source: "member-assessment", reported_at: reported },
+  };
 }
-/** Read only the versioned numeric/categorical projection. Narrative fields never enter the engine. */
-export function assessmentInputs(rows: BrowserVaultEntity[], asOf: string) {
+
+/** The canonical projector exposes only the checked response at attributes.checkIn. */
+export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf: string, timeZone: string) {
   const checkins: Observation[] = [],
     tests: Observation[] = [];
   for (const row of rows) {
-    const a = row.attributes,
-      date = row.date;
-    if (!date || !day(date) || date > asOf || !isRecord(a.responses)) continue;
-    const r = a.responses;
-    if (a.questionnaireSlug === "health-you-answer-v1") {
-      const answer = checkInAnswer(r.key, r.value, date);
-      if (answer) checkins.push(answer);
+    const assessment = projectedAssessment(row, from, asOf, timeZone);
+    if (!assessment) continue;
+    const { response, value } = assessment;
+    if (
+      response.instrument === "you-answer" &&
+      isRecord(response.answer) &&
+      response.answer.key === "whoopZones" &&
+      ["yes", "no", "notSure"].includes(String(response.answer.value))
+    ) {
+      checkins.push({ ...value, whoop_zones: response.answer.value });
     }
-    if (a.questionnaireSlug === "health-food-week-v1" && typeof r.habitual_fibre_g_day === "number")
-      checkins.push({ date, source: "member-assessment", habitual_fibre_g_day: r.habitual_fibre_g_day });
-    if (a.questionnaireSlug === "health-combine-v1" && Array.isArray(r.tests) && r.safety === "clear") {
-      for (const t of r.tests)
-        if (isRecord(t) && !t.skipped && typeof t.value === "number" && Number.isFinite(t.value))
-          tests.push({
-            date,
-            test: t.key,
-            value: t.value,
-            unit: t.unit,
-            source: "self-report",
-            protocol: "murph-combine-v1",
-          });
+    if (response.instrument === "food-week" && Array.isArray(response.answers)) {
+      // Serving categories and the reported week are insufficient to establish habitual daily grams.
+      checkins.push({ ...value, food_week: true });
+    }
+    if (response.instrument === "combine" && response.date === value.date && Array.isArray(response.tests)) {
+      tests.push(...submittedTests(response.tests, value));
     }
   }
   return { checkins, tests };
+}
+function submittedTests(input: unknown[], event: Observation): Observation[] {
+  return input.flatMap((test) => {
+    if (
+      !isRecord(test) ||
+      test.skipped ||
+      typeof test.key !== "string" ||
+      typeof test.value !== "number" ||
+      !Number.isFinite(test.value)
+    )
+      return [];
+    return [{ ...event, test: test.key, value: test.value, protocol: "murph-combine-v1", source: "self-report" }];
+  });
 }
 /** A daily rollup cannot establish simultaneous readings. Use the canonical action pair identity and local time. */
 export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string): Observation[] {
@@ -55,7 +71,7 @@ export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string):
     { date: string; time: string; upper: Set<number>; lower: Set<number>; validated: boolean; setting: string }
   >();
   for (const r of rows) {
-    const id = r.context.pairId;
+    const id = r.sourceKind === "measurement" && r.recordIds.length === 1 ? r.recordIds[0] : null;
     if (
       typeof id !== "string" ||
       !id ||

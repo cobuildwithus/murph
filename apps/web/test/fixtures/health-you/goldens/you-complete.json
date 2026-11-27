@@ -44,10 +44,30 @@
       "factor": "lifts",
       "title": "Strength sessions",
       "icon": "lifts",
-      "value": 0,
+      "value": 1,
       "goal": 2,
-      "text": "0 of 2",
-      "progress": 0
+      "text": "1 of 2",
+      "progress": 0.5
+    },
+    {
+      "kind": "target",
+      "factor": "activeMinutes",
+      "title": "Active minutes",
+      "icon": "active",
+      "value": 28,
+      "goal": 150,
+      "text": "28 of 150",
+      "progress": 0.18666666666666668
+    },
+    {
+      "kind": "target",
+      "factor": "bedtime",
+      "title": "Within an hour of your usual bedtime",
+      "icon": "bedtime",
+      "value": 1,
+      "goal": 7,
+      "text": "1 of 7",
+      "progress": 0.14285714285714285
     }
   ],
   "factors": [

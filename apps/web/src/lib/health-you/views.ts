@@ -130,7 +130,7 @@ export function ownTargets(input: YouInputs): ThisWeekRow[] {
   if (input.bedtime?.some((r) => inWeek(r.date)))
     add(
       "bedtime",
-      "Nights in your bedtime window",
+      "Within an hour of your usual bedtime",
       "bedtime",
       input.bedtime.filter((r) => inWeek(r.date) && r.inTarget).length,
       7,
@@ -279,16 +279,15 @@ export function buildViews(input: YouInputs): Bundle {
   you.factors = factors;
   you.notCounted = offerings(rows);
   you.thisWeek = ownTargets(input);
-  if (!rows.smoking && you.state !== "paused")
+  if (input.needsWhoopAnswer && you.state !== "paused")
     you.questions = [
       {
-        key: "smoking",
-        text: "Which best describes your cigarette use?",
+        key: "whoopZones",
+        text: "Are your WHOOP heart rate zones set to the standard ranges?",
         options: [
-          { value: "never", label: "Never smoked regularly" },
-          { value: "former", label: "Former smoker" },
-          { value: "current", label: "Currently smoke" },
-          { value: "unknown", label: "Skip" },
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+          { value: "notSure", label: "Not sure" },
         ],
       },
     ];
@@ -387,7 +386,7 @@ function ageHistory(
     [evidence.bp, "bloodPressure", "Blood pressure"],
     [evidence.fitness_tests, "combine", "Fitness test"],
     [
-      evidence.checkins?.filter((r) => r.habitual_fibre_g_day != null || r.diet_day_complete),
+      evidence.checkins?.filter((r) => r.food_week || r.habitual_fibre_g_day != null || r.diet_day_complete),
       "foodWeek",
       "Food week",
     ],
