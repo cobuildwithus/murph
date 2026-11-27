@@ -69,7 +69,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
   const current = months.at(-1);
   if (current?.month !== currentMonth) return [];
 
-  const { unit, label, filter, direction, trendStep } = metricInfo(metric);
+  const { unit, label, filter, direction, trendStep, per } = metricInfo(metric);
   const date = rows[rows.length - 1].date;
   const prior = months.slice(0, -1);
   const baselineMonths = prior.filter(month => monthIndex(currentMonth) - monthIndex(month.month) <= 3);
@@ -114,7 +114,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
           title: { number: formatMetricValue(metric, current.value, "title"), measure: label },
-          subtitle: `${formatWinMonthPeriod(currentMonth, today)}, ${comparison === 0 ? "tied for " : ""}best month ${period}`,
+          subtitle: `${per ? `a ${per} in ` : ""}${formatWinMonthPeriod(currentMonth, today)}, ${comparison === 0 ? "tied for " : ""}best month ${period}`,
           source_note: `${current.days} tracked days this month so far. Compared across ${comparisonMonths.length} qualifying monthly averages.`,
           chart: { type: "monthly_bars", unit, series: comparisonMonths, highlight: currentMonth },
         },
