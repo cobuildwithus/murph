@@ -77,7 +77,7 @@ async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, tod
   };
 }
 
-async function withInputAuthority<T>(checkAuthority: () => Promise<void>, load: () => Promise<T>): Promise<T> {
+export async function withInputAuthority<T>(checkAuthority: () => Promise<void>, load: () => Promise<T>): Promise<T> {
   await checkAuthority();
   try {
     return await load();

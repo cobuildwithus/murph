@@ -29,7 +29,7 @@ vi.mock("@/src/lib/hosted-vault-share/projection-snapshot", async original => {
 import { getPrisma } from "@/src/lib/prisma";
 import { hostedAuthAdapter } from "@/src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
-import { readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
+import { readProfilePairBoard, readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
 import { addHostedGroupPairBoardSharingTx, readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
 import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { recordHostedConsentGrant, revokeHostedConsentScope, buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
@@ -125,6 +125,26 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
+  it("reads bedtime only through the exact sleep-times grant and rechecks it after decrypting", async () => {
+    const f = await fixture(true);
+    await f.share(f.b, "sleep-duration-days.v0", true);
+    const read = async () => (await readProfilePairBoard(f.a, f.b, true))?.sleepTimes;
+    expect(await read()).toMatchObject({ state: "not_granted", records: [] });
+    const id = await f.share(f.b, "sleep-times.v0");
+    expect(await read()).toMatchObject({ state: "pending", records: [] });
+    const projectionScope = hostedVaultShareProjectionKindToScope("sleep-times.v0");
+    const date = today();
+    const ciphertext = await encryptHostedVaultShareProjectionSnapshot({ memberTimeZone: "UTC", share: {
+      id, destinationMemberId: f.room, grantorMemberId: f.b, projectionScope, projectionKind: "sleep-times.v0",
+      projectionScopeKey: buildHostedVaultShareProjectionScopeKey(projectionScope),
+    }, records: [{ data: { date, sleepStartAt: addDays(date, -1) + "T22:17:00.000Z", sleepEndAt: date + "T06:39:00.000Z" },
+      recordKey: date, occurredAt: date + "T00:00:00.000Z" }] });
+    await db.hostedVaultShare.update({ where: { id }, data: { projectionSnapshotCiphertext: ciphertext } });
+    expect(await read()).toMatchObject({ state: "available", records: [{ data: { date } }] });
+    mocks.afterDecrypt.mockImplementationOnce(() => db.hostedVaultShare.update({ where: { id }, data: { status: "revoked" } }));
+    expect(await read()).toMatchObject({ state: "not_granted", records: [] });
+    expect(await f.read()).not.toHaveProperty("sleepTimes");
+  });
   it.each([false, true])("shows age group only for the other person on an exact granted ranking scope (viewer joined: %s)", async joined => {
     const f = await fixture(joined);
     const group = { biologicalSex: "female", ageFrom: 30 } as const;

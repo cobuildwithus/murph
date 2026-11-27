@@ -2291,3 +2291,7 @@ booleans, terminal-kind enums and counts; identifiers, content and raw errors st
 private. Scratch and keys are discarded on every exit. This mode does not call a
 model, wake a runtime, replay work, publish a checkpoint, acknowledge mailboxes,
 write billing state or send messages. Historical repair needs separate authority.
+
+## Native Health profiles
+
+The You allowlist sits inside the Health feed gate. Profile extras require current session, health consent and profile audience. Cover uploads use game media ownership checks. Milestone picks bind to the offered set and display option through commit. Live selectors disclose only the chosen public card. Friend streaks require mutual active seats except for a deliberately published streak card, which omits partner identity. Shared progress reads the existing pair-board grants and the separate sleep-times scope. Selection writes never grant access. Settings approval authorizes export of retained profile choices and the member’s outgoing cheers.

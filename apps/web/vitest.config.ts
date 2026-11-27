@@ -40,6 +40,7 @@ export default defineProject({
       "apps/web/test/**/*.test.ts",
       "apps/web/test/**/*.test.tsx",
       "apps/web/src/lib/health-wins/**/*.test.ts",
+      "apps/web/src/lib/health-profile/**/*.test.ts",
     ],
     setupFiles: [path.join(appDir, "test", "setup-env.ts")],
   },

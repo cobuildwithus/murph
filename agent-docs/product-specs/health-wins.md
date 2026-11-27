@@ -136,6 +136,12 @@ people’s posts and comments from each other. This choice applies only within
 Health wins. A game block also takes effect here, in either direction.
 Settings lists the people the member has hidden, newest first, so they can undo a hide.
 
+Members on `MURPH_HEALTH_YOU_MEMBER_IDS` can decorate their profile with a finished photo upload or leaf, cream, ink or gold artwork. The allowlist accepts member IDs or `*` and requires feed access. An empty list preserves the existing profile.
+
+`GET me/pin-candidates` offers ordered card choices with a revision, filter and the current pinned keys. `PUT me/pins` accepts up to three ordered `{key, revision, option?}` picks. A milestone keeps the chosen display and its local selection date even after its suggestion disappears. A live streak publishes the task, count and week marks. Biological age requires an available engine and an explicit pin.
+
+`GET me/working-on/options` and `PUT me/working-on` select up to three measurable factors. Selection starts on the owner's local date and never changes a sharing grant. Partners see up to 90 days from the pair board; bedtime requires the separate sleep-times grant. Comparisons start at selection and identify partial baselines. A viewer can set or retract a cheer on one selection. Profiles show only the viewer's cheer state. Friends see mutual game streaks and comparable shared numbers. Own profiles show eligible live games.
+
 Opening a profile shows that person’s eligible posts. Profile numbers follow
 the existing pair-board sharing choices. Posting a card grants access to that
 card only. Withdrawing health consent closes access to the author’s shared

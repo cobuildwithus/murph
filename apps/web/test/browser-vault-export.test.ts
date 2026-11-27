@@ -200,6 +200,17 @@ test("includes the medal photo after the shares in the approved export", async (
   expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, recordedActivities: [activity], progressShares: [share], progressSharePhoto: photo });
 });
 
+test("includes retained profile choices and paged outgoing cheers in the approved download", async () => {
+  const fixture = await createBucketedExportFixture();
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) => fixture.plaintextByCiphertext.get(envelope.ciphertext));
+  const healthProfile = { workingOn: [{ factor: "steps", since: "2033-02-10" }], pins: [], cover: null };
+  const cheers = [{ ownerId: "fixture-a", factor: "steps" }, { ownerId: "fixture-b", factor: "bedtime" }];
+  const records = [{ healthProfile }, ...cheers.map(cheer => ({ workingOnCheers: [cheer] }))];
+  const body = [await fixture.response.text(), ...records.map(record => JSON.stringify(record))].join("\n") + "\n";
+  const result = await loadBrowserVaultExport({ authorization: createAuthorization(), fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(body)) });
+  expect(JSON.parse(await result.blob.text())).toMatchObject({ healthProfile, workingOnCheers: cheers });
+});
+
 test.each([
   {
     mutate(response: Record<string, unknown>) {

@@ -27,6 +27,7 @@ export type HostedBlindIndexKind =
   | "external-thread"
   | "external-thread-identity"
   | "group-disclosure-permission"
+  | "profile-factor"
   | "game-audience"
   | "linq-chat"
   | "linq-message"
@@ -86,6 +87,11 @@ export function createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
 
 export function createHostedPhoneLookupKey(value: string | null | undefined): string | null {
   return createHostedLookupKey("phone", normalizePhoneNumber(value));
+}
+
+export function profileFactorLookupKeys(memberId: string, factor: string) {
+  const value = JSON.stringify([memberId, factor]);
+  return { current: createHostedLookupKey("profile-factor", value)!, candidates: createHostedLookupKeyReadCandidates("profile-factor", value) };
 }
 
 /** Exact normalized handle set, serialized by the game audience owner. */
