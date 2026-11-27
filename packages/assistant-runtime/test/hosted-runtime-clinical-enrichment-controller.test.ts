@@ -178,7 +178,7 @@ describe("clinical enrichment controller", () => {
     await controller.closeAndRequeue();
   });
 
-  it("holds the idle checkpoint for one window while it owns provider work", async () => {
+  it("holds the original checkpoint window through extraction and pending clinical applies", async () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
     try {
       const call = deferred<string>();
@@ -192,10 +192,13 @@ describe("clinical enrichment controller", () => {
         onError: vi.fn(),
       });
       expect(controller.activeDeadline()).toBeNull();
+      expect(controller.activeDeadline(true)).toBeNull();
       controller.kick();
       await vi.waitFor(() => expect(controller.activeDeadline()).toBe(1_000 + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS));
       call.resolve("page");
       await vi.waitFor(() => expect(controller.hasOwnedWork()).toBe(false));
+      clock.mockReturnValue(5_000);
+      expect(controller.activeDeadline(true)).toBe(1_000 + HOSTED_CLINICAL_ENRICHMENT_CHECKPOINT_WINDOW_MS);
       expect(controller.activeDeadline()).toBeNull();
     } finally {
       clock.mockRestore();

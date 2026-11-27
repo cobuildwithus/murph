@@ -30,14 +30,18 @@ export function isHealthPayoffEnabled(memberId: string, env: FlagEnv = process.e
   return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_PAYOFF_MEMBER_IDS, memberId);
 }
 
-/** Only explicitly enrolled feed members can receive pilot texts. */
-export function healthWinTextMemberIds(env: FlagEnv = process.env): string[] {
+/** The sweep checks named members or pages composer enrollments for everyone in the feed. */
+export function healthWinTextMemberIds(env: FlagEnv = process.env): string[] | "everyone" {
   const entries = (env.MURPH_HEALTH_WIN_TEXT_MEMBER_IDS ?? "").split(",").map(entry => entry.trim());
-  return [...new Set(entries)].filter(id => id !== "" && id !== "*" && isHealthFeedEnabled(id, env));
+  if (entries.includes("*")) {
+    const feed = healthFeedAuthors(env);
+    return feed === "everyone" || feed.length > 0 ? "everyone" : [];
+  }
+  return [...new Set(entries)].filter(id => id !== "" && isHealthFeedEnabled(id, env));
 }
 
 export function isHealthWinTextEnabled(memberId: string, env: FlagEnv = process.env): boolean {
-  return healthWinTextMemberIds(env).includes(memberId);
+  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_WIN_TEXT_MEMBER_IDS, memberId);
 }
 
 export function healthRecordCapability(memberId: string, env: FlagEnv = process.env) {

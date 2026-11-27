@@ -30,7 +30,7 @@ export function resolveHostedBackgroundReadCheckpointDeadline(input: {
 }
 
 export interface HostedClinicalEnrichmentController {
-  activeDeadline(): number | null;
+  activeDeadline(applyPending?: boolean): number | null;
   /** True while a provider call, its queued or running publication, or planning is owned. */
   hasOwnedWork(): boolean;
   /** Plans and starts free slots; `progressed` marks committed apply progress. */
@@ -170,7 +170,7 @@ export function createHostedClinicalEnrichmentController<Unit, Outcome>(
     && continuationsWithoutProgress < 2;
 
   return {
-    activeDeadline: () => (slots.size > 0 || publishing.size > 0 ? windowDeadline : null),
+    activeDeadline: (applyPending = false) => (slots.size > 0 || publishing.size > 0 || applyPending ? windowDeadline : null),
     hasOwnedWork,
     kick(progressed = false) {
       if (progressed) continuationsWithoutProgress = 0;

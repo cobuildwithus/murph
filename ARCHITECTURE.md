@@ -6841,16 +6841,18 @@ One author-indexed query returns at most one matching digest per candidate (up t
 This filter leaves the stored set and its revision available to open composers.
 If the opaque-ID keyring is unavailable, Web skips the filter and logs the error class.
 
-For the win-text pilot, detectors identify achievements before card IDs and
+For win texts, detectors identify achievements before card IDs and
 units change for display. Web seals the descriptor in the candidate wrapper.
 A successful composer read records its presentation and returns an opaque,
 member-bound `winRef` on eligible candidates. The landing page validates only
 the reference format. It has no data lookup.
 
 The minute sweep reads the same inputs and deterministic detector order.
-Only the composer publishes candidate sets. A row lock on `health_win_nudge`
-serializes presentations, local-day claims and the final diff with mailbox
-append. A crash consumes the claim. Web prepares encryption outside
+Only the composer publishes candidate sets and creates `health_win_nudge` rows.
+With wildcard text enrollment, the sweep pages these rows by member ID and
+claims up to 25 feed members for evaluation within its four-minute budget.
+A row lock on `health_win_nudge` serializes presentations, local-day claims
+and the final diff with mailbox append. A crash consumes the claim. Web prepares encryption outside
 the transaction, queues one expiring exact-text wake, then signals the runtime.
 Signed Linq egress checks the evaluation start against the presentation
 watermark and rechecks current eligibility and the local dispatch window.
@@ -6943,7 +6945,7 @@ database transactions.
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
-| `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private pilot achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
+| `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
 | `health_win_nudge` | None | `member_id` owns the row. `seen_keys` holds lifetime member-bound keyed digests under a separate purpose from link references. `seen_version` identifies the keyring and achievement identity versions. `baseline_at` marks the first complete nonempty observation, `last_presented_at` fences pending delivery and `last_evaluated_day` claims a local day once. An incompatible version disables sending pending explicit handling. Account deletion cascades this operational state. |
 | `health_post_attachment` | `storage_key_encrypted` identifies the reserved Progress object. Its sealed JPEG bytes live in the object store. | `id` identifies the attachment, `member_id` owns it, nullable `post_id` binds it to a post, `status` tracks its lifecycle and `created_at` records admission. |
 

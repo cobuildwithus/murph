@@ -17,7 +17,7 @@ import { getPrisma } from "../prisma";
 import { MURPH_PUBLIC_SITE_URL } from "../site-metadata";
 import { readHealthWinIdentities, type HealthWinObservations } from "./achievement";
 import { readHealthWinDetection } from "./detection";
-import { healthWinTextMemberIds } from "./flag";
+import { healthWinTextMemberIds, isHealthFeedEnabled } from "./flag";
 import { assertHealthWinTextAuthority } from "./nudge-authority";
 import { healthWinTextKeys, healthWinTextWindow } from "./nudge-delivery";
 import { isHealthWinTextPaused } from "./nudge-pause";
@@ -117,25 +117,34 @@ async function evaluate(prisma: PrismaClient, claim: Claim, signal: AbortSignal,
   return "queued";
 }
 
-/** Founder-only sweep. Only a composer can create the enrollment row. */
+function dueClaim(memberId: string, timeZone: string | undefined, lastEvaluatedDay: string | null): Claim | null {
+  if (!timeZone || !isHealthFeedEnabled(memberId)) return null;
+  const startedAt = new Date();
+  const window = healthWinTextWindow(startedAt, timeZone);
+  if (!window || (lastEvaluatedDay && lastEvaluatedDay >= window.day)) return null;
+  return { memberId, day: window.day, startedAt };
+}
+
+/** Only a successful composer read creates an enrollment row. */
 export async function drainHealthWinTexts(input: { prisma?: PrismaClient; signal?: AbortSignal } = {}) {
   const counts = { claimed: 0, queued: 0, suppressed: 0, incomplete: 0, ineligible: 0, unavailable: 0, errors: 0 };
   const computeTimes: number[] = [];
   const members = healthWinTextMemberIds();
   const budget = AbortSignal.timeout(SWEEP_BUDGET_MS);
   const signal = input.signal ? AbortSignal.any([budget, input.signal]) : budget;
-  for (let i = 0; i < members.length && !signal.aborted && counts.claimed < MAX_CLAIMS; i += MAX_CLAIMS) {
+  const canClaim = () => !signal.aborted && counts.claimed < MAX_CLAIMS;
+  let after: string | undefined;
+  for (let i = 0; canClaim() && (members === "everyone" || i < members.length); i += MAX_CLAIMS) {
     const prisma = input.prisma ?? getPrisma();
+    const memberFilter = members === "everyone" ? { gt: after } : { in: members.slice(i, i + MAX_CLAIMS) };
     const enrolled = await prisma.healthWinNudge.findMany({
-      where: { memberId: { in: members.slice(i, i + MAX_CLAIMS) } }, orderBy: { memberId: "asc" },
+      where: { memberId: memberFilter }, orderBy: { memberId: "asc" }, take: MAX_CLAIMS,
       select: { memberId: true, lastEvaluatedDay: true, member: { select: { gameProfile: { select: { timeZone: true } } } } },
     });
     for (const { memberId, member, lastEvaluatedDay } of enrolled) {
-      if (signal.aborted || counts.claimed >= MAX_CLAIMS) break;
-      const startedAt = new Date();
-      const window = member.gameProfile && healthWinTextWindow(startedAt, member.gameProfile.timeZone);
-      if (!window || (lastEvaluatedDay && lastEvaluatedDay >= window.day)) continue;
-      const claim = { memberId, day: window.day, startedAt };
+      if (!canClaim()) break;
+      const claim = dueClaim(memberId, member.gameProfile?.timeZone, lastEvaluatedDay);
+      if (!claim) continue;
       try {
         if (!await prisma.$transaction(tx => claimHealthWinDayTx(tx, claim))) continue;
         counts.claimed++;
@@ -145,6 +154,10 @@ export async function drainHealthWinTexts(input: { prisma?: PrismaClient; signal
         if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) counts.ineligible++;
         else counts.errors++;
       }
+    }
+    if (members === "everyone") {
+      if (enrolled.length < MAX_CLAIMS) break;
+      after = enrolled[enrolled.length - 1]!.memberId;
     }
   }
   computeTimes.sort((a, b) => a - b);
