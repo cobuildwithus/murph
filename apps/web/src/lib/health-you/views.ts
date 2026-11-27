@@ -1,37 +1,28 @@
+import { offerings } from "./offerings";
+import { youLabel } from "./labels";
 import { nextQuestion } from "./questions";
 import type { Bundle, Factor, Person, ThisWeekRow, YouView } from "./contract";
 import { recentSleepNights } from "./engine/observations";
-import { finishFactors, missingEvidence } from "./engine/report";
+import { finishFactors } from "./engine/report";
 import { MODEL_VERSION, score } from "./engine";
 import { fields, lookup, model, number, offset, rowDay, YEAR, type Contribution } from "./engine/model";
 import type { MarkerInput, YouInputs } from "./evidence";
 
-const keys: Record<string, [string, string]> = {
-  sleep: ["sleepTime", "Sleep duration"],
-  pulse: ["restingHeartRate", "Resting heart rate"],
-  steps: ["steps", "Daily steps"],
-  activity: ["activeMinutes", "Active minutes"],
-  hip_minutes: ["activeMinutes", "Active minutes"],
-  vo2_peak: ["cardioFitness", "Cardio fitness"],
-  vo2: ["cardioFitness", "Cardio fitness"],
-  sbp: ["bloodPressure", "Blood pressure"],
-  floor_rise: ["sitRise", "Sit and rise"],
-  lifting: ["lifts", "Strength training"],
-  sleep_regularity: ["bedtime", "Sleep regularity"],
-  non_hdl: ["cholesterol", "Non-HDL cholesterol"],
-  ldl_c: ["cholesterol", "LDL cholesterol"],
-  lpa: ["lpa", "Lipoprotein(a)"],
-  a1c: ["bloodSugar", "HbA1c"],
-  crp: ["inflammation", "hs-CRP"],
-  rdw: ["rdw", "Red cell distribution width"],
-  wbc: ["wbc", "White blood cell count"],
-  acr: ["acr", "Urine albumin-to-creatinine ratio"],
-  phq9: ["phq9", "Mood questionnaire"],
-  bmi: ["bmi", "Body mass index"],
-  fev1: ["fev1", "Lung function"],
-  health: ["health", "Self-rated health"],
-  disease: ["disease", "Health history"],
-  fibre: ["fibre", "Dietary fibre"],
+const keys: Record<string, string> = {
+  sleep: "sleepTime",
+  pulse: "restingHeartRate",
+  activity: "activeMinutes",
+  hip_minutes: "activeMinutes",
+  vo2_peak: "cardioFitness",
+  vo2: "cardioFitness",
+  sbp: "bloodPressure",
+  floor_rise: "sitRise",
+  lifting: "lifts",
+  sleep_regularity: "bedtime",
+  non_hdl: "cholesterol",
+  ldl_c: "cholesterol",
+  a1c: "bloodSugar",
+  crp: "inflammation",
 };
 const food = new Set([...model.overlap.absolute_log_caps.food.factors, "alcohol"]);
 const fitness = new Set([
@@ -50,12 +41,10 @@ const fmt = (v: number, decimals = 1) => v.toLocaleString("en-US", { maximumFrac
 function signed(v: number) {
   return (v < 0 ? "−" : "+") + Math.abs(v).toFixed(1);
 }
-function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs, age: number): Factor {
+function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs, age: number): Omit<Factor, "featured"> {
   const marker = input.markers.find((m) => m.modelKey === k);
-  const [key, label] = keys[k] ?? [
-    k,
-    marker?.label ?? (k.charAt(0).toUpperCase() + k.slice(1)).replaceAll("_", " "),
-  ];
+  const key = keys[k] ?? k;
+  const label = youLabel(k)!;
   const group = factorGroup(k);
   const { value, unit } = displayValue(k, r);
   const rank = factorRank(k, r, input, age);
@@ -94,59 +83,6 @@ function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs,
             : "none",
     markerKey: marker?.key,
   };
-}
-function offerings(input: YouInputs, rows: Record<string, Contribution>) {
-  const options: YouView["notCounted"] = [];
-  const seen = new Set<string>();
-  for (const { key: k } of missingEvidence(input.evidence, input.asOf, rows)) {
-    const factor = k.replace(/^food_week\.|^labs\./, "");
-    const action = missingAction(k, factor);
-    const [key, label] = keys[k] ?? [
-      k,
-      factor
-        .replaceAll("_", " ")
-        .replaceAll("-", " ")
-        .replace(/^./, (c) => c.toUpperCase()),
-    ];
-    if (seen.has(key)) continue;
-    options.push({ key, label, icon: key, action, primary: !options.length });
-    seen.add(key);
-  }
-  return options;
-}
-function missingAction(k: string, factor: string): YouView["notCounted"][number]["action"] {
-  if (factor === "sbp" || k === "blood_pressure_protocol") return "addBloodPressure";
-  else if (
-    fields[factor]?.group === "blood" ||
-    k.startsWith("labs.") ||
-    ["lpa", "ldl_c", "unmapped_lab"].includes(factor)
-  )
-    return "bloodWork";
-  else if (k.startsWith("food_week.") || (food.has(k) && k !== "alcohol") || k === "meals") return "foodWeek";
-  else if (
-    model.feeds.combine.includes(k) ||
-    ["grip", "floor_rise", "balance", "fitness_tests", "combine_task"].includes(k)
-  )
-    return "combine";
-  else if (
-    activities.has(k) ||
-    [
-      "sleep",
-      "pulse",
-      "vo2_peak",
-      "vo2",
-      "sleep_regularity",
-      "l5_midpoint",
-      "workouts",
-      "workout_minutes",
-      "hrv",
-    ].includes(k) ||
-    Object.hasOwn(model.feeds.daily, k) ||
-    k.startsWith("daily.") ||
-    k.startsWith("sleep_sessions.")
-  )
-    return "connectWearable";
-  else return "answer";
 }
 export function ownTargets(input: YouInputs): ThisWeekRow[] {
   const monday = weekStart(input.asOf),
@@ -251,7 +187,7 @@ function bloodViews(input: YouInputs, factors: Factor[], notCounted: YouView["no
       latest,
       years: sumYears(bloodFactors),
       factors: bloodFactors,
-      notCounted: notCounted.filter((n) => n.action === "bloodWork"),
+      notCounted: notCounted.filter((n) => n.action === "bloodWork").map(n => ({ ...n, primary: true })),
       unchanged,
       worthALook,
       all: {
@@ -290,7 +226,7 @@ function section(
     hero: { value: hero?.value ?? "—", unit: hero?.unit, years: sumYears(rows) },
     chart: points.length ? { kind: "trend", points, unit } : null,
     factors: rows,
-    notCounted: notCounted.filter((n) => (area === "sleep" ? n.key === "sleepTime" : n.action === "combine")),
+    notCounted: notCounted.filter(n => n.action === (area === "sleep" ? "connectWearable" : "combine")).map(n => ({ ...n, primary: true })),
     tiles: rows
       .filter((f) => f !== hero)
       .map((f) => ({ label: f.label, value: [f.value, f.unit].filter(Boolean).join(" ") })),
@@ -336,7 +272,8 @@ function viewFactors(input: YouInputs, current: Score | null) {
   const measured = finishFactors(current.rows, current.parts, current.age, current.sex);
   return Object.entries(measured)
     .map(([k, r]) => factorFor(k, { ...r, grade: r.evidence_grade }, r.contribution_tenths, input, current.real))
-    .sort((a, b) => Math.abs(b.years) - Math.abs(a.years) || a.key.localeCompare(b.key));
+    .sort((a, b) => Math.abs(b.years) - Math.abs(a.years) || a.key.localeCompare(b.key))
+    .map((factor, index) => ({ ...factor, featured: index < 5 }));
 }
 export function buildViews(input: YouInputs): Bundle {
   // Pin an undated reported age to this refresh across every historical snapshot.
@@ -363,7 +300,7 @@ export function buildViews(input: YouInputs): Bundle {
         };
   }
   you.factors = factors;
-  you.notCounted = current ? offerings(input, rows) : [];
+  you.notCounted = current ? offerings(input, rows, current.age) : [];
   you.thisWeek = ownTargets(input);
   you.questions = nextQuestion(input, rows, false, you.state === "paused");
   let age: Bundle["age"] = null,

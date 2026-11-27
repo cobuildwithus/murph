@@ -1,4 +1,4 @@
-import { foodWeekLimits, type FoodWeekKey } from "@murphai/contracts";
+import { foodWeekDependencies, foodWeekLimits, type FoodWeekKey } from "@murphai/contracts";
 
 const rows: readonly [FoodWeekKey, string, string, "servings" | "days" | "percent" | "drinks", "more" | "less"][] = [
   ["vegetables", "Vegetable portions", "Vegetable portions?", "servings", "more"],
@@ -17,4 +17,6 @@ const rows: readonly [FoodWeekKey, string, string, "servings" | "days" | "percen
   ["alcohol", "Standard drinks", "How many standard drinks did you have this week?", "drinks", "less"],
   ["max_occasion", "Most in one sitting", "What was the most you drank in one sitting this week, in standard drinks?", "drinks", "less"],
 ];
-export const foodWeekQuestions = rows.map(([key, label, text, kind, group]) => ({ key, label, text, kind, group, max: foodWeekLimits[key] }));
+export const foodWeekQuestions = rows.map(([key, label, text, kind, group]) => ({
+  key, label, text, kind, group, min: 0, max: foodWeekLimits[key], maxFrom: foodWeekDependencies[key]?.maxFrom,
+}));

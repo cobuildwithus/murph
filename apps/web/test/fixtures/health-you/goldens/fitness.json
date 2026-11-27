@@ -52,6 +52,7 @@
       },
       "years": -0.8,
       "yearsText": "−0.8",
+      "featured": true,
       "whatItIs": "This estimates the body's peak oxygen use during exercise.",
       "whatLowersIt": "Use the same device or repeat the same lab test.",
       "rank": null,
@@ -71,6 +72,7 @@
       },
       "years": -0.1,
       "yearsText": "−0.1",
+      "featured": true,
       "whatItIs": "This counts the steps the device recorded each day.",
       "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
       "rank": {
@@ -85,32 +87,11 @@
   ],
   "notCounted": [
     {
-      "key": "balance",
-      "label": "Balance",
-      "icon": "balance",
+      "key": "strength",
+      "label": "Strength",
+      "icon": "strength",
       "action": "combine",
-      "primary": false
-    },
-    {
-      "key": "sitRise",
-      "label": "Sit and rise",
-      "icon": "sitRise",
-      "action": "combine",
-      "primary": false
-    },
-    {
-      "key": "grip",
-      "label": "Grip",
-      "icon": "grip",
-      "action": "combine",
-      "primary": false
-    },
-    {
-      "key": "fitness_tests",
-      "label": "Fitness tests",
-      "icon": "fitness_tests",
-      "action": "combine",
-      "primary": false
+      "primary": true
     }
   ],
   "tiles": [

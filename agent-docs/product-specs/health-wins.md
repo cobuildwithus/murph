@@ -414,7 +414,10 @@ one-off answers submit one replayable member action per check-in. Acceptance
 precedes publication. The next private read after replica publication checks the new input revision.
 The private view offers at most one new question per local day. It prioritizes unanswered
 model factors and offers a quit date to a former smoker. Date and number questions carry
-an optional `inputKind` and an empty options array. A scorable Combine session can show
+an optional `inputKind` and an empty options array. The quit date uses `precision: "month"` and still submits an ISO date.
+The main list marks up to five factors as `featured` by absolute years. All factors remain available.
+The view ranks up to four missing measurement actions by their potential contribution. Lab gaps share one blood work action.
+Food week questions publish `min`, `max` and, for dependent answers, the parent key in `maxFrom`. A scorable Combine session can show
 its modeled effect immediately. A stopped Combine session returns 409 before submission.
 Deploy generation 21 replica builders and runtime consumers with the flag off,
 then Web, the companion client and finally the allowlist.

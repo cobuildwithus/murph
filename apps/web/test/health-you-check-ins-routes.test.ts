@@ -146,6 +146,22 @@ describe("private check-in routes", () => {
       expect((await answer(req({ id, key, value }))).status).toBe(400);
       expect(mocks.submit).not.toHaveBeenCalled();
     });
+  it.each([
+    ["fried_days", "eating_days", "Days with fried foods"],
+    ["packaged_days", "eating_days", "Days with salty snacks"],
+    ["max_occasion", "alcohol", "Drinks in one sitting"],
+  ])("publishes and enforces the %s limit", async (key, parent, message) => {
+    const { questions } = await (await food(req())).json();
+    expect(questions).toContainEqual(expect.objectContaining({ key, maxFrom: parent }));
+    for (const question of questions) expect(question).toMatchObject({ min: 0, max: expect.any(Number) });
+    const answers = questions.map((q: { key: string }) => ({ key: q.key, value: q.key === key ? 2 : 1 }));
+    const rejected = await saveFood(req({ id, answers }));
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ error: { message: expect.stringContaining(message) } });
+    expect(mocks.submit).not.toHaveBeenCalled();
+    const valid = answers.map((a: { key: string; value: number }) => a.key === parent ? { ...a, value: 2 } : a);
+    expect((await saveFood(req({ id, answers: valid }))).status).toBe(200);
+  });
   it("accepts the food recall and a supported one-off answer, rejects unknown keys and an incomplete pair", async () => {
     const view = await (await food(req())).json();
     expect(view).toMatchObject({ state: "ready", daysLogged: 0 });

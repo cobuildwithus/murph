@@ -24,9 +24,11 @@ import {
   lookup,
   offset,
   rowDay,
+  released,
   type MemberEvidence,
   type Observation,
 } from "./engine/model";
+import { markerSystem, youLabel } from "./labels";
 import { bedtimeProgress } from "./bedtime";
 import { assessmentInputs, pressureInputs } from "./checkins";
 import { inputState, type MarkerInput, type YouInputs } from "./evidence";
@@ -42,28 +44,6 @@ const labAliases: Record<string, string> = {
   "total-bilirubin": "bilirubin_total",
 };
 const labs: Record<string, string[]> = model.labs;
-function system(key: string) {
-  if (["hdl", "ldl", "total_cholesterol", "non_hdl", "lpa", "apob", "triglycerides"].includes(key))
-    return "Lipids";
-  if (
-    [
-      "rdw",
-      "wbc",
-      "mcv",
-      "hemoglobin",
-      "platelets",
-      "lymphocytes_pct",
-      "hematocrit",
-      "red_blood_cell_count",
-    ].includes(key)
-  )
-    return "Blood counts";
-  if (["creatinine", "egfr", "bun", "urine_acr"].includes(key)) return "Kidney";
-  if (["alt", "ast", "ggt", "alp", "bilirubin_total", "albumin", "globulin", "total_protein"].includes(key))
-    return "Liver";
-  if (["hba1c", "glucose", "insulin"].includes(key)) return "Blood sugar";
-  return "Other markers";
-}
 export function projectYouInputs(
   client: BrowserVaultCoreCapableQueryClient,
   clock: Date,
@@ -156,6 +136,7 @@ export function projectYouInputs(
     timeZone,
     evidence,
     bedtime,
+    hasWearableData: hasWearableData(metrics, minutes.size, timing, asOf),
     hasAnswerProjection: (replica.generation ?? 0) >= 21 && Array.isArray(timing),
     needsWhoopAnswer: Array.isArray(timing) && needsWhoopAnswer(evidence, asOf),
     availability,
@@ -221,6 +202,11 @@ function validMetric(row: BrowserVaultMetricRow, from: string, asOf: string) {
   const value = normalized.canonicalValue;
   return value !== null && Number.isFinite(value) ? normalized : null;
 }
+function hasWearableData(metrics: Observation[], activeMinuteDays: number, timing: readonly { date: string }[] | undefined, asOf: string) {
+  return activeMinuteDays > 0 || Boolean(timing?.some(night => night.date <= asOf)) || metrics.some(row =>
+    row.provider && Object.hasOwn(model.feeds.daily, String(row.key)) && released(row, asOf));
+}
+
 // Only an identified original measuring device can establish a wearable series.
 function measuringDevice(label: unknown) {
   if (typeof label !== "string") return undefined;
@@ -345,9 +331,9 @@ function readLabs(
     markers.push({
       date: row.date,
       key: def.key,
-      label: def.displayName,
+      label: youLabel(marker) ?? youLabel(def.key)!,
       ...reading,
-      system: system(marker),
+      system: markerSystem(marker),
       modelKey: labs[marker]?.[0] ?? (marker === "ldl" ? "ldl_c" : marker),
     });
   }
