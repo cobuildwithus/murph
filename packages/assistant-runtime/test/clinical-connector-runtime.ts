@@ -11,7 +11,7 @@ export type ClinicalCheckpointInput = {
   vaultRoot: string;
   workspaceRoot: string;
   port: HostedRuntimeClinicalRecordsPort;
-  publish: (ref: { hash: string; key: string; size: number; updatedAt: string }) => Promise<void>;
+  publishAndRestore: (ref: { hash: string; key: string; size: number; updatedAt: string }) => Promise<string>;
 };
 
 // Load the runtime in Vitest. Its Node environment is typechecked in the runtime project.

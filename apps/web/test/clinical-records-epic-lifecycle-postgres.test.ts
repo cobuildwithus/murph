@@ -2,10 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { findEventByExternalRef, initializeVault } from "@murphai/core";
+import { parseHostedExecutionBundleRef, restoreHostedBundleRoots, sha256HostedBundleHex } from "@murphai/runtime-state/node";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as db from "@/src/lib/prisma";
 import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
 import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 import { clinicalProcessors } from "@/src/lib/clinical-records/processor-registry";
@@ -15,7 +17,6 @@ import { renewClinicalAccess } from "@/src/lib/clinical-records/persistent-acces
 import { admitClinicalDailySync } from "@/src/lib/clinical-records/daily-sync";
 import {
   buildClinicalRetrievalWakeEventId, fetchClinicalRetrievalPage, readClinicalRetrievalRun,
-  recordClinicalChangeProof, recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
 import { readHostedMailboxItemByDedupeKey, readHostedMailboxWakeByDedupeKey } from "@/src/lib/hosted-mailbox/store";
 import { claimHostedRuntime } from "@/src/lib/hosted-execution/runtime-owner";
@@ -27,6 +28,7 @@ import { GET as callback } from "../app/api/clinical-records/oauth/callback/rout
 import { POST as complete } from "../app/api/clinical-records/companion/complete/route";
 import { POST as remove } from "../app/api/clinical-records/companion/sources/[id]/remove/route";
 import { checkpointClinicalMailboxItem, createHostedRuntimeWorkspace } from "../../../packages/assistant-runtime/test/clinical-connector-runtime";
+import { createClinicalRuntimeRoutePort } from "./support/clinical-runtime-routes";
 import { createClinicalVendorSimulator, epicWireProfile } from "./support/clinical-vendor-simulator";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
 import { localRosterCrypto } from "./support/roster-postgres";
@@ -53,7 +55,7 @@ afterEach(async () => {
 
 function lab(id: string, value: number, updated: Date, status = "final", patient = epicWireProfile.patient) {
   return { resourceType: "Observation", id, status, subject: { reference: `Patient/${patient}` },
-    meta: { lastUpdated: updated.toISOString() }, effectiveDateTime: "2026-01-05T12:00:00Z",
+    meta: { lastUpdated: updated.toISOString() }, effectiveDateTime: "2020-01-05T12:00:00Z",
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
     code: { coding: [{ system: "http://loinc.org", code: "4548-4", display: "Hemoglobin A1c" }] },
     valueQuantity: { value, unit: "%", code: "%", system: "http://unitsofmeasure.org" } };
@@ -61,6 +63,8 @@ function lab(id: string, value: number, updated: Date, status = "final", patient
 
 async function connect() {
   localRosterCrypto();
+  // Internal fetch-page validates the real encrypted continuation envelope.
+  setHostedSecureBoxStringTestCodecForTests(null);
   vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", origin);
   vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 31).toString("base64url"));
   vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 32).toString("base64url"));
@@ -74,6 +78,7 @@ async function connect() {
   const memberId = randomUUID();
   await prisma.hostedMember.create({ data: { id: memberId, billingStatus: "active" } });
   cleanups.push(() => prisma.hostedMember.delete({ where: { id: memberId } }));
+  cleanups.push(() => prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberId } }));
   for (const domain of ["ingress", "device", "control"] as const) {
     await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain, userId: memberId, reason: "synthetic-test", prisma });
   }
@@ -123,21 +128,37 @@ async function importGeneration(f: Connected, workspace: Awaited<ReturnType<type
   const lease = await claimHostedRuntime({ prisma, userId: memberId, processingMode: "default" });
   if (lease.status === "blocked" || !lease.owner.attemptId) throw new Error("Expected a runtime lease.");
   const runtimeAuthority = { attemptId: lease.owner.attemptId, generation: String(lease.owner.generation), workspaceVersion: String(current.version) };
-  await checkpointClinicalMailboxItem({ ...workspace, item, wake, port: {
-    readRun: request => readClinicalRetrievalRun({ memberId, ...request }),
-    fetchPage: request => fetchClinicalRetrievalPage({ memberId, request, fetchImpl: f.vendor.fetchImpl }),
-    recordOutcome: async request => {
-      if ("kind" in request) await recordClinicalChangeProof({ memberId, ...request });
-      else await recordClinicalRetrievalOutcome({ memberId, request });
-    },
-  }, publish: async snapshotRef => {
+  const restored = await createHostedRuntimeWorkspace("clinical-restore-");
+  cleanups.push(restored.cleanup);
+  const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority);
+  await checkpointClinicalMailboxItem({ ...workspace, item, wake, port, publishAndRestore: async snapshotRef => {
     const before = await prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } });
     expect(before.completedAt).toBeNull();
     const published = await checkpointHostedRuntimeWorkspace({ userId: memberId, runtimeAuthority,
       expectedVersion: current.version, reason: "system_mailbox_receipt", snapshotRef });
     expect(published.status).toBe("updated");
+    const ref = parseHostedExecutionBundleRef((await ensureHostedWorkspace({ userId: memberId })).snapshotRef);
+    expect(ref).toEqual(snapshotRef);
+    const bytes = await readFile(join(workspace.workspaceRoot, ref!.key));
+    expect(bytes.byteLength).toBe(ref!.size);
+    expect(sha256HostedBundleHex(bytes)).toBe(ref!.hash);
+    await restoreHostedBundleRoots({ bytes, expectedKind: "vault", roots: { vault: restored.vaultRoot } });
+    return restored.vaultRoot;
   } });
-  return prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } });
+  return { run: await prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } }), workspace: restored };
+}
+
+async function fetchInitialPage(f: Connected) {
+  const initial = await f.prisma.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { connectionId: f.connectionId } });
+  const pointer = { memberId: f.memberId, runId: initial.id, generation: initial.generation };
+  const loaded = await readClinicalRetrievalRun(pointer);
+  if (loaded.status !== "ready") throw new Error("Expected the initial run.");
+  const slice = loaded.run.retrievalSlices[0]!;
+  return fetchClinicalRetrievalPage({ memberId: f.memberId, fetchImpl: f.vendor.fetchImpl, request: {
+    runId: initial.id, generation: initial.generation, retrievalProtocol: loaded.run.retrievalProtocol,
+    resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, sliceId: slice.sliceId, queryFingerprint: slice.queryFingerprint,
+    cursor: null, requestId: "fixture-initial-page",
+  } });
 }
 
 async function vault() {
@@ -161,13 +182,19 @@ function barrier() {
 describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
   it("publishes full, identical and corrected generations before removing local access", async () => {
     const f = await connect();
-    const workspace = await vault();
     const now = new Date();
     f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 5, now), lab("second", 6, now)]);
-    const initial = await importGeneration(f, workspace);
-    expect(initial.outcomeCountsJson).toMatchObject({ createdCount: 2, labResultCount: 2 });
+    const encounter = (id: string, start: Date) => ({ resourceType: "Encounter", id, status: "finished",
+      class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" }, meta: { lastUpdated: start.toISOString() },
+      subject: { reference: `Patient/${epicWireProfile.patient}` }, period: { start: start.toISOString(), end: start.toISOString() } });
+    f.vendor.setSearchResults("Encounter", null, [
+      encounter("older-visit", new Date(now.getTime() - 30 * 86_400_000)), encounter("recent-visit", now),
+    ]);
+    const initial = await importGeneration(f, await vault());
+    expect(f.vendor.returnedIds).toEqual(expect.arrayContaining(["older-visit", "recent-visit", "first", "second"]));
+    expect(initial.run.outcomeCountsJson).toMatchObject({ createdCount: 4, labResultCount: 2 });
     expect(await f.projection()).toMatchObject({ state: "ready", updates: "daily" });
-    const first = await fact(workspace.vaultRoot, "first");
+    const first = await fact(initial.workspace.vaultRoot, "first");
     expect(first).toMatchObject({ results: [{ value: 5 }] });
     const nextDay = (await f.connection()).nextSyncAt!;
     const admit = async (at: Date) => expect(await admitClinicalDailySync({
@@ -175,10 +202,14 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     })).toBe(true);
     await admit(nextDay);
     await f.nearExpiry();
-    const repeat = await importGeneration(f, workspace);
+    const repeatStart = f.vendor.returnedIds.length;
+    const repeat = await importGeneration(f, initial.workspace);
+    const dailyIds = f.vendor.returnedIds.slice(repeatStart);
+    expect(dailyIds).toEqual(expect.arrayContaining(["recent-visit", "first", "second"]));
+    expect(dailyIds).not.toContain("older-visit");
     expect(refreshes(f)).toBe(1);
-    expect(repeat.outcomeCountsJson).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
-    expect(await fact(workspace.vaultRoot, "first")).toEqual(first);
+    expect(repeat.run.outcomeCountsJson).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
+    expect(await fact(repeat.workspace.vaultRoot, "first")).toEqual(first);
     expect(await f.projection()).toMatchObject({ state: "nothing_new" });
     const encounterWindow = (from: number) => f.vendor.requests.slice(from)
       .find(({ url }) => url.pathname.endsWith("/Encounter") && url.searchParams.has("date"))?.url.searchParams.getAll("date");
@@ -188,28 +219,67 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 7, changed, "corrected"), lab("second", 6, changed, "entered-in-error")]);
     await admit(new Date(nextDay.getTime() + 86_400_000));
     const startAt = f.vendor.requests.length;
-    const daily = await importGeneration(f, workspace);
-    expect(daily.outcomeCountsJson).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+    const daily = await importGeneration(f, repeat.workspace);
+    expect(daily.run.outcomeCountsJson).toMatchObject({ supersededCount: 1, retractedCount: 1 });
     const nextWindow = encounterWindow(startAt);
     expect(nextWindow).toHaveLength(2);
     const [previousFrom, previousTo] = previousWindow!.map(date => Date.parse(date.slice(2)));
     const [nextFrom] = nextWindow!.map(date => Date.parse(date.slice(2)));
     expect(nextFrom).toBeGreaterThan(previousFrom!);
     expect(nextFrom).toBeLessThan(previousTo!);
-    const corrected = await fact(workspace.vaultRoot, "first");
+    const corrected = await fact(daily.workspace.vaultRoot, "first");
     expect(corrected).toMatchObject({ results: [{ value: 7 }] });
-    expect(await fact(workspace.vaultRoot, "second")).toBeNull();
+    expect(await fact(daily.workspace.vaultRoot, "second")).toBeNull();
     const wireCount = f.vendor.requests.length;
     const before = await f.connection();
     await f.disconnect();
     expect(await f.projection()).toMatchObject({ state: "disconnected", updates: "one_time" });
     expect(await f.connection()).toMatchObject({ patientBindingEncrypted: before.patientBindingEncrypted,
       accessTokenEncrypted: null, refreshTokenEncrypted: null, nextSyncAt: null });
-    expect(await fact(workspace.vaultRoot, "first")).toEqual(corrected);
+    expect(await fact(daily.workspace.vaultRoot, "first")).toEqual(corrected);
     expect(f.vendor.requests).toHaveLength(wireCount);
-  }, 180_000);
+  }, 240_000);
 
-  it.each(["contender", "disconnect"] as const)("fences a concurrent %s after the vendor consumes the grant", async race => {
+  it("serializes racing refresh claims from separate database clients", async () => {
+    const f = await connect();
+    await f.nearExpiry();
+    const clients = Array.from({ length: 2 }, () => db.createPrismaClient({ databaseUrl: process.env.DATABASE_URL!, poolMax: 1 }));
+    cleanups.push(() => Promise.all(clients.map(client => client.$disconnect())));
+    const pids = await Promise.all(clients.map(async client =>
+      (await client.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0]!.pid));
+    expect(new Set(pids).size).toBe(2);
+
+    const start = barrier();
+    const claims = Promise.allSettled(clients.map(async client => {
+      await start.promise;
+      vi.spyOn(db, "getPrisma").mockReturnValueOnce(client);
+      return f.renew();
+    }));
+    try {
+      await f.prisma.$transaction(async tx => {
+        // Hold the claim write until both real sessions queue. Without the member
+        // lock both read an empty lease and queue stale, unconditional updates.
+        await tx.$queryRaw`SELECT id FROM clinical_record_connection WHERE id = ${f.connectionId} FOR UPDATE`;
+        start.resolve();
+        await vi.waitFor(async () => {
+          const [row] = await tx.$queryRaw<{ waiting: boolean }[]>`
+            SELECT cardinality(pg_blocking_pids(${pids[0]}::int)) > 0
+               AND cardinality(pg_blocking_pids(${pids[1]}::int)) > 0 AS waiting`;
+          expect(row?.waiting).toBe(true);
+        }, { timeout: 3000, interval: 10 });
+      });
+    } finally {
+      start.resolve();
+      await claims;
+    }
+    expect(refreshes(f)).toBe(1);
+    expect(await claims).toEqual(expect.arrayContaining([
+      { status: "fulfilled", value: expect.any(String) },
+      { status: "rejected", reason: expect.objectContaining({ code: "CLINICAL_RECORD_REFRESH_IN_PROGRESS" }) },
+    ]));
+  });
+
+  it("fences a disconnect after the vendor consumes the grant", async () => {
     const f = await connect();
     await f.nearExpiry();
     const entered = barrier();
@@ -218,20 +288,25 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     const first = f.renew();
     await Promise.race([entered.promise, first.then(() => { throw new Error("Refresh missed the vendor barrier."); })]);
     try {
-      if (race === "contender") {
-        const contender = db.createPrismaClient({ databaseUrl: process.env.DATABASE_URL!, poolMax: 1 });
-        try {
-          vi.spyOn(db, "getPrisma").mockReturnValueOnce(contender);
-          await expect(f.renew()).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_IN_PROGRESS" });
-        } finally { await contender.$disconnect(); }
-      } else await f.disconnect();
+      await f.disconnect();
     } finally { release.resolve(); await first.catch(() => undefined); }
-    if (race === "disconnect") {
-      await expect(first).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
-      expect(await f.connection()).toMatchObject({ refreshTokenEncrypted: null, accessTokenEncrypted: null });
-      expect(await f.projection()).toMatchObject({ state: "disconnected" });
-    } else expect(await f.renew()).toBe(await first);
+    await expect(first).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
+    expect(await f.connection()).toMatchObject({ refreshTokenEncrypted: null, accessTokenEncrypted: null });
+    expect(await f.projection()).toMatchObject({ state: "disconnected" });
     expect(refreshes(f)).toBe(1);
+  });
+
+  it("requires sign-in without saving a successor when renewal changes patient", async () => {
+    const f = await connect();
+    await f.nearExpiry();
+    const before = await f.connection();
+    f.vendor.onNext("refresh_token", async response => Response.json({ ...await response.json(), patient: "alternate-chart" }));
+    const egress = f.vendor.requests.length;
+    expect(await fetchInitialPage(f)).toMatchObject({ status: "unavailable", errorCode: "authorization-required", retryable: false });
+    expect(f.vendor.requests.slice(egress).map(request => request.operation)).toEqual(["refresh_token"]);
+    expect(await f.projection()).toMatchObject({ state: "sign_in_again", updates: "one_time" });
+    expect(await f.connection()).toMatchObject({ accessTokenEncrypted: null, refreshTokenEncrypted: null,
+      patientBindingEncrypted: before.patientBindingEncrypted });
   });
 
   it("never replays a consumed token after PostgreSQL rejects the successor", async () => {
@@ -246,16 +321,7 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     const row = await f.connection();
     expect(row.refreshLeaseId).toBeTruthy();
     await f.prisma.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: { refreshLeaseExpiresAt: new Date(0) } });
-    const initial = await f.prisma.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { connectionId: f.connectionId } });
-    const pointer = { memberId: f.memberId, runId: initial.id, generation: initial.generation };
-    const loaded = await readClinicalRetrievalRun(pointer);
-    if (loaded.status !== "ready") throw new Error("Expected the initial run.");
-    const slice = loaded.run.retrievalSlices[0]!;
-    const result = await fetchClinicalRetrievalPage({ memberId: f.memberId, fetchImpl: f.vendor.fetchImpl, request: {
-      runId: initial.id, generation: initial.generation, retrievalProtocol: loaded.run.retrievalProtocol,
-      resourceType: slice.resourceType, queryScopeId: slice.queryScopeId, sliceId: slice.sliceId, queryFingerprint: slice.queryFingerprint,
-      cursor: null, requestId: "fixture-expired-lease",
-    } });
+    const result = await fetchInitialPage(f);
     expect(result).toMatchObject({ status: "unavailable", errorCode: "authorization-required", retryable: false });
     expect(await f.projection()).toMatchObject({ state: "sign_in_again", updates: "one_time" });
     expect(await f.connection()).toMatchObject({ refreshTokenEncrypted: null, accessTokenEncrypted: null });
@@ -264,9 +330,8 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
 
   it("keeps a foreign patient observation out of both raw evidence and active facts", async () => {
     const f = await connect();
-    const workspace = await vault();
     f.vendor.setSearchResults("Observation", "laboratory", [lab("foreign-lab", 9, new Date(), "final", "foreign-chart")]);
-    const run = await importGeneration(f, workspace);
+    const { run, workspace } = await importGeneration(f, await vault());
     expect(run.lastErrorCode).toBe("snapshot_rejected");
     expect(await f.projection()).toMatchObject({ state: "could_not_add" });
     expect(await fact(workspace.vaultRoot, "foreign-lab")).toBeNull();
@@ -274,5 +339,5 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     for (const entry of await readdir(raw, { recursive: true, withFileTypes: true })) {
       if (entry.isFile()) expect(await readFile(join(entry.parentPath, entry.name), "utf8")).not.toContain("foreign-lab");
     }
-  });
+  }, 90_000);
 });

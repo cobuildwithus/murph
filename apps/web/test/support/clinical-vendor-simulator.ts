@@ -13,10 +13,10 @@ export const epicWireProfile = {
     code_challenge_methods_supported: ["S256"],
     scopes_supported: ["openid", "fhirUser", "profile"],
   },
-  // Epic returns a new refresh token on every exchange. Patient and scope are optional on renewal.
+  // Report patient on renewal and omit scope to exercise inherited permissions.
   tokenResponse(grant: Exchange, patient: string, scope: string) {
-    return { access_token: randomUUID(), refresh_token: randomUUID(), token_type: "Bearer", expires_in: 3600,
-      ...(grant === "authorization_code" ? { patient, scope } : {}) };
+    return { access_token: randomUUID(), refresh_token: randomUUID(), token_type: "Bearer", expires_in: 3600, patient,
+      ...(grant === "authorization_code" ? { scope } : {}) };
   },
   grants: ["openid", "fhirUser", "launch/patient", "offline_access", "patient/Patient.r", "patient/Observation.s", "patient/Encounter.s"],
 };
@@ -25,6 +25,33 @@ type Resource = { resourceType: string; id: string; [field: string]: unknown };
 type Exchange = "authorization_code" | "refresh_token";
 type Operation = Exchange | "discovery" | "authorize" | "read" | "search";
 type Fault = (response: Response, url: URL) => Response | Promise<Response>;
+
+type Period = { start?: string; end?: string };
+type DatedResource = Resource & {
+  period?: Period; context?: { period?: Period }; effectivePeriod?: Period; performedPeriod?: Period;
+  effectiveDateTime?: string; performedDateTime?: string; occurrenceDateTime?: string; issued?: string;
+};
+
+function matchesWindow(row: DatedResource, query: URLSearchParams) {
+  const clinicalDate = row.period ?? row.effectivePeriod ?? row.performedPeriod
+    ?? row.effectiveDateTime ?? row.performedDateTime ?? row.occurrenceDateTime;
+  const fields = { date: clinicalDate, period: row.context?.period, issued: row.issued };
+  for (const parameter of ["date", "period", "issued"] as const) {
+    const value = fields[parameter];
+    for (const bound of query.getAll(parameter)) {
+      if (!value || !matchesDateBound(value, bound)) return false;
+    }
+  }
+  return true;
+}
+
+function matchesDateBound(value: string | Period, bound: string) {
+  const limit = Date.parse(bound.slice(2));
+  const period = typeof value === "string" ? { start: value, end: value } : value;
+  if (bound.startsWith("ge")) return period.end === undefined || Date.parse(period.end) >= limit;
+  if (bound.startsWith("lt")) return period.start === undefined || Date.parse(period.start) < limit;
+  throw new Error("Unexpected synthetic search bound.");
+}
 
 /** A single offline portal. Faults are consumed at scenario-selected wire boundaries. */
 export function createClinicalVendorSimulator(profile: typeof epicWireProfile, publicKey: JWK) {
@@ -36,7 +63,8 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
   let refresh: string | undefined;
   let scope = "";
   const reads = new Map<string, Resource>([[`Patient/${profile.patient}`, { resourceType: "Patient", id: profile.patient }]]);
-  const searches = new Map<string, Resource[]>();
+  const searches = new Map<string, DatedResource[]>();
+  const returnedIds: string[] = [];
   const searchKey = (family: string, category: string | null) => JSON.stringify([family, category]);
   const denied = () => Response.json({ error: "invalid_grant" }, { status: 400 });
 
@@ -85,11 +113,14 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
     }
     if (url.searchParams.get("patient") !== profile.patient) return denied();
     const page = Number(url.searchParams.get("fixture-page") ?? "0");
-    const rows = searches.get(searchKey(path, url.searchParams.get("category"))) ?? [];
+    const rows = (searches.get(searchKey(path, url.searchParams.get("category"))) ?? [])
+      .filter(row => matchesWindow(row, url.searchParams));
+    const entries = rows.slice(page, page + 1);
+    returnedIds.push(...entries.map(row => row.id));
     const next = new URL(url);
     next.searchParams.set("fixture-page", String(page + 1));
     return Response.json({ resourceType: "Bundle", type: "searchset",
-      entry: rows.slice(page, page + 1).map(resource => ({ resource })),
+      entry: entries.map(resource => ({ resource })),
       link: page + 1 < rows.length ? [{ relation: "next", url: next.href }] : [] });
   }
 
@@ -121,8 +152,8 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
     faults.delete(operation);
     return fault ? fault(response, url) : response;
   };
-  return { fetchImpl, requests,
-    setSearchResults(family: string, category: string | null, rows: Resource[]) {
+  return { fetchImpl, requests, returnedIds,
+    setSearchResults(family: string, category: string | null, rows: DatedResource[]) {
       searches.set(searchKey(family, category), rows);
     },
     onNext(operation: Operation, fault: Fault) { faults.set(operation, fault); } };

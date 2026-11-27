@@ -34,7 +34,13 @@ export async function checkpointClinicalMailboxItem(input: ClinicalCheckpointInp
   const hash = sha256HostedBundleHex(bytes);
   const key = `${hash}.bundle.json`;
   await writeFile(join(input.workspaceRoot, key), bytes);
-  await input.publish({ hash, key, size: bytes.byteLength, updatedAt: new Date().toISOString() });
-  const result = await recordHostedSystemMailboxItemAfterCheckpoint({ runtime, vaultRoot, item: prepared.item });
+  const restoredRoot = await input.publishAndRestore({ hash, key, size: bytes.byteLength, updatedAt: new Date().toISOString() });
+  const restored = await prepareHostedSystemMailboxItemForCheckpoint({
+    runtime, runtimeEnv: {}, vaultRoot: restoredRoot, allowedRouteActions: ["run-clinical-records-sync"],
+  });
+  if (restored?.status !== "recording" || restored.itemId !== prepared.itemId) {
+    throw new Error("Published bundle did not restore the pending clinical receipt.");
+  }
+  const result = await recordHostedSystemMailboxItemAfterCheckpoint({ runtime, vaultRoot: restoredRoot, item: restored.item });
   if (result.failed || !result.recorded) throw new Error("Clinical checkpoint outcome was not accepted.");
 }
