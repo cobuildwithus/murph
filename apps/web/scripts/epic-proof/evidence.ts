@@ -20,7 +20,15 @@ export function fixtureResource(resource: Record<string, unknown>) {
 
 export function observeSnapshot(input: Snapshot, counts: Record<string, number>, documents: Map<string, number>) {
   const manifest = clinicalRawManifestSchema.parse(input.manifest);
-  for (const file of manifest.resourceFiles) counts[file.resourceType]! += file.count;
+  let resources = 0;
+  for (const file of manifest.resourceFiles) {
+    // Manifest counts include marked search-outcome notices, which the importer skips without a decision.
+    const page = JSON.parse(input.pages.find(p => p.relativePath === file.relativePath)!.content);
+    const notices = (page.entry ?? []).filter((e: { search?: { mode?: string }; resource?: { resourceType?: string } }) =>
+      e.search?.mode === "outcome" && e.resource?.resourceType === "OperationOutcome").length;
+    counts[file.resourceType]! += file.count - notices;
+    resources += file.count - notices;
+  }
   const downloaded = (manifest.documentAttachments ?? []).filter(d => d.status === "downloaded");
   if (downloaded.length) documents.set(input.manifestPath, downloaded.length);
   for (const doc of downloaded) {
@@ -29,7 +37,7 @@ export function observeSnapshot(input: Snapshot, counts: Record<string, number>,
     counts.downloaded!++;
     if (file.extractedText || readClinicalAttachmentText(Buffer.from(file.contentBase64, "base64"), doc.mediaType)) counts.parsed!++;
   }
-  return manifest.resourceFiles.reduce((total, file) => total + file.count, 0);
+  return resources;
 }
 
 export async function verifyDocuments(vaultRoot: string, documents: Map<string, number>, counts: Record<string, number>) {
