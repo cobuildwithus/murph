@@ -79,6 +79,15 @@ test("publication reports each kind of held change with mention-safe cells and a
   ]) assert.ok(report.includes(row), row);
 });
 
+test("publication strips zero-width and bidi controls from report cells", () => {
+  const hidden = "\u200B\u200F\u202A\u202E\u2066\u2069\uFEFF\u061C\u2060\u00AD\u2028\u{E0041}";
+  const report = publish([alder, birch, sandbox], [
+    { kind: "addition", id: "epic-cedar", brandName: `Ce${hidden}dar`, candidate: "https://cedar.example.test/r4", clientIdEnvironmentKey: PRODUCTION },
+  ]);
+  assert.ok(report.includes("| `epic-cedar` | `Cedar` | New entry on a new host |  | `https://cedar.example.test/r4` |"), report);
+  assert.doesNotMatch(report, /[\u2028\u2029\p{Cf}]/u);
+});
+
 test("publication rejects held reports that do not match the candidate", () => {
   const entries = [alder, birch, sandbox];
   const endpoint = { kind: "connection", id: "epic-alder", field: "fhirBaseUrl", current: alder[1], candidate: "https://alder.example.test/v2/r4" };
