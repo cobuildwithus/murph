@@ -69,8 +69,17 @@ const RELEVANT_EXACT_PATHS = new Set([
   "tsconfig.base.json",
 ]);
 
+// Data-only files under relevant prefixes that no Temporal producer or reader
+// touches. The weekly bot refresh changes only the public provider directory,
+// which Web search reads; requiring a human-authored head for it would block
+// every automated directory publication.
+const NEUTRAL_EXACT_PATHS = new Set([
+  "apps/web/src/lib/clinical-records/provider-directory.v2.json",
+]);
+
 export function isTemporalCompatibilityRelevantPath(value) {
   const filePath = requiredString(value, "changed file path");
+  if (NEUTRAL_EXACT_PATHS.has(filePath)) return false;
   return RELEVANT_EXACT_PATHS.has(filePath)
     || RELEVANT_PREFIXES.some((prefix) => filePath.startsWith(prefix));
 }

@@ -84,7 +84,7 @@ function experimentHeadline(experiment: Experiment, runningBlock: boolean) {
 
 function experimentOutcome(metric: Metric, before: number, during: number) {
   const { label, direction, trendStep } = metricInfo(metric);
-  const step = metric === "rhr_bpm" || metric === "sleep_score" ? 2 : trendStep ?? 1;
+  const step = metric === "sleep_score" ? 2 : trendStep ?? 1;
   const change = during - before;
   if (change * direction <= -step) return null;
   const subject = metric === "distance_km" ? "Distance on foot" : label[0].toUpperCase() + label.slice(1);

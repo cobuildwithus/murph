@@ -82,7 +82,7 @@ describe("trend_change", () => {
 
   it.each([
     ["sleep_total_min", 418, 15, 10, "a night, vs usual"],
-    ["rhr_bpm", 64, -1, 2, "on average, vs usual"], ["hrv_ms", 69, 5, 3, "on average, vs usual"],
+    ["rhr_bpm", 64, -2, 2, "on average, vs usual"], ["hrv_ms", 69, 5, 3, "on average, vs usual"],
     ["steps", 6300, 1000, 500, "a day, vs usual"], ["distance_km", 3, 1, 1, "a day, vs usual"],
   ] as const)("requires a full favorable step for %s", (metric, base, step, spread, subtitle) => {
     const trend = (delta: number) => cards(fourMonths(metric, [base, base, base, base + delta], spread))
