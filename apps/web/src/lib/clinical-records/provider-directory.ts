@@ -1,3 +1,4 @@
+import { milesBetween, postalCentroid, type DirectoryPoint, type LocationCell } from "./directory-geography";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   ClinicalProviderFacilityContract,
@@ -28,6 +29,7 @@ export type ClinicalProviderClientIdEnvironmentKey =
 export interface ClinicalProviderFacility extends ClinicalMatchedFacility {
   aliases?: readonly string[];
   upstreamId?: string;
+  coordinate?: DirectoryPoint | null;
 }
 
 export interface ClinicalProviderDirectoryEntry {
@@ -65,38 +67,55 @@ export function buildEpicProviderDirectoryEntryId(brandIdentifier: string): stri
   return `epic-${normalized}`;
 }
 
+interface DirectorySearchInput {
+  grouped?: boolean;
+  includeDistance?: boolean;
+  near?: LocationCell;
+  accessRank?: (entry: ClinicalProviderDirectoryEntry) => number;
+  city?: string | null;
+  query?: string | null;
+  state?: string | null;
+}
+
+function searchSelectors(input: DirectorySearchInput) {
+  const text = input.query?.slice(0, MAX_SEARCH_TEXT_LENGTH) ?? "";
+  const zip = text.match(/\b\d{5}(?:-\d{4})?\b/u)?.[0];
+  const zipPoint = postalCentroid(zip ?? null);
+  const origin: DirectoryPoint | null = zipPoint ?? (input.near ? [input.near.lat, input.near.lon] : null);
+  const query = normalizeSearchText(zipPoint && zip ? text.replace(zip, " ") : text);
+  const city = normalizeSearchText(input.city);
+  const state = normalizeSearchText(input.state);
+  return { origin, city, query, state, hasText: Boolean(query || city || state) };
+}
+
 export function searchClinicalProviderDirectorySnapshot(
   directory: ClinicalProviderDirectory,
-  input: {
-    grouped?: boolean;
-    accessRank?: (entry: ClinicalProviderDirectoryEntry) => number;
-    city?: string | null;
-    query?: string | null;
-    state?: string | null;
-  },
+  input: DirectorySearchInput,
 ): {
   directoryVersion: string;
   providers: ClinicalProviderSearchResult[];
 } {
-  const query = normalizeSearchText(input.query);
-  const city = normalizeSearchText(input.city);
-  const state = normalizeSearchText(input.state);
-  const scored = directory.entries
-    .map((entry) => ({ entry, score: scoreDirectoryEntry({ city, entry, query, state }) }))
-    .sort((left, right) => right.score - left.score || left.entry.brandName.localeCompare(right.entry.brandName));
+  const { city, query, state, origin, hasText } = searchSelectors(input);
+  const scored = directory.entries.map(entry => {
+    const selectors = { city, entry, query, state };
+    const score = scoreDirectoryEntry(selectors);
+    const ranked = origin && (!hasText || score > 0) ? rankFacilities(selectors, origin) : undefined;
+    return { entry, score, ranked, miles: ranked?.[0]?.miles ?? Infinity };
+  }).sort((left, right) => right.score - left.score || left.miles - right.miles
+    || left.entry.brandName.localeCompare(right.entry.brandName));
   const results: ClinicalProviderSearchResult[] = [];
   const byBase = new Map<string, ClinicalProviderSearchResult>();
-  for (const { entry, score } of scored) {
-    if (!score && (query || city || state)) break;
+  for (const candidate of scored) {
+    const { entry, score } = candidate;
+    if (!score && hasText) break;
+    if (origin && !hasText && !candidate.ranked?.length) continue;
     if (input.grouped && byBase.has(entry.fhirBaseUrl)) continue;
-    const ranked = rankFacilities({ city, entry, query, state }).slice(0, 8);
-    const best = ranked[0];
+    const ranked = (candidate.ranked ?? rankFacilities({ city, entry, query, state }, null)).slice(0, 8);
     const result: ClinicalProviderSearchResult = {
       brandName: entry.brandName, id: entry.id, sourceSystem: entry.sourceSystem,
-      facilities: ranked.map(publicFacility),
-      ...(input.grouped ? { matchedFacility: best ? { ...publicFacility(best),
-        ...(best.street?.length ? { street: best.street } : {}) } : null } : {}),
+      facilities: ranked.map(({ facility }) => publicFacility(facility)),
     };
+    if (input.grouped) result.matchedFacility = matchedPlace(ranked[0], input.includeDistance);
     results.push(result);
     byBase.set(entry.fhirBaseUrl, result);
     if (results.length === MAX_PROVIDER_RESULTS) break;
@@ -123,6 +142,7 @@ function selectPortalBrands(
     ranks.set(entry.fhirBaseUrl, rank);
     result.id = entry.id;
     result.brandName = entry.brandName;
+    result.sourceSystem = entry.sourceSystem;
   }
 }
 
@@ -142,6 +162,16 @@ function publicFacility({ city, name, postalCode, state }: ClinicalProviderFacil
   return { city, name, postalCode, state };
 }
 
+function matchedPlace(best: { facility: ClinicalProviderFacility; miles: number } | undefined, includeDistance?: boolean) {
+  if (!best) return null;
+  const { facility, miles } = best;
+  return {
+    ...publicFacility(facility),
+    ...(facility.street?.length ? { street: facility.street } : {}),
+    ...(includeDistance && Number.isFinite(miles) ? { approximateDistanceMiles: Math.round(miles) } : {}),
+  };
+}
+
 function facilityFields(facility: ClinicalProviderFacility) {
   return [facility.name, facility.city, facility.state, facility.postalCode, ...facility.aliases ?? [], ...facility.street ?? []];
 }
@@ -151,9 +181,12 @@ function rankFacilities(input: {
   entry: ClinicalProviderDirectoryEntry;
   query: string;
   state: string;
-}): ClinicalProviderFacility[] {
+}, origin: DirectoryPoint | null) {
+  const nearbyOnly = origin && !input.query && !input.city && !input.state;
   return input.entry.facilities
     .map((facility, index) => {
+      const miles = origin && facility.coordinate ? milesBetween(origin, facility.coordinate) : Infinity;
+      if (nearbyOnly) return { facility, index, score: 0, miles };
       const fields = facilityFields(facility)
         .map(normalizeSearchText);
       let score = 0;
@@ -167,10 +200,10 @@ function rankFacilities(input: {
       ) score += 80;
       if (input.city && normalizeSearchText(facility.city) === input.city) score += 30;
       if (input.state && normalizeSearchText(facility.state) === input.state) score += 20;
-      return { facility, index, score };
+      return { facility, index, score, miles };
     })
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .map(({ facility }) => facility);
+    .filter(row => nearbyOnly ? row.miles <= 50 : !origin || row.score > 0)
+    .sort((left, right) => right.score - left.score || left.miles - right.miles || left.index - right.index);
 }
 
 export function parseClinicalProviderDirectory(value: unknown): ClinicalProviderDirectory {
@@ -269,18 +302,25 @@ function parseLocationTuple(
   entryIndex: number,
   locationIndex: number,
 ): ClinicalProviderFacility {
-  if (!Array.isArray(value) || (value.length !== 4 && value.length !== 7)) {
+  if (!Array.isArray(value) || ![4, 7, 8].includes(value.length)) {
     throw new TypeError(
       `Clinical provider directory entry ${entryIndex} location ${locationIndex} is invalid.`,
     );
   }
-  if (value.length === 7 && (!Array.isArray(value[4]) || value[4].length > 4)) throw new RangeError("Invalid street lines.");
+  if (value.length >= 7 && (!Array.isArray(value[4]) || value[4].length > 4)) throw new RangeError("Invalid street lines.");
+  const coordinate = value[7];
+  if (value.length === 8 && coordinate !== null && !(Array.isArray(coordinate) && coordinate.length === 2
+    && Number.isFinite(coordinate[0]) && Math.abs(coordinate[0]) <= 90
+    && Number.isFinite(coordinate[1]) && Math.abs(coordinate[1]) <= 180)) {
+    throw new TypeError("Invalid directory facility coordinate.");
+  }
   return {
+    ...(coordinate ? { coordinate: [coordinate[0], coordinate[1]] as const } : {}),
     name: optionalBoundedString(value[0], 180),
     city: optionalBoundedString(value[1], 120),
     state: optionalBoundedString(value[2], 80),
     postalCode: optionalBoundedString(value[3], 24),
-    ...(value.length === 7 ? {
+    ...(value.length >= 7 ? {
       street: requireArray(value[4], "facility street").map(line => requireBoundedString(line, "street line", 180)),
       aliases: parseUniqueStrings(value[5], "facility aliases", 20, 120),
       upstreamId: requireBoundedString(value[6], "upstream facility id", 240),

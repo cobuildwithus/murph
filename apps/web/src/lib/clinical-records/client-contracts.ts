@@ -47,6 +47,7 @@ export interface ClinicalProviderFacilityContract {
 
 export interface ClinicalMatchedFacility extends ClinicalProviderFacilityContract {
   street?: readonly string[];
+  approximateDistanceMiles?: number;
 }
 
 export interface ClinicalProviderSearchResultContract {
@@ -63,7 +64,8 @@ export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResu
   const facility = provider.matchedFacility ?? provider.facilities[0];
   const locality = facility && [facility.name === provider.brandName ? null : facility.name,
     ...(provider.matchedFacility?.street ?? []), facility.city, facility.state].filter(Boolean).join(", ");
-  return [locality, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
+  const miles = provider.matchedFacility?.approximateDistanceMiles;
+  return [locality, miles === undefined ? null : `about ${miles} mi`, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
     && `May already be included through ${provider.possiblyIncludedThrough}`].filter((label): label is string => Boolean(label));
 }
 
@@ -221,9 +223,10 @@ export function parseClinicalRecordCallbackMarker(
 }
 
 function parseMatchedFacility(value: unknown): ClinicalMatchedFacility {
-  const record = requireExactRecord(value, ["city", "name", "postalCode", "state"], ["street"]);
-  const { street, ...facility } = record;
-  return { ...parseFacility(facility), ...(street === undefined ? {} : { street: requireArray(street, 4).map(line => requireString(line, 180)) }) };
+  const record = requireExactRecord(value, ["city", "name", "postalCode", "state"], ["street", "approximateDistanceMiles"]);
+  const { street, approximateDistanceMiles, ...facility } = record;
+  return { ...parseFacility(facility),
+    ...(approximateDistanceMiles === undefined ? {} : { approximateDistanceMiles: requireCount(approximateDistanceMiles) }), ...(street === undefined ? {} : { street: requireArray(street, 4).map(line => requireString(line, 180)) }) };
 }
 
 function parseFacility(value: unknown): ClinicalProviderFacilityContract {

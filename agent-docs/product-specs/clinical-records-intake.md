@@ -275,10 +275,37 @@ discoverable.
 Search returns the highest-ranked facility with its name, city, state, postal
 code and any available street lines. Extended location tuples retain the
 upstream organization identity, local aliases and street lines. The reader
-also accepts the original four fields. The companion projects the place into
+also accepts the original four- and seven-field tuples. New tuples append a
+public coordinate pair in latitude/longitude order, or null for an unmapped ZIP.
+The tuple and search owner are shared by all directory sources. The companion projects the place into
 its existing display string. Browsers request grouped results with the
 `X-Clinical-Directory-Version: 2` header. Older requests keep the original
 exact provider and facility shapes.
+
+ZIP and location searches use the public-domain [2026 Census national ZCTA Gazetteer](https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2026_Gazetteer/2026_Gaz_zcta_national.zip).
+Its 33,791 representative internal points approximate ZIP locations. The source
+archive SHA-256 is `f1e9046b91f6e60686a99343cb2752834c02b0764939403b331c78c017e2c54c`.
+Run `python3 apps/web/scripts/import-zcta-centroids.py ARCHIVE apps/web/src/lib/clinical-records/zcta-centroids.2026.json`
+to reproduce the offline lookup. The directory builder uses the five-digit
+part of a ZIP or ZIP+4. Census omits some postal codes and some facilities
+publish no ZIP. These facilities remain available to text searches.
+
+Both search POST bodies accept `query` and optional `near: { lat, lon }`.
+An explicit location tap rounds one fix on the device to a 0.1-degree cell
+(about 11 km north/south, narrower east/west). Web rejects extra cell fields,
+finer precision and coordinates outside the supported US envelope. The input
+exists only for the request. URLs, logs, analytics, storage, the clinical
+runtime and the vault receive neither the ZIP selector nor the cell.
+
+A recognized five-digit ZIP anywhere in the query takes precedence over a cell.
+Without a centroid the ZIP remains ordinary search text. Origin-only searches
+include located facilities within 50 miles. With additional text, relevance
+ranks first and great-circle distance breaks ties. Facility filtering precedes
+portal grouping and result limits. The companion and browsers negotiating
+`X-Clinical-Directory-Version: 3` receive optional whole-mile
+`matchedFacility.approximateDistanceMiles`. Clients display “about 3 mi”.
+Version 2 keeps its grouped place fields and the unversioned route keeps
+its four-field facilities. Each Web deployment bundles its directory and reader.
 
 Each grouped result keeps its best matching facility. Its selectable brand on
 the same canonical FHIR base prefers a usable hospital-approved registration,
@@ -309,8 +336,29 @@ folder, with provenance in `sources-square.json`. The companion routes prefer
 it and fall back to the wide PNG; the web pages keep the wide wordmarks. The
 square set is produced offline and the refresh script does not rewrite it.
 
-A weekly GitHub Actions build publishes changed directory data to a content-addressed branch.
-Open its comparison link from the job summary to review endpoint changes, removals and the source hash before merging it.
+### Weekly refresh and one-time signer grant
+
+The weekly refresh validates the prior and candidate directories and fails
+when any source system loses more than 10 percent of its brands, facilities
+or mapped facilities.
+It checks the tracked output and requires a nonempty source. After the build,
+the main-only `frog-reconciliation` environment mints a repository App token
+with contents and pull-request write access. The App opens a ready PR for
+normal CI. The workflow waits for GitHub's protected merge state, verifies
+the same head and requests a regular squash merge. Required status checks
+remain enforced. An unchanged candidate skips publication.
+
+Before enabling publication, grant the existing App key signer to this
+main-branch workflow once. The build job has read-only checkout access.
+The publish and merge jobs use the repository's OIDC/KMS token action.
+
+```sh
+gcloud kms keys add-iam-policy-binding frog-app --project=murph-495013 \
+  --location=global --keyring=github-apps --role=roles/cloudkms.signer \
+  --member='principalSet://iam.googleapis.com/projects/662258957089/locations/global/workloadIdentityPools/github-actions/attribute.workflow_ref/cobuildwithus/murph/.github/workflows/clinical-provider-directory.yml@refs/heads/main'
+```
+
+
 To build the same artifact manually from the repository root:
 
 ```bash
@@ -906,6 +954,6 @@ client id fails closed before redirect.
   services, and automatic nationwide provider discovery.
 - Email scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
-- Provider-directory network refresh jobs and provider-specific data erasure.
+- Runtime requests to refresh public directories and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

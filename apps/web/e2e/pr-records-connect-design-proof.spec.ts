@@ -14,6 +14,8 @@ for (const width of [390, 1280]) {
     await search.scrollIntoViewIfNeeded();
     await expect(search.getByText("Cleveland Clinic", { exact: true })).toBeVisible();
     const shared = search.getByRole("button", { name: "Continue to Alder Health patient portal", includeHidden: true });
+    await expect(study.getByRole("button", { name: "Use my location", includeHidden: true }).first()).toBeVisible();
+    await expect(shared).toContainText("about 3 mi");
     await expect(shared).toContainText("Harbor Clinic, 42 Cove Road, Elm Bay, ME");
     await expect(shared).toContainText("May already be included through Lantern Medical");
     await page.evaluate(async () => {

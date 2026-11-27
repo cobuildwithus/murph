@@ -1,3 +1,4 @@
+import { postalCentroid, type DirectoryFacilityTuple } from "../src/lib/clinical-records/directory-geography";
 import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,6 +13,8 @@ import {
   CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
   buildEpicProviderDirectoryEntryId,
   parseClinicalProviderDirectory,
+  type ClinicalProviderDirectory,
+  type ClinicalProviderSourceSystem,
 } from "../src/lib/clinical-records/provider-directory";
 
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
@@ -30,8 +33,6 @@ const EPIC_SANDBOX_ENTRY = {
 
 type JsonRecord = Record<string, unknown>;
 
-type LocationTuple = [string | null, string | null, string | null, string | null, string[], string[], string];
-
 interface EpicProviderDirectoryArtifactV2 {
   entries: Array<{
     aliases: string[];
@@ -41,7 +42,7 @@ interface EpicProviderDirectoryArtifactV2 {
       | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
     fhirBaseUrl: string;
     id: string;
-    locations: LocationTuple[];
+    locations: DirectoryFacilityTuple[];
     policyId: string;
   }>;
   generatedAt: string;
@@ -70,9 +71,25 @@ async function main(): Promise<void> {
   const sourceBytes = inputPath === "-"
     ? await readBoundedStdin()
     : await readFile(inputPath);
-  const artifact = buildEpicProviderDirectoryArtifact(sourceBytes);
+  const previous = parseClinicalProviderDirectory(JSON.parse(await readFile(outputPath, "utf8")));
+  const artifact = buildEpicProviderDirectoryArtifact(sourceBytes, previous);
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
   process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+}
+
+// Compare independently so a rise in brands cannot hide a loss of facilities.
+export function assertDirectoryRefreshCounts(previous: ClinicalProviderDirectory, next: ClinicalProviderDirectory) {
+  function counts(directory: ClinicalProviderDirectory, system: ClinicalProviderSourceSystem) {
+    const entries = directory.entries.filter(entry => entry.sourceSystem === system);
+    const facilities = entries.flatMap(entry => entry.facilities);
+    return [entries.length, facilities.length, facilities.filter(f => f.coordinate).length];
+  }
+  for (const system of new Set(previous.entries.map(entry => entry.sourceSystem))) {
+    const prior = counts(previous, system);
+    if (counts(next, system).some((count, index) => count < prior[index]! * 0.9)) {
+      throw new RangeError("Provider directory brands, facilities or mapped facilities decreased by more than 10%.");
+    }
+  }
 }
 
 async function readBoundedStdin(): Promise<Buffer> {
@@ -94,6 +111,7 @@ async function readBoundedStdin(): Promise<Buffer> {
 
 export function buildEpicProviderDirectoryArtifact(
   source: string | Uint8Array,
+  previous?: ClinicalProviderDirectory,
 ): EpicProviderDirectoryArtifactV2 {
   const sourceBytes = typeof source === "string" ? Buffer.from(source, "utf8") : source;
   if (sourceBytes.byteLength <= 0 || sourceBytes.byteLength > MAX_INPUT_BYTES) {
@@ -138,7 +156,7 @@ export function buildEpicProviderDirectoryArtifact(
     brandIdentifier: string;
     brandName: string;
     endpoint: string;
-    facilities: LocationTuple[];
+    facilities: DirectoryFacilityTuple[];
   }>();
 
   for (const organization of organizations) {
@@ -184,13 +202,14 @@ export function buildEpicProviderDirectoryArtifact(
     sourceBundleSha256: createHash("sha256").update(sourceBytes).digest("hex"),
     version: `${generatedAt.slice(0, 10)}.epic-brands-r4-policy-v2`,
   };
-  parseClinicalProviderDirectory(artifact);
+  const parsed = parseClinicalProviderDirectory(artifact);
+  if (previous) assertDirectoryRefreshCounts(previous, parsed);
   return artifact;
 }
 
 function attachFacilities(
   organizations: readonly { resource: JsonRecord; fullUrl: string }[],
-  primaryBrands: ReadonlyMap<string, { facilities: LocationTuple[] }>,
+  primaryBrands: ReadonlyMap<string, { facilities: DirectoryFacilityTuple[] }>,
 ) {
   const byReference = new Map(organizations.map(org => [org.fullUrl, org]));
   const owners = new Map([...primaryBrands.keys()].map(ref => [ref, ref]));
@@ -215,7 +234,10 @@ function parseArguments(args: string[]): { inputPath: string; outputPath: string
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--input") input = args[index + 1] ?? null;
-    if (argument === "--output") output = args[index + 1] ?? output;
+    if (argument === "--output") {
+      output = args[index + 1] ?? "";
+      if (!output || output.startsWith("--")) throw new TypeError("Missing directory output path.");
+    }
     if (argument === "--input" || argument === "--output") index += 1;
   }
   if (!input) throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>]");
@@ -250,20 +272,20 @@ function readReference(value: unknown): string | null {
   return optionalString((value as JsonRecord).reference, 240);
 }
 
-function readLocations(org: { resource: JsonRecord; fullUrl: string }): LocationTuple[] {
+function readLocations(org: { resource: JsonRecord; fullUrl: string }): DirectoryFacilityTuple[] {
   const { resource } = org;
   const name = optionalString(resource.name, 180);
   const upstreamId = optionalString(resource.id, 64) ?? org.fullUrl;
   const aliases = [...new Set(readStringArray(resource.alias, 20, 120))].sort();
   const addresses = Array.isArray(resource.address) && resource.address.length ? resource.address : [{}];
-  return addresses.flatMap((address): LocationTuple[] => {
+  return addresses.flatMap((address): DirectoryFacilityTuple[] => {
     if (!address || typeof address !== "object" || Array.isArray(address)) return [];
     const city = optionalString(address.city, 120);
     const state = optionalString(address.state, 80);
     const postalCode = optionalString(address.postalCode, 24);
     const street = readStringArray(address.line, 4, 180);
     if (!city && !state && !postalCode && !street.length && (!resource.partOf || !name)) return [];
-    return [[name, city, state, postalCode, street, aliases, upstreamId]];
+    return [[name, city, state, postalCode, street, aliases, upstreamId, postalCentroid(postalCode)]];
   });
 }
 

@@ -1,4 +1,5 @@
 import "server-only";
+import type { LocationCell } from "./directory-geography";
 
 import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
@@ -30,6 +31,8 @@ export function resolveClinicalProviderDirectoryEntry(
 
 export async function searchClinicalProviderDirectory(input: {
   city?: string | null;
+  includeDistance?: boolean;
+  near?: LocationCell;
   query?: string | null;
   state?: string | null;
 }, memberId?: string) {

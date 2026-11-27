@@ -45,12 +45,12 @@ const searchPreview: ProviderSearchViewProps = {
     { id: "epic-320", brandName: "Cleveland Clinic", facilities: [{ city: "Cleveland", state: "OH", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
     { id: "epic-958", brandName: "Mayo Clinic", facilities: [{ city: "Rochester", state: "MN", name: null, postalCode: null }], sourceSystem: "epic-fhir" },
     { id: "epic-example", brandName: "Alder Health", facilities: [], sourceSystem: "epic-fhir",
-      matchedFacility: { name: "Harbor Clinic", city: "Elm Bay", state: "ME", postalCode: null, street: ["42 Cove Road"] },
+      matchedFacility: { name: "Harbor Clinic", city: "Elm Bay", state: "ME", postalCode: null, street: ["42 Cove Road"], approximateDistanceMiles: 3 },
       sharedPlaces: ["Lantern Medical"], possiblyIncludedThrough: "Lantern Medical" },
   ],
   hasSearched: true, searchPending: false, searchError: null, startError: null,
   startingProviderId: null, selectedProviderId: null,
-  onQueryChange: () => {}, onSearch: () => {}, onSelect: () => {}, onRestart: () => {},
+  onUseLocation: () => {}, onQueryChange: () => {}, onSearch: () => {}, onSelect: () => {}, onRestart: () => {},
 };
 
 export function ClinicalRecordsConnectLauncherStudy() {

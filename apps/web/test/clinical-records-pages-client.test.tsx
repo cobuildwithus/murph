@@ -128,6 +128,38 @@ afterEach(async () => {
 });
 
 describe("Clinical Records connect page", () => {
+  it("requests one coarse fix only after a tap and displays the matched distance", async () => {
+    const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
+    const rendered = await renderClientComponent(createElement(ProviderSearch, {
+      intentClaim: "synthetic", onConsentRequired: () => {},
+    }));
+    cleanup = rendered.cleanup;
+    const locate = vi.fn((success: (position: unknown) => void) => success({
+      coords: { latitude: 44.18492, longitude: -70.27341 },
+    }));
+    vi.stubGlobal("navigator", { geolocation: { getCurrentPosition: locate } });
+    mocks.requestHostedOnboardingJson.mockResolvedValue({ ok: true, directoryVersion: "demo", providers: [{
+      id: "epic-hollow", brandName: "Hollow", sourceSystem: "epic-fhir", facilities: [],
+      matchedFacility: { name: "Clinic", city: null, state: null, postalCode: null, approximateDistanceMiles: 3 },
+    }] });
+    expect(locate).not.toHaveBeenCalled();
+    await clickButton(rendered, "Use my location");
+    expect(locate).toHaveBeenCalledOnce();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledExactlyOnceWith({
+      method: "POST", url: "/api/clinical-records/providers/search", signal: expect.any(AbortSignal),
+      headers: { "X-Clinical-Directory-Version": "3" }, payload: { query: "", near: { lat: 44.2, lon: -70.3 } },
+    });
+    expect(rendered.container.textContent).toContain("about 3 mi");
+    const input = rendered.container.querySelector<HTMLInputElement>('input[name="provider-search"]')!;
+    await act(async () => { setInputValue(rendered.window, input, "04210"); });
+    await submitProviderSearch(rendered);
+    expect(mocks.requestHostedOnboardingJson.mock.lastCall?.[0]).toMatchObject({
+      method: "POST", url: "/api/clinical-records/providers/search", payload: { query: "04210" },
+    });
+    expect(JSON.stringify([rendered.window.location.href, rendered.replaceState.mock.calls,
+      rendered.window.localStorage, rendered.window.sessionStorage])).not.toMatch(/04210|44\.18|44\.2|-70\.3/u);
+  });
+
   it("debounces typing, aborts superseded searches, and never restores an older result", async () => {
     vi.useFakeTimers();
     const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
@@ -409,7 +441,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
         method: "POST",
-        headers: { "X-Clinical-Directory-Version": "2" },
+        headers: { "X-Clinical-Directory-Version": "3" },
         payload: { query: "Piedmont" },
         signal: expect.any(AbortSignal),
         url: "/api/clinical-records/providers/search",

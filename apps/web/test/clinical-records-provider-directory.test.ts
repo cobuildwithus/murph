@@ -344,3 +344,52 @@ function makeDirectory(overrides: {
     version: "test-v2",
   };
 }
+
+describe("public facility proximity", () => {
+  const directory = parseClinicalProviderDirectory(makeDirectory({ locations: [] }));
+  const template = directory.entries[0]!;
+  const facility = (name: string, coordinate: readonly [number, number] | null, postalCode = "30309") =>
+    ({ name, city: "Pond", state: "GA", postalCode, coordinate });
+  const entry = (id: string, facilities: ReturnType<typeof facility>[], base = id) =>
+    ({ ...template, id, brandName: id, facilities, fhirBaseUrl: `https://${base}.example.test/r4` });
+  const snapshot = { ...directory, entries: [
+    entry("first", [facility("Reed", [33.85, -84.4])], "shared"),
+    entry("second", [facility("Reed", [33.8, -84.4]), facility("Moss", [33.79, -84.39])], "shared"),
+    entry("third", [facility("Distant", [35, -84.5])]),
+    entry("unplaced", [facility("Unplaced", null, "00000")]),
+  ] };
+
+  it("uses the ZIP anywhere in a query and matches the facility before grouping", () => {
+    for (const query of ["30309 Reed", "Reed, 30309", "30309-1001 Reed"]) {
+      const { providers } = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true });
+      expect(providers).toHaveLength(1);
+      expect(providers[0]).toMatchObject({ id: "second", matchedFacility: { name: "Reed", approximateDistanceMiles: expect.any(Number) } });
+    }
+  });
+
+  it("applies the radius before caps and ranks ties stably using unrounded distances", () => {
+    const entries = [...Array.from({ length: 23 }, (_, n) => entry("far-" + n, [facility("Far", [33.9, -84.4])])),
+      entry("tie-z", [facility("South", [33.8, -84.4])]), ...snapshot.entries, entry("tie-a", [facility("East", [33.8, -84.4])])];
+    const { providers } = searchClinicalProviderDirectorySnapshot({ ...directory, entries }, {
+      near: { lat: 33.8, lon: -84.4 }, grouped: true, includeDistance: true,
+    });
+    expect(providers).toHaveLength(20);
+    expect(providers.slice(0, 3).map(row => row.id)).toEqual(["second", "tie-a", "tie-z"]);
+    expect(providers[0]?.matchedFacility).toMatchObject({ name: "Reed", approximateDistanceMiles: 0 });
+    expect(providers.some(row => ["third", "unplaced"].includes(row.id))).toBe(false);
+  });
+
+  it("falls back to text for an unmapped ZIP and keeps unmapped clinics discoverable by name", () => {
+    for (const query of ["00000", "Unplaced"]) {
+      const result = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true });
+      expect(result.providers.map(p => p.id)).toEqual(["unplaced"]);
+      expect(result.providers[0]?.matchedFacility).not.toHaveProperty("approximateDistanceMiles");
+    }
+    const directoryOnly = { ...snapshot, entries: [entry("westhaven", [])] };
+    const named = searchClinicalProviderDirectorySnapshot(directoryOnly, { query: "westhaven 30309", grouped: true });
+    expect(named.providers[0]).toMatchObject({ id: "westhaven", matchedFacility: null });
+    const old = searchClinicalProviderDirectorySnapshot(snapshot, { query: "30309", grouped: true });
+    expect(old.providers[0]?.matchedFacility).not.toHaveProperty("approximateDistanceMiles");
+    expect(old.providers[0]?.matchedFacility).not.toHaveProperty("coordinate");
+  });
+});

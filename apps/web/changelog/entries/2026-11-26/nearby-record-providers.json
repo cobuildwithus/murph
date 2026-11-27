@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-26",
+  "order": 300,
+  "item": {
+    "id": "nearby-record-providers",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Find medical record providers near you",
+    "summary": "When connecting medical records on the web, enter a ZIP or tap Use my location to find nearby hospitals and clinics.",
+    "details": "Distances are approximate and use each facility’s ZIP. Your browser rounds your location before searching. Murph does not save it.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": []
+  }
+}

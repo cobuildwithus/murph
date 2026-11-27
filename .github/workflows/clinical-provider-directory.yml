@@ -6,20 +6,26 @@ on:
     - cron: '17 9 * * 1'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: clinical-provider-directory-refresh
   cancel-in-progress: false
 
+env:
+  DIRECTORY: apps/web/src/lib/clinical-records/provider-directory.v2.json
+
 jobs:
   refresh:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    outputs:
+      changed: ${{ steps.build.outputs.changed }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -28,30 +34,142 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @murphai/clinical-records... run build
-      - name: Build the directory from the public Epic bundle
+      - name: Build and validate the public directory
+        id: build
         run: |
-          set -o pipefail
+          set -euo pipefail
+          git ls-files --error-unmatch -- "$DIRECTORY"
+          test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
+          input="$RUNNER_TEMP/epic-brands.json"
           curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
-            --max-time 300 --max-filesize 268435456 https://open.epic.com/Endpoints/Brands |
-            pnpm --dir apps/web clinical-records:providers:import -- --input -
-      - name: Publish changed data for directory review
+            --max-time 300 --max-filesize 268435456 https://open.epic.com/Endpoints/Brands -o "$input"
+          test -s "$input" || { echo "::error::Downloaded Epic source is missing or empty"; exit 1; }
+          pnpm --dir apps/web clinical-records:providers:import -- --input "$input" --output "$GITHUB_WORKSPACE/$DIRECTORY"
+          test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
+          if ! git diff --quiet -- "$DIRECTORY"; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.build.outputs.changed == 'true'
+        with:
+          name: clinical-directory
+          path: ${{ env.DIRECTORY }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: refresh
+    if: needs.refresh.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: frog-reconciliation
+      deployment: false
+    outputs:
+      pr: ${{ steps.publish.outputs.pr }}
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: clinical-directory
+          path: ${{ runner.temp }}/validated
+      - name: Copy validated snapshot to its tracked destination
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch -- "$DIRECTORY"
+          test -s "$RUNNER_TEMP/validated/provider-directory.v2.json" || { echo "::error::Validated directory artifact is missing"; exit 1; }
+          cp "$RUNNER_TEMP/validated/provider-directory.v2.json" "$DIRECTORY"
+      - name: Mint directory publication token
+        id: app
+        uses: ./.github/actions/github-app-token
+        with:
+          app-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          key-version: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/frog-app/cryptoKeyVersions/1
+          owner: ${{ github.repository_owner }}
+          repositories: murph
+          permissions: '{"contents":"write","pull_requests":"write"}'
+      - name: Open the exact directory change for required CI
+        id: publish
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           GIT_CONFIG_COUNT: '1'
           GIT_CONFIG_KEY_0: core.hooksPath
           GIT_CONFIG_VALUE_0: /dev/null
         run: |
-          file=apps/web/src/lib/clinical-records/provider-directory.v2.json
-          git diff --quiet -- "$file" && exit 0
-          branch="records/epic-directory-$(git hash-object "$file")"
+          set -euo pipefail
+          branch="records/directory-${GITHUB_SHA:0:12}-$(git hash-object "$DIRECTORY")"
           gh auth setup-git --hostname github.com
-          existing=$(git ls-remote --heads origin "refs/heads/$branch")
-          if [[ -z "$existing" ]]; then
-            git switch -c "$branch"
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add -- "$file"
-            git commit -m 'Refresh the public Epic provider directory'
-            git push origin "$branch"
+          git add -- "$DIRECTORY"
+          tree=$(git write-tree)
+          if [[ -n "$(git ls-remote --heads origin "refs/heads/$branch")" ]]; then
+            git fetch --depth=2 origin "refs/heads/$branch"
+            head=$(git rev-parse FETCH_HEAD)
+            test "$(git rev-parse "$head^{tree}")" = "$tree"
+            test "$(git rev-parse "$head^")" = "$GITHUB_SHA"
+          else
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'Refresh the clinical provider directory'
+            head=$(git rev-parse HEAD)
+            git push origin "HEAD:refs/heads/$branch"
           fi
-          echo "[Review the directory update]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$branch?expand=1)" >> "$GITHUB_STEP_SUMMARY"
+          pr=$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [[ -z "$pr" ]]; then
+            url=$(gh pr create --base main --head "$branch" --title 'Refresh the clinical provider directory' \
+              --body-file .github/clinical-provider-refresh-pr.md)
+            pr=${url##*/}
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+  merge:
+    needs: publish
+    if: needs.publish.outputs.pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment:
+      name: frog-reconciliation
+      deployment: false
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    env:
+      PR: ${{ needs.publish.outputs.pr }}
+      HEAD_SHA: ${{ needs.publish.outputs.head }}
+    steps:
+      - name: Wait for branch protection on the published head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while true; do
+            state=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid,baseRefName,state,mergeStateStatus)
+            jq -e --arg head "$HEAD_SHA" '.headRefOid == $head and .baseRefName == "main" and .state == "OPEN"' <<< "$state" >/dev/null
+            case $(jq -r '.mergeStateStatus' <<< "$state") in
+              CLEAN) break ;;
+              BLOCKED|UNSTABLE|UNKNOWN) sleep 30 ;;
+              *) echo "::error::Directory PR cannot merge at this head"; exit 1 ;;
+            esac
+          done
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Mint exact-head merge token
+        id: app
+        uses: ./.github/actions/github-app-token
+        with:
+          app-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          key-version: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/frog-app/cryptoKeyVersions/1
+          owner: ${{ github.repository_owner }}
+          repositories: murph
+          permissions: '{"contents":"write","pull_requests":"write"}'
+      - name: Merge through repository protections
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --match-head-commit "$HEAD_SHA" --squash

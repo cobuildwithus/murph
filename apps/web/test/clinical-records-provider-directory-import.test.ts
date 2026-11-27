@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseClinicalProviderDirectory, searchClinicalProviderDirectorySnapshot } from "@/src/lib/clinical-records/provider-directory";
 import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
-import { buildEpicProviderDirectoryArtifact } from "@/scripts/import-epic-clinical-provider-directory";
+import { assertDirectoryRefreshCounts, buildEpicProviderDirectoryArtifact } from "@/scripts/import-epic-clinical-provider-directory";
 
 const generatedAt = "2026-07-20T08:00:05.631Z";
 
@@ -23,8 +23,8 @@ describe("Epic Clinical Records provider directory importer", () => {
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       id: "epic-brand-123",
       locations: expect.arrayContaining([
-        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], "urn:uuid:facility-1"],
-        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], "facility-north"],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], "urn:uuid:facility-1", [33.799851, -84.385837]],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], "facility-north", [33.799851, -84.385837]],
       ]),
     });
   });
@@ -66,6 +66,20 @@ describe("Epic Clinical Records provider directory importer", () => {
     expect(shuffled.sourceBundleSha256).toBe(
       createHash("sha256").update(shuffledSource, "utf8").digest("hex"),
     );
+  });
+
+  it("rejects a refresh losing more than ten percent of brands, facilities or located facilities", () => {
+    const artifact = buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle()));
+    const baseline = parseClinicalProviderDirectory(artifact);
+    expect(() => assertDirectoryRefreshCounts(baseline, baseline)).not.toThrow();
+    expect(() => assertDirectoryRefreshCounts(baseline, { ...baseline, entries: baseline.entries.slice(0, 1) })).toThrow(/10%/u);
+    for (const facilities of [[], baseline.entries[0]!.facilities.map(f => ({ ...f, coordinate: null }))]) {
+      expect(() => assertDirectoryRefreshCounts(baseline, {
+        ...baseline, entries: [{ ...baseline.entries[0]!, facilities }, ...baseline.entries.slice(1)],
+      })).toThrow(/10%/u);
+    }
+    artifact.entries[0]!.locations[0]![7] = [94, -84];
+    expect(() => parseClinicalProviderDirectory(artifact)).toThrow(/coordinate/u);
   });
 
   it("rejects duplicate source identities", () => {

@@ -24,7 +24,7 @@ vi.mock("@/src/lib/clinical-records/provider-directory.v2.json", async () => {
     entries: ["Alder", "Birch"].map(brandName => ({
       aliases: [], brandName, id: "epic-" + brandName.toLowerCase(), policyId: EPIC_ACQUISITION_POLICY_ID,
       clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID", fhirBaseUrl: "https://portal.example.test/r4",
-      locations: [[brandName + " Clinic", "Cove", "ME", null, ["12 Pine Road"], [], "urn:sample:" + brandName]],
+      locations: [[brandName + " Clinic", "Cove", "ME", null, ["12 Pine Road"], [], "urn:sample:" + brandName, [44.1, -70.2]]],
     })),
   } };
 });
@@ -83,5 +83,36 @@ it.each(["basic", "hospital"] as const)("selects the %s sibling in both grouped 
         id: "epic-birch", matchedFacility: { name: "Alder Clinic" }, sharedPlaces: ["Alder"],
       }]);
     }
+  }
+});
+
+it("keeps origins out of storage, logs and public responses in both transports", async () => {
+  findMany.mockReset().mockResolvedValue([]);
+  const log = vi.spyOn(console, "log");
+  const warn = vi.spyOn(console, "warn");
+  const error = vi.spyOn(console, "error");
+  try {
+    for (const search of [POST, companionSearch]) {
+      for (const body of [{ query: "", near: { lat: 44.2, lon: -70.2 } }, { query: "04210" }]) {
+        const request = new Request("https://app.example.test/search", { method: "POST",
+          headers: { "X-Clinical-Directory-Version": "3" }, body: JSON.stringify(body) });
+        const response = await search(request);
+        expect(response.status).toBe(200);
+        expect(response.headers.get("Cache-Control")).toBe("no-store");
+        const result = await response.json();
+        expect(result.providers[0].matchedFacility.approximateDistanceMiles).toEqual(expect.any(Number));
+        expect(JSON.stringify([request.url, result, findMany.mock.calls, log.mock.calls, warn.mock.calls, error.mock.calls]))
+          .not.toMatch(/04210|44\.2|-70\.2/u);
+      }
+      const before = findMany.mock.calls.length;
+      const bad = await search(new Request("https://app.example.test/search", { method: "POST",
+        body: JSON.stringify({ query: "", near: { lat: 44.21234, lon: -70.2 } }) }));
+      expect(bad.status).toBe(400);
+      expect(await bad.text()).not.toContain("44.21234");
+      expect(findMany).toHaveBeenCalledTimes(before);
+      expect(JSON.stringify([log.mock.calls, warn.mock.calls, error.mock.calls])).not.toContain("44.21234");
+    }
+  } finally {
+    log.mockRestore(); warn.mockRestore(); error.mockRestore();
   }
 });
