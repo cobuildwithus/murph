@@ -803,10 +803,15 @@ describe("browser vault session route", () => {
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({ member: { id: memberId }, sessionId: "export-session" });
     mocks.getPrisma.mockReturnValue({
       healthActivity: { findMany },
+      healthProfilePin: { findMany: vi.fn().mockResolvedValue([{ sourceKey: "age", specEncrypted: "sealed-pin" }]) },
+      gameProfile: { findUnique: vi.fn().mockResolvedValue({ coverKind: "art", coverArt: "gold" }) },
+      healthWorkingOn: { findMany: vi.fn().mockResolvedValue([]) },
+      healthWorkingOnCheer: { findMany: vi.fn().mockResolvedValue([]) },
       $transaction: (run: (tx: object) => Promise<void>) => run(mocks.prismaClient),
     });
     mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
-    mocks.openHealthTexts.mockImplementation((entries: { rowId: string }[]) => entries.map(entry => JSON.stringify(summary(entry.rowId))));
+    mocks.openHealthTexts.mockImplementation((entries: { rowId: string }[]) => entries.map(entry =>
+      JSON.stringify(entry.rowId === "age" ? { kind: "age" } : summary(entry.rowId))));
 
     const result = await loadBrowserVaultExport({
       authorization: {
@@ -819,6 +824,7 @@ describe("browser vault session route", () => {
 
     expect(JSON.parse(await result.blob.text())).toEqual({
       browserVault: null, exportedAt: result.generatedAt, progressShares: [],
+      healthProfile: { cover: { art: "gold" }, pins: [{ key: "age", kind: "age" }], workingOn: [] },
       recordedActivities: rows.map(row => ({ ...summary(row.id), day: row.day, createdAt: createdAt.toISOString(), postId: null })),
     });
     expect(findMany).toHaveBeenCalledTimes(2);
@@ -826,10 +832,11 @@ describe("browser vault session route", () => {
       expect(query.where).toMatchObject({ memberId, deletedAt: null });
     }
     const opened = mocks.openHealthTexts.mock.calls.flatMap(([entries]) => entries);
-    expect(opened).toEqual(rows.map(row => ({
-      memberId, rowId: row.id, table: "health_activity", field: "summary", value: row.summaryEncrypted,
-    })));
-    expect(mocks.assertHostedAppSessionCurrentTx).toHaveBeenCalledTimes(4);
+    expect(opened).toEqual([
+      ...rows.map(row => ({ memberId, rowId: row.id, table: "health_activity", field: "summary", value: row.summaryEncrypted })),
+      { memberId, rowId: "age", table: "health_profile_pin", field: "spec", value: "sealed-pin" },
+    ]);
+    expect(mocks.assertHostedAppSessionCurrentTx).toHaveBeenCalledTimes(6);
     expect(mocks.consumeSensitiveActionChallenge.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.openHealthTexts.mock.invocationCallOrder[0]!);
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();

@@ -22,6 +22,14 @@ export function isHealthFeedEnabled(memberId: string, env: FlagEnv = process.env
   return isGameEnabled(env) && lists(env.MURPH_HEALTH_FEED_MEMBER_IDS, memberId);
 }
 
+export function isHealthYouEnabled(memberId: string, env: FlagEnv = process.env): boolean {
+  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_YOU_MEMBER_IDS, memberId);
+}
+
+export function assertHealthYouEnabled(memberId: string) {
+  if (!isHealthYouEnabled(memberId)) throw gameNotFound();
+}
+
 export function isHealthDietEnabled(memberId: string, env: FlagEnv = process.env): boolean {
   return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_DIET_MEMBER_IDS, memberId);
 }
@@ -57,12 +65,4 @@ export function assertHealthRecordEnabled(memberId: string, capability: "timed" 
 
 export function assertHealthFeedEnabled(memberId: string): void {
   if (!isHealthFeedEnabled(memberId)) throw gameNotFound();
-}
-
-export function isHealthYouEnabled(memberId: string, env: FlagEnv = process.env): boolean {
-  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_YOU_MEMBER_IDS, memberId);
-}
-
-export function assertHealthYouEnabled(memberId: string): void {
-  if (!isHealthYouEnabled(memberId)) throw gameNotFound();
 }

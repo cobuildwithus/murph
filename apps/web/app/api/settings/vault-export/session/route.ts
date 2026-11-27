@@ -40,6 +40,7 @@ import {
   verifySensitiveActionChallenge,
 } from "@/src/lib/sensitive-actions/server";
 
+import { prepareHealthProfileExport } from "@/src/lib/health-profile/export";
 import { prepareRecordedActivityExport } from "@/src/lib/health-wins/activity-export";
 import { prepareProgressShareExport } from '@/src/lib/game/progress/share-export';
 import { progressEffect } from '@/src/lib/game/progress/http';
@@ -127,6 +128,7 @@ export const POST = withJsonError(async (request: Request) => {
   const activityRecords = body.includeRecordedActivities === true
     ? await prepareRecordedActivityExport(auth.member.id, assertCurrent)
     : null;
+  const profileRecords = body.includeHealthProfile === true ? await prepareHealthProfileExport(auth.member.id, assertCurrent) : null;
   const session = replicaRef
     ? await fetchExportSession({ browserPublicKeyJwk, replicaRef, userId: auth.member.id }, acceptsBucketedReplica)
     : null;
@@ -136,7 +138,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   // Only a withdrawn member may download saved activities without a replica: an active member's
   // refresh is already queued, so keep the approval and ask them to retry.
-  if (!session && (processingAllowed || !activityRecords)) {
+  if (!session && (processingAllowed || (!activityRecords && !profileRecords))) {
     throw processingAllowed ? browserVaultSessionNotFreshError() : browserVaultRetainedReplicaUnavailableError();
   }
   const shareRecords = await progressEffect("prepare_share_export", () => prepareProgressShareExport(auth.member.id, assertCurrent));
@@ -150,6 +152,7 @@ export const POST = withJsonError(async (request: Request) => {
   const encoder = new TextEncoder();
   async function* exportRecords() {
     if (activityRecords) yield* activityRecords();
+    if (profileRecords) yield* profileRecords();
     yield* shareRecords();
   }
   const records = exportRecords();

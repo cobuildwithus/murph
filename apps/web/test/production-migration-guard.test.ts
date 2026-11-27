@@ -630,6 +630,22 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("permits only the backward-compatible profile cover expansion", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-profile-migration-"));
+    const migrationId = "20261127130000_health_profile";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const incompatible of [sql.replace("DEFAULT 'none'", "DEFAULT 'photo'"), sql.replace(") NOT VALID;", ");")]) {
+        await writeMigrationSql(migrationsDir, migrationId, incompatible);
+        assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))[0]?.reason, "ADD CONSTRAINT CHECK");
+      }
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("permits only the mixed-writer clinical return expansion", async () => {
     const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
     const migrationId = "20261124120000_clinical_native_return";

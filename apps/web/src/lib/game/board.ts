@@ -78,6 +78,10 @@ async function boardGameFacts(db: Db, viewerId: string, otherId: string, room: s
 }
 
 export async function readPairBoard(viewerId: string, otherId: string): Promise<PairBoard | null> {
+  return (await readProfilePairBoard(viewerId, otherId, false))?.board ?? null;
+}
+
+export async function readProfilePairBoard(viewerId: string, otherId: string, includeSleepTimes: boolean) {
   if (!isGameBoardEnabled()) return null;
   const db = getPrisma();
   const binding = await resolvePairBoard(db, viewerId, otherId);
@@ -85,7 +89,7 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
   const now = new Date();
   const facts = await boardGameFacts(db, viewerId, otherId, binding.runtimeMemberId, now);
   if (!facts) return null;
-  const shared = await readHostedGroupBoardData({ ...binding, viewerId, otherId, now, prisma: db });
+  const shared = await readHostedGroupBoardData({ ...binding, viewerId, otherId, now, prisma: db, ...(includeSleepTimes && { includeSleepTimes }) });
   if (!shared) return null;
   const current = await resolvePairBoard(db, viewerId, otherId);
   if (!current || current.groupId !== binding.groupId || current.runtimeMemberId !== binding.runtimeMemberId) return null;
@@ -100,9 +104,10 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
       inARow: facts.streaks.get(person.memberId) ?? null,
       numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };
   });
-  return { groupId: binding.groupId, membershipId: shared.membershipId, sharingRevision: shared.sharingRevision, firstGameOn: facts.firstGameOn, window,
+  const board: PairBoard = { groupId: binding.groupId, membershipId: shared.membershipId, sharingRevision: shared.sharingRevision, firstGameOn: facts.firstGameOn, window,
     myShares: BOARD_METRICS.filter((_, index) => shared.myScopes.includes(buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index]))),
     people, crowns: boardCrowns(people) };
+  return { board, sleepTimes: shared.people.find(p => p.memberId === otherId)?.sleepTimes };
 }
 
 // Earlier versions of Friends granted Steps/Sleep in every eligible room for a person.

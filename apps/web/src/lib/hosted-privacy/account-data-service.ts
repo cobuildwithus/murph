@@ -165,6 +165,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deleting the author or the parent post cascades the comment and its replay tombstone. Deleting a private reply’s recipient also cascades the reply.",
   },
   {
+    slug: "prisma.health_profile_pin", label: "Health profile pins", deletion: "live-delete",
+    note: "Settings exports frozen milestones and live selectors. Deleting the owner cascades every pin.",
+  },
+  {
+    slug: "prisma.health_working_on", label: "Working on selections", deletion: "live-delete",
+    note: "Settings exports ordered factors and start dates. Deleting the owner removes their selections and attached cheers.",
+  },
+  {
+    slug: "prisma.health_working_on_cheer", label: "Working on cheers", deletion: "live-delete",
+    note: "Settings exports outgoing cheers. Removing the selection or deleting either member removes its cheer.",
+  },
+  {
     slug: "prisma.health_post_cheer",
     label: "Health feed cheers",
     deletion: "live-delete",

@@ -11,6 +11,9 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { eligibleHealthAuthorsSql, findVisibleHealthPost, healthPostAudienceSql, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
+import { isHealthYouEnabled } from "./flag";
+import { assertProfileAccess } from "../health-profile/access";
+import { readExtendedProfile } from "../health-profile/profile";
 import { openHealthTexts } from "./crypto";
 import type { FrozenHealthCard } from "./card-options";
 import { openHealthCursor, sealHealthCursor, type HealthPagePosition } from "./cursor";
@@ -250,12 +253,16 @@ async function profileNumbers(viewer: string, memberId: string) {
   }
 }
 
-export async function readHealthProfile(auth: Auth, memberId: string, cursor?: string | null) {
+export async function readHealthProfile(auth: Auth, memberId: string, cursor?: string | null, signal = AbortSignal.timeout(15000)) {
   const db = getPrisma(), viewer = auth.member.id;
   const identity = await profileIdentity(db, viewer, memberId);
   const position = await openHealthCursor(viewer, `profile:${memberId}`, cursor);
   const [opened, prepared] = await together([names([identity]), preparePosts(db, viewer, { author: memberId, cursor: position })]);
-  const numbers = await profileNumbers(viewer, memberId);
-  const [page] = await finishRead(auth, tx => Promise.all([finishPosts(tx, viewer, prepared), profileIdentity(tx, viewer, memberId)]));
-  return { memberId, ...opened.get(memberId)!, numbers, ...page };
+  const [allowed] = isHealthYouEnabled(viewer) ? await db.$queryRaw<{ allowed: boolean }[]>`
+    SELECT (${visibleHealthPersonSql(viewer, Prisma.sql`${memberId}::text`)}) AS allowed` : [];
+  const extended = allowed?.allowed ? await readExtendedProfile(auth, memberId, signal) : null;
+  const numbers = extended ? extended.numbers : await profileNumbers(viewer, memberId);
+  const [page] = await finishRead(auth, tx => Promise.all([finishPosts(tx, viewer, prepared),
+    extended ? assertProfileAccess(tx, auth, memberId) : profileIdentity(tx, viewer, memberId)]));
+  return { memberId, ...opened.get(memberId)!, numbers, ...page, ...extended?.extras };
 }

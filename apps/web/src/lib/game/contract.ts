@@ -114,6 +114,9 @@ export interface GameInviteeLabel {
 
 /** PUT /me/profile */
 export interface SetProfileBody {
+  coverPhotoKey?: string;
+  coverArt?: "leaf" | "cream" | "ink" | "gold";
+  cover?: null;
   /** Omitted keeps membership; joining again preserves the original join time. */
   everyoneJoined?: boolean;
   /** Whole list; omitted keeps it, [] clears it. */

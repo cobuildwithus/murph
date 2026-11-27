@@ -88,6 +88,7 @@ export async function loadBrowserVaultExport({
       authorization,
       browserPublicKeyJwk: publicKeyJwk,
       includeRecordedActivities: true,
+      includeHealthProfile: true,
       ...(acceptsBucketedReplica
         ? {
             requestedMetricBuckets:
@@ -122,18 +123,24 @@ export async function loadBrowserVaultExport({
     const header = requireRecord(first.value, "Settings export session");
     const payload = await loadRetainedVaultPayload(header, privateKeyJwk, signal);
 
+    let profilePart: BlobPart[] = [];
+    const cheerParts: BlobPart[] = [];
     const activityParts: BlobPart[] = [];
     const shareParts: BlobPart[] = [];
     // The medal photo comes last, on its own record.
     let photoPart: BlobPart[] = [];
     for await (const value of records) {
       const record = requireRecord(value, "Settings export record");
+      if (record.healthProfile !== undefined) {
+        profilePart = [',"healthProfile":', JSON.stringify(requireRecord(record.healthProfile, "Health profile export"))];
+        continue;
+      }
+      if (Array.isArray(record.workingOnCheers)) {
+        appendExportRows(cheerParts, record.workingOnCheers, "Working on cheer export");
+        continue;
+      }
       if (Array.isArray(record.recordedActivities)) {
-        const activities = record.recordedActivities.map(activity => requireRecord(activity, "Recorded activity export"));
-        if (activities.length) {
-          if (activityParts.length) activityParts.push(",");
-          activityParts.push(new Blob([JSON.stringify(activities)]).slice(1, -1));
-        }
+        appendExportRows(activityParts, record.recordedActivities, "Recorded activity export");
         continue;
       }
       if (record.progressSharePhoto !== undefined) {
@@ -151,15 +158,23 @@ export async function loadBrowserVaultExport({
       if (shareParts.length) shareParts.push(',');
       shareParts.push(new Blob([JSON.stringify(share)]));
     }
-    if (header.state === "no_replica" && !activityParts.length) {
+    if (header.state === "no_replica" && !activityParts.length && !profilePart.length) {
       throw new ContractValidationError("Settings export is missing its recorded activities.");
     }
     const blob = new Blob([
-      payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, "]", ...photoPart,
+      payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, "]", ...photoPart, ...profilePart,
+      ...(cheerParts.length ? [',"workingOnCheers":[', ...cheerParts, "]"] : []),
       ...(activityParts.length ? [',"recordedActivities":[', ...activityParts, "]"] : []), "}",
     ], { type: VAULT_EXPORT_MIME_TYPE });
     return { ...payload, blob };
   } finally { await records.return(undefined); }
+}
+
+function appendExportRows(parts: BlobPart[], rows: unknown[], label: string) {
+  if (!rows.length) return;
+  const checked = rows.map(row => requireRecord(row, label));
+  if (parts.length) parts.push(",");
+  parts.push(new Blob([JSON.stringify(checked)]).slice(1, -1));
 }
 
 async function loadRetainedVaultPayload(

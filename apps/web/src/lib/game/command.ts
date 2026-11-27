@@ -241,11 +241,18 @@ function oneLineWords(value: unknown): string {
 }
 
 function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
-  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined && input.everyoneJoined === undefined) {
+  const covers = ["coverPhotoKey", "coverArt", "cover"].filter(key => input[key] !== undefined);
+  if (covers.length > 1 || (input.cover !== undefined && input.cover !== null)) {
+    reject("INVALID_REQUEST", "Choose one cover or clear it.");
+  }
+  if (!covers.length && input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined && input.everyoneJoined === undefined) {
     reject("INVALID_REQUEST", "Choose a profile field to update.");
   }
   return {
     type: "setProfile",
+    ...optional(input.coverPhotoKey, value => ({ coverPhotoKey: mediaKey(value) })),
+    ...optional(input.coverArt, value => ({ coverArt: oneOf(value, "coverArt", ["leaf", "cream", "ink", "gold"] as const) })),
+    ...(input.cover === null && { cover: null }),
     ...optional(input.everyoneJoined, value => ({ everyoneJoined: flag(value, "everyoneJoined") })),
     ...optional(input.notForMe, value => {
       if (!Array.isArray(value)) reject("INVALID_REQUEST", "notForMe must be a list of activities.");
