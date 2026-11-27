@@ -82,7 +82,7 @@ describe("trend_change", () => {
 
   it.each([
     ["sleep_total_min", 418, 15, 10, "a night, vs usual"],
-    ["rhr_bpm", 64, -1, 2, "on average, vs usual"], ["hrv_ms", 69, 3, 3, "on average, vs usual"],
+    ["rhr_bpm", 64, -2, 2, "on average, vs usual"], ["hrv_ms", 69, 5, 3, "on average, vs usual"],
     ["steps", 6300, 1000, 500, "a day, vs usual"], ["distance_km", 3, 1, 1, "a day, vs usual"],
   ] as const)("requires a full favorable step for %s", (metric, base, step, spread, subtitle) => {
     const trend = (delta: number) => cards(fourMonths(metric, [base, base, base, base + delta], spread))
@@ -114,7 +114,7 @@ describe("best_month", () => {
   it("compares six qualifying months within twelve calendar months and labels partial coverage", () => {
     const card = cards([...prior, ...current, ...monthOf("steps", "2031-02", 12000, 15),
       ...monthOf("steps", "2031-12", 11000, 14)]).find(card => card.kind === "best_month");
-    expect(card?.subtitle).toBe("February, best month in the past 12 months");
+    expect(card?.subtitle).toBe("February so far, best month in the past 12 months");
     expect(card?.source_note).toContain("so far");
     expect(card?.chart.series.map(month => month.month)).toEqual([...full, "2032-02"]);
     expect(card?.chart.highlight).toBe("2032-02");
@@ -135,7 +135,7 @@ describe("best_month", () => {
     const samples = full.flatMap((month, index) => monthOf("rhr_bpm", month, means[index], 15, 2));
     const card = cards([...samples, ...monthOf("rhr_bpm", "2032-02", 62, 14, 2)])
       .find(card => card.kind === "best_month");
-    expect(card?.subtitle).toBe("February, tied for best month in the past 12 months");
+    expect(card?.subtitle).toBe("February so far, tied for best month in the past 12 months");
   });
 
   it("keeps rounding differences from turning flat monthly means into a best", () => {
@@ -168,7 +168,7 @@ describe("best_month", () => {
     expect(best).toMatchObject({ date: "2034-06-18", eventDate: asOf });
     expect(best?.card).toMatchObject({
       title: { number: "84", measure: "sleep score" },
-      subtitle: "June, best month this year",
+      subtitle: "June so far, best month this year",
     });
   });
 
@@ -198,7 +198,7 @@ describe("best_month", () => {
     const current = best(14);
     expect(current).toMatchObject({ date: "2034-09-14", eventDate: asOf });
     expect(current?.card).toMatchObject({
-      title: { number: "95", measure: "miles on foot" }, subtitle: "in September, most this year",
+      title: { number: "95", measure: "miles on foot" }, subtitle: "in September so far, most this year",
     });
     expect(best(1, miles("2034-05", 8, 1))).toBeUndefined();
     expect(best(5, daily.filter(row => !row.date.startsWith("2034-04")))).toBeUndefined();

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-11-14
+Last verified: 2026-11-27
 
 Read the delivery-path rules first, then only the matrix row or procedure for
 what you changed. Everything else here is reference, not a checklist. On a pull
@@ -70,8 +70,11 @@ if the PR still shows Ready, and a skipped job is not a pass. PR authors own
 Draft and Ready; no background workflow changes that state. `PR Evidence`
 still runs on `synchronize` to keep policy and evidence metadata current.
 
-Required CI runs the same jobs for documentation and code. PR runs supersede by
-PR number. Required `main` proof uses SHA-scoped concurrency, so merging
+Required CI runs the same jobs for documentation and code. Host Support lets
+the active PR run finish and keeps the newest waiting run for that PR. This
+lets GitHub expand and report every reached matrix shard on the active run.
+Other required PR workflows can cancel superseded runs by PR number. Required
+`main` proof uses SHA-scoped concurrency, so merging
 another commit cannot cancel a candidate's tests; the Web admission group
 finishes its active run and keeps only the newest pending candidate. Every
 `main` commit creates a Vercel production candidate for the Deployment Check

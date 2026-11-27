@@ -1,6 +1,8 @@
 # Clinical Records Intake
 
-Last verified: 2026-11-25
+Last verified: 2026-11-27
+
+See the [hospital connector expectation matrix](../references/clinical-connector-expectations.md) for test ownership and gaps.
 
 ## Product outcome
 
@@ -209,6 +211,14 @@ Completion distinguishes connected, canceled, expired, sign_in_required, already
    atomically persists the connection, next retrieval generation and existing
    system-mailbox wake. Reauthorization reuses the connection for the same patient and FHIR base. The existing
    Temporal handoff sweep re-signals pending work without creating another run.
+   A source that already has a connection row, connected or disconnected,
+   reconnects and re-adds at that row's pinned FHIR base, not the directory
+   entry's current URL; only a first connection uses the directory endpoint.
+   The OAuth client, policy and integration still come from the entry. Before
+   any request, the pinned base must pass the integration's endpoint rules (the
+   directory URL rule for Epic, the tenant template for Oracle), or the start is
+   refused with `CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED`. An unbound callback
+   resolves against the same row; a bound one keeps the base saved in its session.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through
    the Clinical Records vault use case. The web control plane records only
@@ -361,27 +371,37 @@ the floor. It checks the tracked output and requires a nonempty source.
 A member's connection is bound to its entry id and a hash of that entry's
 exact FHIR base URL, and connects with the OAuth client and policy the entry
 names, so the parser rejects any URL not already in canonical form and the
-refresh never changes those connection fields automatically.
+refresh never changes those connection fields automatically. A published URL
+change reaches only first connections: existing sources keep reconnecting at
+their pinned base. A pinned base the hospital has retired cannot reconnect;
+recovering it needs a deliberate rebind with verified patient identity, which
+does not exist yet.
 `holdDirectoryChangesForReview` in `provider-directory-artifact.ts` is the one
 refresh rule. Upstream names, aliases and facilities publish. Three changes are
 held: any change to an existing entry's URL (path included), client key or
 policy keeps the published value; an existing entry missing upstream stays as
 published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
 on an endpoint origin a production entry already uses. The sandbox host does
-not count as a production host. The run opens or updates the GitHub issue
-“Clinical directory changes need review” listing every held change. The issue
+not count as a production host. A run that holds changes opens or updates the
+oldest open GitHub issue “Clinical directory changes need review” listing every
+held change, even when the directory itself is unchanged, and closes newer
+duplicates. The re-check proves each listed row but cannot prove the list is
+complete, so a run that holds nothing never closes the issue: it comments once
+that the run reported no held changes, and a person checks and closes it. The issue
 says its upstream values are unverified and must be re-checked against
 open.epic.com, and a report over the issue size limit ends with a count of
 unlisted rows. To accept one, a person changes the committed directory in
 their own pull request.
 
-The publish job installs no dependencies and never sees the Epic download.
-With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
-reruns the directory parser, the count floor and the hold rule on the
-candidate, which must hold nothing against the committed directory. It then
-reports held changes and, in the main-only
-`frog-reconciliation` environment, mints a repository App token with contents
-and pull-request write access. The App opens a ready PR for normal CI. The PR
+The report and publish jobs install no dependencies and never see the Epic
+download. With Node and the committed checkout, each runs
+`scripts/check-clinical-provider-directory.mjs`, which reruns the directory
+parser, the count floor and the hold rule on the candidate. The candidate must
+hold nothing against the committed directory. The report job then writes the
+issue with only issue write access. When the candidate changed the directory,
+the publish job, in the main-only `frog-reconciliation` environment, mints a
+repository App token with contents and pull-request write access. The App
+opens a ready PR for normal CI. The PR
 lookup is qualified by the repository owner, so a fork's branch of the same
 name is ignored. The workflow waits for GitHub's protected merge state,
 verifies the same head and requests a regular squash merge. Required status
@@ -822,6 +842,39 @@ Sign in as a sandbox patient and select ongoing access on the portal. The script
 
 Epic documents `jku` as optional for registered JWK Set URLs. Web omits it and sends RS384, JWT type, and the published kid. Each request gets a fresh identifier and the exact token endpoint as its audience. Web backdates `iat` and `nbf` by 60 seconds for clock skew and sets `exp` 120 seconds after signing. The 180-second assertion lifetime fits Epic’s five-minute limits from both claims and from receipt. See the frontend confidential JWT exchange, JWT refresh, Creating a JWT and Key Rotation sections of the [Epic OAuth 2.0 Specification](https://fhir.epic.com/Documentation?docId=oauth2).
 
+## Secure patient sandbox
+
+The hidden `oracle-sandbox` entry resolves only for a member in
+`CLINICAL_RECORDS_ORACLE_MEMBER_IDS` with `CLINICAL_RECORDS_ORACLE_STARTS=1`.
+New Oracle sessions also require `CLINICAL_RECORDS_WRITE_GRANT_PROFILES=1`.
+Switching either writer flag off preserves outstanding callbacks and refreshes.
+Keep compatible readers, the sandbox signer and its public keys available for
+the lifetime of those grants. The disabled switch pauses provider traffic.
+
+Register a separate confidential Patient, Offline, SMART v1 app for Millennium
+FHIR R4 with patient read scopes, patient launch, OpenID and fhirUser. Set its
+redirect to `https://127.0.0.1:8443/api/clinical-records/oauth/callback`.
+Publish the committed `/.well-known/oracle/sandbox.jwks.json` on a stable,
+anonymously accessible HTTPS staging origin. Register and test that URL on the
+sandbox app's Cerner Central system account.
+
+On the proof machine, inject `ORACLE_SANDBOX_SMART_CLIENT_ID` privately and
+`ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM` from the local sandbox PEM. Set both
+writer flags to `1`, allowlist the test member and leave
+`CLINICAL_RECORDS_ORACLE_DISABLED` unset. From a hydrated checkout, run
+
+```sh
+pnpm --dir apps/web -s oracle:sandbox:offline "$MEMBER_ID" \
+  "$STAGING_ORIGIN/.well-known/oracle/sandbox.jwks.json" "$TLS_CERT" "$TLS_KEY"
+```
+
+Supply a locally trusted TLS certificate for 127.0.0.1 and its matching key.
+Sign in with a synthetic sandbox patient and grant offline access. The proof
+checks discovery, code exchange, refresh, a read of the original Patient, and
+each catalog Encounter search with and without its daily window.
+The hosted-local Web writer uses the same registration with its public origin
+set to `https://127.0.0.1:8443`. Keep the credentials in the local Web process.
+
 ## Daily checks with persistent access
 
 The existing signed device-sync recovery sweep admits at most twenty due
@@ -1001,9 +1054,9 @@ client id fails closed before redirect.
 - TEFCA/QHIN participation, CLEAR-style identity proofing, record-locator
   services, and automatic nationwide provider discovery.
 - Email scanning for portal/provider inference.
-- Provider-specific adapters beyond Epic SMART. Oracle Health readers, keys and
-  flags exist but stay off; starts, directory entries and member copy are
-  pending.
+- Provider-specific adapters beyond Epic SMART. The Oracle Health writer and secure sandbox
+  registration are disabled by default. Production directory rollout and member
+  copy are pending.
 - Runtime requests to refresh public directories and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

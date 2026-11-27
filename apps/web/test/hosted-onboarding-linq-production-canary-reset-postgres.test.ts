@@ -183,12 +183,13 @@ describe.skipIf(!runPostgresProof)(
           waiterPid: await resetPid.promise,
         });
         releaseProvider.resolve();
-        await providerTransaction;
-
-        await expect(resetTransaction).rejects.toMatchObject({
-          code: "HOSTED_LINQ_CANARY_RESET_UNSAFE_DELIVERY",
-          httpStatus: 409,
-        });
+        await Promise.all([
+          providerTransaction,
+          expect(resetTransaction).rejects.toMatchObject({
+            code: "HOSTED_LINQ_CANARY_RESET_UNSAFE_DELIVERY",
+            httpStatus: 409,
+          }),
+        ]);
         await expect(readFixtureCounts(observer, fixture)).resolves.toEqual({
           budgets: 1,
           decisions: 1,

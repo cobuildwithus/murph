@@ -26,6 +26,15 @@ function runStep(source, name, env) {
   });
 }
 
+test("a second PR event lets the active release matrix finish", async () => {
+  const source = await workflow("host-support.yml");
+  assert.ok(source.includes([
+    "concurrency:",
+    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}",
+    "  cancel-in-progress: false",
+  ].join("\n")));
+});
+
 test("release admission requires every actual shard to succeed", async () => {
   const source = await workflow("host-support.yml");
   const results = Object.fromEntries([

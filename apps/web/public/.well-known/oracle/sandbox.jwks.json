@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-oracle-sandbox-sQnumFnTEA_I",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "_qJeBfDT4foVcKlfhmbrvGW5Sj3dS1Lh5jirHhm1Aw2PhCEGPx2pSg1-AW2tpegbDYOo3SKe_FW50ZQW1jdtLCoxWPEbGfcjLvvfWWjIdP4hMyAxWv6F0zKK1T2bSwRgversMBA7SPAR7tFgGUQLIfWQZT77mbvsKY59TRgTgr8X0QFL_WpUQM_fNN3OG_BfnjGi-PzdLKHTlA0q2hjMbZlTVJcR_xs2Zr73iYJ5xQX8HlXexpQ4YSLN1wWosdarP-DqjQipgPLzSQoFM-7Z8mC3I3vXiCNtkpKqXQzRrSSmR9tkDFGS11rpylmrm5IRjM5AXG8PBwPg-Tlg85jplTy2-DxsTGubmEfRv6gtKLPEsv-C-HnsA7x3QJzQluPQysF6aZqKjmYevswFNAA2VU_nLXshS9XpUSpoCLDc8O7XG0_b85UDWdcRYmKKxN9JG5V9s0-qOVWk2VjtbkcJAb5N1BVFepLPIphDBcNkzZNFB5uolQCqMK8Y2HfBbL7b",
+      "e": "AQAB"
+    }
+  ]
+}

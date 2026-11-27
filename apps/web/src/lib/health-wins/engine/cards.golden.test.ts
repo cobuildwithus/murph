@@ -229,9 +229,9 @@ it("keeps streaks unlinked as the observation window rolls or earlier nights arr
     metric: "sleep_total_min", date: addDays(member.today, index - 95), value: 495, provider: "garmin",
   }));
   const windows = [
-    { today: addDays(member.today, -1), nights: daily, expectedStart: addDays(member.today, -90) },
+    { today: addDays(member.today, -1), nights: daily, expectedStart: daily[0].date },
     { today: member.today, nights: daily.slice(-30), expectedStart: addDays(member.today, -29) },
-    { today: member.today, nights: daily, expectedStart: addDays(member.today, -89) },
+    { today: member.today, nights: daily, expectedStart: daily[0].date },
   ];
   for (const { today, nights, expectedStart } of windows) {
     const { cards, achievements } = detectHealthWins({ member: { ...member, today }, daily: nights });

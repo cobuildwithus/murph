@@ -734,6 +734,7 @@ async function assertStripeHostedCardFieldsReady(
     ['input[name="cardCvc"]', 'input[autocomplete="cc-csc"]'],
   ] as const;
   const deadline = Date.now() + timeoutMs;
+  let selectedCard = false;
   while (Date.now() < deadline) {
     const ready = await Promise.all(fields.map(async (selectors) => {
       for (const frame of page.frames()) {
@@ -746,9 +747,30 @@ async function assertStripeHostedCardFieldsReady(
     if (ready.every(Boolean)) {
       return;
     }
+    if (!selectedCard && !ready.some(Boolean)) {
+      selectedCard = await openStripeCardMethod(page, deadline);
+    }
     await page.waitForTimeout(250);
   }
   throw new Error("Stripe Checkout did not expose its required card fields.");
+}
+
+async function openStripeCardMethod(page: Page, deadline: number): Promise<boolean> {
+  for (const frame of page.frames()) {
+    if (!/^https:\/\/(?:checkout|js)\.stripe\.com\//u.test(frame.url())) continue;
+    const method = frame.getByRole("button", { name: "Pay with card", exact: true })
+      .and(frame.locator('button[type="button"]:enabled'));
+    try {
+      if (await method.count() !== 1) continue;
+      // The accordion expands its pointer target with CSS. The actual button
+      // can have a zero-size box and still support keyboard activation.
+      await method.press("Enter", { timeout: Math.max(1, deadline - Date.now()) });
+      return true;
+    } catch (error) {
+      if (!frame.isDetached()) throw error;
+    }
+  }
+  return false;
 }
 
 async function findVisibleEditable(

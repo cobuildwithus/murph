@@ -25,6 +25,12 @@ export function formatWinMonth(date: string, style: "long" | "short" = "long"): 
   return months[style].format(new Date(date));
 }
 
+/** Name the calendar month covered by a claim, including whether it is still in progress. */
+export function formatWinMonthPeriod(month: string, today: string): string {
+  const label = formatWinMonth(month);
+  return month === today.slice(0, 7) ? `${label} so far` : label;
+}
+
 /** Display a validated local calendar day relative to the member's current year. */
 export function formatWinDate(date: string, today: string): string {
   const year = date.slice(0, 4);

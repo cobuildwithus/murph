@@ -20,6 +20,7 @@ export const NATIVE_ANDROID_HOSTED_E2E_CONTRACT_VERSION = "1";
 
 const GITHUB_API_VERSION = "2026-03-10";
 const ANDROID_TIMEOUT_MS = 85 * 60_000;
+const PRIVATE_RUN_VISIBILITY_MS = 30_000;
 export const PRIVATE_ANDROID_DISPATCH_TTL_SECONDS = 30 * 60;
 export const PRIVATE_ANDROID_JOB_TIMEOUT_SECONDS = 55 * 60;
 export const PRIVATE_ANDROID_TERMINAL_GRACE_SECONDS = 2 * 60;
@@ -147,15 +148,27 @@ export async function dispatchAndWait({
   });
 
   const runUrl = `https://api.github.com/repos/${encodedRepository}/actions/runs/${runId}`;
+  async function readRunStatus(visibilityDeadline) {
+    for (;;) {
+      const headers = githubHeaders(await tokenSupplier());
+      try {
+        return await fetchJsonImpl(runUrl, { headers }, "private Android workflow status");
+      } catch (error) {
+        // GitHub can receipt the dispatch before GET exposes that exact run.
+        const remaining = visibilityDeadline - now();
+        if (error?.status !== 404 || remaining <= 0) throw error;
+        await sleepImpl(Math.min(POLL_MS, remaining));
+      }
+    }
+  }
+
   let terminal = false;
   try {
     const deadline = now() + ANDROID_TIMEOUT_MS;
+    let visibilityDeadline = now() + PRIVATE_RUN_VISIBILITY_MS;
     while (now() < deadline) {
-      const run = inspectPrivateRun(await fetchJsonImpl(
-        runUrl,
-        { headers: githubHeaders(await tokenSupplier()) },
-        "private Android workflow status",
-      ), { runId, sha: expectedSha });
+      const run = inspectPrivateRun(await readRunStatus(visibilityDeadline), { runId, sha: expectedSha });
+      visibilityDeadline = 0;
       if (run.complete) {
         terminal = true;
         if (run.conclusion !== "success") {

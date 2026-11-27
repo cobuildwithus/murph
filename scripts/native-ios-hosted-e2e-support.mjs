@@ -132,7 +132,7 @@ export async function fetchJson(url, init, label) {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new Error(`${label} failed with HTTP ${response.status}.`);
+    throw Object.assign(new Error(`${label} failed with HTTP ${response.status}.`), { status: response.status });
   }
   try {
     return await response.json();

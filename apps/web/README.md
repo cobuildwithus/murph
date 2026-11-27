@@ -2186,15 +2186,17 @@ Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
-completed production deployment statuses, checks out the exact deployed commit,
-requires it to equal current `origin/main`, and requires that exact commit to be
-the deployment serving the configured production base domain. Stale or late
-deployment events fail before database authority is exposed. The workflow
-then enumerates and proves every production custom domain against the event's
+completed production deployment statuses. It checks the event SHA against
+`origin/main` before starting the production job. A newer main commit skips
+the older event. Missing revisions and commits outside main history fail the
+check. The production job checks out the exact deployed commit and requires it
+to be serving the configured production base domain. It then enumerates and
+proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
 function executions to drain, then repeats the current-commit and complete
-domain-set proof before exposing the database secret. It can also be manually
+domain-set proof before exposing the database secret. It rechecks main after
+the final Vercel proof immediately before invoking SQL. It can also be manually
 dispatched with `deployed_sha` and `deployment_url` set to the current exact
 Vercel production deployment; the same drain and exact-domain proof apply before
 SQL runs.

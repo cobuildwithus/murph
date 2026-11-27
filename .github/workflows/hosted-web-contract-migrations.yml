@@ -17,9 +17,32 @@ permissions:
   contents: read
 
 jobs:
+  deployment-revision:
+    name: Check deployed revision against main
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
+    runs-on: ubuntu-24.04
+    outputs:
+      current: ${{ steps.revision.outputs.current }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify deployed commit is current main
+        id: revision
+        shell: bash
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+        run: |
+          source scripts/require-current-web-deployment.sh
+          echo 'current=true' >> "$GITHUB_OUTPUT"
+
   production-contract-migrations:
     name: Run post-deploy contract migrations
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
+    needs: deployment-revision
+    if: ${{ needs.deployment-revision.outputs.current == 'true' }}
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 20
@@ -29,20 +52,6 @@ jobs:
           ref: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Verify deployed commit is current main
-        shell: bash
-        env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
-        run: |
-          set -euo pipefail
-
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          main_sha="$(git rev-parse origin/main)"
-          if [ "${DEPLOYED_SHA}" != "${main_sha}" ]; then
-            echo "::error::Vercel production may advance only to the exact current main revision."
-            exit 1
-          fi
 
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
@@ -57,6 +66,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify current Vercel production deployment
+        id: production
         shell: bash
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
@@ -94,45 +104,18 @@ jobs:
             exit 1
           fi
 
-          current_sha="$(
-            pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
-          )"
-
-          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::The current main Vercel deployment is Ready, but the production base domain still serves another commit."
-            exit 1
-          fi
-
-          verified_sha="$(
-            pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
-          )"
-          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
-            exit 1
-          fi
+          source scripts/require-current-web-deployment.sh --verify-vercel
 
           if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 0 ]; then
             echo "::notice::Waiting ${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}s for prior production function executions to drain before contract migrations."
             sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"
           fi
 
-          current_sha="$(
-            pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
-          )"
-          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::The current main Vercel deployment changed during the prior-function drain."
-            exit 1
-          fi
-
-          verified_sha="$(
-            pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
-          )"
-          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::Final exact Vercel production deployment verification returned an unexpected commit."
-            exit 1
-          fi
+          source scripts/require-current-web-deployment.sh --verify-vercel
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
 
       - name: Apply contract migrations
+        if: ${{ steps.production.outputs.verified == 'true' }}
         shell: bash
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
@@ -152,29 +135,5 @@ jobs:
             exit 1
           fi
 
-          current_sha="$(
-            env \
-              -u DIRECT_DATABASE_URL \
-              -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
-              -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
-              pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
-          )"
-
-          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::The current main Vercel deployment changed immediately before contract migrations."
-            exit 1
-          fi
-
-          verified_sha="$(
-            env \
-              -u DIRECT_DATABASE_URL \
-              -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
-              -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
-              pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
-          )"
-          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
-            echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
-            exit 1
-          fi
-
+          source scripts/require-current-web-deployment.sh --verify-vercel
           pnpm --dir apps/web release:production:contract-migrate

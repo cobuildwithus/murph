@@ -4,11 +4,14 @@ import { signerPem } from "./clinical-records-synthetic-signer";
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
+vi.mock("../public/.well-known/oracle/sandbox.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
 vi.mock("../public/.well-known/oracle/production.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   exchangeSmartAuthorizationCode: vi.fn(),
   getPrisma: vi.fn(),
   openClinicalOauthVerifier: vi.fn(),
+  openClinicalConnectionFhirBaseUrl: vi.fn(),
   openClinicalConnectionSecret: vi.fn(),
   readGrantedSmartResourceTypes: vi.fn(),
   resolveClinicalProviderDirectoryEntry: vi.fn(),
@@ -57,6 +61,7 @@ vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
 }));
 vi.mock("@/src/lib/clinical-records/secrets", () => ({
   openClinicalOauthVerifier: mocks.openClinicalOauthVerifier,
+  openClinicalConnectionFhirBaseUrl: mocks.openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret: mocks.openClinicalConnectionSecret,
   sealClinicalConnectionFhirBaseUrl: mocks.sealClinicalConnectionFhirBaseUrl,
   sealClinicalConnectionSecret: mocks.sealClinicalConnectionSecret,
@@ -84,7 +89,7 @@ import { buildHostedDeviceSyncAppCompletionProof } from "@/src/lib/device-sync/b
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-policy";
 import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
-import { ORACLE_STORED_CLIENT_REFERENCE } from "@/src/lib/clinical-records/oracle-integration";
+import { ORACLE_SANDBOX_ENTRY, ORACLE_SANDBOX_CALLBACK, ORACLE_SMART_ENDPOINT_TRUST, ORACLE_STORED_CLIENT_REFERENCE } from "@/src/lib/clinical-records/oracle-integration";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   finishClinicalRecordAuthorization,
@@ -140,6 +145,7 @@ describe("Clinical Records authorization persistence", () => {
     });
     mocks.openClinicalOauthVerifier.mockResolvedValue("pkce-verifier");
     mocks.openClinicalConnectionSecret.mockResolvedValue(createHash("sha256").update("patient-low-entropy").digest("hex"));
+    mocks.openClinicalConnectionFhirBaseUrl.mockImplementation(async () => productionProvider.fhirBaseUrl);
     mocks.exchangeSmartAuthorizationCode.mockResolvedValue({
       accessToken: "access-token",
       expiresInSeconds: 3_600,
@@ -491,6 +497,18 @@ describe("Clinical Records authorization persistence", () => {
     }));
   });
 
+  it.each([
+    "pkce-verifier",
+    '{"version":1,"verifier":"pkce-verifier","profile":{"environment":"production","method":"public","hospitalApproved":false},"brandName":"Example Health","fhirBaseUrl":"https://fhir.example.test/FHIR/R4","resourceTypes":["Patient","Observation"]}',
+  ])("exchanges a historical Epic verifier serialization", async serialized => {
+    mocks.getPrisma.mockReturnValue(createHarness(null).prisma);
+    mocks.openClinicalOauthVerifier.mockResolvedValue(serialized);
+    await finishAuthorization();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+      verifier: "pkce-verifier", auth: { method: "public", clientId: "epic-client-id" },
+    }));
+  });
+
   it.each(["moved", "foreign-token", "retired"])("uses the original bound profile when the directory or registration is %s", async change => {
     vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
     vi.stubEnv("EPIC_SMART_PUBLIC_CLIENT_ID", "epic-client-id");
@@ -713,7 +731,7 @@ describe("Clinical Records authorization persistence", () => {
       "intent:complete",
       "wake:append",
     ]);
-    expect(harness.connectionFindUnique).toHaveBeenCalledTimes(2);
+    expect(harness.connectionFindUnique).toHaveBeenCalledTimes(3);
     expect(harness.durableConnections).toHaveLength(1);
     expect(harness.durableRetrievalRuns).toHaveLength(1);
   });
@@ -1006,7 +1024,7 @@ describe("Clinical Records authorization persistence", () => {
     Object.assign(settling.retrievalRuns[0]!, { status: "needs_reauth", completedAt: new Date() });
     const h = createHarness(open);
     mocks.getPrisma.mockReturnValue(h.prisma);
-    h.connectionFindUnique.mockResolvedValueOnce(open).mockResolvedValueOnce(settling);
+    h.connectionFindUnique.mockResolvedValueOnce(open).mockResolvedValueOnce(open).mockResolvedValueOnce(settling);
     await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_CONNECTION_ALREADY_EXISTS" });
     expect(mocks.sealClinicalConnectionSecret).toHaveBeenCalled();
     expect(h.tx.clinicalRecordRetrievalRun.updateMany).not.toHaveBeenCalled();
@@ -1320,6 +1338,112 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
   });
 
+  describe("after the directory moves an entry's FHIR base", () => {
+    const PINNED = productionProvider.fhirBaseUrl;
+    const MOVED = "https://moved.example.test/FHIR/R4";
+    const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+
+    function finalizedSource(status: "active" | "disconnected", fhirBaseUrl = PINNED) {
+      const existing = { ...existingConnection(status), fhirBaseHash: digest(fhirBaseUrl) };
+      existing.retrievalRuns[0] = { ...existing.retrievalRuns[0]!, completedAt: new Date("2026-07-09T12:00:00Z"), status: "complete", outcomeCountsJson: {} };
+      if (status === "disconnected") existing.disconnectedAt = new Date("2026-07-10T12:00:00Z");
+      return existing;
+    }
+
+    /** Starts through one public path with the directory moved, then feeds that saved session to its callback. */
+    async function startAfterMove(path: "browser" | "native", existing: ReturnType<typeof existingConnection> | null) {
+      const h = createHarness(existing, path === "native" ? nativeRow : {});
+      mocks.getPrisma.mockReturnValue(h.prisma);
+      mocks.bearer.mockResolvedValue(nativeAuth);
+      provider = { ...productionProvider, fhirBaseUrl: MOVED };
+      if (path === "native") mocks.createSmartState.mockReturnValue({ state: nativeState, stateHash: "state-hash" });
+      const started = path === "native"
+        ? await (await nativeStart(post({ providerId: PROVIDER_ID, appReturn: "ios-dev" }))).json()
+        : await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
+          request: new Request("https://app.example.test/start", { method: "POST" }) }).catch((error: { code: string }) => ({ error }));
+      const verifierOpenScopes: unknown[] = [];
+      const finish = async () => {
+        h.oauthSessionFindUnique.mockResolvedValueOnce({ ...oauthSession(), ...h.oauthSessionCreate.mock.lastCall![0].data });
+        const sealedVerifier = mocks.sealClinicalOauthVerifier.mock.lastCall![0].value;
+        mocks.openClinicalOauthVerifier.mockImplementation(async () => {
+          verifierOpenScopes.push(getHostedDomainRootUnwrapCache());
+          return sealedVerifier;
+        });
+        if (path === "browser") return finishAuthorization().then(() => "connected");
+        return (await (await nativeComplete(post({ query: `state=${nativeState}&code=code`, completionProof: started.completionProof }))).json()).outcome;
+      };
+      return { h, started, finish, verifierOpenScopes };
+    }
+
+    it.each([
+      ["browser", false, "active"], ["browser", true, "active"], ["native", false, "active"], ["native", true, "active"],
+      ["browser", false, "disconnected"], ["browser", true, "disconnected"], ["native", false, "disconnected"], ["native", true, "disconnected"],
+    ] as const)("reauthorizes the same source at its pinned base (%s, bound=%s, %s)", async (path, bound, status) => {
+      vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", bound ? "1" : "");
+      const existing = finalizedSource(status);
+      // Each crypto step records the domain-root unwrap scope it ran in.
+      const scopes: Record<string, unknown[]> = { pinnedOpen: [], verifierSeal: [], verifierOpen: [] };
+      const record = (step: string) => scopes[step]!.push(getHostedDomainRootUnwrapCache());
+      mocks.openClinicalConnectionFhirBaseUrl.mockImplementation(async () => { record("pinnedOpen"); return PINNED; });
+      mocks.sealClinicalOauthVerifier.mockImplementation(async () => { record("verifierSeal"); return "sealed-verifier"; });
+      const { h, finish, verifierOpenScopes } = await startAfterMove(path, existing);
+      const [startScope] = scopes.pinnedOpen;
+      expect(startScope).toBeDefined();
+      expect(scopes.verifierSeal).toEqual([startScope]);
+      expect(mocks.openClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith({
+        connectionId: existing.id, encrypted: existing.fhirBaseUrlEncrypted, memberId: MEMBER_ID,
+      });
+      expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ fhirBaseUrl: PINNED }));
+      expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ audience: PINNED }));
+      expect(h.oauthSessionCreate.mock.lastCall![0].data).toMatchObject({ fhirBaseHash: digest(PINNED), clientId: "epic-client-id" });
+      expect(await finish()).toBe("connected");
+      // An unbound callback reopens the pinned base in the same unwrap scope as its verifier; a bound one uses its saved base.
+      const [callbackScope] = verifierOpenScopes;
+      expect(callbackScope).toBeDefined();
+      expect(callbackScope).not.toBe(startScope);
+      expect(scopes.pinnedOpen).toEqual(bound ? [startScope] : [startScope, callbackScope]);
+      expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+        tokenEndpoint: "https://fhir.example.test/oauth2/token", auth: { method: "public", clientId: "epic-client-id" },
+      }));
+      expect(h.tx.clinicalRecordConnection.update).toHaveBeenCalledWith({ where: { id: existing.id },
+        data: expect.objectContaining({ fhirBaseHash: digest(PINNED), status: "active", tokenVersion: 2 }) });
+      expect(mocks.sealClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith(expect.objectContaining({ connectionId: existing.id, value: PINNED }));
+      expect(h.connectionCreate).not.toHaveBeenCalled();
+    });
+
+    it.each(["browser", "native"] as const)("starts a first connection at the directory's current base (%s)", async path => {
+      const { h } = await startAfterMove(path, null);
+      expect(mocks.openClinicalConnectionFhirBaseUrl).not.toHaveBeenCalled();
+      expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({ fhirBaseUrl: MOVED }));
+      expect(h.oauthSessionCreate.mock.lastCall![0].data).toMatchObject({ fhirBaseHash: digest(MOVED) });
+    });
+
+    const untrusted = [
+      ["a private address", "https://10.0.0.8/FHIR/R4", undefined],
+      ["a trailing slash", `${PINNED}/`, undefined],
+      ["plain HTTP", PINNED.replace("https:", "http:"), undefined],
+      ["a stored hash for another base", PINNED, MOVED],
+    ] as const;
+    it.each(["browser", "native"].flatMap(path => untrusted.map(row => [path, ...row] as const)))(
+      "(%s) refuses a pinned base with %s before discovery", async (path, _label, pinned, hashedAs) => {
+        mocks.openClinicalConnectionFhirBaseUrl.mockResolvedValue(pinned);
+        const { h, started } = await startAfterMove(path as "browser" | "native", finalizedSource("active", hashedAs ?? pinned));
+        expect(started.error.code).toBe("CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED");
+        expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+        expect(h.oauthSessionCreate).not.toHaveBeenCalled();
+        expect(h.connectIntentUpdateMany).not.toHaveBeenCalled();
+      });
+
+    it("refuses an unbound callback whose source's pinned base fails the rules before token exchange", async () => {
+      const pinned = "https://10.0.0.8/FHIR/R4";
+      mocks.openClinicalConnectionFhirBaseUrl.mockResolvedValue(pinned);
+      const harness = createHarness(finalizedSource("active", pinned), { fhirBaseHash: digest(pinned) });
+      mocks.getPrisma.mockReturnValue(harness.prisma);
+      await expect(finishAuthorization()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED" });
+      expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+      expect(harness.tx.clinicalRecordConnection.update).not.toHaveBeenCalled();
+    });
+  });
 });
 
 const nativeState = `crs_${"b".repeat(43)}`;
@@ -1345,6 +1469,7 @@ describe("Oracle-bound callbacks", () => {
     vi.stubEnv("ORACLE_SMART_CLIENT_ID", "synthetic-oracle-client");
     vi.stubEnv("ORACLE_SMART_PRIVATE_KEY_PEM", signerPem);
     const harness = createHarness(null, { clientId: ORACLE_STORED_CLIENT_REFERENCE, providerDirectoryEntryId: ORACLE_ID, tokenEndpoint: TOKEN,
+      redirectUri: "https://www.withmurph.ai/api/clinical-records/oauth/callback",
       fhirBaseHash: createHash("sha256").update(BASE).digest("hex"), requestedScopesJson: SCOPES, ...sessionOverrides });
     mocks.getPrisma.mockReturnValue(harness.prisma);
     mocks.openClinicalOauthVerifier.mockResolvedValue(binding());
@@ -1404,17 +1529,104 @@ describe("Oracle-bound callbacks", () => {
     expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
   });
 
-  it("starts only Epic entries until the Oracle writer ships", async () => {
+  function sandboxStart() {
     const harness = createHarness(null);
     mocks.getPrisma.mockReturnValue(harness.prisma);
-    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ aliases: [], brandName: "Synthetic Valley Hospital", facilities: [],
-      fhirBaseUrl: BASE, id: ORACLE_ID, integration: "oracle-millennium-r4", policyId: "oracle-millennium-r4-v1",
-      requestedBaseScopes: ["openid"], resourceTypes: ["Patient", "Observation"], sourceSystem: "cerner-fhir" });
-    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: ORACLE_ID,
-      request: new Request("https://app.example.test/start", { method: "POST" }) }))
-      .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
+    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue(ORACLE_SANDBOX_ENTRY);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", MEMBER_ID);
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
+    vi.stubEnv("ORACLE_SANDBOX_SMART_CLIENT_ID", "synthetic-sandbox");
+    vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", signerPem);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", new URL(ORACLE_SANDBOX_CALLBACK).origin);
+    const start = () => startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: ORACLE_SANDBOX_ENTRY.id,
+      request: new Request(ORACLE_SANDBOX_CALLBACK, { method: "POST" }) });
+    return { start, harness };
+  }
+
+  it("writes a sandbox binding and completes the saved session after starts and profile writes stop", async () => {
+    const { start, harness } = sandboxStart();
+    const tenant = ORACLE_SANDBOX_ENTRY.fhirBaseUrl.split("/").pop()!;
+    const tokenEndpoint = TOKEN.replace("0aB1cD2e-synthetic", tenant);
+    mocks.discoverSmartConfiguration.mockResolvedValue({ tokenEndpoint, requestedScopes: SCOPES });
+    await start();
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1", fhirBaseUrl: ORACLE_SANDBOX_ENTRY.fhirBaseUrl,
+    }));
+    expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ clientId: "synthetic-sandbox" }));
+    const stored = harness.oauthSessionCreate.mock.lastCall![0].data;
+    expect(stored).toMatchObject({ clientId: ORACLE_STORED_CLIENT_REFERENCE, redirectUri: ORACLE_SANDBOX_CALLBACK });
+    const binding = mocks.sealClinicalOauthVerifier.mock.lastCall![0].value;
+    expect(JSON.parse(binding).profile).toEqual({ ...PROFILE, environment: "sandbox" });
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "0");
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "0");
+    harness.oauthSessionFindUnique.mockResolvedValueOnce({ ...oauthSession(), ...stored });
+    mocks.openClinicalOauthVerifier.mockResolvedValue(binding);
+    mocks.exchangeSmartAuthorizationCode.mockResolvedValue({ accessToken: "synthetic-access", refreshToken: "synthetic-refresh",
+      expiresInSeconds: 570, grantedScopes: SCOPES, patientId: "76543" });
+    await finishAuthorization();
+    expect(harness.durableConnections).toMatchObject([{ sourceSystem: "cerner-fhir", requiresProcessorApprovals: true }]);
+    const sealed = mocks.sealClinicalConnectionSecret.mock.calls.find(([input]) => input.field === "refreshToken")![0];
+    expect(JSON.parse(sealed.value)).toMatchObject({ profile: { ...PROFILE, environment: "sandbox" }, clientId: ORACLE_STORED_CLIENT_REFERENCE });
+  });
+
+  it.each([
+    ["starts off", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "")],
+    ["member outside allowlist", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "other")],
+    ["profile writer off", () => vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "")],
+    ["kill switch", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1")],
+    ["wrong callback", () => vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://127.0.0.1:8444")],
+    ["missing sandbox key", () => vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", "")],
+    ["unpublished sandbox key", () => vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", generateKeyPairSync("rsa", { modulusLength: 2048 })
+      .privateKey.export({ format: "pem", type: "pkcs8" }).toString())],
+    ["wrong tenant on the same host", () => mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, fhirBaseUrl: BASE })],
+    ["unknown integration", () => mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, integration: "unregistered" })],
+    ["production entry with sandbox credentials", () => {
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
+      vi.stubEnv("ORACLE_SMART_CLIENT_ID", "");
+      mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, id: ORACLE_ID, fhirBaseUrl: BASE });
+    }],
+  ])("refuses %s before discovery", async (_label, change) => {
+    const { start, harness } = sandboxStart();
+    change();
+    await expect(start()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
     expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["its own tenant base", BASE, null],
+    ["another host", "https://fhir-myrecord.cerner.example.test/r4/0aB1cD2e-synthetic", "CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED"],
+    ["an extra path segment", `${BASE}/extra`, "CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED"],
+    ["an upper-case host", BASE.replace("fhir-myrecord", "FHIR-MYRECORD"), "CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED"],
+  ])("reconnects an existing Oracle source only at a pinned base on the tenant template (%s)", async (_label, pinned, refusal) => {
+    const existing = { ...existingConnection(), fhirBaseHash: createHash("sha256").update(pinned).digest("hex") };
+    existing.retrievalRuns[0] = { ...existing.retrievalRuns[0]!, completedAt: new Date("2026-07-09T12:00:00Z"), status: "complete", outcomeCountsJson: {} };
+    const harness = createHarness(existing);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, id: ORACLE_ID,
+      fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/moved-tenant-synthetic" });
+    mocks.openClinicalConnectionFhirBaseUrl.mockResolvedValue(pinned);
+    mocks.discoverSmartConfiguration.mockResolvedValue({ authorizationEndpoint: TOKEN.replace("/token", "/authorize"), tokenEndpoint: TOKEN, requestedScopes: SCOPES });
+    for (const [key, value] of Object.entries({ CLINICAL_RECORDS_ORACLE_STARTS: "1", CLINICAL_RECORDS_ORACLE_MEMBER_IDS: MEMBER_ID,
+      CLINICAL_RECORDS_WRITE_GRANT_PROFILES: "1", ORACLE_SMART_CLIENT_ID: "synthetic-oracle-client", ORACLE_SMART_PRIVATE_KEY_PEM: signerPem,
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.withmurph.ai" })) vi.stubEnv(key, value);
+    const start = startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: ORACLE_ID,
+      request: new Request("https://www.withmurph.ai/start", { method: "POST" }) });
+    if (refusal) {
+      await expect(start).rejects.toMatchObject({ code: refusal });
+      expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
+      expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
+      return;
+    }
+    await start;
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      fhirBaseUrl: BASE, endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1",
+    }));
+    expect(JSON.parse(mocks.sealClinicalOauthVerifier.mock.lastCall![0].value)).toMatchObject({ fhirBaseUrl: BASE, profile: PROFILE });
+    expect(harness.oauthSessionCreate.mock.lastCall![0].data).toMatchObject({
+      clientId: ORACLE_STORED_CLIENT_REFERENCE, fhirBaseHash: existing.fhirBaseHash,
+    });
   });
 });
 
@@ -1589,6 +1801,7 @@ function existingConnection(status: "active" | "disconnected" | "needs_reauth" =
     retrievalGeneration: 1,
     patientBindingEncrypted: "sealed-patientBinding",
     fhirBaseHash: createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
+    fhirBaseUrlEncrypted: "sealed-fhir-base-url",
     disconnectedAt: null as Date | null,
     retrievalRuns: [{ id: "prior-run", generation: 1, createdAt: new Date(0), requests: [], completedAt: null as Date | null, status: "retrieving", outcomeCountsJson: null as Record<string, unknown> | null }],
   };

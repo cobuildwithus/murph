@@ -302,10 +302,12 @@ describe.skipIf(!runPostgresProof)(
           });
 
           allowWithdrawalCommit.resolve();
-          await expect(withdrawalTransaction).resolves.toBeUndefined();
-          await expect(admissionOutcome).rejects.toMatchObject({
-            code: "HEALTH_DATA_CONSENT_REQUIRED",
-          });
+          await Promise.all([
+            expect(withdrawalTransaction).resolves.toBeUndefined(),
+            expect(admissionOutcome).rejects.toMatchObject({
+              code: "HEALTH_DATA_CONSENT_REQUIRED",
+            }),
+          ]);
           expect(admissionCallback).not.toHaveBeenCalled();
           expect(encrypt).not.toHaveBeenCalled();
           await expect(fixture.observer.deviceSyncDirtyConnection.count({

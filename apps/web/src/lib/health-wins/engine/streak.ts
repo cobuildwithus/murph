@@ -46,5 +46,17 @@ export function longestStreak(rows: readonly Point[], today: string, threshold: 
     length++;
     if (length >= best.length) best = { start, end: date, length };
   }
-  if (best.length >= 5 && asOf - dayNumber(best.end) <= 60) return { ...best, window };
+  if (best.length < 5 || asOf - dayNumber(best.end) > 60) return;
+
+  // The window chooses the winner. Earlier consecutive observations complete that run.
+  let first = rows.indexOf(window[0]);
+  const afterWindow = first + window.length;
+  while (first > 0) {
+    const prior = rows[first - 1];
+    if (prior.value < threshold || dayNumber(prior.date) !== dayNumber(best.start) - 1) break;
+    best.start = prior.date;
+    best.length++;
+    first--;
+  }
+  return { ...best, chartRows: rows.slice(first, afterWindow) };
 }

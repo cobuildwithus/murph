@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { addDays } from "../../game/time";
 import { prepareHealthCandidates, previewHealthCandidate } from "../card-options";
 import { dietCandidates } from "./diet";
 import { foodTally } from "./foods";
@@ -97,7 +98,7 @@ describe("Diet best_month", () => {
     expect(best([...prior, ...april], "2034-04-14")).toBeDefined();
     expect(best([...prior, ...april.slice(0, 11)])).toBeUndefined();
     expect(best([...prior, ...april])).toMatchObject({
-      id: "best_month:protein_g:2034-04", subtitle: "April, tied for most this year",
+      id: "best_month:protein_g:2034-04", subtitle: "April so far, tied for most this year",
       title: { number: "1,200", measure: "g protein" },
       chart: { unit: "g", highlight: "2034-04", series: [
         { value: 1200 }, { value: 920 }, { value: 1100 }, { value: 1200, days: 12 },
@@ -110,24 +111,35 @@ describe("Diet best_month", () => {
     const huge = days("2033-03", 25, 200);
     const current = days("2034-04", 12, 108);
     expect(best([...previousYear, ...feb, ...mar, ...current])).toBeUndefined();
-    expect(best([...previousYear, ...jan, ...feb, ...mar, ...current])?.subtitle).toBe("April, your most this year");
+    expect(best([...previousYear, ...jan, ...feb, ...mar, ...current])?.subtitle).toBe("April so far, most this year");
     expect(best([...huge, ...days("2033-04", 25, 30), ...feb, ...mar, ...current])?.subtitle)
-      .toBe("April, your most in the past 12 months");
+      .toBe("April so far, most in the past 12 months");
   });
 
   it("orders and labels ties before rounding, including sums of fractional grams", () => {
     const flat = ["01", "02", "03"].flatMap(month => days(`2034-${month}`, 25, 48));
-    expect(best([...flat, ...april])?.subtitle).toBe("April, tied for most this year");
+    expect(best([...flat, ...april])?.subtitle).toBe("April so far, tied for most this year");
     expect(best([...flat, ...april].map(row => ({ ...row, proteinG: 0 })))).toBeUndefined();
     const prior = [...days("2034-01", 25, 47.999), ...feb, ...mar];
     expect(best([...prior, ...days("2034-04", 12, 99.999)])).toMatchObject({
-      title: { number: "1,200" }, subtitle: "April, your most this year",
+      title: { number: "1,200" }, subtitle: "April so far, most this year",
     });
     expect(best([...prior, ...days("2034-04", 12, 99.997)])).toBeUndefined();
   });
 });
 
 describe("fiber streak", () => {
+  it("counts all known consecutive days even before the monthly comparison history", () => {
+    const meals = Array.from({ length: 406 }, (_, index) => ({
+      date: addDays(today, index - 405), fiberG: 34, proteinG: null,
+    }));
+    meals[2].fiberG = 27;
+    const streak = cards(meals).find(card => card.kind === "streak");
+    expect(streak).toMatchObject({
+      title: { number: "403 days" }, chart: { highlight: { start: meals[3].date, end: today } },
+    });
+  });
+
   it("uses the full precision daily threshold and breaks on an unknown nutrient day", () => {
     const streak = (meals: MealDay[]) => cards(meals).find(card => card.kind === "streak");
     for (const value of [29.49, 29.5, 29.99]) {

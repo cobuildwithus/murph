@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
@@ -7,6 +7,7 @@ import {
   parseClinicalProviderDirectory,
   searchClinicalProviderDirectorySnapshot,
 } from "@/src/lib/clinical-records/provider-directory";
+import { resolveClinicalProviderDirectoryEntry, readClinicalProviderDirectory } from "@/src/lib/clinical-records/provider-directory-store";
 import { readLocationCell } from "@/src/lib/clinical-records/provider-search-input";
 import {
   EPIC_ACQUISITION_POLICY,
@@ -51,6 +52,19 @@ describe("Clinical Records provider directory", () => {
       clientIdEnvironmentKey: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID",
       fhirBaseUrl: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
     });
+  });
+
+  it("resolves the sandbox only for an allowed start and omits it from the search index", () => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "sandbox-member");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_SEARCH", "1");
+    try {
+      vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "0");
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")).toBeNull();
+      vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "other")).toBeNull();
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")?.sourceSystem).toBe("cerner-fhir");
+      expect(readClinicalProviderDirectory().entries.some(entry => entry.id === "oracle-sandbox")).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("drives the existing SMART and retrieval contract from a committed v2 entry", () => {

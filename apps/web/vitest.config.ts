@@ -25,6 +25,10 @@ export default defineProject({
       },
       ...createVitestWorkspaceRuntimeAliases({
         ...resolveHostedWebWorkspaceSourceEntries(appDir),
+        // The clinical connector fixture runs the mailbox owner in this Vitest project.
+        "@murphai/assistant-engine": path.resolve(repoRoot, "packages/assistant-engine/src/index.ts"),
+        "@murphai/inbox-services": path.resolve(repoRoot, "packages/inbox-services/src/index.ts"),
+        "@murphai/recap-video": path.resolve(repoRoot, "packages/recap-video/src/index.ts"),
         "@murphai/vault-usecases": path.resolve(repoRoot, "packages/vault-usecases/package.json"),
       }),
     ],

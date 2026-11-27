@@ -1,5 +1,5 @@
 import { foodTally, type FoodTally, type Nutrient } from "./foods";
-import { cardDateKey, compareMonthlyValues, dayNumber, formatNumber, formatWinDate, formatWinMonth, mad, median, monthIndex } from "./shared";
+import { cardDateKey, compareMonthlyValues, dayNumber, formatNumber, formatWinDate, formatWinMonth, formatWinMonthPeriod, mad, median, monthIndex } from "./shared";
 import { longestStreak, streakDateRange, thresholdBars } from "./streak";
 import type { Candidate, MealDay } from "./types";
 
@@ -58,14 +58,14 @@ function bestMonth(nutrient: Nutrient, current: Month, prior: readonly Month[], 
   const rank = compareMonthlyValues(current.value, Math.max(...values));
   if (rank < 0) return;
   const period = useCalendarYear ? "this year" : "in the past 12 months";
-  const superlative = rank === 0 ? "tied for most" : "your most";
+  const superlative = rank === 0 ? "tied for most" : "most";
   return {
     date: lastKnown, eventDate: today, effect: current.value - median(values), noise: Math.max(1, mad(values)),
     achievement: { kind: "best_month", subject: `${nutrient}_g`, period: current.month },
     card: {
       id: `best_month:${nutrient}_g:${current.month}`, kind: "best_month", filter: "Diet",
       title: { number: formatNumber(current.value, 0), measure: `g ${nutrient}` },
-      subtitle: `${formatWinMonth(today)}, ${superlative} ${period}`,
+      subtitle: `${formatWinMonthPeriod(current.month, today)}, ${superlative} ${period}`,
       source_note: `Logged on ${current.days} of ${Number(today.slice(8))} days this month so far. Compared with ${comparison.length} qualifying monthly totals. A day counts when every meal has ${nutrient}.`,
       chart: { type: "monthly_bars", series: [...comparison, current], unit: "g", highlight: current.month },
     },
@@ -97,14 +97,14 @@ function fiberStreak(rows: readonly Point[], today: string): Candidate | undefin
 /** The meal adapter supplies a single observation per day, in chronological order. */
 export function dietCandidates(meals: readonly MealDay[], today: string): Candidate[] {
   const current = monthIndex(today);
-  const recent = meals.filter(row => row.date <= today && current - monthIndex(row.date) <= 12);
+  const observed = meals.filter(row => row.date <= today);
   const candidates: Candidate[] = [];
   for (const nutrient of ["protein", "fiber"] as const) {
-    const rows = recent.flatMap(({ date, proteinG, fiberG }) => {
+    const rows = observed.flatMap(({ date, proteinG, fiberG }) => {
       const value = nutrient === "protein" ? proteinG : fiberG;
       return value === null ? [] : [{ date, value }];
     });
-    const months = qualifyingMonths(rows, today);
+    const months = qualifyingMonths(rows.filter(row => current - monthIndex(row.date) <= 12), today);
     const lastMonth = months.find(point => monthIndex(point.month) === current - 1);
     const tally = lastMonth && monthTotal(nutrient, lastMonth);
     if (tally) candidates.push(tally);

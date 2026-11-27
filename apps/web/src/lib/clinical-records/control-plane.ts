@@ -16,9 +16,12 @@ import * as z from "@murphai/contracts/zod-runtime";
 import { resolveSavedEpicAuth, resolveEpicClient } from "./epic-import-config";
 import {
   clinicalGrantProfileSchema,
+  isOracleFhirBaseUrl,
   isOracleProfile,
   requireOracleSmartEndpoint,
   resolveOracleClientAuth,
+  resolveOracleStart,
+  ORACLE_STORED_CLIENT_REFERENCE,
   type ClinicalGrantProfile,
 } from "./oracle-integration";
 import { buildOracleRetrievalPlan } from "./oracle-policy";
@@ -50,10 +53,11 @@ import {
 import { clinicalRecordsError } from "./errors";
 import {
   type ClinicalProviderDirectoryEntry,
-  type EpicProviderDirectoryEntry,
 } from "./provider-directory";
+import { isCanonicalPublicHttpsUrl } from "./provider-directory-artifact";
 import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
 import {
+  openClinicalConnectionFhirBaseUrl,
   openClinicalConnectionSecret,
   openClinicalOauthVerifier,
   sealClinicalConnectionFhirBaseUrl,
@@ -83,6 +87,7 @@ import {
 const OAUTH_SESSION_TTL_MS = 10 * 60 * 1_000;
 const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
 const CLINICAL_RETRIEVAL_RUN_ID_PREFIX = "crr_";
+const PINNED_ENDPOINT_SELECT = { id: true, fhirBaseHash: true, fhirBaseUrlEncrypted: true } as const;
 
 const authorizationBinding = z.object({
   version: z.literal(1), verifier: z.string().min(1).max(128), profile: clinicalGrantProfileSchema,
@@ -114,19 +119,30 @@ export async function startNativeAuthorization(input: {
   }) };
 }
 
-async function startAuthorization(input: {
+type AuthorizationStart = {
   auth: HostedAppSession | HostedNativeMemberAuth; origin: string; appReturn: DeviceSyncAppConnectReturn | null;
   claim: string | null; providerDirectoryEntryId: string; fetchImpl?: typeof fetch;
-}) {
+};
+
+/** A source's pinned-base open and the verifier seal share one domain-root unwrap. */
+function startAuthorization(input: AuthorizationStart) {
+  return runWithHostedDomainRootUnwrapCache(() => startAuthorizationInScope(input));
+}
+
+async function startAuthorizationInScope(input: AuthorizationStart) {
   const { auth } = input;
   const prisma = getPrisma();
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma });
-  const provider = requireEpicProviderEntry(input.providerDirectoryEntryId);
-  await assertClinicalRecordConnectionAvailable({
+  const entry = requireProviderEntry(input.providerDirectoryEntryId, auth.member.id);
+  const existing = await assertClinicalRecordConnectionAvailable({
     memberId: auth.member.id,
-    providerDirectoryEntryId: provider.id,
+    providerDirectoryEntryId: entry.id,
   });
-  const configuration = resolveEpicClient(provider);
+  const provider = await withPinnedEndpoint(entry, auth.member.id, existing);
+  const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
+  const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
+  const configuration = provider.sourceSystem === "cerner-fhir"
+    ? resolveOracleStart(provider, auth.member.id, redirectUri) : resolveEpicClient(provider);
   const { clientId } = configuration.auth;
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, prisma);
   const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
@@ -137,14 +153,13 @@ async function startAuthorization(input: {
 
   try {
     const smart = await discoverSmartConfiguration({
+      ...("endpointTrust" in configuration && { endpointTrust: configuration.endpointTrust, permissionVersion: configuration.permissionVersion }),
       requestOfflineAccess: configuration.auth.method !== "public",
       fetchImpl: input.fetchImpl,
       fhirBaseUrl: provider.fhirBaseUrl,
       requestedBaseScopes: provider.requestedBaseScopes,
       resourceTypes: configuration.resourceTypes,
     });
-    const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
-    const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
     const pkce = createSmartPkce();
     const state = createSmartState(input.appReturn);
     const now = new Date();
@@ -152,14 +167,15 @@ async function startAuthorization(input: {
     const codeVerifierEncrypted = await sealClinicalOauthVerifier({
       memberId: auth.member.id,
       stateHash: state.stateHash,
-      value: process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES === "1"
+      // The Oracle binding is intrinsic to an Oracle start, not only implied by its flag gate.
+      value: isOracleProfile(configuration.profile) || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES === "1"
         ? JSON.stringify({ version: 1, verifier: pkce.verifier, profile: configuration.profile,
           brandName: provider.brandName, fhirBaseUrl: provider.fhirBaseUrl, resourceTypes: configuration.resourceTypes })
         : pkce.verifier,
     });
 
     const data = {
-      clientId,
+      clientId: isOracleProfile(configuration.profile) ? ORACLE_STORED_CLIENT_REFERENCE : clientId,
       codeVerifierEncrypted,
       appReturn: input.appReturn,
       connectIntentClaimHash: intent?.claimHash ?? null,
@@ -283,26 +299,37 @@ async function finishAuthorization(input: {
     });
   }
 
-  const opened = await openClinicalOauthVerifier({
-    encrypted: session.codeVerifierEncrypted, memberId: auth.member.id, stateHash: session.stateHash,
+  // The verifier and a source's pinned base open under one domain-root unwrap.
+  const { saved, verifier, configuration } = await runWithHostedDomainRootUnwrapCache(async () => {
+    const opened = await openClinicalOauthVerifier({
+      encrypted: session.codeVerifierEncrypted, memberId: auth.member.id, stateHash: session.stateHash,
+    });
+    const saved = opened.startsWith("{") ? authorizationBinding.parse(JSON.parse(opened)) : null;
+    const stored = { clientId: session.clientId, grant: "callback" as const };
+    const configuration = await (async () => {
+      if (!saved) {
+        const entry = requireProviderEntry(session.providerDirectoryEntryId);
+        if (entry.sourceSystem !== "epic-fhir") throw providerConfigurationChangedError();
+        // An unbound session started at the source's pinned base whenever the source already existed.
+        const provider = await withPinnedEndpoint(entry, auth.member.id, await getPrisma().clinicalRecordConnection.findUnique({
+          where: { memberId_providerDirectoryEntryId: { memberId: auth.member.id, providerDirectoryEntryId: entry.id } },
+          select: PINNED_ENDPOINT_SELECT,
+        }));
+        return { ...resolveEpicClient(provider, stored), provider };
+      }
+      const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
+      // The saved profile, not the current directory, selects the integration.
+      if (isOracleProfile(saved.profile)) {
+        return { auth: resolveOracleClientAuth(saved.profile, provider, { ...stored, redirectUri: session.redirectUri }), resourceTypes: saved.resourceTypes,
+          hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
+      }
+      if (provider.id.startsWith("oracle-")) throw providerConfigurationChangedError();
+      return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
+        resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
+        provider: { ...provider, sourceSystem: "epic-fhir" as const } };
+    })();
+    return { saved, verifier: saved?.verifier ?? opened, configuration };
   });
-  const saved = opened.startsWith("{") ? authorizationBinding.parse(JSON.parse(opened)) : null;
-  const stored = { clientId: session.clientId, grant: "callback" as const };
-  const configuration = (() => {
-    if (!saved) {
-      const provider = requireEpicProviderEntry(session.providerDirectoryEntryId);
-      return { ...resolveEpicClient(provider, stored), provider };
-    }
-    const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
-    // The saved profile, not the current directory, selects the integration.
-    if (isOracleProfile(saved.profile)) {
-      return { auth: resolveOracleClientAuth(saved.profile, stored), resourceTypes: saved.resourceTypes,
-        hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
-    }
-    return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
-      resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
-      provider: { ...provider, sourceSystem: "epic-fhir" as const } };
-  })();
   const { provider } = configuration;
   if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) throw providerConfigurationChangedError();
   const fhirBase = new URL(provider.fhirBaseUrl);
@@ -310,7 +337,6 @@ async function finishAuthorization(input: {
   else requirePinnedEndpoint(session.tokenEndpoint, fhirBase, "token endpoint");
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
-  const verifier = saved?.verifier ?? opened;
   const token = await exchangeSmartAuthorizationCode({
     auth: configuration.auth,
     code: normalizeAuthorizationCode(input.code),
@@ -661,11 +687,10 @@ async function assertClinicalRecordConnectionAvailable(
 ) {
   const existing = await prisma.clinicalRecordConnection.findUnique({
     select: {
-      id: true,
+      ...PINNED_ENDPOINT_SELECT,
       tokenVersion: true,
       retrievalGeneration: true,
       patientBindingEncrypted: true,
-      fhirBaseHash: true,
       status: true,
       disconnectedAt: true,
       retrievalRuns: {
@@ -686,22 +711,38 @@ async function assertClinicalRecordConnectionAvailable(
   return existing;
 }
 
-function requireEpicProviderEntry(entryId: string): EpicProviderDirectoryEntry {
-  const entry = resolveClinicalProviderDirectoryEntry(entryId);
+/**
+ * A source stays on the FHIR base its patient binding was made at, so reconnecting and re-adding it
+ * use that pinned base, while a first connection uses the directory's. The client, policy and
+ * integration still come from the entry, and the pinned base must still pass the integration's
+ * endpoint rules before any request reaches it.
+ */
+async function withPinnedEndpoint<Entry extends ClinicalProviderDirectoryEntry>(
+  entry: Entry, memberId: string,
+  source: { id: string; fhirBaseHash: string; fhirBaseUrlEncrypted: string } | null,
+): Promise<Entry> {
+  if (!source) return entry;
+  const fhirBaseUrl = await openClinicalConnectionFhirBaseUrl({
+    connectionId: source.id, encrypted: source.fhirBaseUrlEncrypted, memberId,
+  });
+  const trusted = entry.sourceSystem === "cerner-fhir" ? isOracleFhirBaseUrl(fhirBaseUrl) : isCanonicalPublicHttpsUrl(fhirBaseUrl);
+  if (!trusted || hashClinicalFhirBaseUrl(fhirBaseUrl) !== source.fhirBaseHash) {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED",
+      httpStatus: 409,
+      message: "This source's saved provider endpoint no longer passes Murph's endpoint checks, so it cannot reconnect.",
+    });
+  }
+  return { ...entry, fhirBaseUrl };
+}
+
+function requireProviderEntry(entryId: string, memberId?: string) {
+  const entry = resolveClinicalProviderDirectoryEntry(entryId, memberId);
   if (!entry) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_PROVIDER_NOT_FOUND",
       httpStatus: 404,
       message: "The selected Clinical Records provider is unavailable.",
-    });
-  }
-  // Starts for other integrations arrive with their own writer; until then they fail before egress.
-  if (entry.sourceSystem !== "epic-fhir") {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED",
-      httpStatus: 503,
-      message: "The selected Clinical Records provider is not configured yet.",
-      retryable: true,
     });
   }
   return entry;

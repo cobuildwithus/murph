@@ -153,9 +153,9 @@ function resolveRefreshAuth(
   const stored = { clientId: payload.clientId, grant: "refresh" as const };
   if (current.sourceSystem === "cerner-fhir" && isOracleProfile(payload.profile)) {
     requireOracleSmartEndpoint("token", payload.tokenEndpoint, fhirBase);
-    return resolveOracleClientAuth(payload.profile, stored);
+    return resolveOracleClientAuth(payload.profile, { id: current.providerDirectoryEntryId, fhirBaseUrl: fhirBase.href }, stored);
   }
-  if (current.sourceSystem !== "epic-fhir" || isOracleProfile(payload.profile)) throw authorizationRequired();
+  if (current.sourceSystem !== "epic-fhir" || current.providerDirectoryEntryId.startsWith("oracle-") || isOracleProfile(payload.profile)) throw authorizationRequired();
   requirePinnedEndpoint(payload.tokenEndpoint, fhirBase, "token endpoint");
   return resolveSavedEpicAuth(current.providerDirectoryEntryId, stored, payload.profile);
 }
