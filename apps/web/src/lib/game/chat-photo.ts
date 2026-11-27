@@ -59,7 +59,7 @@ export async function handleGameChatPhoto(input: Input): Promise<PhotoResult> {
   return { status: "ok", photoOutcome: "saved" };
 }
 
-async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promise<{ result: PhotoResult } | { offer: Offer; source: NonNullable<ReturnType<typeof gamePhotoAttachment>>; swapEntryId?: string }> {
+async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promise<Prepared> {
   await requireSourceActor(input, tx, input.messageRef);
   await tx.$queryRaw`SELECT member_id FROM game_profile WHERE member_id = ${input.actor} FOR UPDATE`;
   const profile = await tx.gameProfile.findUnique({ where: { memberId: input.actor }, select: { chatPhotoIntroducedAt: true, chatPhotoOffer: true } });
@@ -78,13 +78,17 @@ async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promi
   const selection = await selectGamePhoto(input, tx, profile.chatPhotoOffer, posting);
   if ("result" in selection) return selection;
   if (input.photo.operation === "offer") return recordPhotoIntroduction(input, tx, profile.chatPhotoIntroducedAt, posting, selection.offer);
-  // Fixing a photo Murph saved here swaps it in place and keeps the player's retake.
-  const replacing = input.photo.replaceEntryId;
-  if (replacing && replacing === posting.currentEntryId && replacing.startsWith(CHAT_PHOTO_ENTRY_PREFIX)) return { ...selection, swapEntryId: replacing };
-  const entryId = photoEntryId(input, selection.offer);
-  const already = await tx.gameEntry.findUnique({ where: { id: entryId }, select: { memberId: true, withdrawnAt: true, dayIndex: true } });
+  return decideSave(input, tx, posting, selection);
+}
+
+/** A save posts the photo, or swaps it in place when it fixes a photo Murph saved here, so the player keeps their retake. */
+type Prepared = { result: PhotoResult } | (Exclude<Selection, { result: PhotoResult }> & { swapEntryId?: string });
+async function decideSave(input: Input, tx: Prisma.TransactionClient, posting: Posting, selection: Exclude<Selection, { result: PhotoResult }>): Promise<Prepared> {
+  const replacing = input.photo.replaceEntryId ?? null;
+  if (replacing !== null && replacing === posting.currentEntryId && replacing.startsWith(CHAT_PHOTO_ENTRY_PREFIX)) return { ...selection, swapEntryId: replacing };
+  const already = await tx.gameEntry.findUnique({ where: { id: photoEntryId(input, selection.offer) }, select: { memberId: true, withdrawnAt: true, dayIndex: true } });
   if (already?.memberId === input.actor) return { result: already.withdrawnAt === null && already.dayIndex === posting.dayIndex ? { status: "ok", photoOutcome: "saved" } : rejected("photo_already_used_choose_another") };
-  if (posting.currentEntryId !== (input.photo.replaceEntryId ?? null)) return { result: rejected("replacement_confirmation_required") };
+  if (posting.currentEntryId !== replacing) return { result: rejected("replacement_confirmation_required") };
   if (posting.attemptsRemaining === 0) return { result: rejected("RETAKE_USED") };
   return selection;
 }
