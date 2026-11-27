@@ -115,7 +115,7 @@ jobs:
               [[ -n "$issue" ]] || continue
               last=""
               if (( comments > 0 )); then
-                last=$(gh api "repos/$GITHUB_REPOSITORY/issues/$issue/comments?per_page=1&page=$comments" --jq '.[0].body // ""')
+                last=$(gh api "repos/$GITHUB_REPOSITORY/issues/$issue/comments?per_page=1&page=$comments" --jq '.[0] | select(.user.login == "github-actions[bot]") | .body // ""')
               fi
               [[ "$last" == *"$note"* ]] || gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" \
                 --body "The latest refresh ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) $note"

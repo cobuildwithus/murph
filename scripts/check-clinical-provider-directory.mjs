@@ -140,8 +140,8 @@ const HELD_CHANGE_PARSERS = new Map([
 
 function renderHeldReport(held) {
   if (!held.length) return "";
-  // Drops cell breakers plus zero-width and bidi controls that could disguise a value.
-  const code = text => (text ? `\`${String(text).replace(/[`|\r\n\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/gu, "")}\`` : "");
+  // Drops cell breakers, line/paragraph separators and every format character (zero-width, bidi, tags) that could disguise a value.
+  const code = text => (text ? `\`${String(text).replace(/[`|\r\n\u2028\u2029\p{Cf}]/gu, "")}\`` : "");
   const labels = {
     clientIdEnvironmentKey: "Client key change", fhirBaseUrl: "Endpoint change", policyId: "Policy change", removal: "Removed upstream",
   };
