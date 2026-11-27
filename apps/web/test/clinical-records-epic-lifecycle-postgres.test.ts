@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findEventByExternalRef, initializeVault } from "@murphai/core";
 import { parseHostedExecutionBundleRef, restoreHostedBundleRoots, sha256HostedBundleHex } from "@murphai/runtime-state/node";
@@ -27,7 +28,7 @@ import { POST as start } from "../app/api/clinical-records/companion/start/route
 import { GET as callback } from "../app/api/clinical-records/oauth/callback/route";
 import { POST as complete } from "../app/api/clinical-records/companion/complete/route";
 import { POST as remove } from "../app/api/clinical-records/companion/sources/[id]/remove/route";
-import { checkpointClinicalMailboxItem, createHostedRuntimeWorkspace } from "../../../packages/assistant-runtime/test/clinical-connector-runtime";
+import { checkpointClinicalMailboxItem } from "@murphai/assistant-runtime/clinical-connector-testkit";
 import { createClinicalRuntimeRoutePort } from "./support/clinical-runtime-routes";
 import { createClinicalVendorSimulator, epicWireProfile } from "./support/clinical-vendor-simulator";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
@@ -117,7 +118,7 @@ async function connect() {
 }
 
 type Connected = Awaited<ReturnType<typeof connect>>;
-async function importGeneration(f: Connected, workspace: Awaited<ReturnType<typeof createHostedRuntimeWorkspace>>) {
+async function importGeneration(f: Connected, workspace: Awaited<ReturnType<typeof createWorkspace>>) {
   const { memberId, prisma } = f;
   const run = await prisma.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId }, orderBy: { generation: "desc" } });
   const lookup = { dedupeKey: buildClinicalRetrievalWakeEventId({ runId: run.id, generation: run.generation }), userId: memberId };
@@ -128,8 +129,7 @@ async function importGeneration(f: Connected, workspace: Awaited<ReturnType<type
   const lease = await claimHostedRuntime({ prisma, userId: memberId, processingMode: "default" });
   if (lease.status === "blocked" || !lease.owner.attemptId) throw new Error("Expected a runtime lease.");
   const runtimeAuthority = { attemptId: lease.owner.attemptId, generation: String(lease.owner.generation), workspaceVersion: String(current.version) };
-  const restored = await createHostedRuntimeWorkspace("clinical-restore-");
-  cleanups.push(restored.cleanup);
+  const restored = await createWorkspace();
   const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority);
   await checkpointClinicalMailboxItem({ ...workspace, item, wake, port, publishAndRestore: async snapshotRef => {
     const before = await prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } });
@@ -161,9 +161,14 @@ async function fetchInitialPage(f: Connected) {
   } });
 }
 
+async function createWorkspace() {
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "clinical-connector-"));
+  cleanups.push(() => rm(workspaceRoot, { recursive: true, force: true }));
+  return { workspaceRoot, vaultRoot: join(workspaceRoot, "vault") };
+}
+
 async function vault() {
-  const workspace = await createHostedRuntimeWorkspace("clinical-connector-");
-  cleanups.push(workspace.cleanup);
+  const workspace = await createWorkspace();
   await initializeVault({ vaultRoot: workspace.vaultRoot, timezone: "UTC" });
   return workspace;
 }

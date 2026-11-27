@@ -1,16 +1,21 @@
 import { vi } from "vitest";
 import type { HostedExecutionClinicalRecordsSyncRequestedWake } from "@murphai/hosted-execution";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
-import type { HostedRuntimeClinicalRecordsPort } from "../src/hosted-runtime/platform.ts";
-
-export { createHostedRuntimeWorkspace } from "./hosted-runtime-test-helpers.ts";
+import type {
+  HostedClinicalChangeProof, HostedClinicalRecordsFetchPageRequest, HostedClinicalRecordsFetchPageResponse,
+  HostedClinicalRecordsReadRunRequest, HostedClinicalRecordsReadRunResponse, HostedClinicalRecordsRecordOutcomeRequest,
+} from "@murphai/hosted-execution/clinical-records";
 
 export type ClinicalCheckpointInput = {
   item: HostedMailboxItem;
   wake: HostedExecutionClinicalRecordsSyncRequestedWake;
   vaultRoot: string;
   workspaceRoot: string;
-  port: HostedRuntimeClinicalRecordsPort;
+  port: {
+    readRun(request: HostedClinicalRecordsReadRunRequest): Promise<HostedClinicalRecordsReadRunResponse>;
+    fetchPage(request: HostedClinicalRecordsFetchPageRequest): Promise<HostedClinicalRecordsFetchPageResponse>;
+    recordOutcome(request: HostedClinicalRecordsRecordOutcomeRequest | HostedClinicalChangeProof): Promise<void>;
+  };
   publishAndRestore: (ref: { hash: string; key: string; size: number; updatedAt: string }) => Promise<string>;
 };
 

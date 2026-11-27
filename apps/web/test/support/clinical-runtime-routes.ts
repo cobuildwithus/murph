@@ -9,7 +9,7 @@ import { expect, vi } from "vitest";
 import { POST as readRun } from "../../app/api/internal/clinical-records/runtime/read-run/route";
 import { POST as fetchPage } from "../../app/api/internal/clinical-records/runtime/fetch-page/route";
 import { POST as recordOutcome } from "../../app/api/internal/clinical-records/runtime/record-outcome/route";
-import type { ClinicalCheckpointInput } from "../../../../packages/assistant-runtime/test/clinical-connector-runtime";
+import type { ClinicalCheckpointInput } from "@murphai/assistant-runtime/clinical-connector-testkit";
 
 export async function createClinicalRuntimeRoutePort(userId: string, authority: {
   attemptId: string; generation: string; workspaceVersion: string;
