@@ -5,6 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { dependencyKey, readPrivateYou } from "../src/lib/health-you/read";
 import { buildViews } from "../src/lib/health-you/views";
 const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(),
   vault: vi.fn(),
   session: vi.fn(),
   workspace: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../src/lib/prisma", () => ({
   }),
 }));
 vi.mock("../src/lib/game/http/auth", () => ({ assertGameMemberAuthCurrentForRead: mocks.session }));
+vi.mock("../src/lib/browser-vault/session-handler", () => ({ scheduleBrowserVaultRefresh: mocks.refresh }));
 vi.mock("../src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.vault }));
 vi.mock("../src/lib/hosted-workspace/store", () => ({ readHostedBrowserVaultReplicaState: mocks.workspace }));
 vi.mock("../src/lib/game/crypto", () => ({ openGameTexts: async () => ["Example"] }));
@@ -112,6 +114,30 @@ describe("private view authority and dependency lifecycle", () => {
     expect(mocks.vault).toHaveBeenCalledTimes(4);
     expect(mocks.session).toHaveBeenCalledTimes(4);
     expect(mocks.extras).toHaveBeenCalledOnce();
+  });
+  it("recovers on retry after an owner read requests a missing, expired or older publication", async () => {
+    warm();
+    for (const pointer of [null, { ...ref, generatedAt: "2031-04-10T07:00:00.000Z" }, { ...ref, generation: ref.generation - 1 }]) {
+      mocks.workspace.mockResolvedValueOnce({ browserVaultReplicaRef: pointer });
+      expect(await readPrivateYou(auth, "you", signal)).toMatchObject({ state: "unavailable" });
+      expect(await readPrivateYou(auth, "you", signal)).toMatchObject({ state: "ready" });
+    }
+    expect(mocks.refresh.mock.calls).toEqual(Array(3).fill([memberId]));
+    mocks.vault.mockRejectedValueOnce(hostedOnboardingError({ httpStatus: 403, code: "CONSENT_REQUIRED", message: "Consent required." }));
+    await expect(readPrivateYou(auth, "you", signal)).rejects.toMatchObject({ httpStatus: 403 });
+    expect(mocks.refresh).toHaveBeenCalledTimes(3);
+  });
+  it("offers an answerable question from the same cache to each supported client", async () => {
+    warm();
+    const bundle = buildViews({ ...snapshot, hasAnswerProjection: true, evidence: { ...snapshot.evidence,
+      checkins: [{ date: "2031-04-10", answerKey: "smoking", smoking: "former" }] } });
+    mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: bundle })]);
+    for (const [platform, build, typed] of [["ios", "127", false], ["ios", "128", true], ["android", "128", false]] as const) {
+      const headers = new Headers({ "X-Murph-Client-Platform": platform, "X-Murph-Client-Version": "1.0", "X-Murph-Client-Build": build });
+      const view = await readPrivateYou(auth, "you", signal, undefined, headers);
+      expect(view).toMatchObject({ questions: [typed ? { key: "quitDate", inputKind: "date" } : { options: expect.arrayContaining([expect.objectContaining({ value: expect.any(String) })]) }] });
+    }
+    expect(await readPrivateYou(auth, "you", signal)).toMatchObject({ questions: bundle.optionQuestions });
   });
   it("lets consent withdrawal win even on a warm read", async () => {
     warm();

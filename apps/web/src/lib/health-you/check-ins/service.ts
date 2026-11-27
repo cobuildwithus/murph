@@ -14,7 +14,9 @@ import { assertPrivateHealthAuthority, withInputAuthority } from "../../health-w
 import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { readHostedOnboardingJsonObject } from "../../hosted-onboarding/http";
 import { getPrisma } from "../../prisma";
-import { combineAgeEffect } from "../checkins";
+import { model } from "../engine/model";
+import { bpValue } from "../engine/observations";
+import { combineAgeEffect, localPressureTime, pressureInputs } from "../checkins";
 import { readYouInputs } from "../inputs";
 import { combineResult, combineStations } from "./combine";
 import { foodWeekQuestions } from "./food-week";
@@ -44,17 +46,17 @@ function validate<T>(schema: z.ZodType<T>, value: unknown) {
   return parsed.data;
 }
 
-async function checkInReplica(request: Request, auth: HostedNativeMemberAuth) {
+async function checkInReplica(request: Request, auth: HostedNativeMemberAuth, metricKeys: string[] = []) {
   const memberId = auth.member.id;
   return withInputAuthority(() => assertPrivateHealthAuthority(auth), async () => {
     const loaded = await loadPublishedCompanionMetricReplica({
-      memberId, signal: request.signal, metricKeys: [], requestedShards: ["core"], timeoutMs: 5000,
+      memberId, signal: request.signal, metricKeys, requestedShards: metricKeys.length ? ["core", "metricsIndex"] : ["core"], timeoutMs: 5000,
     });
-    if (loaded.state !== "ready" || (loaded.client.replica.generation ?? 0) < 21
+    if (loaded.state !== "ready" || (request.method === "GET" && loaded.freshness !== "fresh") || (loaded.client.replica.generation ?? 0) < 21
       || !loaded.client.replica.sleepTiming || !loaded.client.replica.meals) {
       throw error(503, "Your private health data is getting ready. Try again soon.");
     }
-    return { replica: loaded.client.replica, meals: loaded.client.replica.meals };
+    return { client: loaded.client, freshness: loaded.freshness, replica: loaded.client.replica, meals: loaded.client.replica.meals };
   });
 }
 async function submit(auth: HostedNativeMemberAuth, id: string, action: MemberActionV1, requestedAt = new Date().toISOString()) {
@@ -67,10 +69,25 @@ const pressureRequest = bloodPressureFields.safeExtend({ id });
 export async function saveBloodPressure(request: Request, auth: HostedNativeMemberAuth) {
   const { id, takenAt, ...pair } = validate(pressureRequest, await body(request));
   if (Date.parse(takenAt) > Date.now()) throw error(400, "Choose a reading taken in the past.");
-  await checkInReplica(request, auth);
+  const keys = pair.setting ? ["systolic-blood-pressure", "diastolic-blood-pressure"] : [];
+  const { client, freshness, meals } = await checkInReplica(request, auth, keys);
   const timestamp = new Date(takenAt).toISOString();
-  return submit(auth, id, { kind: "measurement.blood-pressure", version: 1,
-    ...pair, takenAt: timestamp, ...(/[+-]\d{2}:\d{2}$/u.test(takenAt) ? { date: takenAt.slice(0, 10) } : {}) }, timestamp);
+  const today = toLocalDayKey(Date.now(), meals.timeZone);
+  const datetime = localPressureTime(new Date(timestamp), meals.timeZone);
+  const reading = { ...pair, validated: pair.setting === "home" && model.policy.protocol.member_entered_home_cuff_assumed_validated, datetime, date: datetime.slice(0, 10) };
+  let qualifies = false;
+  if (pair.setting && freshness === "fresh" && "metrics" in client) {
+    const from = addDaysToIsoDate(today, -model.policy.protocol.bp_days);
+    const rows = keys.flatMap(metricKey => client.metrics.list({ metricKey, from, to: today }));
+    const bp = [...pressureInputs(rows, meals.timeZone), reading];
+    qualifies = bpValue({ profile: {}, bp }, today, reading)?.includesSubmitted === true;
+  }
+  const receipt = await submit(auth, id, { kind: "measurement.blood-pressure", version: 1, ...pair, takenAt: timestamp }, timestamp);
+  if (qualifies) return receipt;
+  const next = pair.setting === "home" ? "For a home series, add morning and evening pairs on 3 days."
+    : pair.setting === "clinic" ? "For a clinic series, add a pair of readings on 2 days."
+    : "Choose home or clinic on future readings to count a series.";
+  return { state: "recorded", next };
 }
 
 const foodRequest = z.object({ id, answers: foodWeekAnswersSchema }).strict();

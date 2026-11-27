@@ -1,11 +1,18 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { initializeVault, saveMemberCheckIn } from "@murphai/core";
+import { buildMetricProjection, readVault } from "@murphai/query";
 import { describe, expect, it } from "vitest";
 import {
   createBrowserVaultQueryClient,
+  createBrowserVaultReplica,
   type BrowserVaultReplica,
   type BrowserVaultMetricRow,
 } from "@murphai/query/browser";
 import { projectYouInputs } from "../src/lib/health-you/inputs";
-import { buildViews } from "../src/lib/health-you/views";
+import { buildViews, favorableRank } from "../src/lib/health-you/views";
 import { score } from "../src/lib/health-you/engine";
 import { combineAgeEffect } from "../src/lib/health-you/checkins";
 import { nextQuestion } from "../src/lib/health-you/questions";
@@ -77,7 +84,7 @@ function addPulse(r: BrowserVaultReplica) {
   return r;
 }
 function read(r: BrowserVaultReplica) {
-  return projectYouInputs(createBrowserVaultQueryClient(r), clock, new Date("2030-01-01T00:00:00Z"));
+  return projectYouInputs(createBrowserVaultQueryClient(structuredClone(r)), clock, new Date("2030-01-01T00:00:00Z"));
 }
 describe("dated private replica projections", () => {
   it("uses the vault date, year precision, qualified sleep and the evidence horizon", () => {
@@ -128,7 +135,74 @@ describe("dated private replica projections", () => {
     expect(result.you.factors).toContainEqual(expect.objectContaining({ key: "rdw", unit: "%" }));
     expect(result.markers["red-cell-distribution-width"]).toMatchObject({ value: 13, unit: "%" });
     expect(JSON.stringify(result)).not.toContain("synthetic");
+    const prior = r.labResultRows[0];
+    prior.date = offset(today, -4);
+    prior.normalizedValue = 17;
+    const project = () => buildViews(projectYouInputs(createBrowserVaultQueryClient(structuredClone(r)), clock, clock));
+    const baseline = project();
+    expect(baseline.you.state).toBe("ready");
+    expect(baseline.markers[prior.metricKey!]).toMatchObject({ value: 17 });
+    expect(baseline.blood.all.total).toBe(1);
+    expect(baseline.age?.history.map(p => p.date)).toEqual([today]);
+    const repeat = { ...prior, id: "repeat", drawId: "new-draw", date: today, parentResultStatus: "pending" as const };
+    r.labResultRows.push(repeat);
+    expect(project()).toEqual(baseline);
+    r.labResultRows[1] = { ...repeat, parentResultStatus: "abnormal" };
+    expect(project().markers[prior.metricKey!].history).toHaveLength(2);
+    expect(project().you.age).toEqual(baseline.you.age);
   });
+  it.each(["short_sleep", "tentative"])("counts only completed nights when a seventh is %s", flag => {
+    const r = addPulse(replica());
+    r.metricRows = r.metricRows.filter(row => row.metricKey !== "total-sleep-minutes" || row.date >= offset(today, -6));
+    const seventh = r.metricRows.find(row => row.date === today && row.metricKey === "total-sleep-minutes")!;
+    seventh.context = flag === "tentative" ? { sleepState: flag } : { sleepType: flag };
+    expect(read(r).evidence.sleep_sessions).toHaveLength(6);
+    expect(buildViews(read(r)).you.factors.map(f => f.key)).not.toContain("sleepTime");
+    seventh.context = { sleepType: "main_sleep" };
+    expect(buildViews(read(r)).you.factors.map(f => f.key)).toContain("sleepTime");
+  });
+  it("keeps late pulse backfill out of the saved-days comparison", () => {
+    const r = addPulse(replica());
+    const base = r.metricRows.find(row => row.metricKey === "resting-heart-rate")!;
+    const pulse = Array.from({ length: 60 }, (_, i) => ({
+      ...base, date: offset(today, -i), id: "pulse-day-" + i, value: i < 7 ? 52 : 73,
+    }));
+    r.metricRows = [...r.metricRows.filter(row => row.metricKey !== base.metricKey), ...pulse];
+    expect(buildViews(read(r)).week!.saved).toBeGreaterThan(0);
+    for (const row of pulse.slice(0, 7)) row.context = { recordedAt: clock.toISOString() };
+    const projected = read(r);
+    expect(projected.evidence.daily?.find(row => row.date === offset(today, -3))?.reported_at).toBe(today);
+    expect(buildViews(projected).week!.saved).toBe(0);
+  });
+  it("uses only complete workout windows across weekly publications", () => {
+    const snapshots = [0, 7].map(delta => {
+      const date = offset(today, delta);
+      const at = new Date(date + "T16:00:00Z");
+      const r = replica();
+      r.generatedAt = at.toISOString();
+      const persistent = offset(today, -130);
+      r.labResultRows = [{ rowSchema: "murph.browser-vault.lab-result-row.v1", id: "prior-draw",
+        date: persistent, observedAt: persistent + "T12:00:00Z", metricKey: "red-cell-distribution-width",
+        biomarkerKey: null, analyte: "RDW", sourceLabel: null, labName: null, textValue: null,
+        comparator: null, drawId: "prior", fastingStatus: "unknown", parentResultStatus: "unknown",
+        specimenKind: null, referenceRange: null, flag: "normal", unit: "%", value: 14, normalizedValue: 14, normalizedUnit: "percent" }];
+      r.metricRows = [];
+      r.activitySessions = Array.from({ length: 63 }, (_, i) => ({ type: "run", minutes: 24, date: offset(date, -i) }));
+      const result = buildViews(projectYouInputs(createBrowserVaultQueryClient(r), at, new Date("2030-01-01")));
+      expect(result.age?.history[0].date).toBe(offset(date, -35));
+      expect(result.you.factors.some(f => f.key === "running")).toBe(true);
+      return result.age!.history;
+    });
+    for (const point of snapshots[1].filter(p => p.date <= today)) {
+      expect(snapshots[0].find(p => p.date === point.date)).toEqual(point);
+    }
+  });
+  it.each([[39, null], [40, "Average"], [59, "Average"], [60, "Top 40%"]] as const)(
+    "bands favorable percentiles at %i", (percentile, label) => {
+      expect(favorableRank("grip", percentile)?.label ?? null).toBe(label);
+      expect(favorableRank("ldl_c", 100 - percentile)?.label ?? null).toBe(label);
+      expect(favorableRank("sleep", percentile)).toBeNull();
+    });
   it("distinguishes a failed read, stale measurements and a readable empty panel", () => {
     const r = replica();
     expect(() => read({ ...r, demographics: undefined })).toThrow();
@@ -192,7 +266,7 @@ describe("canonical check-in and sleep timing projections", () => {
     expect(buildViews(input).you.questions).toEqual([]);
   });
   it("replays corrections at their reporting day and remembers even an old or unsure answer", () => {
-    const r = replica();
+    const r = addPulse(replica());
     Object.assign(r, { generation: 21, sleepTiming: [] });
     const put = (key: string, value: string | number, date: string, hour: number) => {
       r.entities.push({ id: "fixture-" + r.entities.length, family: "assessment", kind: "assessment",
@@ -200,6 +274,16 @@ describe("canonical check-in and sleep timing projections", () => {
         lookupIds: [], status: null, bodyPreview: null, experimentSlug: null, stream: null, title: null,
         attributes: { checkIn: { date, response: { instrumentVersion: 1, instrument: "you-answer", answer: { key, value } } } } });
     };
+    r.demographics = { ...r.demographics!, biologicalSex: "female" };
+    expect(buildViews(read(r)).you).toMatchObject({ state: "ready", questions: [{ key: "ageEligibility" }] });
+    for (const status of ["pregnant", "postpartum"]) {
+      put("ageEligibility", status, offset(today, -2), 12);
+      expect(buildViews(read(structuredClone(r))).you).toMatchObject({ state: "paused" });
+      put("ageEligibility", "neither", offset(today, -1), 13);
+      expect(buildViews(read(r)).you.state).toBe("ready");
+      r.entities = [];
+    }
+    r.demographics = { ...r.demographics!, biologicalSex: "male" };
     const yesterday = offset(today, -1);
     expect(buildViews(read(structuredClone(r))).you.questions[0]?.key).toBe("smoking");
     put("smoking", "former", offset(today, -400), 12);
@@ -240,6 +324,27 @@ describe("canonical check-in and sleep timing projections", () => {
       verified: "self", unit: "points", value: 4, protocol: "murph-combine-v1" }];
     expect(combineAgeEffect(input, "session", submitted)).toBe(years);
     expect(combineAgeEffect(input, "session", { ...submitted, tests: [{ key: "pullups_max", value: 6 }] })).toBeUndefined();
+  });
+  it.each(["home", "clinic"] as const)("scores a canonical %s series after publication", async setting => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "synthetic-pressure-"));
+    try {
+      await initializeVault({ vaultRoot, timezone: "America/New_York", createdAt: clock.toISOString() });
+      const times = setting === "home" ? ["07:00", "07:03", "19:00", "19:03"] : ["09:10", "09:12"];
+      const days = setting === "home" ? 3 : 2;
+      for (let i = 0; i < days; i++) for (const time of times) {
+        const takenAt = new Date(offset(today, -i) + "T" + time + ":00-05:00").toISOString();
+        expect(await saveMemberCheckIn(vaultRoot, { kind: "measurement.blood-pressure", version: 1,
+          setting, systolic: 128, diastolic: 78, takenAt }, { actionId: randomUUID(), requestedAt: takenAt })).toBe("applied");
+      }
+      const vault = await readVault(vaultRoot);
+      const publication = await createBrowserVaultReplica({ vault, generatedAt: clock.toISOString(),
+        sourceBundleHash: "b".repeat(64), demographics: replica().demographics,
+        metricPoints: buildMetricProjection(vault).metricPoints });
+      const input = read(publication);
+      expect(input.evidence.bp).toHaveLength(days * times.length);
+      expect(score(input.evidence, today)?.rows.sbp).toMatchObject({ value: 128, quality: setting === "home" ? 0.75 : 1 });
+      expect(buildViews(input).you.factors.map(f => f.key)).toContain("bloodPressure");
+    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
   });
   it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
     const r = addPulse(replica());

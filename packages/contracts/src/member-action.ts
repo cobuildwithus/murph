@@ -546,6 +546,7 @@ export function combineProtocolKey(row: z.infer<typeof combineStationSchema>): C
   return row.key;
 }
 export const combineTestsSchema = z.array(combineStationSchema).min(1).max(15)
+  .refine(rows => rows.some(row => !row.skipped && row.value !== undefined), "Record at least one station.")
   .refine(rows => new Set(rows.map(combineProtocolKey)).size === rows.length, "Duplicate station.");
 
 export const foodWeekLimits = {
@@ -568,6 +569,7 @@ export const foodWeekAnswersSchema = z.array(foodAnswer).min(1).max(15).refine(r
 });
 const yesNoUnsure = z.enum(["yes", "no", "unsure"]);
 export const oneOffAnswerSchema = z.discriminatedUnion("key", [
+  z.strictObject({ key: z.literal("ageEligibility"), value: z.enum(["pregnant", "postpartum", "neither"]) }),
   z.strictObject({ key: z.literal("whoopZones"), value: z.enum(["yes", "no", "notSure"]) }),
   z.strictObject({ key: z.literal("smoking"), value: z.enum(["never", "former", "current", "unsure"]) }),
   z.strictObject({ key: z.literal("quitDate"), value: z.iso.date() }),
@@ -587,6 +589,7 @@ export const assessmentCheckInSchema = z.object({
 }).strict();
 
 export const bloodPressureFields = z.object({
+  setting: z.enum(["home", "clinic"]).optional(),
   systolic: z.number().int().positive().max(400), diastolic: z.number().int().positive().max(300),
   takenAt: z.isoDateTime({ offset: true }),
 }).strict().refine(pair => pair.systolic > pair.diastolic);

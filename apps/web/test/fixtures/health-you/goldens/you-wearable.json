@@ -46,11 +46,7 @@
       "yearsText": "+0.1",
       "whatItIs": "This is the heart rate recorded while resting.",
       "whatLowersIt": "Compare resting readings from the same device across several days.",
-      "rank": {
-        "percentile": 59,
-        "label": "59th percentile",
-        "cohort": "Men near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "none",
       "state": "counted"
@@ -69,11 +65,7 @@
       "yearsText": "−0.1",
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
-      "rank": {
-        "percentile": 40,
-        "label": "40th percentile",
-        "cohort": "Men near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "sleep",
       "state": "counted"
@@ -92,11 +84,7 @@
       "yearsText": "−0.1",
       "whatItIs": "This counts the steps the device recorded each day.",
       "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
-      "rank": {
-        "percentile": 37,
-        "label": "37th percentile (lower bound)",
-        "cohort": "Men near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "fitness",
       "state": "counted"

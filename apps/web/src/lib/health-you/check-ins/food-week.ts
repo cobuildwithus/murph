@@ -14,6 +14,7 @@ const rows: readonly [FoodWeekKey, string, string, "servings" | "days" | "percen
   ["plant_oil", "Plant oils", "How often was the main added fat liquid plant oil (%)?", "percent", "more"],
   ["fried_days", "Fried foods", "Days with deep-fried savory food?", "days", "less"],
   ["packaged_days", "Salty snacks", "Days with salty packaged snacks or instant meals?", "days", "less"],
-  ["alcohol", "Standard drinks", "Standard drinks this week? Most in one sitting?", "drinks", "less"],
+  ["alcohol", "Standard drinks", "How many standard drinks did you have this week?", "drinks", "less"],
+  ["max_occasion", "Most in one sitting", "What was the most you drank in one sitting this week, in standard drinks?", "drinks", "less"],
 ];
 export const foodWeekQuestions = rows.map(([key, label, text, kind, group]) => ({ key, label, text, kind, group, max: foodWeekLimits[key] }));

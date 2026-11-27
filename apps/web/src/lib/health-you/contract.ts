@@ -36,7 +36,7 @@ const notCounted = z.object({
   action: z.enum(["combine", "foodWeek", "addBloodPressure", "connectWearable", "bloodWork", "answer"]),
   primary: z.boolean(),
 });
-const question = z.object({ key: s, text: s, inputKind: z.enum(["date", "number"]).optional(), options: z.array(z.object({ value: s, label: s })) });
+const question = z.object({ key: s, text: s, inputKind: z.enum(["options", "date", "number"]).optional(), unit: s.optional(), min: n.optional(), max: n.optional(), options: z.array(z.object({ value: s, label: s })) });
 const weekRow = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("challenge"),
@@ -136,6 +136,7 @@ const marker = z.object({
 });
 export const bundleSchema = z.object({
   you: youViewSchema,
+  optionQuestions: z.array(question).optional(),
   age: ageDetail.nullable(),
   week: weekDetail.nullable(),
   sleep: section,

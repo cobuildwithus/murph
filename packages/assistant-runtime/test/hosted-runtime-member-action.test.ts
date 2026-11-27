@@ -551,7 +551,7 @@ describe("canonical private check-ins", () => {
     const pressureId = "6f94b197-5e55-4044-8f39-3d292a50ffba";
     const sessionId = "bab83750-0d88-4073-b170-d4bb64a27f94";
     const pressure = { kind: "measurement.blood-pressure", version: 1, takenAt: requestedAt,
-      date: "2028-03-17", systolic: 118, diastolic: 74 } as const;
+      setting: "home", systolic: 118, diastolic: 74 } as const;
     const run = async (actionId: string, action: import("@murphai/contracts").MemberActionV1) => {
       const result = await executeHostedMemberActionWake({ vaultRoot, wake: {
         kind: "member.action.requested", eventId: `member.action.requested:${actionId}`,
@@ -567,7 +567,8 @@ describe("canonical private check-ins", () => {
       expect(await run(pressureId, { ...pressure, diastolic: 86 })).toMatchObject({ status: "rejected", reason: "check_in_changed" });
       const event = await readEvent({ vaultRoot, eventId: deterministicContractId("evt", `member-action:${pressureId}`) });
       expect(event.event).toMatchObject({ dayKey: "2028-03-17", occurredAt: requestedAt, measurements: [
-        { metric: "systolic-blood-pressure", value: 118, unit: "mmHg" }, { metric: "diastolic-blood-pressure", value: 74, unit: "mmHg" },
+        { metric: "systolic-blood-pressure", value: 118, unit: "mmHg", qualifiers: { setting: "home", validated: true } },
+        { metric: "diastolic-blood-pressure", value: 74, unit: "mmHg", qualifiers: { setting: "home", validated: true } },
       ] });
       const response = { instrument: "combine", instrumentVersion: 1, date: "2028-03-12",
         tests: [{ key: "pushups_max", variant: "knees", value: 7 }, { key: "grip_strength", value: 32.5 }] } satisfies

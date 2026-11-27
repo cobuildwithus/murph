@@ -46,11 +46,7 @@
       "yearsText": "+1.3",
       "whatItIs": "This measures how much red blood cells vary in size.",
       "whatLowersIt": "Looking at red cell size and hemoglobin alongside this result gives a fuller picture.",
-      "rank": {
-        "percentile": 79,
-        "label": "79th percentile",
-        "cohort": "Women near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "marker",
       "markerKey": "rdw",
@@ -71,8 +67,8 @@
       "whatItIs": "This is total cholesterol minus HDL cholesterol from the same blood draw.",
       "whatLowersIt": "Total cholesterol and HDL from the same draw give a comparable result.",
       "rank": {
-        "percentile": 39,
-        "label": "39th percentile",
+        "percentile": 61,
+        "label": "Top 39%",
         "cohort": "Women near age 51"
       },
       "grade": null,
@@ -93,11 +89,7 @@
       "yearsText": "+0.0",
       "whatItIs": "Albumin is the main protein in the liquid part of blood.",
       "whatLowersIt": "Seeing albumin beside total protein gives the result more context.",
-      "rank": {
-        "percentile": 50,
-        "label": "50th percentile",
-        "cohort": "Women near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "marker",
       "markerKey": "albumin",
@@ -577,24 +569,20 @@
   ],
   "questions": [
     {
-      "key": "smoking",
-      "text": "Have you smoked at least 100 cigarettes in your life? If so, do you smoke now?",
+      "key": "ageEligibility",
+      "text": "Does pregnancy or recovery after childbirth apply to you now?",
       "options": [
         {
-          "value": "never",
-          "label": "Fewer than 100"
+          "value": "pregnant",
+          "label": "Currently pregnant"
         },
         {
-          "value": "former",
-          "label": "100 or more and stopped"
+          "value": "postpartum",
+          "label": "Gave birth in the past 180 days"
         },
         {
-          "value": "current",
-          "label": "100 or more and smoke now"
-        },
-        {
-          "value": "unsure",
-          "label": "Not sure"
+          "value": "neither",
+          "label": "Neither"
         }
       ]
     }

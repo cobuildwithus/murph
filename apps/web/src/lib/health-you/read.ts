@@ -1,4 +1,6 @@
 import "server-only";
+import { keepDailyQuestions, questionsForClient } from "./questions";
+import { scheduleBrowserVaultRefresh } from "../browser-vault/session-handler";
 import { randomUUID } from "node:crypto";
 import { toLocalDayKey } from "@murphai/contracts";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
@@ -26,7 +28,7 @@ import { buildViews, emptyYou } from "./views";
 import { readThisWeek } from "./this-week";
 
 const cacheSchema = z.object({ timeZone: z.string(), views: bundleSchema });
-export const YOU_SCHEMA_VERSION = 4;
+export const YOU_SCHEMA_VERSION = 5;
 type ReadKind = "you" | "age" | "week" | "sleep" | "fitness" | "blood" | "marker";
 function binding(memberId: string, revision: string) {
   return { memberId, table: "health_you_cache", rowId: revision, field: "views" } as const;
@@ -93,14 +95,15 @@ function unavailable() {
   });
 }
 async function computed(member: { id: string; createdAt: Date }, clock: Date, signal: AbortSignal,
-  checkAuthority: (tx: Prisma.TransactionClient) => Promise<void>) {
+  checkAuthority: (tx: Prisma.TransactionClient) => Promise<void>, refreshOwner = false) {
   const db = getPrisma(), memberId = member.id;
   const observed = await db.healthYouCache.findUnique({ where: { memberId } });
   const workspace = await readHostedBrowserVaultReplicaState({ userId: memberId });
   const ref = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Private health view");
-  if (!ref) throw unavailable();
   const fresh =
     assessBrowserVaultReplicaFreshness({ now: clock.toISOString(), replicaRef: ref }).freshness === "fresh";
+  if (!fresh && refreshOwner) scheduleBrowserVaultRefresh(memberId);
+  if (!ref) throw unavailable();
   const cached = observed ? await open(observed, signal) : null;
   if (
     cached &&
@@ -130,10 +133,7 @@ async function computed(member: { id: string; createdAt: Date }, clock: Date, si
   const views = buildViews(inputs),
     dependency = dependencyKey(memberId, ref, inputs.timeZone, inputs.asOf),
     revision = randomUUID();
-  if (cached?.views.you.asOf === inputs.asOf) {
-    const prior = cached.views.you.questions[0]?.key;
-    views.you.questions = views.you.questions.filter(question => question.key === prior);
-  }
+  keepDailyQuestions(views, cached?.views);
   const [viewsEncrypted] = await sealHealthTexts(
     [{ ...binding(memberId, revision), value: JSON.stringify({ timeZone: inputs.timeZone, views }) }],
     signal,
@@ -166,6 +166,7 @@ export async function readPrivateYou(
   kind: ReadKind,
   requestSignal: AbortSignal,
   key?: string,
+  headers?: Headers,
 ) {
   const db = getPrisma(),
     memberId = auth.member.id,
@@ -197,7 +198,7 @@ export async function readPrivateYou(
       };
       let result: Awaited<ReturnType<typeof computed>>;
       try {
-        result = await computed(auth.member, clock, signal, tx => authority(auth, tx));
+        result = await computed(auth.member, clock, signal, tx => authority(auth, tx), true);
       } catch (error) {
         if (isHostedOnboardingError(error) && error.code !== "HEALTH_YOU_UNAVAILABLE" && error.httpStatus < 500)
           throw error;
@@ -210,6 +211,7 @@ export async function readPrivateYou(
         const you = views.you;
         return {
           ...you,
+          questions: questionsForClient(views, headers),
           profile,
           stale,
           factors: you.factors.map((f) => (stale ? { ...f, state: "stale" as const } : f)),

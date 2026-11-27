@@ -418,11 +418,7 @@
       "yearsText": "−0.1",
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
-      "rank": {
-        "percentile": 40,
-        "label": "40th percentile",
-        "cohort": "Women near age 51"
-      },
+      "rank": null,
       "grade": null,
       "detail": "sleep",
       "state": "counted"

@@ -20,6 +20,8 @@ export interface YouInputs {
   markers: MarkerInput[];
   /** First date for which this projection can supply any dated evidence. */
   historyFrom: string;
+  /** First reconstructed age with full contributing workout windows. */
+  ageHistoryFrom?: string;
   hasAnswerProjection?: boolean;
   needsWhoopAnswer?: boolean;
   lifts?: string[];

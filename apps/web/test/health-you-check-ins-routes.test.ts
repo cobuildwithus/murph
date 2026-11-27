@@ -18,7 +18,7 @@ vi.mock("../src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberA
 const id = "9a7c04e4-7f87-46d7-af2b-fbb09ab470a2";
 const replica = { generation: 21, sleepTiming: [], meals: { timeZone: "America/Denver", days: [] }, entities: [],
   demographics: { status: "resolved", birthYear: 1992, biologicalSex: "male" } };
-const ready = (data: object) => ({ state: "ready", client: { replica: data } });
+const ready = (data: object) => ({ state: "ready", freshness: "fresh", client: { replica: data } });
 const req = (data?: unknown) => new Request("https://fixture.test/api/game/v1/health/check-in", {
   method: data === undefined ? "GET" : "POST", body: JSON.stringify(data), headers: { "content-type": "application/json" },
 });
@@ -45,13 +45,47 @@ describe("private check-in routes", () => {
     vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "");
     expect((await food(req())).status).toBe(404);
   });
-  it("returns accepted and submits both pressures with the observed instant and member-local day", async () => {
-    const res = await pressure(req(pair));
-    expect(await res.json()).toMatchObject({ state: "accepted" });
-    expect(mocks.submit).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({
-      actionId: id, action: { kind: "measurement.blood-pressure", version: 1, systolic: 115, diastolic: 72,
-        takenAt: "2023-09-20T02:10:00.000Z", date: "2023-09-19" },
-    }) }));
+  it("records an unknown setting and canonicalizes equivalent instants across local midnight", async () => {
+    for (const takenAt of ["2023-09-20T02:10:00Z", "2023-09-20T02:10:00+00:00", "2023-09-20T04:10:00+02:00"]) {
+      const result = await (await pressure(req({ ...pair, takenAt }))).json();
+      expect(result).toMatchObject({ state: "recorded", next: expect.any(String) });
+      expect(result).not.toHaveProperty("countsBy");
+    }
+    expect(mocks.submit.mock.calls.map(call => call[0].request)).toEqual(Array(3).fill({
+      actionId: id, schemaVersion: 1, requestedAt: "2023-09-20T02:10:00.000Z", action: {
+        kind: "measurement.blood-pressure", version: 1, systolic: 115, diastolic: 72, takenAt: "2023-09-20T02:10:00.000Z",
+      },
+    }));
+  });
+  it.each(["home", "clinic"])("accepts the reading that completes a %s series", async setting => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2033-05-13T22:00:00Z"));
+      const times = setting === "home" ? ["07:00", "07:03", "18:00", "18:03"] : ["11:30", "11:32"];
+      const dates = setting === "home" ? ["2033-05-11", "2033-05-12", "2033-05-13"] : ["2033-05-12", "2033-05-13"];
+      const rows: { metricKey: string; observedAt: string; date: string; value: number }[] = [];
+      mocks.load.mockResolvedValue({ state: "ready", freshness: "fresh", client: {
+        replica: { ...replica, meals: { timeZone: "UTC", days: [] } },
+        metrics: { list: ({ metricKey }: { metricKey: string }) => rows.filter(r => r.metricKey === metricKey) },
+      } });
+      for (const date of dates) for (const time of times) {
+        const takenAt = date + "T" + time + ":00Z";
+        const reading = await (await pressure(req({ ...pair, id: crypto.randomUUID(), takenAt, setting }))).json();
+        expect(reading.state).toBe(date === dates.at(-1) && time === times.at(-1) ? "accepted" : "recorded");
+        const action = mocks.submit.mock.lastCall![0].request.action;
+        expect(action.setting).toBe(setting);
+        for (const component of ["systolic", "diastolic"]) rows.push({
+          metricKey: component + "-blood-pressure", date, observedAt: action.takenAt, value: action[component],
+          ...{ context: { qualifiers: { setting, validated: setting === "home" } }, recordIds: [takenAt], unit: "mmHg", statistic: "value", sourceKind: "measurement" },
+        });
+      }
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([food, combine])("requires fresh data for the current check-in screen", async route => {
+    for (const result of [{ ...ready(replica), freshness: "stale" }, { state: "unpublished" }]) {
+      mocks.load.mockResolvedValueOnce(result);
+      expect((await route(req())).status).toBe(503);
+    }
   });
   it("blocks old projections and consent withdrawal during the load", async () => {
     mocks.load.mockResolvedValueOnce(ready({ ...replica, generation: 20 }));
@@ -78,6 +112,8 @@ describe("private check-in routes", () => {
     expect(preview).toMatchObject({ id, date, retestOn: "2023-10-31", rank: { percentile: expect.any(Number) } });
     const response = mocks.submit.mock.calls[0]![0].request.action.response;
     mocks.load.mockResolvedValueOnce(ready({ ...replica, entities: [{ family: "assessment", attributes: { checkIn: { id, date, response } } }] }));
+    expect((await session(req({ id, date, tests: [{ key: "pullups_max", skipped: true, value: 0 }], safety: { answer: "clear" } }))).status).toBe(400);
+    expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(await (await combine(req())).json()).toMatchObject({ latest: preview, nextAt: preview.retestOn });
   });
   it("includes the model effect on acceptance and on readback from the published session", async () => {
@@ -113,7 +149,8 @@ describe("private check-in routes", () => {
   it("accepts the food recall and a supported one-off answer, rejects unknown keys and an incomplete pair", async () => {
     const view = await (await food(req())).json();
     expect(view).toMatchObject({ state: "ready", daysLogged: 0 });
-    expect(view.questions).toHaveLength(14);
+    expect(view.questions).toHaveLength(15);
+    expect(view.questions.filter((q: { kind: string }) => q.kind === "drinks").map((q: { key: string }) => q.key)).toEqual(["alcohol", "max_occasion"]);
     expect(view.questions.every((q: { label: string }) => q.label.split(" ").length <= 4)).toBe(true);
     const stations = await (await combine(req())).json();
     expect(stations.minutes).toBeGreaterThan(0);

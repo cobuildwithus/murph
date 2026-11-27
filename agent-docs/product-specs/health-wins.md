@@ -418,6 +418,10 @@ its modeled effect immediately. A stopped Combine session returns 409 before sub
 Deploy generation 21 replica builders and runtime consumers with the flag off,
 then Web, the companion client and finally the allowlist.
 
+The private You view uses completed sleep nights and finalized draws. Blood and marker detail include qualifying imports from before signup. Reconstructed age history starts at signup or the first date with a complete contributing workout window, whichever is later. A dated pregnancy or postpartum answer pauses the estimate. A newer answer can end the pause. Postpartum answers expire after 180 days.
+
+A blood pressure check-in accepts an optional setting of `clinic` or `home`. A member-entered home cuff is assumed validated for this model. Clinic readings require pairs on two days. Home readings require morning and evening pairs at least six hours apart on three days and retain the round 3 bridge weight of 0.75. Each pair is one to five minutes apart. An incomplete series or unknown setting gets a `recorded` receipt with a short next step. A reading in a qualifying series gets an `accepted` receipt.
+
 The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
 The private You endpoints also require `MURPH_HEALTH_YOU_MEMBER_IDS`. An empty list disables them and `*` admits feed members. The endpoints return only the signed-in member’s views.
 

@@ -21,6 +21,7 @@ import {
   distance,
   fields,
   model,
+  lookup,
   offset,
   rowDay,
   type MemberEvidence,
@@ -93,7 +94,7 @@ export function projectYouInputs(
         ? client.metrics.list({ metricKey: key, from, to: asOf })
         : client.metrics.series({ metricKey: key, from, to: asOf, grain: "day" });
     for (const row of samples) {
-      recordMetric(metrics, minutes, row, key, from, asOf);
+      recordMetric(metrics, minutes, row, key, from, asOf, timeZone);
     }
   }
   readLabs(client.labResults.list({ from, to: asOf }), from, asOf, labRows, markers);
@@ -148,6 +149,8 @@ export function projectYouInputs(
       2,
     );
 
+  const historyFrom = [from, evidence.joined!].sort().at(-1)!;
+
   return {
     asOf,
     timeZone,
@@ -160,8 +163,18 @@ export function projectYouInputs(
     lifts,
     activeMinutes,
     sourceRevision: replica.source.dataVersion,
-    historyFrom: [from, evidence.joined!].sort().at(-1)!,
+    historyFrom,
+    ageHistoryFrom: workoutHistoryFrom(historyFrom, toLocalDayKey(replica.generatedAt, timeZone), asOf, workouts),
   };
+}
+
+function workoutHistoryFrom(from: string, publication: string, asOf: string, workouts: { type: string }[]) {
+  // Historical scores need the whole rolling window inside the retained source.
+  const kinds = new Set(workouts.map(w => lookup(model.policy.workout_types, w.type)));
+  const bounds = [from];
+  if (kinds.has("running")) bounds.push(offset(publication, -62 + model.policy.workout_days - 1));
+  if (kinds.has("lifting")) bounds.push(offset(asOf, -183 + model.policy.workout_days - 1));
+  return bounds.sort().at(-1)!;
 }
 
 function needsWhoopAnswer(evidence: MemberEvidence, asOf: string) {
@@ -194,6 +207,7 @@ export async function readYouInputs(
 
 function validMetric(row: BrowserVaultMetricRow, from: string, asOf: string) {
   if (
+    (row.metricKey === "total-sleep-minutes" && (row.context.sleepType === "short_sleep" || row.context.sleepState === "tentative")) ||
     !day(row.date) ||
     row.date < from ||
     row.date > asOf ||
@@ -240,6 +254,7 @@ function recordMetric(
   key: string,
   from: string,
   asOf: string,
+  timeZone: string,
 ) {
   const normalized = validMetric(row, from, asOf);
   if (!normalized || normalized.canonicalValue === null) return;
@@ -255,7 +270,9 @@ function recordMetric(
     minutes.set(date, values);
     return;
   }
+  const reported = typeof ctx.recordedAt === "string" ? Date.parse(ctx.recordedAt) : NaN;
   metrics.push({
+    ...(Number.isFinite(reported) && { reported_at: toLocalDayKey(reported, timeZone) }),
     date,
     key,
     value,
@@ -310,7 +327,7 @@ function readLabs(
 ) {
   for (const row of rows) {
     const def = resolveLabResultMetricDefinition(row.metricKey);
-    if (!def || !day(row.date) || row.date < from || row.date > asOf) continue;
+    if (row.parentResultStatus === "pending" || !def || !day(row.date) || row.date < from || row.date > asOf) continue;
     const marker = labAliases[def.key] ?? def.key.replaceAll("-", "_");
     const unit = normalizeUnit(row.normalizedUnit);
     const researchUnit = labs[marker]?.[1];
@@ -320,7 +337,6 @@ function readLabs(
       value: row.normalizedValue,
       unit: researchUnit && normalizeUnit(researchUnit) === unit ? researchUnit : unit,
       draw_id: row.drawId,
-      ...(row.parentResultStatus === "pending" ? { status: "pending" } : {}),
       comparator: row.comparator,
       source: "normalized-lab",
     });

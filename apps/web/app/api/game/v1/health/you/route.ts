@@ -4,5 +4,5 @@ import { readPrivateYou } from "@/src/lib/health-you/read";
 
 export const GET = withHealthRoute(async (request, auth) => {
   assertHealthYouEnabled(auth.member.id);
-  return Response.json(await readPrivateYou(auth, "you", request.signal));
+  return Response.json(await readPrivateYou(auth, "you", request.signal, undefined, request.headers));
 });

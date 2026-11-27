@@ -12,6 +12,7 @@ import {
   roundEven,
   type Observation,
   day,
+  effectiveAnswer,
   eligible,
   pick,
   distance,
@@ -110,7 +111,7 @@ export function comparableMovement(data: MemberEvidence, at: string, cutoff: str
 function canEvaluate(data: MemberEvidence, at: string, anchor: string) {
   const { whole } = ageAt(data, at, anchor),
     p = data.profile;
-  const states = (data.checkins ?? []).filter((r) => eligible(r, at));
+  const states = (data.checkins ?? []).filter((r) => eligible(r, at) && effectiveAnswer(r, at));
   const pregnancy = pick(states, "pregnant"),
     recovery = pick(states, "postpartum");
   const delivery = day(p.delivery_date);

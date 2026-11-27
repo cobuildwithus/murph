@@ -20,10 +20,10 @@ import { ASSESSMENT_LEDGER_DIRECTORY, ASSESSMENT_RESPONSE_SCHEMA_VERSION } from 
 
 type CheckInAction = Extract<MemberActionV1, { kind: "measurement.blood-pressure" | "assessment.respond" }>;
 
-function measurement(metric: string, value: number): MeasurementEntry {
+function measurement(metric: string, value: number, qualifiers?: MeasurementEntry["qualifiers"]): MeasurementEntry {
   const unit = resolveMetricDefinition(metric)?.canonicalUnit;
   if (!unit) throw new TypeError("Check-in metric needs a canonical unit.");
-  return { metric, value, unit };
+  return { metric, value, unit, ...(qualifiers && { qualifiers }) };
 }
 
 async function findResponse(vaultRoot: string, id: string) {
@@ -41,9 +41,10 @@ async function findResponse(vaultRoot: string, id: string) {
 function checkInEvidence(action: CheckInAction, receivedAt: string, zone: string) {
   if (action.kind === "measurement.blood-pressure") {
     const occurredAt = new Date(action.takenAt).toISOString();
+    const qualifiers = action.setting && { setting: action.setting, ...(action.setting === "home" && { validated: true }) };
     return {
       occurredAt, date: action.date ?? toLocalDayKey(occurredAt, zone),
-      measurements: [measurement("systolic-blood-pressure", action.systolic), measurement("diastolic-blood-pressure", action.diastolic)],
+      measurements: [measurement("systolic-blood-pressure", action.systolic, qualifiers), measurement("diastolic-blood-pressure", action.diastolic, qualifiers)],
     };
   }
   const response = action.response;

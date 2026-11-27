@@ -58,7 +58,7 @@ function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs,
   ];
   const group = factorGroup(k);
   const { value, unit } = displayValue(k, r);
-  const rank = factorRank(r, input, age);
+  const rank = factorRank(k, r, input, age);
   const target =
     r.target == null
       ? null
@@ -197,7 +197,7 @@ function bloodViews(input: YouInputs, factors: Factor[], notCounted: YouView["no
   const markers: Bundle["markers"] = {},
     groups = new Map<string, MarkerInput[]>();
   for (const row of input.markers)
-    if (row.date <= input.asOf && row.date >= input.historyFrom) {
+    if (row.date <= input.asOf && row.date >= offset(input.asOf, -364)) {
       const group = groups.get(row.key) ?? [];
       group.push(row);
       groups.set(row.key, group);
@@ -365,7 +365,7 @@ export function buildViews(input: YouInputs): Bundle {
   you.factors = factors;
   you.notCounted = current ? offerings(input, rows) : [];
   you.thisWeek = ownTargets(input);
-  if (you.state !== "paused") you.questions = nextQuestion(input, rows);
+  you.questions = nextQuestion(input, rows, false, you.state === "paused");
   let age: Bundle["age"] = null,
     week: Bundle["week"] = null;
   if (ready && current) {
@@ -376,6 +376,7 @@ export function buildViews(input: YouInputs): Bundle {
   if (current && supportedWeek(input, current)) week = weekView(input, current, you);
   return {
     you,
+    optionQuestions: you.questions.some(q => !q.options.length) ? nextQuestion(input, rows, true) : you.questions,
     age,
     week,
     ...bloodViews(input, factors, you.notCounted),
@@ -419,19 +420,21 @@ function displayValue(k: string, r: Contribution) {
   return { value, unit };
 }
 
-function factorRank(r: Contribution, input: YouInputs, age: number) {
-  const percentile = r.percentile;
-  if (percentile === null) return null;
-  // The model ranks the raw observation. A high exposure may carry a higher risk.
+// Only directional, age/sex-matched norms can support a favorable rank.
+export function favorableRank(key: string, raw: number | null) {
+  if (raw === null) return null;
+  const higher = ["steps", "hip_minutes", "activity", "grip", "vo2", "vo2_peak", "gait", "gait_speed", "knee", "fev1"];
+  const lower = ["non_hdl", "ldl_c", "lpa", "rdw", "acr"];
+  const percentile = higher.includes(key) ? raw : lower.includes(key) ? 100 - raw : null;
+  if (percentile === null || percentile < 40) return null;
+  return { percentile, label: percentile >= 60 ? `Top ${Math.max(1, 100 - percentile)}%` : "Average" };
+}
+
+function factorRank(key: string, r: Contribution, input: YouInputs, age: number) {
+  const rank = favorableRank(key, r.percentile);
+  if (!rank) return null;
   const sex = String(input.evidence.profile.sex).toLowerCase();
-  const last = percentile % 10;
-  const suffix =
-    percentile % 100 >= 11 && percentile % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][last] ?? "th");
-  return {
-    percentile,
-    label: percentile + suffix + " percentile" + (r.reference.includes("wear unknown") ? " (lower bound)" : ""),
-    cohort: (sex === "female" || sex === "f" ? "Women" : "Men") + " near age " + Math.floor(age),
-  };
+  return { ...rank, cohort: (sex === "female" || sex === "f" ? "Women" : "Men") + " near age " + Math.floor(age) };
 }
 
 function ageHistory(
@@ -443,12 +446,13 @@ function ageHistory(
   const history: NonNullable<Bundle["age"]>["history"] = [],
     weeks: NonNullable<Bundle["age"]>["weeks"] = [];
   const events: NonNullable<Bundle["age"]>["events"] = [];
+  const earliest = input.ageHistoryFrom ?? input.historyFrom;
   for (let i = 0; i <= 52; i++) {
     const date = offset(asOf, -7 * i);
-    if (date < input.historyFrom) break;
+    if (date < earliest) break;
     const past = i === 0 ? current : score(evidence, date);
     if (!past || withheld(input, date, past) || !Object.keys(past.parts).length) continue;
-    if (past.residual && offset(date, -7) >= input.historyFrom)
+    if (past.residual && offset(date, -7) >= earliest)
       events.push({
         date,
         kind: "evidenceChange",
@@ -456,7 +460,7 @@ function ageHistory(
         evidenceChangeYears: past.residual,
       });
     history.unshift({ date, age: past.value, real: past.real });
-    if (i < 12 && past.days !== null && offset(date, -7) >= input.historyFrom)
+    if (i < 12 && past.days !== null && offset(date, -7) >= earliest)
       weeks.unshift({
         weekStart: offset(date, -6),
         daysAged: past.days,

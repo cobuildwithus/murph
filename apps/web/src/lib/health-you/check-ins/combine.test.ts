@@ -24,8 +24,8 @@ describe("Combine published reference anchors", () => {
     expect(stationPercentile("broad_jump", 100, 65, "female")).toBeUndefined();
   });
   it("serves each research question once", () => {
-    expect(foodWeekQuestions).toHaveLength(14);
-    expect(new Set(foodWeekQuestions.map(row => row.key)).size).toBe(14);
-    expect(foodWeekQuestions.at(-1)?.text).toBe("Standard drinks this week? Most in one sitting?");
+    expect(foodWeekQuestions).toHaveLength(15);
+    expect(new Set(foodWeekQuestions.map(row => row.key)).size).toBe(15);
+    expect(foodWeekQuestions.filter(row => row.kind === "drinks").map(row => [row.key, row.max])).toEqual([["alcohol", 100], ["max_occasion", 30]]);
   });
 });

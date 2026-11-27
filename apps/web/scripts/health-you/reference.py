@@ -27,6 +27,7 @@ model.update(coef=age.M["fit"]["coef"], strength=age.M["fit"]["strength"],
              feeds=age.CONFIG, extra_context=age.EXTRA_CONTEXT, bridges=age.BRIDGES,
              completion=age.COMPLETION, display=age.FACTOR_TEXT, extra_ranks=age.EXTRA_RANKS,
              calibration=age.CAL, reference=age.TABLE)
+model["policy"]["protocol"]["member_entered_home_cuff_assumed_validated"] = True
 write(web / "src/lib/health-you/engine/model.json", model)
 cases = [row for path in sorted((study / "golden").glob("*.json")) for row in json.loads(path.read_text())]
 assert len({row["case"] for row in cases}) == len(cases) == 120

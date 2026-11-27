@@ -1201,7 +1201,7 @@ test("private core keeps selected sleep instants across DST and only projects re
         attributes: { startAt, endAt, timeZone, durationMinutes: 480, sleepType: "main_sleep",
           externalRef: { system: "oura", resourceType: "sleep", resourceId: "synthetic-night" } } }),
       createEntity("event", "synthetic-bp", { kind: "measurement", occurredAt: startAt, attributes: {
-        dayKey: "2028-11-04", source: "manual", measurements: [{ metric: "diastolic-blood-pressure", value: 71, unit: "mmHg" }],
+        dayKey: "2028-11-04", source: "manual", measurements: [{ metric: "diastolic-blood-pressure", value: 71, unit: "mmHg", qualifiers: { setting: "home", validated: true } }],
       } }),
       createEntity("assessment", "asmt_check", { attributes: { source: "manual", questionnaireSlug: "you-answer-v1", responses: checkIn } }),
       createEntity("assessment", "asmt_other", { attributes: { source: "manual", questionnaireSlug: "intake", responses: { other: 1 } } }),
@@ -1212,6 +1212,7 @@ test("private core keeps selected sleep instants across DST and only projects re
   assert.deepEqual(decoded.entities.find(row => row.id === "asmt_check")?.attributes.checkIn, checkIn);
   assert.equal(decoded.entities.find(row => row.id === "asmt_other")?.attributes.responses, undefined);
   assert.ok(decoded.metricRows.some(row => row.metricKey === "diastolic-blood-pressure" && row.date === "2028-11-04" && row.value === 71));
+  assert.deepEqual(decoded.metricRows.find(row => row.metricKey === "diastolic-blood-pressure")?.context.qualifiers, { setting: "home", validated: true });
   const { sleepTiming, ...legacy } = replica;
   assert.ok(sleepTiming);
   assert.equal(parseBrowserVaultReplica(legacy).sleepTiming, undefined);

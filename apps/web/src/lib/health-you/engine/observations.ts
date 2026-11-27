@@ -277,7 +277,7 @@ export function labValues(data: MemberEvidence, at: string) {
     const marker = String(r.marker),
       date = rowDay(r),
       age = distance(at, date);
-    if (!date || age < 0 || age > (marker === "lpa" ? 36500 : 365) || !released(r, at)) continue;
+    if (r.status === "pending" || !date || age < 0 || age > (marker === "lpa" ? 36500 : 365) || !released(r, at)) continue;
     if (!Object.hasOwn(labFields, marker) && !["hdl", "total_cholesterol", "ldl", "lpa"].includes(marker))
       continue;
     const [key, expected] = labFields[marker] ?? [marker, "mg/dL"];
@@ -297,7 +297,7 @@ export function labValues(data: MemberEvidence, at: string) {
   return Object.fromEntries([...labs].map(([k, rows]) => [k, last(rows)])) as Record<string, number | null>;
 }
 function bpReading(r: Observation) {
-  const source = r.setting === "office" ? "clinic" : r.setting === "home" ? "home" : r.source;
+  const source = r.setting === "office" || r.setting === "clinic" ? "clinic" : r.setting === "home" ? "home" : r.source;
   const s = number(r.systolic ?? r.sbp),
     d = number(r.diastolic ?? r.dbp),
     date = rowDay(r);
@@ -317,9 +317,11 @@ function bpReading(r: Observation) {
     return null;
   return { source, s, date, minute: Number(hm[1]) * 60 + Number(hm[2]) };
 }
-function bpValue(data: MemberEvidence, at: string) {
+export function bpValue(data: MemberEvidence, at: string, submitted?: Observation) {
+  const policy = model.policy.protocol;
+  const target = submitted && bpReading(submitted);
   const groups = new Map<string, Map<string, Map<number, number[]>>>();
-  for (const r of [...dated(data, "bp", at, 28), ...pressurePairs(data, at)]) {
+  for (const r of [...dated(data, "bp", at, policy.bp_days), ...pressurePairs(data, at)]) {
     const reading = bpReading(r);
     if (!reading) continue;
     const { source, s, date, minute } = reading;
@@ -337,14 +339,24 @@ function bpValue(data: MemberEvidence, at: string) {
       const pairs = minutes
         .slice(1)
         .flatMap((m, i) =>
-          m - minutes[i] <= 5 ? [{ m: minutes[i], v: (times.get(m)![0] + times.get(minutes[i])![0]) / 2 }] : [],
+          m - minutes[i] <= policy.bp_max_pair_gap
+            ? [{ start: minutes[i], end: m, value: (times.get(m)![0] + times.get(minutes[i])![0]) / 2 }] : [],
         );
-      if (pairs.length && (source === "clinic" || pairs.at(-1)!.m - pairs[0].m >= 360))
-        complete.push({ date, v: pairs.reduce((s, p) => s + p.v, 0) / pairs.length });
+      if (!pairs.length || (source === "home" && pairs.at(-1)!.start - pairs[0].start < policy.bp_session_gap)) continue;
+      complete.push({
+        date,
+        value: pairs.reduce((sum, pair) => sum + pair.value, 0) / pairs.length,
+        includesSubmitted: target?.source === source && target.date === date &&
+          pairs.some(pair => pair.start === target.minute || pair.end === target.minute),
+      });
     }
-    if (complete.length >= (source === "clinic" ? 2 : 3)) {
-      const last = complete.slice(-7);
-      options.push({ date: last.at(-1)!.date, source, value: last.reduce((s, p) => s + p.v, 0) / last.length });
+    if (complete.length >= (source === "clinic" ? policy.clinic_days : policy.home_days)) {
+      const last = complete.slice(-policy.bp_last_days);
+      options.push({
+        date: last.at(-1)!.date, source,
+        includesSubmitted: last.some(day => day.includesSubmitted),
+        value: last.reduce((sum, day) => sum + day.value, 0) / last.length,
+      });
     }
   }
   return options.sort((a, b) => a.date.localeCompare(b.date) || a.source.localeCompare(b.source)).at(-1);
@@ -487,7 +499,7 @@ export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex
   for (const [k, v] of Object.entries(labs)) add(k, v);
   bodyFactors(data, at, add);
   const bp = bpValue(data, at);
-  if (bp) add("sbp", bp.value, bp.source === "home" ? 0.75 : 1);
+  if (bp) add("sbp", bp.value, bp.source === "home" ? model.policy.protocol.home_quality : 1);
   smokingFactor(ci, history, at, add, result);
   for (const [k, field] of Object.entries({
     disease: "serious_disease",

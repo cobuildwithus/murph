@@ -1,7 +1,7 @@
 import { oneOffAnswerSchema, toLocalDayKey, type CheckInInstrument } from "@murphai/contracts";
 import type { BrowserVaultEntity, BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import { isRecord } from "../primitives";
-import { day, lookup, type Observation } from "./engine/model";
+import { day, lookup, offset, model, type Observation } from "./engine/model";
 import type { YouInputs } from "./evidence";
 import { withheld } from "./views";
 import { score } from "./engine";
@@ -32,6 +32,7 @@ type Answer = Extract<CheckInInstrument, { instrument: "you-answer" }>["answer"]
 
 function modelAnswer(answer: Answer): Observation {
   switch (answer.key) {
+    case "ageEligibility": return { pregnant: answer.value === "pregnant", postpartum: answer.value === "postpartum" };
     case "whoopZones": return { whoop_standard_zones: answer.value };
     case "smoking": return { smoking: answer.value };
     case "quitDate": return { quit_date: answer.value };
@@ -82,7 +83,10 @@ export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf:
   answers.sort((a, b) => b.instant - a.instant || b.id.localeCompare(a.id));
   const latest = new Map<Answer["key"], string>();
   for (const { answer, date } of answers) {
-    const until = latest.get(answer.key);
+    const replacement = latest.get(answer.key);
+    const expiry = answer.key === "ageEligibility" && answer.value === "postpartum"
+      ? offset(date, model.policy.protocol.postpartum_days + 1) : undefined;
+    const until = replacement && expiry ? (replacement < expiry ? replacement : expiry) : replacement ?? expiry;
     checkins.push({ date, reported_at: date, superseded_on: until, answerKey: answer.key,
       source: "member-assessment", ...modelAnswer(answer) });
     latest.set(answer.key, date);
@@ -141,6 +145,19 @@ function pressureIdentity(r: BrowserVaultMetricRow) {
       ? "relay"
       : null;
 }
+export function localPressureTime(stamp: Date, timeZone: string) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+    .format(stamp)
+    .replace(" ", "T");
+}
 /** A daily rollup cannot establish simultaneous readings. Use the canonical action pair identity and local time. */
 export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string): Observation[] {
   const pairs = new Map<
@@ -170,17 +187,7 @@ export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string):
       continue;
     const stamp = new Date(r.observedAt);
     if (!Number.isFinite(stamp.valueOf())) continue;
-    const local = new Intl.DateTimeFormat("sv-SE", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    })
-      .format(stamp)
-      .replace(" ", "T");
+    const local = localPressureTime(stamp, timeZone);
     if (day(local) !== r.date) continue;
     const method = pressureMethod(r);
     const k = JSON.stringify([id, r.observedAt, r.date, method]);
