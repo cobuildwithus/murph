@@ -39,6 +39,17 @@ describe("lab draws", () => {
     }
   });
 
+  it("13. reads the usual value at the precision the lab reports", () => {
+    const options = { analyte: "triglycerides" as const, fasting: true };
+    expect(cards([draw(141, 1, options), draw(120, 2, options), draw(92, 3, options)])).toMatchObject([{
+      title: { number: "−39 mg/dL" }, chart: { baseline: { value: 131, draws: 2 }, latest: { value: 92 } },
+    }]);
+    const a1c = { analyte: "a1c" as const, unit: "%" };
+    expect(cards([draw(5.9, 1, a1c), draw(5.6, 2, a1c), draw(5.4, 3, a1c)])).toMatchObject([{
+      title: { number: "−0.4 points" }, chart: { baseline: { value: 5.8 } },
+    }]);
+  });
+
   it("13. audit 10 compares all eligible fasting draws to their median", () => {
     const options = { analyte: "triglycerides" as const, fasting: true };
     const labs = [draw(208, 1, options), draw(98, 2, options), draw(102, 3, options), draw(95, 8, options)];

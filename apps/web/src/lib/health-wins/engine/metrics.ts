@@ -39,7 +39,7 @@ const metrics: Record<Metric, MetricInfo> = {
     min: 30, max: 120, physiological: true, priority: sleepDevices,
   },
   hrv_ms: {
-    label: "heart rate variability", unit: "ms", filter: "Heart", direction: 1, trendStep: 3, record: true,
+    label: "heart rate variability", unit: "ms", filter: "Heart", direction: 1, trendStep: 5, record: true,
     min: 5, max: 250, physiological: true, priority: sleepDevices,
   },
   steps: {
