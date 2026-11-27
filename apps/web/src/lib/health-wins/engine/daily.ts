@@ -1,7 +1,7 @@
 import { dailyAchievements, type DailyAchievementCharts } from "./daily-achievements";
 import { displayedTrendDelta } from "./daily-distance";
 import { formatMetricValue, metricInfo, roundMetricValue } from "./metrics";
-import { compareMonthlyValues, formatHealthWinDistance, formatWinMonth, mad, mean, median, milesFromKm, monthIndex } from "./shared";
+import { compareMonthlyValues, formatHealthWinDistance, formatWinMonth, formatWinMonthPeriod, mad, mean, median, milesFromKm, monthIndex } from "./shared";
 import type { Candidate, DailySample, Metric } from "./types";
 
 interface MonthlyPoint {
@@ -103,16 +103,18 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     const period = thisYear.length >= 6 ? "this year" : "in the past 12 months";
     const previous = comparisonMonths.slice(0, -1).map(month => month.value);
     const previousBest = direction === 1 ? Math.max(...previous) : Math.min(...previous);
-    const comparison = compareMonthlyValues(current.value, previousBest) * direction;
+    // Compare what the title and bars show: a month that reads the same as another is no best month.
+    const shown = (value: number) => roundMetricValue(metric, value);
+    const comparison = compareMonthlyValues(shown(current.value), shown(previousBest)) * direction;
     const effect = (current.value - median(previous)) * direction;
-    if (comparison >= 0 && previous.some(value => compareMonthlyValues(current.value, value) !== 0)) {
+    if (comparison >= 0 && previous.some(value => compareMonthlyValues(shown(current.value), shown(value)) !== 0)) {
       candidates.push({
         date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
         achievement: { kind: "best_month", subject: metric, period: currentMonth },
         card: {
           id: `best_month:${metric}:${currentMonth}`, kind: "best_month", filter,
           title: { number: formatMetricValue(metric, current.value, "title"), measure: label },
-          subtitle: `${formatWinMonth(today)}, ${comparison === 0 ? "tied for " : ""}best month ${period}`,
+          subtitle: `${formatWinMonthPeriod(currentMonth, today)}, ${comparison === 0 ? "tied for " : ""}best month ${period}`,
           source_note: `${current.days} tracked days this month so far. Compared across ${comparisonMonths.length} qualifying monthly averages.`,
           chart: { type: "monthly_bars", unit, series: comparisonMonths, highlight: currentMonth },
         },
@@ -163,7 +165,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       card: {
         id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness", measure: "distance_km",
         title: { number: formatHealthWinDistance(best.value, "whole"), measure: "miles on foot" },
-        subtitle: `in ${formatWinMonth(best.month)}, ${comparison === 0 ? "tied for " : ""}most this year`,
+        subtitle: `in ${formatWinMonthPeriod(best.month, today)}, ${comparison === 0 ? "tied for " : ""}most this year`,
         source_note: `Walking and running distance across ${best.days} tracked days. Compared with every recorded monthly total this year.`,
         chart: { type: "monthly_bars", unit: "miles", series: totals, highlight: best.month },
       },

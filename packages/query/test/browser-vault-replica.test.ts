@@ -1027,6 +1027,8 @@ function createMetricPoint(input: {
 
 function resolveRecordClass(family: BrowserVaultEntity["family"]): BrowserVaultEntity["recordClass"] {
   switch (family) {
+    case "assessment":
+      return "snapshot";
     case "event":
       return "ledger";
     case "experiment":
@@ -1185,4 +1187,33 @@ test("current height selects the latest eligible local date", async () => {
     vault: createVaultReadModel({ vaultRoot: "browser://fixture", metadata: { timezone: "America/Denver" }, entities: [] }),
   });
   assert.equal(replica.metricSelectionRows.find(row => row.metricKey === "body-height")?.effectiveDate, "2026-04-20");
+});
+
+test("private core keeps selected sleep instants across DST and only projects recognized check-ins", async () => {
+  const checkIn = { id: "ea06613a-a58a-446d-8233-db34a9738ed3", date: "2028-11-04",
+    response: { instrument: "you-answer", instrumentVersion: 1, answer: { key: "whoopZones", value: "notSure" } } };
+  const startAt = "2028-11-05T04:00:00.000Z", endAt = "2028-11-05T12:00:00.000Z";
+  const timeZone = "America/New_York";
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2028-11-06T00:00:00.000Z", sourceBundleHash: "c".repeat(64),
+    vault: createVaultReadModel({ vaultRoot: "browser://synthetic", metadata: { timezone: timeZone }, entities: [
+      createEntity("event", "synthetic-sleep", { kind: "sleep_session", occurredAt: startAt, date: "2028-11-05",
+        attributes: { startAt, endAt, timeZone, durationMinutes: 480, sleepType: "main_sleep",
+          externalRef: { system: "oura", resourceType: "sleep", resourceId: "synthetic-night" } } }),
+      createEntity("event", "synthetic-bp", { kind: "measurement", occurredAt: startAt, attributes: {
+        dayKey: "2028-11-04", source: "manual", measurements: [{ metric: "diastolic-blood-pressure", value: 71, unit: "mmHg", qualifiers: { setting: "home", validated: true } }],
+      } }),
+      createEntity("assessment", "asmt_check", { attributes: { source: "manual", questionnaireSlug: "you-answer-v1", responses: checkIn } }),
+      createEntity("assessment", "asmt_other", { attributes: { source: "manual", questionnaireSlug: "intake", responses: { other: 1 } } }),
+    ] }),
+  });
+  const decoded = parseBrowserVaultReplica(replica);
+  assert.deepEqual(decoded.sleepTiming, [{ date: "2028-11-05", startAt, endAt, timeZone }]);
+  assert.deepEqual(decoded.entities.find(row => row.id === "asmt_check")?.attributes.checkIn, checkIn);
+  assert.equal(decoded.entities.find(row => row.id === "asmt_other")?.attributes.responses, undefined);
+  assert.ok(decoded.metricRows.some(row => row.metricKey === "diastolic-blood-pressure" && row.date === "2028-11-04" && row.value === 71));
+  assert.deepEqual(decoded.metricRows.find(row => row.metricKey === "diastolic-blood-pressure")?.context.qualifiers, { setting: "home", validated: true });
+  const { sleepTiming, ...legacy } = replica;
+  assert.ok(sleepTiming);
+  assert.equal(parseBrowserVaultReplica(legacy).sleepTiming, undefined);
 });

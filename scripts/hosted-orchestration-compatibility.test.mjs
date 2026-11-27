@@ -254,6 +254,13 @@ test("classifier leaves unrelated documentation neutral", () => {
   assert.equal(isTemporalCompatibilityRelevantPath("apps/desktop/README.md"), false);
 });
 
+test("classifier leaves the bot-published provider directory data neutral", () => {
+  assert.equal(isTemporalCompatibilityRelevantPath("apps/web/src/lib/clinical-records/provider-directory.v2.json"), false);
+  // Only that exact data file: its readers and siblings stay relevant.
+  assert.equal(isTemporalCompatibilityRelevantPath("apps/web/src/lib/clinical-records/provider-directory-store.ts"), true);
+  assert.equal(isTemporalCompatibilityRelevantPath("apps/web/src/lib/clinical-records/provider-directory.v3.json"), true);
+});
+
 test("public deployment ref inspection binds the exact configured branch", () => {
   assert.equal(inspectPublicBranchRef(publicMainRef(), "main"), PUBLIC_SHA);
   assert.throws(

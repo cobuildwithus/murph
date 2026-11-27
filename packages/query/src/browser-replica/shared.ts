@@ -275,6 +275,7 @@ export interface BrowserVaultReplica {
   /** Absent on replicas built before run days shipped: unknown, never zero. */
   runs?: CompanionRunsProjection;
   /** Completed sessions after reconciling mirrored workout sources. Absent in older replicas. */
+  sleepTiming?: { date: string; startAt: string; endAt: string; timeZone: string }[];
   activitySessions?: ProjectedActivitySession[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
@@ -302,6 +303,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "sleepTiming"
   | "activitySessions"
   | "runs"
   | "schema"

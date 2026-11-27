@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   healthFeedAuthors, healthRecordCapability, healthWinTextMemberIds, isHealthDietEnabled, isHealthFeedEnabled,
-  isHealthPayoffEnabled, isHealthWinTextEnabled,
+  isHealthYouEnabled, isHealthPayoffEnabled, isHealthWinTextEnabled,
 } from "./flag";
 
 const on = { MURPH_GAME_ENABLED: "true" };
@@ -34,6 +34,7 @@ describe("health allowlists", () => {
   });
 
   it.each([
+    ["MURPH_HEALTH_YOU_MEMBER_IDS", isHealthYouEnabled],
     ["MURPH_HEALTH_DIET_MEMBER_IDS", isHealthDietEnabled],
     ["MURPH_HEALTH_PAYOFF_MEMBER_IDS", isHealthPayoffEnabled],
     ["MURPH_HEALTH_WIN_TEXT_MEMBER_IDS", isHealthWinTextEnabled],

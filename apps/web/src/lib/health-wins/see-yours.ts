@@ -13,6 +13,7 @@ import { chooseSeeYours, seeYoursCard } from "./engine/see-yours";
 import { labUnitKey } from "./engine/shared";
 import type { CardSpec, Measure } from "./engine/types";
 import { readMeasureInputs } from "./inputs";
+import { postedCardKeys } from "./posted-card-keys";
 import { assertVisibleFrozenCardCurrent, readVisibleFrozenCard } from "./read";
 import { localToday } from "./wins";
 
@@ -27,6 +28,17 @@ function friendMarker(frozen: FrozenHealthCard["spec"], viewerCard: CardSpec) {
   if (labUnitKey(friend.unit) !== labUnitKey(own.unit)) return null;
   if (viewerCard.measure === "rhr_bpm" && (!own.referenceKey || friend.referenceKey !== own.referenceKey)) return null;
   return { value: friend.value, unit: friend.unit };
+}
+
+/** The viewer already has a live post carrying this card: See yours shows it, but doesn't offer it again. */
+async function alreadyShared(viewer: string, cardId: string): Promise<boolean> {
+  const key = postedCardKeys(viewer, [cardId]).get(cardId);
+  if (!key) return false;
+  const rows = await getPrisma().$queryRaw<{ found: number }[]>`
+    SELECT 1 AS found FROM health_post
+    WHERE author_member_id = ${viewer} AND deleted_at IS NULL AND ${key} = ANY(posted_card_keys)
+    LIMIT 1`;
+  return rows.length > 0;
 }
 
 // Once the frozen card is admitted, loss of viewer authority makes it unavailable just like a lost audience grant.
@@ -52,9 +64,10 @@ export async function readSeeYours(
   const { input, observed } = await readViewerMeasure(auth, key, signal).catch(concealRevokedRead);
   const result = chooseSeeYours(input, key, spec.kind, observed);
   const measure = { key, ...measures[key] };
+  const card = "card" in result ? previewRecordedCandidate(prepareSeeYoursCandidate(viewer, result.card, units)) : null;
+  const shared = card ? await alreadyShared(viewer, card.id) : false;
   const response = "card" in result ? {
-    measure, card: previewRecordedCandidate(prepareSeeYoursCandidate(viewer, result.card, units)),
-    reason: null, friend: friendMarker(spec, result.card),
+    measure, card, reason: null, friend: friendMarker(spec, result.card), shared,
   } : { measure, card: null, reason: result.reason, friend: null };
   await assertVisibleFrozenCardCurrent(auth, postId, version).catch(concealRevokedRead);
   return response;

@@ -13,6 +13,10 @@ import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
 import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/recap-show";
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
+import { assertHealthYouEnabled, isHealthYouEnabled } from "../health-wins/flag";
+import { activeHostedPersonAccessSql } from "../hosted-onboarding/member-access-projections";
+import { hostedLaunchConsentGrantedSql } from "../legal/consent";
+import { visibleHealthPersonSql } from "../health-wins/audience";
 import { after } from "next/server";
 import { GAME_GRACE_MS } from "./time";
 import { departedLabels, fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } from "./row";
@@ -644,9 +648,12 @@ function respondToInvite(context: CommandContext, command: Extract<GameCommand, 
 
 /** Every media key a command names must be the actor's own finished upload. */
 async function requireUploadedMedia(actor: string, command: GameCommand): Promise<void> {
+  if (command.type === "setProfile" && (command.coverPhotoKey || command.coverArt || command.cover === null)) {
+    assertHealthYouEnabled(actor);
+  }
   const labelPhoto = command.type === "setProfile" || command.type === "setPlayerPhoto" ? command.photoKey
     : command.type === "createGame" ? command.inviteeLabel?.photoKey : null;
-  const keys = command.type === "post" ? command.mediaKeys : [labelPhoto, ...(command.type === "createGame" ? command.invitees?.map(target => target.label?.photoKey) ?? [] : [])].filter((key): key is string => Boolean(key));
+  const keys = command.type === "post" ? command.mediaKeys : [labelPhoto, command.type === "setProfile" && command.coverPhotoKey, ...(command.type === "createGame" ? command.invitees?.map(target => target.label?.photoKey) ?? [] : [])].filter((key): key is string => Boolean(key));
   if (keys.length === 0) return;
   const prefix = mediaKeyPrefixFor(actor);
   if (!keys.every((key) => key.startsWith(prefix))) reject("MEDIA_MISSING", "Upload the media before posting it.");
@@ -663,7 +670,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "photo_swapped" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -744,6 +751,12 @@ function gameTarget(game: Pick<Game, "id" | "wordsOwnerMemberId">, field: string
   return { field, memberId: game.wordsOwnerMemberId, rowId: game.id, table: "game" };
 }
 
+function profileCoverUpdate(command: Extract<GameCommand, { type: "setProfile" }>) {
+  if (command.coverPhotoKey) return { coverKind: "photo", coverPhotoKey: command.coverPhotoKey, coverArt: null };
+  if (command.coverArt) return { coverKind: "art", coverPhotoKey: null, coverArt: command.coverArt };
+  return command.cover === null ? { coverKind: "none", coverPhotoKey: null, coverArt: null } : {};
+}
+
 async function setProfile(context: CommandContext, command: Extract<GameCommand, { type: "setProfile" }>): Promise<{ profile?: GameProfileView; joined?: boolean }> {
   const { actor } = context;
   const target: GameSealTarget = { field: "first_name", memberId: actor, rowId: actor, table: "game_profile" };
@@ -752,6 +765,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     ...(firstNameEncrypted === undefined ? {} : { firstNameEncrypted }),
     ...(command.timeZone === undefined ? {} : { timeZone: command.timeZone }),
     ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
+    ...profileCoverUpdate(command),
     ...(command.notForMe === undefined ? {} : { notForMe: command.notForMe }),
   };
   const prisma = getPrisma();
@@ -761,6 +775,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   // Partial updates never read then rewrite unrelated fields. RETURNING also
   // makes the response describe this write, not a later concurrent update.
   const { profile, membership } = await commandTransaction(context, async tx => {
+    if (data.coverKind) await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
     const profile = !hasProfileFields ? undefined : firstNameEncrypted !== undefined && command.timeZone !== undefined
       ? await tx.gameProfile.upsert({
         create: { ...data, firstNameEncrypted, memberId: actor, timeZone: command.timeZone },
@@ -1597,6 +1612,39 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   });
   sendGamePostNotificationAfterResponse(notification);
   return gameId;
+}
+
+/**
+ * Murph fixes a photo it saved from chat by swapping the upload on that same
+ * entry: same day and attempt, so the player keeps their retake. Replies to the
+ * old photo go with it, and nobody else can read the old upload.
+ */
+export async function swapGameChatPhoto(input: {
+  actorMemberId: string; multiplayer?: boolean; chatContainerMemberId: string; chatPlayerMemberIds: readonly string[];
+  gameId: string; entryId: string; dayIndex: number; mediaKey: string;
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
+}): Promise<GameCommandResult> {
+  const actor = input.actorMemberId;
+  try {
+    await requireUploadedMedia(actor, { type: "post", gameId: input.gameId, entryId: input.entryId, kind: "photo", mediaKeys: [input.mediaKey] });
+    // The same chat authority as a chat post (runGameCommand).
+    const chatAudience = input.multiplayer ? await readGameChatAudience(input.chatContainerMemberId) : undefined;
+    const context = { actor, chatAudience, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx };
+    await runLocked(input.gameId, context, async ({ loaded, now, tx }) => {
+      const player = playerFor(loaded.state, actor);
+      const live = loaded.state.game.status === "live" && player && !player.leftAt && !isGameDecided(loaded.state, now);
+      const entry = live && dayIndexAt(player, now) === input.dayIndex ? liveEntry(loaded.state.entries, actor, input.dayIndex) : null;
+      if (entry?.id !== input.entryId || entry.kind !== "photo") reject("INVALID_REQUEST", "The current check-in changed. Read the game before confirming a replacement.");
+      if (entry.mediaKeys.length === 1 && entry.mediaKeys[0] === input.mediaKey) return [];
+      await deleteEntryReplyTx(tx, entry.id);
+      await tx.gameEntry.update({ where: { id: entry.id }, data: { mediaKeys: [input.mediaKey], blurHash: null } });
+      return [{ payload: { dayIndex: input.dayIndex, entryId: entry.id }, type: "photo_swapped" }];
+    });
+    return { game: null, ok: true };
+  } catch (error) {
+    if (error instanceof GameRuleError) return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
+    throw error;
+  }
 }
 
 /** The ordinary entry masks plus the reply-only, cross-game report mask. No content reads. */
@@ -3924,7 +3972,12 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
     ) AND (
       EXISTS (
         SELECT 1 FROM game_profile profile
-        WHERE profile.member_id = requested.owner AND profile.photo_key = requested.key
+        WHERE profile.member_id = requested.owner AND (profile.photo_key = requested.key
+          ${isHealthYouEnabled(memberId) ? Prisma.sql`OR (profile.cover_kind = 'photo' AND profile.cover_photo_key = requested.key
+            AND EXISTS (SELECT 1 FROM hosted_member cover_viewer WHERE cover_viewer.id = ${memberId}
+              AND ${activeHostedPersonAccessSql(Prisma.sql`cover_viewer`)})
+            AND ${hostedLaunchConsentGrantedSql(Prisma.sql`${memberId}::text`)}
+            AND ${visibleHealthPersonSql(memberId, Prisma.sql`profile.member_id`)})` : Prisma.empty})
           AND NOT EXISTS (SELECT 1 FROM game_report report
             WHERE report.reporter_member_id = ${memberId} AND report.about = 'player'
               AND report.reported_member_id = requested.owner)

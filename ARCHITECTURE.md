@@ -6763,6 +6763,13 @@ Web owns suggestions, posts, comments, cheers, hides and photo attachments under
 routes. Disabled routes return 404. Reading private suggestions also requires
 Browser Vault authority.
 
+Private You check-ins use the member-action mailbox. Paired pressures share
+one measurement event. Each Combine submission commits one assessment and
+its numeric measurements in a single vault batch. Food recall and one-off
+answers use the same versioned assessment path. The core replica carries the
+allowed assessment responses and dated main-sleep windows. Existing metric
+buckets carry the measurements. Check-ins create no hosted control table.
+
 ### Audience and disclosure
 
 A post is visible to its author and current game partners. Health and Progress
@@ -6947,6 +6954,11 @@ database transactions.
 | `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. A private reply has poster visibility and an immutable `recipient_member_id`. Recipient account deletion cascades the reply. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
+| `health_you_cache` | `views_encrypted` contains the member’s derived private age and detail views, sealed to owner and revision | One disposable row per member. The dependency digest covers the published replica, data version, local day, time zone and scorer/schema version. A conditional write guards concurrent replacements. Live game and profile reads happen separately. |
+| `game_profile` cover | Member-owned media key references the existing game media store | Cover kind and built-in art key are presentation choices. The active cover photo requires current profile audience. |
+| `health_profile_pin` | `spec_encrypted` contains the frozen, dated card or live selector, authenticated to owner and source key | Member, position, source kind, opaque source key and selection timestamp. Three positions per owner. |
+| `health_working_on` | Daily readings stay in the private replica or the exact board projection | Member-keyed factor lookup, selection day and position. A retained selection keeps its start day when reordered. |
+| `health_working_on_cheer` | No health values | Cheering member, selection owner and keyed factor reference. Either account deletion or selection removal cascades. |
 | `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
 | `health_win_nudge` | None | `member_id` owns the row. `seen_keys` holds lifetime member-bound keyed digests under a separate purpose from link references. `seen_version` identifies the keyring and achievement identity versions. `baseline_at` marks the first complete nonempty observation, `last_presented_at` fences pending delivery and `last_evaluated_day` claims a local day once. An incompatible version disables sending pending explicit handling. Account deletion cascades this operational state. |
 | `health_post_attachment` | `storage_key_encrypted` identifies the reserved Progress object. Its sealed JPEG bytes live in the object store. | `id` identifies the attachment, `member_id` owns it, nullable `post_id` binds it to a post, `status` tracks its lifecycle and `created_at` records admission. |

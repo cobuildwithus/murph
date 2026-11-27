@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 100,
+  "item": {
+    "id": "game-chat-photo-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Send your check-in photo in the group text",
+    "summary": "In a game's iMessage chat, a photo you send with \"done\", or right after Murph asks for it, now posts as that day's check-in without a follow-up question.",
+    "details": "If Murph posts the wrong photo, tell it which one to use and it swaps the picture on that same post, so you keep your retake in the app. Replacing a post you made in the app still uses your retake, and Murph asks first.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5432]
+  }
+}

@@ -745,6 +745,9 @@ model HostedMember {
   progressShares                 GameProgressShare[]
   progressSharePhotos            GameProgressSharePhoto[]
   areaArtBudget                  GameAreaArtMemberBudget?
+  healthProfilePins              HealthProfilePin[]
+  healthWorkingOn                HealthWorkingOn[]
+  healthWorkingOnCheers          HealthWorkingOnCheer[]
   healthActivities               HealthActivity[]
   healthPosts                    HealthPost[]
   healthPostComments             HealthPostComment[]             @relation("HealthCommentAuthor")
@@ -753,6 +756,7 @@ model HostedMember {
   healthPostAttachments          HealthPostAttachment[]
   healthFeedHides                HealthFeedHide[]                @relation("HealthHideOwner")
   healthFeedHiddenBy             HealthFeedHide[]                @relation("HealthHideSubject")
+  healthYouCache                 HealthYouCache?
   healthWinSets                  HealthWinSet[]
   healthWinNudge                 HealthWinNudge?
   progressTaskMeasures           GameProgressTaskMeasure[]
@@ -2894,6 +2898,9 @@ model GameProfile {
   chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
   chatPhotoOffer Json? @map("chat_photo_offer")
   photoKey           String?            @map("photo_key")
+  coverKind          String             @default("none") @map("cover_kind")
+  coverPhotoKey      String?            @map("cover_photo_key")
+  coverArt           String?            @map("cover_art")
   /// Opt-in to the Everyone exercise board; leaving clears it, rejoining starts again.
   everyoneJoinedAt   DateTime?          @map("everyone_joined_at") @db.Timestamptz(6)
   memberId           String             @id @map("member_id")
@@ -3356,6 +3363,45 @@ model HealthActivityKindDecision {
   @@map("health_activity_kind_decision")
 }
 
+model HealthProfilePin {
+  memberId      String @map("member_id")
+  position      Int
+  sourceKind    String @map("source_kind")
+  sourceKey     String @map("source_key")
+  specEncrypted String @map("spec_encrypted")
+  refreshedAt   DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(3)
+  member        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, sourceKey])
+  @@unique([memberId, position])
+  @@map("health_profile_pin")
+}
+
+model HealthWorkingOn {
+  memberId String @map("member_id")
+  factor   String
+  since    String
+  position Int
+  member   HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  cheers   HealthWorkingOnCheer[]
+
+  @@id([memberId, factor])
+  @@unique([memberId, position])
+  @@map("health_working_on")
+}
+
+model HealthWorkingOnCheer {
+  memberId String @map("member_id")
+  ownerId  String @map("owner_id")
+  factor   String
+  member   HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  item     HealthWorkingOn @relation(fields: [ownerId, factor], references: [memberId, factor], onDelete: Cascade)
+
+  @@id([memberId, ownerId, factor])
+  @@index([ownerId, factor])
+  @@map("health_working_on_cheer")
+}
+
 model HealthPostCheer {
   postId    String       @map("post_id") @db.Uuid
   memberId  String       @map("member_id")
@@ -3398,6 +3444,16 @@ model HealthFeedHide {
   @@id([memberId, hiddenMemberId])
   @@index([hiddenMemberId, memberId])
   @@map("health_feed_hide")
+}
+
+model HealthYouCache {
+  memberId       String       @id @map("member_id")
+  revision       String       @db.Uuid
+  dependency     String
+  viewsEncrypted String       @map("views_encrypted")
+  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("health_you_cache")
 }
 
 model HealthWinSet {

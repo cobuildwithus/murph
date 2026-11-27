@@ -1,11 +1,12 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema, normalizeIanaTimeZone, toLocalDayKey } from "@murphai/contracts";
+import { projectedCheckInSchema, memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema, normalizeIanaTimeZone, toLocalDayKey } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { buildCompanionMealsProjection } from "./meals.ts";
 import { projectActivitySessions } from "./activity-sessions.ts";
 import { buildCompanionRunsProjection } from "./runs.ts";
+import { projectSleepTiming } from "./sleep-timing.ts";
 import { collectWearableDataset } from "../wearables/candidates.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -132,6 +133,7 @@ export async function createBrowserVaultReplica(
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
     ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
+    sleepTiming: projectSleepTiming(wearableDataset.sleepWindows, cutoff, today, zone),
     activitySessions: projectActivitySessions(defaultProjectedVault, wearableDataset, today),
     runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, today),
     hasLabBiomarkers: metricRows.some((row) =>
@@ -472,6 +474,13 @@ function projectEntityAttributes(
     return projectSafeEventAttributes(entity, generatedAt);
   }
 
+  if (entity.family === "assessment") {
+    const checkIn = projectedCheckInSchema.safeParse(entity.attributes.responses);
+    if (checkIn.success && entity.attributes.source === "manual"
+        && entity.attributes.questionnaireSlug === `${checkIn.data.response.instrument}-v1`) {
+      return { checkIn: checkIn.data };
+    }
+  }
   return projectSafeAttributes(entity);
 }
 

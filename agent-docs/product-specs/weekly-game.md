@@ -1707,8 +1707,10 @@ blank dates are simply not posted, with the total target reported separately.
 Shared reads settle due games through the same locked path as app reads and
 return the frozen scores and owed tickets.
 
-In iMessage, a player can explicitly ask Murph to use one received JPEG or HEIC
-photo as their current-day check-in. This deliberately extends the app's
+In iMessage, Murph posts one received JPEG or HEIC photo as a player's
+current-day check-in whenever the player means it as one: they say they did the
+task or want it posted, it answers Murph's ask for the photo, it shows them
+doing the task, or they ask Murph to save it. This deliberately extends the app's
 live-camera honor rule to user-submitted chat photos. It does not verify the
 activity, read camera capture time, backdate a post or satisfy a heart-rate
 challenge. The server resolves both the current requester and original photo
@@ -1716,10 +1718,13 @@ sender. Only their own photo in the same room and current game day qualifies.
 An offer remembers the accepted attachment identity without fetching it. Only
 a consented save refreshes its temporary provider download URL and imports bytes.
 The usual two attempts, replacement, scoring and post notifications still apply.
-An existing post needs explicit replacement consent before consuming the retake.
+An existing app post needs explicit replacement consent before consuming the
+retake. A photo Murph saved from chat can be fixed: the player asks for a
+different one of today's photos and Murph swaps the upload on that same post,
+so the player keeps their retake. Replies to the old photo are removed with it.
 
-When a clear contextual photo relates to the sender's task and they have no
-current post, Murph may introduce this option once per person across games.
+When a photo might be the sender's check-in but they have not said so, and they
+have no current post, Murph may offer to post it once per person across games.
 Ordinary unrelated photos and conversation between people remain quiet. The
 member-owned game profile records the introduction attempt and exact pending
 photo selection; the question is model-authored, and recording the attempt does

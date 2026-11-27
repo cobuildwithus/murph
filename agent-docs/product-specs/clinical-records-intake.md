@@ -1,6 +1,6 @@
 # Clinical Records Intake
 
-Last verified: 2026-11-25
+Last verified: 2026-11-27
 
 See the [hospital connector expectation matrix](../references/clinical-connector-expectations.md) for test ownership and gaps.
 
@@ -211,6 +211,14 @@ Completion distinguishes connected, canceled, expired, sign_in_required, already
    atomically persists the connection, next retrieval generation and existing
    system-mailbox wake. Reauthorization reuses the connection for the same patient and FHIR base. The existing
    Temporal handoff sweep re-signals pending work without creating another run.
+   A source that already has a connection row, connected or disconnected,
+   reconnects and re-adds at that row's pinned FHIR base, not the directory
+   entry's current URL; only a first connection uses the directory endpoint.
+   The OAuth client, policy and integration still come from the entry. Before
+   any request, the pinned base must pass the integration's endpoint rules (the
+   directory URL rule for Epic, the tenant template for Oracle), or the start is
+   refused with `CLINICAL_RECORD_PINNED_ENDPOINT_UNTRUSTED`. An unbound callback
+   resolves against the same row; a bound one keeps the base saved in its session.
 6. The hosted runtime reads a credential-free run descriptor, asks the web
    control plane for bounded FHIR pages, and imports raw-first evidence through
    the Clinical Records vault use case. The web control plane records only
@@ -363,7 +371,11 @@ the floor. It checks the tracked output and requires a nonempty source.
 A member's connection is bound to its entry id and a hash of that entry's
 exact FHIR base URL, and connects with the OAuth client and policy the entry
 names, so the parser rejects any URL not already in canonical form and the
-refresh never changes those connection fields automatically.
+refresh never changes those connection fields automatically. A published URL
+change reaches only first connections: existing sources keep reconnecting at
+their pinned base. A pinned base the hospital has retired cannot reconnect;
+recovering it needs a deliberate rebind with verified patient identity, which
+does not exist yet.
 `holdDirectoryChangesForReview` in `provider-directory-artifact.ts` is the one
 refresh rule. Upstream names, aliases and facilities publish. Three changes are
 held: any change to an existing entry's URL (path included), client key or
