@@ -422,7 +422,7 @@ its modeled effect immediately. A stopped Combine session returns 409 before sub
 Deploy generation 21 replica builders and runtime consumers with the flag off,
 then Web, the companion client and finally the allowlist.
 
-Round four adds provider-qualified bedtime regularity, aerobic workout minutes, weekly food patterns, verified game habits and additional lab comparisons. A meal log needs whole-day confirmation to count towards fibre.
+Round four adds provider-qualified bedtime regularity, aerobic workout minutes, weekly food patterns, verified game habits and additional lab comparisons. Round five counts fibre per 1,000 logged calories when portions include both nutrients on at least three dates in nine. Confirmed whole days use daily fibre instead. Ordinary wearable variation has less effect on the weekly estimate, and the estimated range reflects the measurements available from the reference examination panel.
 
 The private You view uses completed sleep nights and finalized draws. Blood and marker detail include qualifying imports from before signup. Reconstructed age history starts at signup or the first date with a complete contributing workout window, whichever is later. A dated pregnancy or postpartum answer pauses the estimate. A newer answer can end the pause. Postpartum answers expire after 180 days.
 

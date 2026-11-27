@@ -246,6 +246,7 @@ export function clinicalMarkers(
     const used = [
       "food_pattern",
       "meal_fibre",
+      "meal_density",
       "fish",
       "fibre",
       "whole_grains",

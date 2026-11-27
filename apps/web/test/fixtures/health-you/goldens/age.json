@@ -1,78 +1,78 @@
 {
-  "value": 44.8,
+  "value": 45,
   "real": 51.2,
-  "gap": -6.4,
-  "low": 29.4,
-  "high": 60.1,
+  "gap": -6.2,
+  "low": 34.9,
+  "high": 55.1,
   "history": [
     {
       "date": "2024-12-28",
-      "age": 49.5,
+      "age": 49.8,
       "real": 50.9
     },
     {
       "date": "2025-01-04",
-      "age": 49.5,
+      "age": 49.8,
       "real": 50.9
     },
     {
       "date": "2025-01-11",
-      "age": 49.5,
+      "age": 49.8,
       "real": 50.9
     },
     {
       "date": "2025-01-18",
-      "age": 49.6,
+      "age": 49.8,
       "real": 51
     },
     {
       "date": "2025-01-25",
-      "age": 44.6,
+      "age": 44.8,
       "real": 51
     },
     {
       "date": "2025-02-01",
-      "age": 44.6,
+      "age": 44.9,
       "real": 51
     },
     {
       "date": "2025-02-08",
-      "age": 44.6,
+      "age": 44.9,
       "real": 51
     },
     {
       "date": "2025-02-15",
-      "age": 44.6,
+      "age": 44.9,
       "real": 51
     },
     {
       "date": "2025-02-22",
-      "age": 45.2,
+      "age": 45.5,
       "real": 51.1
     },
     {
       "date": "2025-03-01",
-      "age": 44.7,
+      "age": 44.9,
       "real": 51.1
     },
     {
       "date": "2025-03-08",
-      "age": 44.7,
+      "age": 44.9,
       "real": 51.1
     },
     {
       "date": "2025-03-15",
-      "age": 44.7,
+      "age": 45,
       "real": 51.1
     },
     {
       "date": "2025-03-22",
-      "age": 44.7,
+      "age": 45,
       "real": 51.1
     },
     {
       "date": "2025-03-29",
-      "age": 44.8,
+      "age": 45,
       "real": 51.2
     }
   ],
@@ -80,62 +80,62 @@
   "weeks": [
     {
       "weekStart": "2025-01-05",
-      "daysAged": 7.08,
+      "daysAged": 7,
       "basis": "observed"
     },
     {
       "weekStart": "2025-01-12",
-      "daysAged": 7.08,
+      "daysAged": 7,
       "basis": "observed"
     },
     {
       "weekStart": "2025-01-19",
-      "daysAged": 7.07,
+      "daysAged": 7,
       "basis": "observed"
     },
     {
       "weekStart": "2025-01-26",
-      "daysAged": 7.07,
+      "daysAged": 7,
       "basis": "observed"
     },
     {
       "weekStart": "2025-02-02",
-      "daysAged": 5.59,
+      "daysAged": 5.77,
       "basis": "observed"
     },
     {
       "weekStart": "2025-02-09",
-      "daysAged": 2.95,
+      "daysAged": 4.14,
       "basis": "observed"
     },
     {
       "weekStart": "2025-02-16",
-      "daysAged": 6.44,
+      "daysAged": 6.57,
       "basis": "observed"
     },
     {
       "weekStart": "2025-02-23",
-      "daysAged": 9.69,
+      "daysAged": 9.02,
       "basis": "observed"
     },
     {
       "weekStart": "2025-03-02",
-      "daysAged": 10.51,
+      "daysAged": 9.17,
       "basis": "observed"
     },
     {
       "weekStart": "2025-03-09",
-      "daysAged": 5.82,
+      "daysAged": 5.79,
       "basis": "observed"
     },
     {
       "weekStart": "2025-03-16",
-      "daysAged": 7.44,
+      "daysAged": 7.14,
       "basis": "observed"
     },
     {
       "weekStart": "2025-03-23",
-      "daysAged": 10.5,
+      "daysAged": 9.17,
       "basis": "observed"
     }
   ],

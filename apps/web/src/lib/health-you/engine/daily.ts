@@ -14,10 +14,8 @@ import {
 
 const config = model.daily;
 export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-export function updateLevel(level: number | null, target: number) {
-  return level === null
-    ? target
-    : level + clamp((target - level) * -Math.expm1(-1 / config.tau), -config.rate, config.rate);
+export function updateLevel(level: number | null, target: number, tau = config.tau, rate = config.rate) {
+  return level === null ? target : level + clamp((target - level) * -Math.expm1(-1 / tau), -rate, rate);
 }
 export function factor(
   key: string,
@@ -43,12 +41,7 @@ export function factor(
   };
 }
 
-export function visibleRevisions(
-  records: Observation[],
-  at: string,
-  identity: (r: Observation) => unknown,
-  includeInvalid = false,
-) {
+export function releasedGroups(records: Observation[], at: string, identity: (r: Observation) => unknown) {
   const groups = new Map<string, Observation[]>();
   for (const row of records) {
     const date = rowDay(row);
@@ -63,8 +56,12 @@ export function visibleRevisions(
     if (rank > 0) groups.set(id, [row]);
     else if (!rank) group!.push(row);
   }
-  return [...groups.values()].flatMap((rows) =>
-    includeInvalid || rows.every((r) => eligible(r, at) && !r.partial && !r.off_body) ? rows : [],
+  return [...groups.values()];
+}
+
+export function visibleRevisions(records: Observation[], at: string, identity: (r: Observation) => unknown) {
+  return releasedGroups(records, at, identity).flatMap((rows) =>
+    rows.every((r) => eligible(r, at) && !r.partial && !r.off_body) ? rows : [],
   );
 }
 
@@ -91,12 +88,13 @@ export function onset(row: Observation) {
 
 export type StreamDates = Map<string, Map<string, Set<number>>>;
 type Samples = { date: string; value: number }[];
+export function median(values: number[]) {
+  values.sort((a, b) => a - b);
+  return (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2;
+}
 function summary(window: Samples, timing: boolean) {
   const values = window.map((r) => r.value);
-  if (!timing) {
-    values.sort((a, b) => a - b);
-    return (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2;
-  }
+  if (!timing) return median(values);
   if (
     window.length < config.weekend_min_nights ||
     !window.some((r) => [0, 6].includes(new Date(r.date).getUTCDay()))
@@ -128,6 +126,8 @@ export function replay(
     level: number | null = null,
     rec: Contribution | null = null;
   let window: Samples = [];
+  let established = false;
+  const tolerance = lookup(config.deadband, key);
   const timing = key === "onset_sd";
   for (const date of [...dates.keys()].sort()) {
     const sources = dates.get(date)!;
@@ -135,6 +135,7 @@ export function replay(
     if (!next) continue;
     if (next !== source || distance(date, last) > config.fresh) {
       level = rec = null;
+      established = false;
       start = date;
       window = [];
     }
@@ -146,7 +147,22 @@ export function replay(
     const value = summary(window, timing);
     if (value === null) continue;
     rec = make(value, source);
-    if (rec) level = updateLevel(level, rec.years);
+    if (!rec) continue;
+    if (tolerance === undefined) {
+      level = updateLevel(level, rec.years);
+    } else if (!established || level === null) {
+      level = rec.years;
+      start = date;
+      established = window.length >= config.full_dates;
+    } else {
+      const band = [rec.years];
+      for (const endpoint of [value - tolerance, value + tolerance]) {
+        const nearby = make(endpoint, source);
+        if (nearby) band.push(nearby.years);
+      }
+      const nearest = clamp(level, Math.min(...band), Math.max(...band));
+      level = updateLevel(level, nearest, config.wear_tau, config.wear_rate);
+    }
   }
   const lag = distance(at, last);
   if (!rec || level === null || lag > config.fresh) return null;

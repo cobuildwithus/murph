@@ -1,6 +1,6 @@
 {
   "latest": "2025-01-22",
-  "years": -4.7,
+  "years": -4.8,
   "factors": [
     {
       "key": "albumin",
@@ -111,6 +111,24 @@
       "state": "counted"
     },
     {
+      "key": "alp",
+      "label": "Alkaline phosphatase",
+      "icon": "alp",
+      "group": "blood",
+      "value": "66",
+      "unit": "U/L",
+      "target": null,
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "featured": false,
+      "whatItIs": "This enzyme comes mainly from the liver and bones.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "alp",
+      "state": "counted"
+    },
+    {
       "key": "homocysteine",
       "label": "Homocysteine",
       "icon": "homocysteine",
@@ -144,24 +162,6 @@
       "grade": null,
       "detail": "marker",
       "markerKey": "wbc",
-      "state": "counted"
-    },
-    {
-      "key": "alp",
-      "label": "Alkaline phosphatase",
-      "icon": "alp",
-      "group": "blood",
-      "value": "66",
-      "unit": "U/L",
-      "target": null,
-      "years": 0,
-      "yearsText": "+0.0",
-      "featured": false,
-      "whatItIs": "This enzyme comes mainly from the liver and bones.",
-      "rank": null,
-      "grade": null,
-      "detail": "marker",
-      "markerKey": "alp",
       "state": "counted"
     },
     {
@@ -337,13 +337,6 @@
     }
   ],
   "unchanged": [
-    {
-      "key": "alp",
-      "label": "Alkaline phosphatase",
-      "value": 66,
-      "unit": "U/L",
-      "flag": null
-    },
     {
       "key": "b12",
       "label": "Vitamin B12",
