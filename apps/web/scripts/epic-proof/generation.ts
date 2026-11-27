@@ -25,7 +25,12 @@ export async function importGeneration(memberId: string, dir: string, generation
   const lease = await claimHostedRuntime({ prisma, userId: memberId, processingMode: "default" });
   check(lease.status !== "blocked" && lease.owner.attemptId);
   const runtimeAuthority = { attemptId: lease.owner.attemptId, generation: String(lease.owner.generation), workspaceVersion: String(current.version) };
-  const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority, (k, v) => { process.env[k] = v; });
+  // The route signer's public half lives in this process's env only while this generation runs.
+  const previous = new Map<string, string | undefined>();
+  const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority, (k, v) => {
+    if (!previous.has(k)) previous.set(k, process.env[k]);
+    process.env[k] = v;
+  });
   const server = createServer(async (req, res) => {
     try {
       const chunks: Buffer[] = [];
@@ -69,6 +74,15 @@ export async function importGeneration(memberId: string, dir: string, generation
     try { check((await once(worker, "exit"))[0] === 0); } finally { process.off("exit", stop); process.off("SIGTERM", stop); }
     const saved = await prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } });
     check(saved.completedAt);
-    return { saved, counts: safeCounts(JSON.parse(await readFile(join(dir, "counts.json"), "utf8"))) };
-  } finally { server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); await rm(socketDir, { recursive: true, force: true }); }
+    const evidence = JSON.parse(await readFile(join(dir, "counts.json"), "utf8"));
+    return { saved, counts: safeCounts(evidence.plan), vault: safeCounts(evidence.vault) };
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(done => server.close(() => done()));
+    await rm(socketDir, { recursive: true, force: true });
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 }

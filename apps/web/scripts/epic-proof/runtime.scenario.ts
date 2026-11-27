@@ -2,7 +2,7 @@ import { request } from "node:http";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { it, vi } from "vitest";
-import { activeIdentities, observeSnapshot, retainFixtures, verifyDocuments } from "./evidence";
+import { activeIdentities, observeSnapshot, retainFixtures, vaultFamilyCounts, verifyDocuments } from "./evidence";
 import { initializeVault } from "@murphai/core";
 import { restoreHostedBundleRoots, sha256HostedBundleHex } from "@murphai/runtime-state/node";
 import { checkpointClinicalMailboxItem, type ClinicalCheckpointInput } from "@murphai/assistant-runtime/clinical-connector-testkit";
@@ -64,5 +64,6 @@ it("publishes and restores the clinical mailbox checkpoint", async () => {
   const identities = await activeIdentities(restored);
   if (previous) check(identities === previous);
   if (generation === 1 && process.env.PROOF_CAPTURE === "1") await retainFixtures(dir, restored, wake.wake.runId, wake.connection);
-  await writeFile(join(dir, "counts.json"), JSON.stringify(counts), { mode: 0o600 });
+  const vault = await vaultFamilyCounts(restored, wake.connection);
+  await writeFile(join(dir, "counts.json"), JSON.stringify({ plan: counts, vault }), { mode: 0o600 });
 });

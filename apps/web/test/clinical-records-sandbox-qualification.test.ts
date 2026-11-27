@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, it, vi } from "vitest";
 import { cleanEnv, base, oauth, options, requireClient, requirePatient, withinBands, families } from "../scripts/epic-proof/policy";
 import { hashClinicalFhirBaseUrl, hashClinicalFhirPatientId } from "@murphai/clinical-records";
-import { fixtureResource, observeSnapshot } from "../scripts/epic-proof/evidence";
+import { fixtureResource, observeSnapshot, vaultFamilyCounts } from "../scripts/epic-proof/evidence";
 import { privatePhase, type Summary } from "../scripts/epic-proof/private-process";
 import { boundedEpicTransport } from "../scripts/epic-proof/transport";
 
@@ -40,25 +40,40 @@ it("holds the measured family bands and retains only structural local fixture fi
   expect(fixture).toEqual({ resourceType: "Observation", id: expect.stringMatching(/^[0-9a-f]{64}$/), status: "final" });
 });
 
+// A synthetic page with one record and one marked search-outcome notice.
+const content = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [
+  { resource: { resourceType: "Observation", id: "synthetic-observation", status: "final", subject: { reference: "Patient/synthetic-patient" } }, search: { mode: "match" } },
+  { resource: { resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing" }] }, search: { mode: "outcome" } },
+] });
+const relativePath = "Observation/page.json";
+const manifest = {
+  schemaVersion: "murph.clinical-raw-manifest.v2", kind: "clinical_fhir_retrieval", connectionId: "connection-1", retrievalJobId: "retrieval-1",
+  sourceSystem: "epic-fhir", fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
+  patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), fetchedAt: "2026-07-01T12:00:00Z",
+  requestedScopes: ["patient/Observation.read"], grantedScopes: ["patient/Observation.read"],
+  resourceFiles: [{ resourceType: "Observation", relativePath, count: 2, sha256: createHash("sha256").update(content).digest("hex") }],
+  retrievalScopes: [{ coverage: "whole-family", queryFingerprint: "a".repeat(64), resourceType: "Observation" }],
+  completedResourceTypes: ["Observation"], documentAttachments: [],
+};
+
 it("counts a family's records without the vendor's marked search-outcome notices", () => {
-  const content = JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [
-    { resource: { resourceType: "Observation", id: "synthetic-observation", status: "final", subject: { reference: "Patient/synthetic-patient" } }, search: { mode: "match" } },
-    { resource: { resourceType: "OperationOutcome", issue: [{ severity: "warning", code: "processing" }] }, search: { mode: "outcome" } },
-  ] });
-  const relativePath = "Observation/page.json";
-  const manifest = {
-    schemaVersion: "murph.clinical-raw-manifest.v2", kind: "clinical_fhir_retrieval", connectionId: "connection-1", retrievalJobId: "retrieval-1",
-    sourceSystem: "epic-fhir", fhirBaseUrlHash: hashClinicalFhirBaseUrl("https://ehr.example.test/fhir"),
-    patientIdHash: hashClinicalFhirPatientId("synthetic-patient"), fetchedAt: "2026-07-01T12:00:00Z",
-    requestedScopes: ["patient/Observation.read"], grantedScopes: ["patient/Observation.read"],
-    resourceFiles: [{ resourceType: "Observation", relativePath, count: 2, sha256: createHash("sha256").update(content).digest("hex") }],
-    retrievalScopes: [{ coverage: "whole-family", queryFingerprint: "a".repeat(64), resourceType: "Observation" }],
-    completedResourceTypes: ["Observation"], documentAttachments: [],
-  };
   const counts = { Observation: 0, downloaded: 0, parsed: 0 };
   const snapshot = { manifestPath: "raw/clinical/fhir/connection-1/retrieval-1/manifest.json", manifest, pages: [{ content, relativePath }] };
   expect(observeSnapshot(snapshot, counts, new Map())).toBe(1);
   expect(counts.Observation).toBe(1);
+});
+
+it("counts each vault record once across rereads", async () => {
+  const vault = await mkdtemp(join(tmpdir(), "clinical-vault-counts-"));
+  try {
+    for (const batch of ["run-1-batch-0", "run-2-batch-0"]) {
+      const root = join(vault, "raw/clinical/fhir/connection-1", batch);
+      await mkdir(join(root, "Observation"), { recursive: true });
+      await writeFile(join(root, relativePath), content);
+      await writeFile(join(root, "manifest.json"), JSON.stringify(manifest));
+    }
+    expect(await vaultFamilyCounts(vault, "connection-1")).toMatchObject({ Observation: 1, Patient: 0, Condition: 0 });
+  } finally { await rm(vault, { recursive: true, force: true }); }
 });
 
 it("drops thrown assertions, raw browser diagnostics and forged summary fields at the process boundary", async () => {

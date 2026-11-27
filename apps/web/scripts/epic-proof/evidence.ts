@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readCanonicalEntityFamilySource } from "@murphai/query";
 import { clinicalRawManifestSchema } from "@murphai/clinical-records";
@@ -51,7 +51,6 @@ export async function verifyDocuments(vaultRoot: string, documents: Map<string, 
 }
 
 export async function retainFixtures(dir: string, vault: string, runId: string, connection: string) {
-  const { readdir } = await import("node:fs/promises");
   const raw = join(vault, "raw/clinical/fhir", connection);
   const destination = join(dirname(dir), "fixtures", hash(runId));
   await mkdir(destination, { recursive: true, mode: 0o700 });
@@ -69,6 +68,30 @@ export async function retainFixtures(dir: string, vault: string, runId: string, 
     }
   }
   check(index);
+}
+
+// Distinct records per family across every raw batch the vault keeps for the connection. This measures the
+// cumulative chart even when a reread writes nothing new.
+export async function vaultFamilyCounts(vault: string, connection: string) {
+  const counts: Record<string, number> = Object.fromEntries(families.map(k => [k, 0]));
+  const seen = new Set<string>();
+  const raw = join(vault, "raw/clinical/fhir", connection);
+  for (const batch of await readdir(raw)) {
+    const root = join(raw, batch);
+    const manifest = clinicalRawManifestSchema.parse(JSON.parse(await readFile(join(root, "manifest.json"), "utf8")));
+    for (const file of manifest.resourceFiles) {
+      const page = JSON.parse(await readFile(join(root, file.relativePath), "utf8"));
+      const resources: { resourceType?: string; id?: unknown }[] = page.resourceType === "Bundle"
+        ? (page.entry ?? []).map((e: { resource?: object }) => e.resource ?? {}) : [page];
+      for (const { resourceType, id } of resources) {
+        const key = resourceType + "/" + String(id);
+        if (!resourceType || !families.includes(resourceType) || typeof id !== "string" || seen.has(key)) continue;
+        seen.add(key);
+        counts[resourceType]!++;
+      }
+    }
+  }
+  return counts;
 }
 
 // Read current canonical events through the vault owner and compare stable identities across imports.

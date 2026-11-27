@@ -20,7 +20,7 @@ import { issueHostedAppSession } from "../../test/support/hosted-auth-session";
 import { importGeneration } from "./generation";
 import { login, SandboxFailure } from "./browser";
 import { boundedEpicTransport } from "./transport";
-import { base, check, origin, patients, requireClient, requirePatient } from "./policy";
+import { base, check, origin, patients, requireClient, requirePatient, withinBands } from "./policy";
 
 const memberId = process.env.PROOF_MEMBER!;
 const dir = process.env.PROOF_DIR!;
@@ -122,10 +122,12 @@ async function scenario(initial: boolean) {
     stage(generation === 2 ? "repeat" : "daily");
     const row = await connection();
     if (generation === 3) check(row.nextSyncAt && await admitClinicalDailySync({ memberId, connectionId: row.id, now: row.nextSyncAt }));
-    const { saved } = await importGeneration(memberId, dir, generation);
+    const { saved, vault } = await importGeneration(memberId, dir, generation);
     checkUnchangedReceipt(saved.outcomeCountsJson);
     const source = await projection();
     check((imported(source) || source?.state === "nothing_new") && source?.lastImport?.addedCount === 0);
+    // A reread that writes nothing new must leave the cumulative chart inside the measured bands.
+    if (!withinBands(patient, vault)) throw new SandboxFailure("expectation-drift");
   }
   stage("disconnect");
   const binding = (await connection()).patientBindingEncrypted;
