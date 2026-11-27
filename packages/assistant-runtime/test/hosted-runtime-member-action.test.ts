@@ -539,3 +539,53 @@ it("keeps an evening reading on the member's day, not the next UTC day", async (
     expect(Date.parse(points[0]!.observedAt)).toBe(Date.parse(requestedAt));
   } finally { await rm(root, { force: true, recursive: true }); }
 });
+
+describe("canonical private check-ins", () => {
+  it("recovers concurrent and lost acknowledgments without changing evidence", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { deterministicContractId, initializeVault, listAssessmentResponses, readEvent } = await import("@murphai/core");
+    const vaultRoot = await mkdtemp(join(tmpdir(), "synthetic-check-in-"));
+    const requestedAt = "2028-03-18T06:15:00.000Z";
+    const pressureId = "6f94b197-5e55-4044-8f39-3d292a50ffba";
+    const sessionId = "bab83750-0d88-4073-b170-d4bb64a27f94";
+    const pressure = { kind: "measurement.blood-pressure", version: 1, takenAt: requestedAt,
+      setting: "home", systolic: 118, diastolic: 74 } as const;
+    const run = async (actionId: string, action: import("@murphai/contracts").MemberActionV1) => {
+      const result = await executeHostedMemberActionWake({ vaultRoot, wake: {
+        kind: "member.action.requested", eventId: `member.action.requested:${actionId}`,
+        userId: "synthetic-check-in-member", occurredAt: requestedAt, request: { actionId, requestedAt, action, schemaVersion: 1 },
+      } });
+      if (result.postCheckpointRecord?.kind !== "member-action.outcome-recorded") throw Error("Missing outcome");
+      return result.postCheckpointRecord.outcome;
+    };
+    try {
+      await initializeVault({ vaultRoot, timezone: "America/Los_Angeles", createdAt: requestedAt });
+      expect((await Promise.all([run(pressureId, pressure), run(pressureId, pressure)])).map(r => r.status).sort())
+        .toEqual(["applied", "unchanged"]);
+      expect(await run(pressureId, { ...pressure, diastolic: 86 })).toMatchObject({ status: "rejected", reason: "check_in_changed" });
+      const event = await readEvent({ vaultRoot, eventId: deterministicContractId("evt", `member-action:${pressureId}`) });
+      expect(event.event).toMatchObject({ dayKey: "2028-03-17", occurredAt: requestedAt, measurements: [
+        { metric: "systolic-blood-pressure", value: 118, unit: "mmHg", qualifiers: { setting: "home", validated: true } },
+        { metric: "diastolic-blood-pressure", value: 74, unit: "mmHg", qualifiers: { setting: "home", validated: true } },
+      ] });
+      const response = { instrument: "combine", instrumentVersion: 1, date: "2028-03-12",
+        tests: [{ key: "pushups_max", variant: "knees", value: 7 }, { key: "grip_strength", value: 32.5 }] } satisfies
+        import("@murphai/contracts").CheckInInstrument;
+      const action = { kind: "assessment.respond", version: 1, response } as const;
+      expect((await run(sessionId, action)).status).toBe("applied");
+      expect((await run(sessionId, action)).status).toBe("unchanged");
+      expect((await run(sessionId, { ...action, response: { ...response, date: "2028-03-11" } })).status).toBe("rejected");
+      const answers = await listAssessmentResponses({ vaultRoot });
+      expect(answers).toHaveLength(1);
+      expect(answers[0]).toMatchObject({ questionnaireSlug: "combine-v1", responses: { id: sessionId, date: response.date, response } });
+      const session = await readEvent({ vaultRoot, eventId: answers[0]!.relatedIds![0]! });
+      expect(session.event).toMatchObject({ dayKey: response.date, occurredAt: "2028-03-12T19:00:00.000Z", measurements: [
+        { metric: "pushups-knees", value: 7, unit: "reps" }, { metric: "grip-strength", value: 32.5, unit: "kg" },
+      ] });
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});

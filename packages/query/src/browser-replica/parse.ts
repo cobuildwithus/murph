@@ -61,6 +61,11 @@ import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA, labFastingStatus, labParentResultS
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
 
 /** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+const sleepTimingSchema = z.array(z.object({
+  date: z.iso.date(), startAt: z.isoDateTime({ offset: true }), endAt: z.isoDateTime({ offset: true }),
+  timeZone: z.string().min(1),
+}).strict());
+
 const activitySessionsSchema = z.array(z.object({
   type: z.enum(["run", "walk", "sauna", "hiit", "basketball", "other"]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -111,6 +116,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.sleepTiming === undefined ? {} : { sleepTiming: sleepTimingSchema.parse(record.sleepTiming) }),
     ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
@@ -155,6 +161,7 @@ export function parseBrowserVaultCoreShard(
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.sleepTiming === undefined ? {} : { sleepTiming: sleepTimingSchema.parse(record.sleepTiming) }),
     ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     policy: parsePolicy(record.policy, `${label}.policy`),

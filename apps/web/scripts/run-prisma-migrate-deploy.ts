@@ -360,6 +360,20 @@ const clinicalNativeReturnExpansion = [
   ') NOT VALID',
 ].join(" ");
 
+// Existing profiles and older writers use the default none/null/null cover. NOT VALID
+// enforces the shape on future writes without scanning the profile table during deploy.
+const healthProfileCoverExpansion = [
+  "ALTER TABLE \"game_profile\"",
+  "ADD COLUMN \"cover_kind\" TEXT NOT NULL DEFAULT 'none',",
+  "ADD COLUMN \"cover_photo_key\" TEXT,",
+  "ADD COLUMN \"cover_art\" TEXT,",
+  "ADD CONSTRAINT \"game_profile_cover_check\" CHECK (",
+  "(cover_kind = 'none' AND cover_photo_key IS NULL AND cover_art IS NULL) OR",
+  "(cover_kind = 'photo' AND cover_photo_key IS NOT NULL AND cover_art IS NULL) OR",
+  "(cover_kind = 'art' AND cover_photo_key IS NULL AND cover_art IS NOT NULL AND cover_art IN ('leaf','cream','ink','gold'))",
+  ") NOT VALID",
+].join(" ");
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -566,6 +580,8 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
     if (entry.name === "20261102230000_game_seat_storage"
       && createHash("sha256").update(sql).digest("hex") === "4e0e426e22ebeda0969b90e91f0543dc1efcc33eaeb6eb24bf78e1397be18dff") continue;
     const sqlStatements = splitSqlStatements(sql)
+      .filter((statement) => entry.name !== "20261127130000_health_profile"
+        || statement.replace(/\s+/gu, " ").trim() !== healthProfileCoverExpansion)
       .filter((statement) => entry.name !== "20261124120000_clinical_native_return"
         || statement.replace(/\s+/gu, " ").trim() !== clinicalNativeReturnExpansion)
       .filter((statement) => entry.name !== "20261022071000_game_negotiation"

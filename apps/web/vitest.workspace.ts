@@ -64,6 +64,8 @@ export const hostedWebVitestProjects = [
   ),
   createHostedWebProject("hosted-web-health-wins", [
     path.join(appDir, "src/lib/health-wins/**/*.test.ts"),
+    path.join(appDir, "src/lib/health-you/**/*.test.ts"),
+    path.join(appDir, "src/lib/health-profile/**/*.test.ts"),
   ]),
 ];
 

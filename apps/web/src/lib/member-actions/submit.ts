@@ -51,12 +51,23 @@ export async function submitMemberAction(input: {
           prisma: tx,
         });
 
+        const eventId = `member.action.requested:${input.request.actionId}`;
+        // Assessment clients supply an identity but no receipt timestamp. The member lock
+        // serializes first admission and replay, including across midnight.
+        let request = input.request;
+        if (request.action.kind === "assessment.respond") {
+          const existing = await tx.hostedMailboxItem.findUnique({
+            where: { userId_dedupeKey: { userId: input.memberId, dedupeKey: eventId } },
+            select: { occurredAt: true },
+          });
+          if (existing) request = { ...request, requestedAt: existing.occurredAt.toISOString() };
+        }
         return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
           envelope: buildHostedExecutionMemberActionRequestedWake({
-            eventId: `member.action.requested:${input.request.actionId}`,
+            eventId,
             memberId: input.memberId,
-            occurredAt: input.request.requestedAt,
-            request: input.request,
+            occurredAt: request.requestedAt,
+            request,
           }),
           prepared,
           tx,

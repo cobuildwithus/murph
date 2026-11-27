@@ -11,6 +11,8 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { eligibleHealthAuthorsSql, findVisibleHealthPost, healthPostAudienceSql, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
+import { isHealthYouEnabled } from "./flag";
+import { prepareExtendedProfile } from "../health-profile/profile";
 import { openHealthTexts } from "./crypto";
 import type { FrozenHealthCard } from "./card-options";
 import { openHealthCursor, sealHealthCursor, type HealthPagePosition } from "./cursor";
@@ -250,12 +252,21 @@ async function profileNumbers(viewer: string, memberId: string) {
   }
 }
 
-export async function readHealthProfile(auth: Auth, memberId: string, cursor?: string | null) {
+export async function readHealthProfile(auth: Auth, memberId: string, cursor?: string | null, signal = AbortSignal.timeout(15000)) {
   const db = getPrisma(), viewer = auth.member.id;
   const identity = await profileIdentity(db, viewer, memberId);
   const position = await openHealthCursor(viewer, `profile:${memberId}`, cursor);
   const [opened, prepared] = await together([names([identity]), preparePosts(db, viewer, { author: memberId, cursor: position })]);
-  const numbers = await profileNumbers(viewer, memberId);
-  const [page] = await finishRead(auth, tx => Promise.all([finishPosts(tx, viewer, prepared), profileIdentity(tx, viewer, memberId)]));
-  return { memberId, ...opened.get(memberId)!, numbers, ...page };
+  const [allowed] = isHealthYouEnabled(viewer) ? await db.$queryRaw<{ allowed: boolean }[]>`
+    SELECT (${visibleHealthPersonSql(viewer, Prisma.sql`${memberId}::text`)}) AS allowed` : [];
+  const finishProfile = allowed?.allowed ? await prepareExtendedProfile(auth, memberId, signal) : null;
+  const fallback = finishProfile ? null : await profileNumbers(viewer, memberId);
+  const [page, extended] = await db.$transaction(async tx => {
+    const page = await finishPosts(tx, viewer, prepared);
+    if (finishProfile) return [page, await finishProfile(tx)] as const;
+    await assertGameMemberAuthCurrentForRead(auth, tx);
+    await profileIdentity(tx, viewer, memberId);
+    return [page, null] as const;
+  }, { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: "RepeatableRead" });
+  return { memberId, ...opened.get(memberId)!, numbers: extended ? extended.numbers : fallback, ...page, ...extended?.extras };
 }

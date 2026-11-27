@@ -58,7 +58,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { recordMemberActionOutcome } from "../src/lib/member-actions/outcome";
 import { submitMemberAction } from "../src/lib/member-actions/submit";
 
-const transactionClient = { marker: "transaction" };
+const transactionClient = { marker: "transaction", hostedMailboxItem: { findUnique: vi.fn() } };
 const prisma = {
   $transaction: vi.fn(async (
     run: (tx: typeof transactionClient) => Promise<unknown>,
@@ -135,6 +135,21 @@ describe("member-action mailbox crypto boundary", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     mocks.current.mockReset();
     mocks.authority.mockReset();
+  });
+
+  it("uses the first assessment receipt time for a retry after midnight", async () => {
+    const initial = "2028-07-05T23:59:35.000Z";
+    transactionClient.hostedMailboxItem.findUnique.mockResolvedValueOnce({ occurredAt: new Date(initial) });
+    await submitMemberAction({
+      memberId: "synthetic-member", prisma: prisma as never,
+      request: { schemaVersion: 1, actionId: ACTION_ID, requestedAt: "2028-07-06T00:00:04.000Z",
+        action: { kind: "assessment.respond", version: 1, response: {
+          instrument: "you-answer", instrumentVersion: 1, answer: { key: "whoopZones", value: "no" },
+        } } },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({ occurredAt: initial, request: expect.objectContaining({ requestedAt: initial }) }),
+    }));
   });
 
   it("keeps durable acceptance when post-commit signaling fails", async () => {

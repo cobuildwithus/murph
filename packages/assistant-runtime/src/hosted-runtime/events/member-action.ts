@@ -4,7 +4,7 @@ import type {
 import { deleteMealRecord } from "@murphai/vault-usecases/records";
 import { resolveMetricDefinition } from "@murphai/query";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { addMeasurement, deterministicContractId, ID_PREFIXES, setMemoryDemographics, setMemoryDisplayName } from "@murphai/core";
+import { addMeasurement, saveMemberCheckIn, deterministicContractId, ID_PREFIXES, setMemoryDemographics, setMemoryDisplayName } from "@murphai/core";
 import {
   applyLiveWorkoutMemberAction,
   readLiveWorkoutCardSnapshot,
@@ -21,6 +21,19 @@ export async function executeHostedMemberActionWake(input: {
   wake: HostedExecutionMemberActionRequestedWake;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.request.action.kind) {
+    case "measurement.blood-pressure":
+    case "assessment.respond": {
+      const { request } = input.wake;
+      const status = await saveMemberCheckIn(input.vaultRoot, input.wake.request.action, request);
+      return createNoopMailboxEffect({
+        conversationMetrics: null, mailboxLane: "member-action",
+        postCheckpointRecord: {
+          kind: "member-action.outcome-recorded",
+          outcome: { actionId: request.actionId, completedAt: new Date().toISOString(), schemaVersion: 1,
+            status, reason: status === "rejected" ? "check_in_changed" : null },
+        },
+      });
+    }
     case "measurement.add": {
       const { actionId, requestedAt } = input.wake.request;
       const definition = resolveMetricDefinition(input.wake.request.action.metric)!;
@@ -39,34 +52,13 @@ export async function executeHostedMemberActionWake(input: {
           }],
         },
       });
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "member-action",
-        postCheckpointRecord: {
-          kind: "member-action.outcome-recorded",
-          outcome: {
-            actionId, completedAt: new Date().toISOString(),
-            schemaVersion: 1, status: result.created ? "applied" : "unchanged", reason: null,
-          },
-        },
-      });
+      return mutationOutcome(input.wake.request.actionId, result.created);
     }
     case "display-name.set": {
-      const request = input.wake.request;
       const result = await setMemoryDisplayName(input.vaultRoot, {
         displayName: input.wake.request.action.displayName,
       });
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "member-action",
-        postCheckpointRecord: {
-          kind: "member-action.outcome-recorded",
-          outcome: {
-            actionId: request.actionId, completedAt: new Date().toISOString(),
-            schemaVersion: 1, status: result.changed ? "applied" : "unchanged", reason: null,
-          },
-        },
-      });
+      return mutationOutcome(input.wake.request.actionId, result.changed);
     }
     case "demographics.set": {
       const request = input.wake.request;
@@ -181,6 +173,17 @@ export async function executeHostedMemberActionWake(input: {
       });
     }
   }
+}
+
+function mutationOutcome(actionId: string, changed: boolean): HostedMailboxOutcome {
+  return createNoopMailboxEffect({
+    conversationMetrics: null, mailboxLane: "member-action",
+    postCheckpointRecord: {
+      kind: "member-action.outcome-recorded",
+      outcome: { actionId, completedAt: new Date().toISOString(), schemaVersion: 1,
+        status: changed ? "applied" : "unchanged", reason: null },
+    },
+  });
 }
 
 async function removeMeal(vaultRoot: string, mealId: string): Promise<"meal_not_found" | "meal_changed" | null> {

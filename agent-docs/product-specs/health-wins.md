@@ -137,6 +137,12 @@ people’s posts and comments from each other. This choice applies only within
 Health wins. A game block also takes effect here, in either direction.
 Settings lists the people the member has hidden, newest first, so they can undo a hide.
 
+Members on `MURPH_HEALTH_YOU_MEMBER_IDS` can decorate their profile with a finished photo upload or leaf, cream, ink or gold artwork. The allowlist accepts member IDs or `*` and requires feed access. An empty list preserves the existing profile.
+
+`GET me/pin-candidates` offers ordered card choices with a revision, filter and the current pinned keys. `PUT me/pins` accepts up to three ordered `{key, revision, option?}` picks. A milestone keeps the chosen display and its local selection date even after its suggestion disappears. A live streak publishes the task, count and week marks. Biological age requires an available engine and an explicit pin.
+
+`GET me/working-on/options` and `PUT me/working-on` select up to three measurable factors. Selection starts on the owner's local date and never changes a sharing grant. Partners see up to 90 days from the pair board; bedtime requires the separate sleep-times grant. Comparisons start at selection and identify partial baselines. A viewer can set or retract a cheer on one selection. Profiles show only the viewer's cheer state. Friends see mutual game streaks and comparable shared numbers. Own profiles show eligible live games.
+
 Opening a profile shows that person’s eligible posts. Profile numbers follow
 the existing pair-board sharing choices. Posting a card grants access to that
 card only. Withdrawing health consent closes access to the author’s shared
@@ -402,7 +408,24 @@ controls payoff eligibility and publication for feed members. Apply the
 disabled. Wait for every older reader to drain before enabling payoffs. Keep
 the scoped readers on every rollback once any payoff has been posted.
 
+Private You check-ins require both the feed and `MURPH_HEALTH_YOU_MEMBER_IDS`.
+The allowlists accept member IDs or `*`. Blood pressure, food week, Combine and
+one-off answers submit one replayable member action per check-in. Acceptance
+precedes publication. The next private read after replica publication checks the new input revision.
+The private view offers at most one new question per local day. It prioritizes unanswered
+model factors and offers a quit date to a former smoker. Date and number questions carry
+an optional `inputKind` and an empty options array. A scorable Combine session can show
+its modeled effect immediately. A stopped Combine session returns 409 before submission.
+Deploy generation 21 replica builders and runtime consumers with the flag off,
+then Web, the companion client and finally the allowlist.
+
+The private You view uses completed sleep nights and finalized draws. Blood and marker detail include qualifying imports from before signup. Reconstructed age history starts at signup or the first date with a complete contributing workout window, whichever is later. A dated pregnancy or postpartum answer pauses the estimate. A newer answer can end the pause. Postpartum answers expire after 180 days.
+
+A blood pressure check-in accepts an optional setting of `clinic` or `home`. A member-entered home cuff is assumed validated for this model. Clinic readings require pairs on two days. Home readings require morning and evening pairs at least six hours apart on three days and retain the round 3 bridge weight of 0.75. Each pair is one to five minutes apart. An incomplete series or unknown setting gets a `recorded` receipt with a short next step. A reading in a qualifying series gets an `accepted` receipt.
+
 The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
+The private You endpoints also require `MURPH_HEALTH_YOU_MEMBER_IDS`. An empty list disables them and `*` admits feed members. The endpoints return only the signed-in member’s views.
+
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
