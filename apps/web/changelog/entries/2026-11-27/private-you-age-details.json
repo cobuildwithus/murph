@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 100,
+  "item": {
+    "id": "private-you-age-details",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "See what happened along your age timeline",
+    "summary": "The private You preview marks blood draws, fitness check-ins, food weeks and your first qualifying blood pressure series on your age chart.",
+    "details": "When your estimate is still building, the You tab explains which measurement to add next. A Combine result shows how many tests you finished and shows an age effect only after at least three.",
+    "relevanceTags": ["health", "measurements"],
+    "sourcePullRequests": []
+  }
+}

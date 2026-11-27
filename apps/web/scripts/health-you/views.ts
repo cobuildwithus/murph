@@ -84,7 +84,7 @@ for (const [name, id] of [
       days: ["done", "todo", "todo", "todo", "todo", "none", "none"],
     });
     for (const key of ["age", "week", "sleep", "fitness", "blood"] as const) write(key, bundle[key]);
-    write("marker", bundle.markers.albumin);
+    write("marker", bundle.markers.alp);
   }
   write("you-" + name, bundle.you);
 }

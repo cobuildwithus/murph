@@ -138,7 +138,7 @@ export function comparableMovement(
   }
   return changes;
 }
-function canEvaluate(data: MemberEvidence, at: string, anchor: string) {
+export function pauseReason(data: MemberEvidence, at: string, anchor: string) {
   const { whole } = ageAt(data, at, anchor),
     p = data.profile;
   const states = (data.checkins ?? []).filter((r) => eligible(r, at) && effectiveAnswer(r, at));
@@ -146,16 +146,13 @@ function canEvaluate(data: MemberEvidence, at: string, anchor: string) {
     recovery = pick(states, "postpartum");
   const delivery = day(p.delivery_date);
   const postpartum = (d: string) => delivery && distance(d, delivery) >= 0 && distance(d, delivery) <= 180;
-  return (
-    whole >= 20 &&
-    whole <= 80 &&
-    (!data.joined || data.joined <= at) &&
-    !p.pregnant &&
-    !p.postpartum &&
-    pregnancy !== true &&
-    recovery !== true &&
-    !postpartum(at)
-  );
+  if (p.pregnant || pregnancy === true) return "pregnant";
+  if (p.postpartum || recovery === true || postpartum(at)) return "postpartum";
+  if (!["m", "male", "f", "female"].includes(String(p.sex).toLowerCase())) return "sex";
+  if (!Number.isFinite(whole)) return "birthDate";
+  if (whole < 20 || whole > 80) return "age";
+  if (data.joined && data.joined > at) return "beforeJoining";
+  return null;
 }
 export function score(data: MemberEvidence, at: string, period = 7) {
   if (!day(at)) throw new Error("Invalid evaluation date");
@@ -166,7 +163,7 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     : ["f", "female"].includes(String(p.sex).toLowerCase())
       ? "2"
       : null;
-  if (!sex || !canEvaluate(data, at, at)) return null;
+  if (!sex || pauseReason(data, at, at)) return null;
   const rows = snapshot(data, at, age, sex),
     factors = Object.entries(rows);
   const gap = sumYears(factors.map(([, r]) => r.years)),
@@ -200,7 +197,7 @@ export function score(data: MemberEvidence, at: string, period = 7) {
   let days: number | null = null;
   let residual: number | null = null;
   let changes: Record<string, number> = {};
-  if (canEvaluate(data, cutoff, at)) {
+  if (!pauseReason(data, cutoff, at)) {
     changes = comparableMovement(data, at, cutoff, rows, snapshot(data, cutoff, age, sex));
     const move = sumYears(
       Object.keys(changes)

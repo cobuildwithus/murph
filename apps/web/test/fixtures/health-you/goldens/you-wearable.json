@@ -37,16 +37,14 @@
       "label": "Bedtime regularity",
       "icon": "bedtime",
       "group": "sleep",
-      "value": "0.4",
-      "unit": "h SD",
-      "target": {
-        "text": "Comparison value 0.8 h SD"
-      },
+      "value": "25",
+      "unit": "min of variation",
+      "target": null,
       "years": -0.6,
       "yearsText": "−0.6",
       "featured": true,
       "whatItIs": "How much your sleep start time varies across nights.",
-      "whatLowersIt": "Recording weekday and weekend nights gives a fuller picture.",
+      "whatLowersIt": "Try going to bed around the same time each night.",
       "rank": null,
       "grade": null,
       "detail": "sleep",
@@ -60,13 +58,13 @@
       "value": "6h 37m",
       "unit": null,
       "target": {
-        "text": "Comparison value 7.5"
+        "text": "Aim for 7h to 9h a night"
       },
       "years": 0.1,
       "yearsText": "+0.1",
       "featured": true,
       "whatItIs": "This is the time spent asleep.",
-      "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
+      "whatLowersIt": "Set aside enough time for sleep at a regular bedtime.",
       "rank": null,
       "grade": null,
       "detail": "sleep",
@@ -79,14 +77,11 @@
       "group": "habits",
       "value": "73",
       "unit": "bpm",
-      "target": {
-        "text": "Comparison value 62 bpm"
-      },
+      "target": null,
       "years": 0,
       "yearsText": "+0.0",
       "featured": true,
       "whatItIs": "This is the heart rate recorded while resting.",
-      "whatLowersIt": "Compare resting readings from the same device across several days.",
       "rank": null,
       "grade": null,
       "detail": "none",
@@ -98,15 +93,15 @@
       "icon": "steps",
       "group": "activity",
       "value": "7,760",
-      "unit": "steps/day",
+      "unit": "steps a day",
       "target": {
-        "text": "Comparison value 11,000 steps/day"
+        "text": "Aim for 8,000+ steps a day"
       },
       "years": 0,
       "yearsText": "+0.0",
       "featured": true,
       "whatItIs": "This counts the steps the device recorded each day.",
-      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
+      "whatLowersIt": "Add a short walk to a part of your day when you usually sit.",
       "rank": null,
       "grade": null,
       "detail": "fitness",

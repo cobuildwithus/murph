@@ -15,7 +15,8 @@ describe("Combine published reference anchors", () => {
   it("keeps unranked measurements, leaves out skipped tests and offers a six-week retest", () => {
     const preview = combineResult("session", { instrument: "combine", instrumentVersion: 1, date: "2028-02-17",
       tests: [{ key: "pushups_max", variant: "wall", value: 8 }, { key: "step_3min", skipped: true },
-        { key: "pullups_max", value: 2 }] });
+        { key: "pullups_max", value: 2 }] }, undefined, () => 1);
+    expect(preview).toMatchObject({ completed: 2, skipped: 1 });
     expect(preview.retestOn).toBe("2028-03-30");
     expect(preview.recorded.map(row => row.key)).toEqual(["pushups_wall", "pullups_max"]);
     expect(preview.rank).toBeUndefined();
@@ -23,8 +24,20 @@ describe("Combine published reference anchors", () => {
     expect(stationPercentile("pushups_knees", 30, 30, "male")).toBeUndefined();
     expect(stationPercentile("broad_jump", 100, 65, "female")).toBeUndefined();
   });
+  it("keeps a middle percentile numeric without a station or session rank label", () => {
+    const preview = combineResult("synthetic", { instrument: "combine", instrumentVersion: 1, date: "2031-02-11",
+      tests: [{ key: "grip_strength", value: 30.2 }] },
+      { birthYear: 2005, biologicalSex: "female", status: "resolved", birthYearPrecision: "approximate", revision: "fixture" });
+    expect(preview.tests[0].percentile).toBe(50);
+    expect(preview.tests[0].label).toBeUndefined();
+    expect(preview.rank).toBeUndefined();
+  });
   it("serves each research question once", () => {
     expect(foodWeekQuestions).toHaveLength(15);
+    for (const { text, unit } of foodWeekQuestions) {
+      expect(text).toContain("last 7 days");
+      expect(text).toContain(unit);
+    }
     expect(new Set(foodWeekQuestions.map(row => row.key)).size).toBe(15);
     expect(foodWeekQuestions.filter(row => row.kind === "drinks").map(row => [row.key, row.max])).toEqual([["alcohol", 100], ["max_occasion", 30]]);
   });
