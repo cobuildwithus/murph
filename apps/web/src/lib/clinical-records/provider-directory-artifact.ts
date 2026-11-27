@@ -307,6 +307,15 @@ function assertStrictlySorted(values: readonly string[], label: string): void {
   }
 }
 
+/** The endpoint rule every directory entry's FHIR base passes, for a base read back from elsewhere. */
+export function isCanonicalPublicHttpsUrl(value: string): boolean {
+  try {
+    return requireCanonicalPublicHttpsUrl(value, "FHIR base URL") === value;
+  } catch {
+    return false;
+  }
+}
+
 function requireCanonicalPublicHttpsUrl(value: unknown, label: string): string {
   const text = requireBoundedString(value, label, 2_048);
   const url = new URL(text);
