@@ -1756,16 +1756,18 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   while every old writer remains valid. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
-  workflow checks out the deployed SHA, verifies it is reachable from
-  `origin/main`, fails when the current main tip is not serving through the
+  workflow skips the production job for an older commit on `origin/main`,
+  rejects a revision outside main history, and checks out the exact current
+  SHA for deployment proof. It fails when that tip is not serving through the
   configured production base domain, and proves the event's exact ready
   production deployment id behind every paginated production project domain.
   It waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior
   production function executions to drain, repeats the current-commit and full
-  domain-set proof before exposing the database secret, supports manual dispatch
+  domain-set proof before exposing the database secret, rechecks main after
+  the final Vercel proof immediately before SQL, and supports manual dispatch
   with `deployed_sha` plus `deployment_url` for the same exact-deployment proof
-  path, does not use GitHub Actions concurrency for this lane so stale
-  events cannot replace valid pending runs, and requires GitHub Actions values for
+  path. This lane allows independent production events so stale events cannot
+  replace valid pending runs. It requires GitHub Actions values for
   `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
   `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver

@@ -2554,20 +2554,8 @@ describe("hosted web production migration guard", () => {
       /github\.event\.deployment_status\.environment_url \|\| inputs\.deployment_url/u,
     );
     assert.match(workflow, /fetch-depth: 0/u);
-    assert.match(workflow, /git rev-parse origin\/main/u);
-    assert.doesNotMatch(workflow, /git merge-base --is-ancestor/u);
-    assert.match(
-      workflow,
-      /if \[ "\$\{DEPLOYED_SHA\}" != "\$\{main_sha\}" \]; then/u,
-    );
-    assert.match(
-      workflow,
-      /Vercel production may advance only to the exact current main revision/u,
-    );
-    assert.match(
-      workflow,
-      /resolve-vercel-production-alias-sha\.ts/u,
-    );
+    assert.match(workflow, /ref: main/u);
+    assert.match(workflow, /needs: deployment-revision\s+if: \$\{\{ needs\.deployment-revision\.outputs\.current == 'true'/u);
     assert.doesNotMatch(workflow, /alias_host=/u);
     assert.doesNotMatch(workflow, /alias_url=/u);
     assert.doesNotMatch(workflow, /data\?\.meta\?\.githubCommitSha/u);
@@ -2588,14 +2576,6 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
     assert.doesNotMatch(workflow, /release:production:verify-exact-deployment/u);
-    assert.equal(
-      workflow.match(
-        /pnpm --dir apps\/web exec tsx scripts\/verify-vercel-production-deployment\.ts/gu,
-      )?.length,
-      3,
-      "captured deployment proofs must bypass pnpm 10 lifecycle stdout",
-    );
-
     const productionProofStep = extractWorkflowStep(
       workflow,
       "Verify current Vercel production deployment",
@@ -2605,88 +2585,17 @@ describe("hosted web production migration guard", () => {
       "Apply contract migrations",
     );
     assert.match(productionProofStep, /HOSTED_WEB_VERCEL_TOKEN/u);
-    assert.match(productionProofStep, /resolve-vercel-production-alias-sha\.ts/u);
-    assert.match(
-      productionProofStep,
-      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
-    );
-    assert.doesNotMatch(productionProofStep, /GITHUB_OUTPUT/u);
-    assert.doesNotMatch(productionProofStep, /SHOULD_REQUIRE_CURRENT/u);
-    assert.match(productionProofStep, /::error::The current main Vercel deployment is Ready/u);
-    assert.doesNotMatch(productionProofStep, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
+    assert.match(productionProofStep, /echo 'verified=true' >> "\$GITHUB_OUTPUT"/u);
     assert.doesNotMatch(productionProofStep, /DIRECT_DATABASE_URL/u);
-    assert.doesNotMatch(contractMigrationStep, /steps\.current-production\.outputs/u);
-    assert.doesNotMatch(contractMigrationStep, /SHOULD_REQUIRE_CURRENT/u);
-    assert.match(
-      contractMigrationStep,
-      /::error::The current main Vercel deployment changed immediately before contract migrations/u,
-    );
-    assert.match(contractMigrationStep, /HOSTED_WEB_VERCEL_TOKEN/u);
-    assert.match(contractMigrationStep, /resolve-vercel-production-alias-sha\.ts/u);
-    assert.match(
-      contractMigrationStep,
-      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
-    );
-    assert.match(contractMigrationStep, /-u DIRECT_DATABASE_URL/u);
-    assert.match(
-      contractMigrationStep,
-      /-u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS/u,
-    );
-    assert.match(
-      contractMigrationStep,
-      /-u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS/u,
-    );
-    assert.match(
-      contractMigrationStep,
-      /DIRECT_DATABASE_URL: \$\{\{ secrets\.HOSTED_WEB_DIRECT_DATABASE_URL \}\}/u,
-    );
-    assert.match(
-      contractMigrationStep,
-      /MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"/u,
-    );
-    assert.match(
-      contractMigrationStep,
-      /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u,
-    );
-    assert.match(contractMigrationStep, /release:production:contract-migrate/u);
-    const initialCurrentProof = productionProofStep.indexOf('current_sha="$(');
-    const initialExactProof = productionProofStep.indexOf(
-      "verify-vercel-production-deployment.ts",
-    );
-    const drainWait = productionProofStep.indexOf(
-      'sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"',
-    );
-    const finalCurrentProof = productionProofStep.lastIndexOf('current_sha="$(');
-    const finalExactProof = productionProofStep.lastIndexOf(
-      "verify-vercel-production-deployment.ts",
-    );
-    assert.ok(
-      initialCurrentProof < initialExactProof
-        && initialExactProof < drainWait
-        && drainWait < finalCurrentProof
-        && finalCurrentProof < finalExactProof,
-      "contract migrations must prove every production domain before and after the prior-function drain",
-    );
-    assert.ok(
-      contractMigrationStep.indexOf("-u DIRECT_DATABASE_URL")
-        < contractMigrationStep.indexOf("resolve-vercel-production-alias-sha.ts"),
-      "contract migration step must strip the database env before running the resolver",
-    );
-    assert.ok(
-      contractMigrationStep.indexOf('current_sha="$(')
-        < contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then'),
-      "contract migration step must compare the fresh production alias SHA before SQL",
-    );
-    assert.ok(
-      contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then')
-        < contractMigrationStep.indexOf("verify-vercel-production-deployment.ts"),
-      "contract migrations must reject a superseded deployment before exact-domain proof",
-    );
-    assert.ok(
-      contractMigrationStep.indexOf("verify-vercel-production-deployment.ts")
-        < contractMigrationStep.indexOf("release:production:contract-migrate"),
-      "contract migrations must re-check the current production deployment SHA immediately before SQL",
-    );
+    assert.match(contractMigrationStep, /if: \$\{\{ steps\.production\.outputs\.verified == 'true'/u);
+    assert.match(contractMigrationStep, /DIRECT_DATABASE_URL: \$\{\{ secrets\.HOSTED_WEB_DIRECT_DATABASE_URL \}\}/u);
+    assert.match(contractMigrationStep, /MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"/u);
+    assert.match(contractMigrationStep, /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u);
+    const gate = "source scripts/require-current-web-deployment.sh --verify-vercel";
+    const drain = productionProofStep.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"');
+    assert.ok(productionProofStep.indexOf(gate) >= 0 && productionProofStep.indexOf(gate) < drain);
+    assert.ok(productionProofStep.lastIndexOf(gate) > drain);
+    assert.ok(contractMigrationStep.includes(`${gate}\n          pnpm --dir apps/web release:production:contract-migrate`));
     const productionProofRun = extractWorkflowRunScript(productionProofStep);
     const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
     const shellFixture = await mkdtemp(
@@ -2699,6 +2608,10 @@ describe("hosted web production migration guard", () => {
         pnpmStub,
         `#!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" != *"release:production:contract-migrate"* && -n "\${DIRECT_DATABASE_URL:-}\${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\${MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS:-}" ]]; then
+  echo 'verifier received database authority' >&2
+  exit 96
+fi
 if [[ "$*" == *"resolve-vercel-production-alias-sha.ts"* ]]; then
   printf '%s\\n' "\${STUB_CURRENT_SHA}"
 elif [[ "$*" == *"release:production:verify-exact-deployment"* ]]; then
@@ -2716,8 +2629,9 @@ elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; 
     exit 98
   fi
   printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
-  printf '%s\\n' "\${DEPLOYED_SHA}"
+  printf '%s\\n' "\${STUB_EXACT_SHA:-$DEPLOYED_SHA}"
 elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
+  [[ -n "\${DIRECT_DATABASE_URL:-}" && "\${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}" == 1 && "\${MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS:-}" == 1 ]]
   printf 'migrate\\n' >> "\${STUB_CALLS_FILE}"
 else
   printf 'unexpected pnpm invocation: %s\\n' "$*" >&2
@@ -2728,14 +2642,49 @@ fi
       await chmod(pnpmStub, 0o700);
 
       const deployedSha = "f".repeat(40);
+      const gitStub = path.join(shellFixture, "git");
+      await writeFile(gitStub, `#!/bin/sh
+[ -z "\${DIRECT_DATABASE_URL:-}\${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}\${MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS:-}\${HOSTED_WEB_VERCEL_TOKEN:-}" ] || exit 96
+case "$1" in
+  fetch) exit "\${STUB_FETCH_STATUS:-0}";;
+  rev-parse)
+    if [ -n "\${STUB_MAIN_AFTER_VERIFY:-}" ] && [ -f "$STUB_CALLS_FILE" ]; then
+      echo "$STUB_MAIN_AFTER_VERIFY"
+    else
+      echo "\${STUB_MAIN_SHA:-$DEPLOYED_SHA}"
+    fi;;
+  merge-base) exit "\${STUB_ANCESTRY_STATUS:-1}";;
+  *) exit 64;;
+esac
+`);
+      await chmod(gitStub, 0o700);
+      const shellEnvironment = {
+        ...process.env,
+        PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+        DEPLOYED_SHA: deployedSha,
+        GITHUB_OUTPUT: path.join(shellFixture, "output"),
+      };
+      const revisionRun = extractWorkflowRunScript(extractWorkflowStep(
+        workflow.split("  production-contract-migrations:")[0]!, "Verify deployed commit is current main",
+      ));
+      const checkRevision = (env: Record<string, string>) => spawnSync("bash", ["-c", revisionRun], {
+        cwd: workflowRoot, env: { ...shellEnvironment, ...env }, encoding: "utf8",
+      });
+      const newerMain = { STUB_MAIN_SHA: "a".repeat(40), STUB_ANCESTRY_STATUS: "0" };
+      assert.equal(checkRevision(newerMain).status, 0);
+      assert.equal(checkRevision({ STUB_MAIN_SHA: newerMain.STUB_MAIN_SHA }).status, 1);
+      assert.equal(checkRevision({ STUB_FETCH_STATUS: "7" }).status, 7);
+      await assert.rejects(readFile(shellEnvironment.GITHUB_OUTPUT), /ENOENT/u);
+      assert.equal(checkRevision({}).status, 0);
+      assert.equal(await readFile(shellEnvironment.GITHUB_OUTPUT, "utf8"), "current=true\n");
       const runProductionProofBody = (verifierAvailable: boolean) => spawnSync(
         "bash",
         ["-c", productionProofRun],
         {
+          cwd: workflowRoot,
           encoding: "utf8",
           env: {
-            ...process.env,
-            DEPLOYED_SHA: deployedSha,
+            ...shellEnvironment,
             DIRECT_DATABASE_URL: undefined,
             HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: "0",
             HOSTED_WEB_PRODUCTION_BASE_URL: "https://production.example.test",
@@ -2743,7 +2692,6 @@ fi
             HOSTED_WEB_VERCEL_TOKEN: "token",
             MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: undefined,
             MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: undefined,
-            PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
             STUB_CALLS_FILE: callsFile,
             STUB_CURRENT_SHA: deployedSha,
             STUB_VERIFIER_AVAILABLE: verifierAvailable ? "1" : "0",
@@ -2762,19 +2710,19 @@ fi
       assert.equal(await readFile(callsFile, "utf8"), "verify\nverify\n");
       await rm(callsFile, { force: true });
 
-      const runWorkflowBody = (currentSha: string) => spawnSync(
+      const runWorkflowBody = (currentSha: string, revision: Record<string, string> = {}) => spawnSync(
         "bash",
         ["-c", contractMigrationRun],
         {
+          cwd: workflowRoot,
           encoding: "utf8",
           env: {
-            ...process.env,
-            DEPLOYED_SHA: deployedSha,
+            ...shellEnvironment,
             DIRECT_DATABASE_URL: "postgresql://test.invalid/release",
             MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
             MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1",
-            PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
             STUB_CALLS_FILE: callsFile,
+            ...revision,
             STUB_CURRENT_SHA: currentSha,
             STUB_VERIFIER_AVAILABLE: "1",
           },
@@ -2786,10 +2734,22 @@ fi
       assert.match(currentMismatch.stdout, /::error::/u);
       await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
 
-      const ancestorMismatch = runWorkflowBody("d".repeat(40));
-      assert.equal(ancestorMismatch.status, 1);
-      assert.match(ancestorMismatch.stdout, /::error::/u);
-      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+      const exactDeploymentMismatch = runWorkflowBody(deployedSha, { STUB_EXACT_SHA: "d".repeat(40) });
+      assert.equal(exactDeploymentMismatch.status, 1);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\n");
+      await rm(callsFile);
+
+      const staleBeforeSql = runWorkflowBody(deployedSha, newerMain);
+      assert.equal(staleBeforeSql.status, 0, staleBeforeSql.stderr);
+      await assert.rejects(readFile(callsFile), /ENOENT/u);
+
+      const supersededDuringProof = runWorkflowBody(deployedSha, {
+        STUB_MAIN_AFTER_VERIFY: newerMain.STUB_MAIN_SHA,
+        STUB_ANCESTRY_STATUS: "0",
+      });
+      assert.equal(supersededDuringProof.status, 0, supersededDuringProof.stderr);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\n");
+      await rm(callsFile);
 
       const exactMatch = runWorkflowBody(deployedSha);
       assert.equal(exactMatch.status, 0, exactMatch.stderr);

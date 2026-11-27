@@ -1,16 +1,20 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, watch } from 'node:fs'
 import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecapAsset } from '@murphai/contracts/recap-show'
 import type { RecapVideoChildRequest } from '@murphai/recap-video'
 import { handOverRecapVideo, recapVideoParts, recapVideoScratchRoot, renderRecapShowVideo } from '../src/assistant/recap-video-render.js'
 
 const roots: string[] = []
-let scratchRoot = ''
-afterEach(async () => { scratchRoot = ''; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+let scratchRoot: string
+beforeEach(async () => {
+  scratchRoot = await mkdtemp(path.join(os.tmpdir(), 'recap-video-scratch-'))
+  roots.push(scratchRoot)
+})
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 const ENTRY_REF = '1'.repeat(64), PROFILE_REF = '2'.repeat(64)
 const poster = { outcome: { kind: 'won', winnerMemberId: 'player-a', loserMemberId: 'player-b' },
@@ -48,19 +52,16 @@ ${body}\n`)
   return { childPath, seen }
 }
 
-const render = async (childPath: string, extra: Partial<Parameters<typeof renderRecapShowVideo>[0]> & { timeoutMs?: number } = {}) => {
-  scratchRoot ||= await mkdtemp(path.join(os.tmpdir(), 'recap-video-scratch-'))
-  if (!roots.includes(scratchRoot)) roots.push(scratchRoot)
+const render = (childPath: string, extra: Partial<Parameters<typeof renderRecapShowVideo>[0]> & { timeoutMs?: number } = {}) => {
   const { timeoutMs, ...rest } = extra
   return renderRecapShowVideo({ vault: '/synthetic/vault', scratchRoot, material: material(), story, assets, media, childPath, deadlineAt: Date.now() + (timeoutMs ?? 20_000),
     fetchReference: async id => Buffer.from(`photo ${id.slice(0, 4)}`), ...rest })
 }
 const workDirectories = async () => scratchRoot ? (await readdir(scratchRoot).catch(() => [])).filter(name => name.startsWith('render-')) : []
-/** Whether anything in the group still runs. An orphaned process the test environment's PID 1 never
- * reaps lingers as a zombie (the runner image's tini reaps it), so zombies count as stopped. */
 const running = (pid: number, group: boolean) => {
   try { process.kill(group ? -pid : pid, 0) } catch { return false }
   if (process.platform !== 'linux') return true
+  // An orphaned Linux zombie has stopped even when PID 1 has yet to reap it.
   return readdirSync('/proc').filter(name => /^\d+$/u.test(name)).some(name => {
     try {
       const stat = readFileSync(`/proc/${name}/stat`, 'utf8'), fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
@@ -68,7 +69,12 @@ const running = (pid: number, group: boolean) => {
     } catch { return false }
   })
 }
-const groupAlive = (pid: number) => running(pid, true)
+// The direct child's close event can precede the OS reaping the killed encoder.
+// An unsignalled fixture encoder sleeps for a full minute.
+const expectRenderStopped = (child: number, encoder: number) => vi.waitFor(() => {
+  expect(running(child, true)).toBe(false)
+  expect(running(encoder, false)).toBe(false)
+})
 
 describe('recap video render step', () => {
   it('draws the show as the app presents it, from trusted inputs only, and hands back one checked file', async () => {
@@ -140,39 +146,57 @@ describe('recap video render step', () => {
 
   // The child stands in for the drawing process and its sleeping grandchild for ffmpeg. It records both pids outside its work directory.
   const hanging = async () => {
-    const pids = path.join(await mkdtemp(path.join(os.tmpdir(), 'recap-video-pids-')), 'pids.json')
-    roots.push(path.dirname(pids))
-    const child = await fakeChild(`const encoder = spawn('sleep', ['60'], { stdio: 'ignore' }); writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, encoder.pid])); setInterval(() => {}, 1000)`)
-    return { ...child, pids: async () => JSON.parse(await readFile(pids, 'utf8')) as [number, number] }
+    const root = await mkdtemp(path.join(os.tmpdir(), 'recap-video-pids-'))
+    roots.push(root)
+    const pids = path.join(root, 'pids.json')
+    const child = await fakeChild(`
+const encoder = spawn('sleep', ['60'], { stdio: 'ignore' })
+writeFileSync(${JSON.stringify(pids)}, JSON.stringify([process.pid, encoder.pid]))
+writeFileSync(${JSON.stringify(path.join(root, 'ready'))}, '')
+setInterval(() => {}, 1000)`)
+    const onReady = (callback: () => void) => {
+      const watcher = watch(root, (_, name) => {
+        if (name !== 'ready') return
+        watcher.close()
+        callback()
+      })
+      return watcher
+    }
+    return { ...child, onReady, pids: async () => JSON.parse(await readFile(pids, 'utf8')) as [number, number] }
   }
   it('stops a render that runs past its time, encoder and all, and carries on without a video', async () => {
-    const { childPath, pids } = await hanging()
+    const { childPath, onReady, pids } = await hanging()
     const before = await workDirectories()
-    const started = Date.now()
-    await expect(render(childPath, { timeoutMs: 1500 })).resolves.toEqual({ kind: 'refused', reason: 'timeout' })
-    expect(Date.now() - started).toBeLessThan(10_000)
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const watcher = onReady(() => vi.advanceTimersByTime(1500))
+    try {
+      await expect(render(childPath, { timeoutMs: 1500 })).resolves.toEqual({ kind: 'refused', reason: 'timeout' })
+    } finally {
+      watcher.close()
+      vi.useRealTimers()
+    }
     const [child, encoder] = await pids()
-    expect(groupAlive(child)).toBe(false)
-    expect(running(encoder, false)).toBe(false)
+    await expectRenderStopped(child, encoder)
     expect(await workDirectories()).toEqual(before)
   })
 
   it('stops the render when the turn is cancelled, and the cancellation goes on', async () => {
-    const { childPath, pids } = await hanging()
+    const { childPath, onReady, pids } = await hanging()
     const controller = new AbortController()
     const before = await workDirectories()
-    const pending = render(childPath, { signal: controller.signal })
-    await new Promise(resolve => setTimeout(resolve, 800))
-    controller.abort(new Error('Synthetic cancel'))
-    await expect(pending).rejects.toThrow('Synthetic cancel')
+    const watcher = onReady(() => controller.abort(new Error('Synthetic cancel')))
+    try {
+      await expect(render(childPath, { signal: controller.signal })).rejects.toThrow('Synthetic cancel')
+    } finally {
+      watcher.close()
+    }
     const [child, encoder] = await pids()
-    expect(groupAlive(child)).toBe(false)
-    expect(running(encoder, false)).toBe(false)
+    await expectRenderStopped(child, encoder)
     expect(await workDirectories()).toEqual(before)
   })
 
   it('renders one show at a time per runner', async () => {
-    const { childPath } = await fakeChild(`setTimeout(() => { writeFileSync(request.outPath, 'x'); say({ ok: true, bytes: 1, frames: 1, drawMs: 1, encoder: null }) }, 500)`)
+    const { childPath } = await fakeChild(`writeFileSync(request.outPath, 'x'); say({ ok: true, bytes: 1, frames: 1, drawMs: 1, encoder: null })`)
     const [first, second] = await Promise.all([render(childPath), render(childPath)])
     expect(second).toEqual({ kind: 'refused', reason: 'busy' })
     expect(first.kind).toBe('rendered')
@@ -216,7 +240,6 @@ describe('recap video render step', () => {
 
   it('removes what a dead runner left behind before the next render', async () => {
     const { childPath } = await fakeChild(`writeFileSync(request.outPath, 'x'); say({ ok: true, bytes: 1, frames: 1, drawMs: 1, encoder: null })`)
-    scratchRoot = await mkdtemp(path.join(os.tmpdir(), 'recap-video-scratch-')); roots.push(scratchRoot)
     const stale = path.join(scratchRoot, 'render-stale'), fresh = path.join(scratchRoot, 'render-fresh')
     for (const directory of [stale, fresh]) await writeFile(directory, 'x')
     const { utimes } = await import('node:fs/promises')

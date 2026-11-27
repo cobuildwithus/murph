@@ -3,9 +3,10 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_LOCAL_MINIO_MIRROR_IMAGE } from "../../src/dev-hosted-local/minio-image-contract.ts";
-import { buildHostedLocalMinioDockerUserArgs } from "../../src/dev-hosted-local/minio.ts";
+import { buildHostedLocalMinioDockerUserArgs, resolveHostedLocalMinioRunnableImage } from "../../src/dev-hosted-local/minio.ts";
 
 const runtimeMocks = vi.hoisted(() => ({
+  runCommand: vi.fn(async () => {}),
   spawnChildProcess: vi.fn(),
   terminateChildProcess: vi.fn(),
   throwIfAbortSignalAborted: (signal?: AbortSignal) => signal?.throwIfAborted(),
@@ -147,6 +148,21 @@ describe("hosted-local MinIO sidecar", () => {
     httpMocks.healthStatuses = [];
     netMocks.listenErrors = [];
     netMocks.listens = [];
+  });
+
+  it("lets a cold mirror pull finish after the Docker cleanup deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      runtimeMocks.runCommand.mockImplementationOnce(() => new Promise<void>(resolve => setTimeout(resolve, 15_000)));
+      const selected = resolveHostedLocalMinioRunnableImage({});
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(selected).resolves.toBe(HOSTED_LOCAL_MINIO_MIRROR_IMAGE);
+      expect(runtimeMocks.runCommand).toHaveBeenCalledWith(
+        "docker", ["pull", HOSTED_LOCAL_MINIO_MIRROR_IMAGE], expect.objectContaining({ name: "setup" }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("applies host UID/GID only to Linux containers", () => {
@@ -775,8 +791,6 @@ describe("hosted-local MinIO sidecar", () => {
       {},
       { stdout: "" },
       {},
-      { stdout: "" },
-      {},
       { stdout: "stale-container\n" },
       {},
     ];
@@ -794,6 +808,7 @@ describe("hosted-local MinIO sidecar", () => {
 
     await expect(maybeStartHostedLocalMinio({
       buildId: "build:test",
+      pullImage: async () => true,
       containerHost: "host.docker.internal",
       env: {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",

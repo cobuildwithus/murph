@@ -451,14 +451,6 @@ function forgetGameRulesAfterCompaction(
   }
 }
 
-function isCodexContextCompactionCompletionForThread(
-  message: CodexRpcMessage,
-  threadId: string,
-): boolean {
-  return isCodexContextCompactionCompletion(message)
-    && extractCodexThreadIdFromMessage(message) === threadId
-}
-
 function isCodexThreadTokenUsageUpdatedMethod(method: string | null): boolean {
   return method === 'thread/tokenUsage/updated'
 }
@@ -2794,7 +2786,8 @@ export async function compactWarmCodexThread(input: {
   let compactStartedItemId: string | null = null
   let compactTurnId: string | null = null
   const compactResponses = new Map<string, CodexCompactionResponseUsage>()
-  let compactCompletionBuffered = false
+  let compactItemCompleted = false
+  let compactTurnCompleted = false
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
   let resolveCompaction!: (reason: CompactionSettleReason) => void
@@ -2809,6 +2802,37 @@ export async function compactWarmCodexThread(input: {
     resolveCompaction(reason)
   }
 
+  // A context item can finish while the native Compact turn still owns the thread.
+  const finishIfReady = (): void => {
+    if (compactRequestAccepted && compactItemCompleted && (compactTurnId === null || compactTurnCompleted)) {
+      settleCompaction('compacted')
+    }
+  }
+
+  const observeCompactionCompletion = (message: CodexRpcMessage): void => {
+    if (message.method === 'turn/completed') {
+      if (compactTurnId === null || extractCodexTurnIdFromMessage(message) !== compactTurnId) return
+      if (readCodexRecord(readCodexRecord(message.params)?.turn)?.status !== 'completed') {
+        settleCompaction('rpc_error')
+        return
+      }
+      compactTurnCompleted = true
+    } else if (isCodexLegacyContextCompactionCompletion(message)) {
+      // Legacy completions have no item id to match before the RPC is accepted.
+      if (!compactRequestAccepted) return
+      const turnId = extractCodexTurnIdFromMessage(message)
+      if (compactTurnId !== null && turnId !== null && compactTurnId !== turnId) return
+      compactTurnId ??= turnId
+      compactItemCompleted = true
+    } else {
+      // A delayed completion from an earlier compact can carry the same thread id.
+      if (!isCodexContextCompactionCompletion(message) || compactStartedItemId === null ||
+        readCodexContextCompactionItemId(message) !== compactStartedItemId) return
+      compactItemCompleted = true
+    }
+    finishIfReady()
+  }
+
   const binding: CodexAppServerActiveTurnBinding = {
     onClose: () => settleCompaction('process_exit'),
     onError: () => settleCompaction('rpc_error'),
@@ -2816,9 +2840,7 @@ export async function compactWarmCodexThread(input: {
     onRpcResponse(message, method) {
       if (method === 'thread/compact/start' && !message.error) {
         compactRequestAccepted = true
-        if (compactCompletionBuffered) {
-          settleCompaction('compacted')
-        }
+        finishIfReady()
       }
     },
     onParsedMessage: (message) => {
@@ -2858,30 +2880,8 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
-      if (!isCodexContextCompactionCompletionForThread(message, vitals.threadId)) {
-        return
-      }
-      if (isCodexLegacyContextCompactionCompletion(message)) {
-        if (!compactRequestAccepted) {
-          return
-        }
-        settleCompaction('compacted')
-        return
-      }
-      if (compactRequestSubmitted) {
-        const itemId = readCodexContextCompactionItemId(message)
-        // The v2 protocol pairs item/completed with an item/started id. Without
-        // that id a same-thread delayed completion from an earlier compact is
-        // indistinguishable from this request, so modern item completions fail
-        // closed. Legacy no-id completions are handled above.
-        if (compactStartedItemId === null || itemId !== compactStartedItemId) {
-          return
-        }
-        if (compactRequestAccepted) {
-          settleCompaction('compacted')
-        } else {
-          compactCompletionBuffered = true
-        }
+      if (messageThreadId === vitals.threadId) {
+        observeCompactionCompletion(message)
       }
     },
     onStderrLine: () => {},

@@ -7,11 +7,11 @@ on:
     branches:
       - main
 
-# PR updates supersede their previous proof. Main commits keep independent
-# proof so later merges cannot cancel a production candidate.
+# Finish the active plan and its shards. Only the newest waiting PR run is
+# needed. Each main SHA still gets independent production proof.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
