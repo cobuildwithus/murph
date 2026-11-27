@@ -25,6 +25,7 @@ interface PostRow extends Identity, HealthPagePosition {
 }
 interface CommentRow extends Identity, HealthPagePosition {
   postId: string; bodyEncrypted: string; visibility: "everyone" | "poster";
+  recipientMemberId: string | null; recipientFirstNameEncrypted: string | null;
 }
 
 function cursorWhere(cursor: HealthPagePosition | undefined, position: Prisma.Sql) {
@@ -170,9 +171,18 @@ export function assertVisibleFrozenCardCurrent(auth: Auth, postId: string, versi
   });
 }
 
+function recipientFirstNameSql(viewerId: string) {
+  // A poster still owns the reply after losing access to the recipient's profile.
+  return Prisma.sql`CASE WHEN c.recipient_member_id IS NOT NULL THEN (
+    SELECT recipient.first_name_encrypted FROM game_profile recipient
+    WHERE recipient.member_id = c.recipient_member_id AND ${visibleHealthPersonSql(viewerId, Prisma.sql`recipient.member_id`)}
+  ) END`;
+}
+
 export function healthCommentPageSql(viewerId: string, postId: string, posterId: string, position?: HealthPagePosition) {
   return Prisma.sql`SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
       c.created_at AS "createdAt", c.body_encrypted AS "bodyEncrypted", c.visibility,
+      c.recipient_member_id AS "recipientMemberId", ${recipientFirstNameSql(viewerId)} AS "recipientFirstNameEncrypted",
       profile.first_name_encrypted AS "firstNameEncrypted", profile.photo_key AS "photoKey"
     FROM health_post_comment c
     LEFT JOIN game_profile profile ON profile.member_id = c.author_member_id
@@ -189,20 +199,34 @@ export async function readHealthComments(auth: Auth, postId: string, cursor?: st
   const position = await openHealthCursor(viewer, collection, cursor);
   const fetched = await db.$queryRaw<CommentRow[]>(healthCommentPageSql(viewer, postId, parent.authorMemberId, position));
   const rows = fetched.slice(0, PAGE_SIZE);
-  const [identities, content, nextCursor] = await together([names(rows), openHealthTexts(rows.map(row => ({
+  const recipients = rows.flatMap(row => row.recipientMemberId && row.recipientFirstNameEncrypted !== null ? [{
+    authorMemberId: row.recipientMemberId, firstNameEncrypted: row.recipientFirstNameEncrypted, photoKey: null,
+  }] : []);
+  // Prefer the full author profile when a recipient also wrote a comment on this page.
+  const [identities, content, nextCursor] = await together([names([...recipients, ...rows]), openHealthTexts(rows.map(row => ({
     memberId: row.authorMemberId, table: "health_post_comment", rowId: row.id, field: "body", value: row.bodyEncrypted,
   }))), sealHealthCursor(viewer, collection, fetched.length > PAGE_SIZE ? rows.at(-1) : undefined)]);
   const [post, current] = await finishRead(auth, tx => Promise.all([
     findVisibleHealthPost(tx, viewer, postId),
-    rows.length ? tx.$queryRaw<Array<{ id: string }>>`SELECT c.id FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
+    rows.length ? tx.$queryRaw<Array<Pick<CommentRow, "id" | "recipientFirstNameEncrypted">>>`
+      SELECT c.id, ${recipientFirstNameSql(viewer)} AS "recipientFirstNameEncrypted"
+      FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
       WHERE c.id IN (${Prisma.join(rows.map(row => Prisma.sql`${row.id}::uuid`))}) AND ${visibleHealthCommentSql(viewer)}` : [],
   ]));
   if (!post) throw gameNotFound();
-  const visible = new Set(current.map(row => row.id));
-  const comments = rows.flatMap((row, index) => visible.has(row.id) ? [{
-    id: row.id, postId, authorMemberId: row.authorMemberId, ...identities.get(row.authorMemberId)!,
-    createdAt: row.createdAt.toISOString(), visibility: row.visibility, body: content[index],
-  }] : []);
+  const visible = new Map(current.map(row => [row.id, row]));
+  const comments = rows.flatMap((row, index) => {
+    const checked = visible.get(row.id);
+    if (!checked) return [];
+    const recipientFirstName = row.recipientMemberId && checked.recipientFirstNameEncrypted !== null
+      && checked.recipientFirstNameEncrypted === row.recipientFirstNameEncrypted
+      ? identities.get(row.recipientMemberId)!.firstName : null;
+    return [{
+      id: row.id, postId, authorMemberId: row.authorMemberId, ...identities.get(row.authorMemberId)!,
+      createdAt: row.createdAt.toISOString(), visibility: row.visibility, body: content[index],
+      recipientMemberId: row.recipientMemberId, recipientFirstName,
+    }];
+  });
   return { comments, nextCursor };
 }
 

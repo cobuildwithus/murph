@@ -5,6 +5,7 @@ import type { HostedNativeMemberAuth } from "@/src/lib/better-auth/native-auth";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-json";
 import * as moderation from "@/src/lib/game/moderation";
+import { readGamePushRoutes } from "@/src/lib/game/push-delivery";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import * as gameService from "@/src/lib/game/service";
 import { createHostedOpaqueDigest } from "@/src/lib/hosted-onboarding/contact-privacy";
@@ -16,6 +17,7 @@ import * as healthCrypto from "@/src/lib/health-wins/crypto";
 import { buildRecordedCards } from "@/src/lib/health-wins/engine/recorded";
 import { seeYoursCard } from "@/src/lib/health-wins/engine/see-yours";
 import type { HealthWinsInput, LabDraw } from "@/src/lib/health-wins/engine/types";
+import { deliverHealthNotification } from "@/src/lib/health-wins/notifications";
 import { readHealthPost } from "@/src/lib/health-wins/read";
 import { openRecordedActivitySummaries } from "@/src/lib/health-wins/recorded-summary";
 import { previewRecordedActivity, saveRecordedActivity } from "@/src/lib/health-wins/recorded-activities";
@@ -27,7 +29,7 @@ import { seedHealthPayoff } from "./support/health-payoff-fixture";
 
 const state = vi.hoisted(() => ({
   consent: true, visible: true, currentSet: true, keysAvailable: true,
-  resolve: vi.fn(), measure: vi.fn(), sent: vi.fn(), queued: [] as Array<() => Promise<void>>,
+  resolve: vi.fn(), measure: vi.fn(), sent: vi.fn<(notification: Parameters<typeof deliverHealthNotification>[0]) => void>(), queued: [] as Array<() => Promise<void>>,
   putPhoto: vi.fn(),
 }));
 vi.mock("@/src/lib/game/progress/media-store", () => ({
@@ -61,9 +63,11 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   unwrapHostedDomainRootForWebByRootKeyId: async () => ({ rootKey: Buffer.alloc(32, 17) }),
 }));
 vi.mock("@/src/lib/game/push-delivery", () => ({
-  readGamePushRoutes: async (_db: unknown, members: string[]) => [{ userId: members[0], gameSessionId: "synthetic-installation",
-    environment: "development", token: "bd".repeat(32), topic: "ai.withmurph.app.dev" }],
-  deliverGamePush: async (notification: unknown, valid: () => Promise<boolean>) => { if (await valid()) state.sent(notification); },
+  readGamePushRoutes: vi.fn(async (_db: unknown, members: string[]) => [{ userId: members[0], gameSessionId: "synthetic-installation",
+    environment: "development", token: "bd".repeat(32), topic: "ai.withmurph.app.dev" }]),
+  deliverGamePush: async (notification: Parameters<typeof deliverHealthNotification>[0], valid: () => Promise<boolean>) => {
+    if (await valid()) state.sent(notification);
+  },
 }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -116,6 +120,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     state.consent = state.visible = state.currentSet = state.keysAvailable = true;
     state.queued.length = 0;
     state.sent.mockClear();
+    vi.mocked(readGamePushRoutes).mockClear();
     state.resolve.mockReset();
     state.measure.mockReset();
     vi.unstubAllEnvs();
@@ -522,6 +527,50 @@ describe.skipIf(!enabled)("health write transactions", () => {
     await state.queued[0]!();
     expect(state.sent).toHaveBeenCalledTimes(1);
     await expect(createHealthComment(friend, a.id, input)).rejects.toMatchObject({ httpStatus: 409 });
+  });
+
+  it("claims one private reply push for its recipient and rechecks that audience before delivery", async () => {
+    const poster = await member(), recipient = await member();
+    const players = [poster.member.id, recipient.member.id];
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", players.join(","));
+    await getPrisma().gameProfile.createMany({ data: players.map(memberId => ({
+      memberId, timeZone: "UTC", firstNameEncrypted: "fixture-name",
+    })) });
+    await getPrisma().game.create({ data: {
+      id: randomUUID(), createdBy: poster.member.id, wordsOwnerMemberId: poster.member.id, status: "settled",
+      terms: {}, termsWordsEncrypted: "fixture", players: { create: players.map((memberId, seat) => ({
+        memberId, seat, timeZone: "UTC", joinedAt: new Date(), dayOne: new Date(),
+      })) },
+    } });
+    for (const memberId of players) {
+      for (const scope of ["launch.legal", "launch.health-data"] as const) {
+        await recordHostedLaunchRequiredConsent({ memberId, scope, prisma: getPrisma() });
+      }
+    }
+    const post = await createHealthPost(poster, { id: randomUUID(), caption: "Fixture post" });
+    const original = await createHealthComment(recipient, post.id, { id: randomUUID(), body: "Fixture question", visibility: "poster" });
+    const reply = { id: randomUUID(), replyTo: original.id, body: "Fixture private answer" };
+    await Promise.all([createHealthComment(poster, post.id, reply), createHealthComment(poster, post.id, reply)]);
+    expect(vi.mocked(readGamePushRoutes).mock.calls.map(([, members]) => members)).toEqual([[poster.member.id], [recipient.member.id]]);
+    expect(state.queued).toHaveLength(2);
+
+    await deleteHealthComment(recipient, original.id);
+    for (const deliver of state.queued) await deliver();
+    expect(state.sent).toHaveBeenCalledTimes(1);
+    const [notification] = state.sent.mock.calls[0]!;
+    expect(notification.memberId).toBe(recipient.member.id);
+    expect(notification.request.data).toEqual({ notification: "health_comment", postId: post.id });
+    expect(notification.request.message).toEqual({ kind: "alert", body: "Someone replied to your comment." });
+    expect(JSON.stringify(notification.request)).not.toContain(reply.body);
+
+    await deliverHealthNotification({ ...notification, memberId: poster.member.id });
+    state.visible = false;
+    await deliverHealthNotification(notification);
+    state.visible = true;
+    await deleteHealthComment(poster, reply.id);
+    await deliverHealthNotification(notification);
+    expect(state.sent).toHaveBeenCalledTimes(1);
   });
 
   it("atomically coalesces cheers per post for an hour and suppresses a withdrawn claim", async () => {

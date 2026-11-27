@@ -1,5 +1,5 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { after } from "next/server";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
@@ -14,7 +14,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { describeKnownLoggedErrorType } from "../http";
 import { getPrisma } from "../prisma";
 import { admitActivityName } from "./activity-name";
-import { findVisibleHealthPost } from "./audience";
+import { findVisibleHealthPost, visibleHealthCommentOnPostSql } from "./audience";
 import { type CachedHealthCandidate, type FrozenHealthCard, type HealthCardSelection, resolveRecordedSelection } from "./card-options";
 import { openHealthTexts, sealHealthTexts } from "./crypto";
 import type { RecordedActivity } from "./engine/types";
@@ -33,7 +33,7 @@ type Auth = HostedNativeMemberAuth;
 type Content = { caption?: string | null; setRevision?: string; cards?: readonly HealthCardSelection[] };
 type CreatePost = Content & { id: string; attachmentId?: string; activity?: RecordedActivity };
 type CreateCardContext = { recorded?: readonly CachedHealthCandidate[]; units: ClientUnits; signal?: AbortSignal };
-type Comment = { id: string; visibility?: "everyone" | "poster"; body: string };
+type Comment = { id: string; visibility?: "everyone" | "poster"; body: string; replyTo?: string };
 const postReceipt = { id: true, authorMemberId: true, deletedAt: true, version: true } as const;
 const notFound = () => hostedOnboardingError({ code: "HEALTH_NOT_FOUND", httpStatus: 404, message: "That item is unavailable." });
 const conflict = () => hostedOnboardingError({ code: "HEALTH_WRITE_CONFLICT", httpStatus: 409, message: "That item has changed." });
@@ -293,6 +293,33 @@ export async function setHealthCheer(auth: Auth, postId: string, enabled: boolea
   sendHealthNotificationAfterCommit(notification);
 }
 
+async function privateReplyRecipient(tx: Tx, poster: string, postId: string, replyTo: string) {
+  // DELETE tombstones the source without locking the post. Hold this row through insertion.
+  const [source] = await tx.$queryRaw<Array<{ authorMemberId: string }>>`
+    SELECT c.author_member_id AS "authorMemberId" FROM health_post_comment c
+    WHERE c.id = ${replyTo}::uuid AND c.post_id = ${postId}::uuid AND c.author_member_id <> ${poster}
+      AND c.visibility = 'poster' AND c.recipient_member_id IS NULL
+      AND ${visibleHealthCommentOnPostSql(poster, Prisma.sql`${poster}::text`)}
+    FOR SHARE OF c`;
+  if (!source) throw notFound();
+  return source.authorMemberId;
+}
+
+async function checkCommentReplay(tx: Tx, prior: {
+  postId: string; authorMemberId: string; recipientMemberId: string | null; deletedAt: Date | null;
+}, actor: string, postId: string, replyTo?: string) {
+  if (prior.postId !== postId || prior.authorMemberId !== actor || prior.deletedAt) throw conflict();
+  if (!replyTo) {
+    if (prior.recipientMemberId !== null) throw conflict();
+    return;
+  }
+  // A withdrawn original still proves the audience of a committed receipt.
+  if (!prior.recipientMemberId || !await tx.healthPostComment.findFirst({
+    where: { id: replyTo, postId, visibility: "poster", recipientMemberId: null, authorMemberId: prior.recipientMemberId },
+    select: { id: true },
+  })) throw conflict();
+}
+
 export async function createHealthComment(auth: Auth, postId: string, input: Comment) {
   const db = getPrisma(), actor = auth.member.id, id = input.id.toLowerCase(), target = postId.toLowerCase();
   if (!await findVisibleHealthPost(db, actor, target)) throw notFound();
@@ -306,17 +333,26 @@ export async function createHealthComment(auth: Auth, postId: string, input: Com
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
     const post = await lockVisiblePost(tx, actor, target);
-    const now = new Date();
-    const inserted = bodyEncrypted && await tx.healthPostComment.createMany({ data: [{
-      id, authorMemberId: actor, postId: target, visibility: input.visibility ?? "everyone", bodyEncrypted,
-      pushClaimedAt: actor === post.authorMemberId ? null : now,
-    }], skipDuplicates: true });
-    if (!inserted || !inserted.count) {
-      const prior = await tx.healthPostComment.findUnique({ where: { id }, select: { postId: true, authorMemberId: true, deletedAt: true } });
-      if (!prior || prior.postId !== target || prior.authorMemberId !== actor || prior.deletedAt) throw conflict();
+    if (input.replyTo && post.authorMemberId !== actor) throw notFound();
+    const prior = await tx.healthPostComment.findUnique({ where: { id }, select: {
+      postId: true, authorMemberId: true, recipientMemberId: true, deletedAt: true,
+    } });
+    if (prior) {
+      await checkCommentReplay(tx, prior, actor, target, input.replyTo);
       return null;
     }
-    return prepareHealthNotification(tx, { actor, postId: target, memberId: post.authorMemberId, subject: { kind: "comment", commentId: id }, claimedAt: now });
+    if (!bodyEncrypted) throw conflict();
+    const recipientMemberId = input.replyTo ? await privateReplyRecipient(tx, actor, target, input.replyTo) : null;
+    const memberId = recipientMemberId ?? post.authorMemberId;
+    const now = new Date();
+    const inserted = await tx.healthPostComment.createMany({ data: [{
+      id, authorMemberId: actor, postId: target, recipientMemberId, bodyEncrypted,
+      visibility: recipientMemberId ? "poster" : input.visibility ?? "everyone",
+      pushClaimedAt: actor === memberId ? null : now,
+    }], skipDuplicates: true });
+    // Same-post writers hold the parent lock, so an insert collision here belongs to another post.
+    if (!inserted.count) throw conflict();
+    return prepareHealthNotification(tx, { actor, postId: target, memberId, subject: { kind: "comment", commentId: id }, claimedAt: now }, recipientMemberId !== null);
   });
   sendHealthNotificationAfterCommit(notification);
   return { id };

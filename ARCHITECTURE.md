@@ -6785,8 +6785,10 @@ before its per-author limit. Profile, detail, photo, interaction and delivery
 reads reapply it through the shared post predicate. Deleting a game removes
 its seats and leaves only the author eligible to see the post.
 
-Each comment requires access to the live parent post. A poster-only comment
-is visible to the poster and its writer. Blocks and hides also apply between
+Each comment requires access to the live parent post. A poster-only original
+is visible to the poster and its writer. The poster's private reply records
+that writer as its recipient and is visible to those two members. Its audience
+survives deletion of the original. Blocks and hides also apply between
 the reader and the commenter and between the poster and the commenter. A
 commenter must be the poster or the poster's current game partner. Web checks
 the parent before paging comments and binds its poster to the comment query.
@@ -6942,7 +6944,7 @@ database transactions.
 | `health_post` | `caption_encrypted`, `cards_encrypted` (one envelope per selected card, including payoff scores, profile names and stake text) | `id` is the client's replay key. `author_member_id` owns it. Nullable `game_id` scopes a payoff to its game. Only cards selected from suggestion sets enter `posted_card_keys`, as opaque keyed digests of the author's member ID and each candidate ID. `created_at`, `deleted_at` and `version` order and fence changes. `cheer_push_claimed_at` coalesces notifications. |
 | `health_activity` | `summary_encrypted` holds the activity kind, optional name, start, durations, optional timer, heart-rate summary and route summary (moving distance, climb and split seconds), sealed under the owner's `health-post` scope. | `id` is the client UUID. `member_id` owns the recording. Local `day` supports bounded session reads. `created_at` and nullable `deleted_at` track lifecycle. Nullable `post_id` binds the recording to its post. |
 | `health_activity_kind_decision` | None | Shared across members. `key` contains the prompt version, privacy key version and a purpose-specific HMAC of the NFKC-normalized, lowercased name. `kind`, `route` and `timer` hold the classifier's answer before member capability checks. `created_at` records insertion. The table excludes raw names, member references and fallback answers. |
-| `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
+| `health_post_comment` | `body_encrypted` | `id` is the client's replay key. `post_id` and `author_member_id` bind it to a target and writer. `visibility` selects everyone or poster. A private reply has poster visibility and an immutable `recipient_member_id`. Recipient account deletion cascades the reply. `created_at`, `deleted_at` and `push_claimed_at` order, tombstone and claim the comment. |
 | `health_post_cheer` | None | `post_id`, `member_id` and `created_at` identify a member's single cheer on a post and when it was recorded. |
 | `health_feed_hide` | None | `member_id`, `hidden_member_id` and `created_at` record who hid whom and when. Indexes support both directions. |
 | `health_win_set` | `candidates_encrypted`, including unpublished card specs, options and private achievement descriptors | `member_id` and local calendar `day` identify the daily set. `revision` identifies the published set, `created_at` records generation time and `checked_at` bounds hourly revalidation. The keyed lookup is described above. |
@@ -6952,8 +6954,9 @@ database transactions.
 Post and comment IDs bind a retry to its actor and target. Deletion keeps a
 tombstone so delayed requests cannot recreate content. Post edits compare
 `expectedVersion` with the stored version. The mutation that creates a
-comment or admits an hourly cheer notification also claims its push.
-`deliverGamePush` rechecks health access after commit.
+comment or admits an hourly cheer notification also claims its push. A private
+reply targets the stored recipient. Other comments target the post author.
+`deliverGamePush` rechecks health access and the intended member after commit.
 
 The partial unique index permits one live payoff per game. Deletion retains
 the game ID on the tombstone and releases the live slot. The game ID has no

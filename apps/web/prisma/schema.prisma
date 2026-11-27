@@ -747,7 +747,8 @@ model HostedMember {
   areaArtBudget                  GameAreaArtMemberBudget?
   healthActivities               HealthActivity[]
   healthPosts                    HealthPost[]
-  healthPostComments             HealthPostComment[]
+  healthPostComments             HealthPostComment[]             @relation("HealthCommentAuthor")
+  healthPostCommentsReceived     HealthPostComment[]             @relation("HealthCommentRecipient")
   healthPostCheers               HealthPostCheer[]
   healthPostAttachments          HealthPostAttachment[]
   healthFeedHides                HealthFeedHide[]                @relation("HealthHideOwner")
@@ -3368,19 +3369,22 @@ model HealthPostCheer {
 }
 
 model HealthPostComment {
-  id             String       @id @db.Uuid
-  postId         String       @map("post_id") @db.Uuid
-  authorMemberId String       @map("author_member_id")
-  visibility     String       @default("everyone")
-  bodyEncrypted  String?      @map("body_encrypted")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(3)
-  pushClaimedAt  DateTime?    @map("push_claimed_at") @db.Timestamptz(3)
-  author         HostedMember @relation(fields: [authorMemberId], references: [id], onDelete: Cascade)
-  post           HealthPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id                String        @id @db.Uuid
+  postId            String        @map("post_id") @db.Uuid
+  authorMemberId    String        @map("author_member_id")
+  recipientMemberId String?       @map("recipient_member_id")
+  visibility        String        @default("everyone")
+  bodyEncrypted     String?       @map("body_encrypted")
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt         DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  pushClaimedAt     DateTime?     @map("push_claimed_at") @db.Timestamptz(3)
+  author            HostedMember  @relation("HealthCommentAuthor", fields: [authorMemberId], references: [id], onDelete: Cascade)
+  recipient         HostedMember? @relation("HealthCommentRecipient", fields: [recipientMemberId], references: [id], onDelete: Cascade)
+  post              HealthPost    @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([postId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([authorMemberId])
+  @@index([recipientMemberId])
   @@map("health_post_comment")
 }
 

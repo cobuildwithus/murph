@@ -70,7 +70,9 @@ export function visibleHealthPostSql(viewerId: string, access: PostAccess = "con
 function commentContextOnPostSql(viewerId: string, poster: Prisma.Sql) {
   const commenter = Prisma.sql`c.author_member_id`;
   return Prisma.sql`c.deleted_at IS NULL
-    AND (c.visibility = 'everyone' OR c.author_member_id = ${viewerId} OR ${poster} = ${viewerId})
+    AND (c.visibility = 'everyone' OR c.author_member_id = ${viewerId}
+      OR (c.visibility = 'poster' AND c.recipient_member_id IS NULL AND ${poster} = ${viewerId})
+      OR c.recipient_member_id = ${viewerId})
     AND ${unblockedSql(poster, commenter)}
     AND (${poster} = ${commenter} OR EXISTS (${gamePartnersSql(poster, commenter)}))`;
 }
@@ -99,8 +101,9 @@ export async function findVisibleHealthPost(db: Db, viewerId: string, postId: st
 }
 
 export async function findVisibleHealthComment(db: Db, viewerId: string, commentId: string) {
-  const rows = await db.$queryRaw<Array<{ id: string; postId: string; authorMemberId: string; pushClaimedAt: Date | null }>>`
-    SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId", c.push_claimed_at AS "pushClaimedAt"
+  const rows = await db.$queryRaw<Array<{ id: string; postId: string; authorMemberId: string; recipientMemberId: string | null; pushClaimedAt: Date | null }>>`
+    SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
+      c.recipient_member_id AS "recipientMemberId", c.push_claimed_at AS "pushClaimedAt"
     FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
     WHERE c.id = ${commentId}::uuid AND ${visibleHealthCommentSql(viewerId)}`;
   return rows[0] ?? null;
