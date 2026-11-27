@@ -181,7 +181,7 @@ describe("generateHealthWins", () => {
   });
 
   it("offers lab cards only for a draw from the past year", () => {
-    const labs = (latest: string) => [
+    const labs = (latest: string): HealthWinsInput["labs"] => [
       { analyte: "ldl", date: "2032-01-15", unit: "mg/dL", value: 130 },
       { analyte: "ldl", date: "2032-03-09", unit: "mg/dL", value: 128 },
       { analyte: "ldl", date: latest, unit: "mg/dL", value: 103 },
