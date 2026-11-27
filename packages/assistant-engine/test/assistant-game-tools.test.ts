@@ -191,6 +191,13 @@ describe('game dynamic tools', () => {
     expect(guidance).toContain('even though it came before the ask')
     expect(guidance).toContain("Another player's account")
     expect(guidance).not.toMatch(/act only for the player whose message you are answering|requests from earlier messages/)
+    // A photo the player means as their check-in is saved; "done" plus a photo never falls back to asking for words.
+    expect(MURPH_GAME_PHOTO_TOOL.description).toContain('If read_game shows no currentEntryId for them, save without asking when they mean it as their check-in')
+    expect(MURPH_GAME_PHOTO_TOOL.description).toContain('If they posted it in the app, replacing it uses their one retake, so ask first unless they said to replace it')
+    expect(MURPH_GAME_PHOTO_TOOL.description).toContain('it answers your ask for a photo')
+    expect(MURPH_GAME_PHOTO_TOOL.description).toContain('If you saved that post from this chat, swap in the right photo without asking; it changes in place and they keep their retake')
+    expect(MURPH_GAME_PHOTO_TOOL.description).not.toMatch(/later unasked photos get no game reply|introduction once/)
+    expect(GAME_DAY_CORRECTION_GUIDANCE).toContain('unless they sent a photo for today and murph.game_photo is available: then save that photo instead')
     for (const tool of [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL]) {
       expect(tool.inputSchema.properties.messageRef.description).toContain('last 24 hours')
       expect(tool.inputSchema.properties.messageRef.description).not.toContain('current message')

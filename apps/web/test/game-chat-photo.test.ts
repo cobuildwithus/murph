@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ profile: vi.fn(), update: vi.fn(), posting: vi.fn(), run: vi.fn(), download: vi.fn(), put: vi.fn(), entry: vi.fn() }));
+const m = vi.hoisted(() => ({ profile: vi.fn(), update: vi.fn(), posting: vi.fn(), run: vi.fn(), swap: vi.fn(), download: vi.fn(), put: vi.fn(), entry: vi.fn() }));
 const tx = { $queryRaw: async () => [], gameProfile: { findUnique: m.profile, update: m.update }, gameEntry: { findUnique: m.entry } };
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ ...tx, $transaction: (fn: (tx: object) => unknown) => fn(tx) }) }));
-vi.mock("../src/lib/game/service", () => ({ readGamePhotoPostingStateTx: m.posting, runGameCommand: m.run }));
+vi.mock("../src/lib/game/service", () => ({ readGamePhotoPostingStateTx: m.posting, runGameCommand: m.run, swapGameChatPhoto: m.swap }));
 vi.mock("../src/lib/game/media", async (original) => ({ ...await original<typeof import("../src/lib/game/media")>(), putGameMedia: m.put }));
 vi.mock("../src/lib/game/chat-photo-media", async (original) => ({ ...await original<typeof import("../src/lib/game/chat-photo-media")>(), downloadGameChatPhoto: m.download }));
 import { gameMediaUnavailable } from "../src/lib/game/http/errors";
@@ -29,6 +29,7 @@ describe("game photo accepted-source bridge", () => {
     m.posting.mockResolvedValue({ now, dayIndex: 0, player: { dayOne: "2030-03-04", timeZone: "UTC" }, scheduled: true, checkInKind: "photo", currentEntryId: null, attemptsRemaining: 2 });
     m.entry.mockResolvedValue(null); m.download.mockResolvedValue({ bytes: new Uint8Array([255,216,255]), contentType: "image/jpeg" }); m.put.mockResolvedValue("owned/key.jpg");
     m.run.mockImplementation(async (request) => { await request.beforeMutationTx(tx); return { ok: true, game: null }; });
+    m.swap.mockImplementation(async (request) => { await request.beforeMutationTx(tx); return { ok: true, game: null }; });
     authorize.mockResolvedValue({ actor: "player_synthetic", wake: wake() });
   });
   afterEach(() => vi.useRealTimers());
@@ -64,6 +65,31 @@ describe("game photo accepted-source bridge", () => {
     expect(m.run).not.toHaveBeenCalled();
     expect(await handleGameChatPhoto({ ...input("save"), photo: { ...input("save").photo, replaceEntryId: "existing_entry" } })).toMatchObject({ photoOutcome: "saved" });
     expect(m.run.mock.calls[0][0].postGuard).toEqual({ dayIndex: 0, replaceEntryId: "existing_entry" });
+  });
+  it("swaps a photo Murph saved from chat in place, even with no retake left", async () => {
+    m.posting.mockResolvedValue({ ...(await m.posting()), currentEntryId: "gce_saved", attemptsRemaining: 1 });
+    m.entry.mockResolvedValue({ memberId: "player_synthetic", dayIndex: 0, withdrawnAt: null });
+    const request = input("save");
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, replaceEntryId: "gce_saved" } })).toEqual({ status: "ok", photoOutcome: "saved" });
+    expect(m.swap).toHaveBeenCalledWith(expect.objectContaining({ actorMemberId: "player_synthetic", chatContainerMemberId: "room_synthetic", gameId: "game_synthetic", entryId: "gce_saved", dayIndex: 0, mediaKey: "owned/key.jpg" }));
+    expect(m.update).toHaveBeenCalledWith({ where: { memberId: "player_synthetic" }, data: { chatPhotoIntroducedAt: expect.any(Date), chatPhotoOffer: { ...offer, expiresAt: expect.any(String), resolutionMessageRef: ref } } });
+    expect(m.run).not.toHaveBeenCalled();
+    m.posting.mockResolvedValue({ ...(await m.posting()), attemptsRemaining: 0 });
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, replaceEntryId: "gce_saved" } })).toMatchObject({ photoOutcome: "saved" });
+  });
+  it("still spends the retake, and needs consent, to replace a post made in the app", async () => {
+    m.posting.mockResolvedValue({ ...(await m.posting()), currentEntryId: "app_entry", attemptsRemaining: 0 });
+    const request = input("save");
+    expect(await handleGameChatPhoto(request)).toMatchObject({ error: "replacement_confirmation_required" });
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, replaceEntryId: "app_entry" } })).toMatchObject({ error: "RETAKE_USED" });
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, replaceEntryId: "gce_stale" } })).toMatchObject({ error: "replacement_confirmation_required" });
+    expect(m.swap).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled(); expect(m.download).not.toHaveBeenCalled();
+  });
+  it("reports a swap refused after the download", async () => {
+    m.posting.mockResolvedValue({ ...(await m.posting()), currentEntryId: "gce_saved" });
+    m.swap.mockResolvedValueOnce({ ok: false, error: { code: "INVALID_REQUEST", message: "The current check-in changed." } });
+    const request = input("save");
+    expect(await handleGameChatPhoto({ ...request, photo: { ...request.photo, replaceEntryId: "gce_saved" } })).toEqual({ status: "rejected", error: "INVALID_REQUEST: The current check-in changed." });
   });
   it.each(["photo", "any"])("a contextual yes saves the offered photo in a %s game", async (checkInKind) => {
     m.posting.mockResolvedValue({ ...(await m.posting()), checkInKind });

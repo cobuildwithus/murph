@@ -50403,10 +50403,12 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
   }, 720_000)
 
   it.each([
-    { name: 'game chat photo first introduction asks once without saving', kind: 'offer' },
-    { name: 'game chat photo repeated unsolicited photo stays quiet', kind: 'quiet' },
-    { name: 'game chat photo introduction in another room stays quiet', kind: 'quiet-new-room' },
+    { name: 'game chat photo that might be a check-in asks once without saving', kind: 'offer' },
+    { name: 'game chat unrelated photo stays quiet', kind: 'quiet' },
+    { name: 'game chat photo with done words saves without asking', kind: 'done' },
+    { name: 'game chat photo answering Murph\'s ask saves without asking', kind: 'asked' },
     { name: 'game chat photo explicit save needs no repeated confirmation', kind: 'save' },
+    { name: 'game chat wrong photo Murph saved is swapped without asking', kind: 'fix' },
     { name: 'game chat off day credits effort without retrying or counting', kind: 'off-day' },
     { name: 'game v1 any artifact chat photo save uses one write', kind: 'save-any' },
     { name: 'game chat photo yes saves only pending source', kind: 'yes' },
@@ -50426,7 +50428,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
       players: [{ memberId: 'player_alex', seat: 0, firstName: 'Alex', dayOne: '2030-03-04', timeZone: 'UTC' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'UTC' }],
       pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 2 },
       progress: { checkedAt: '2030-03-05T12:00:00Z', players: [
-        { memberId: 'player_alex', score: 1, target: 5, currentDayIndex: 1, currentEntryId: kind === 'replace' ? 'entry_synthetic' : null, attemptsRemaining: kind === 'replace' ? 1 : 2, days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-05', status: 'due' as const }] },
+        { memberId: 'player_alex', score: 1, target: 5, currentDayIndex: 1, currentEntryId: kind === 'replace' ? 'entry_synthetic' : kind === 'fix' ? 'gce_synthetic' : null, attemptsRemaining: kind === 'replace' || kind === 'fix' ? 1 : 2, days: [{ dayIndex: 0, date: '2030-03-04', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-05', status: 'due' as const }] },
         { memberId: 'player_sam', score: 1, target: 5, currentDayIndex: 1, currentEntryId: 'entry_other', attemptsRemaining: 1, days: [{ dayIndex: 0, date: '2030-03-04', status: 'missed' as const }, { dayIndex: 1, date: '2030-03-05', status: 'posted' as const }] },
       ] },
       result: kind === 'result' ? { scores: [{ memberId: 'player_alex', seat: 0, score: 5, misses: 0 }, { memberId: 'player_sam', seat: 1, score: 3, misses: 2 }], tickets: [{ owedByMemberId: 'player_sam', owedToMemberId: 'player_alex', what: 'Choose the next board game', status: 'open' as const, count: 1 }] } : null,
@@ -50450,8 +50452,11 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
           status: player.memberId === 'player_sam' ? 'posted' as const : offset === 13 ? 'due' as const : 'missed' as const }))
       }
     }
-    const message = kind === 'offer' || kind === 'quiet-new-room' ? 'Just finished my 20-minute walk! [One attached JPEG photo, attachment ordinal 1, showing Alex outdoors after the walk.]'
-      : kind === 'quiet' ? 'Another walk done! [One attached JPEG photo, ordinal 1.]'
+    const message = kind === 'offer' ? '[One attached JPEG photo, attachment ordinal 1, showing a park path at sunset. No text.]'
+      : kind === 'quiet' ? 'lol look at him [One attached JPEG photo, ordinal 1, showing a dog asleep on a couch.]'
+      : kind === 'done' ? 'Done for today!! [One attached JPEG photo, attachment ordinal 1, a selfie on a balcony.]'
+      : kind === 'asked' ? '[One attached JPEG photo, attachment ordinal 1, a selfie with a friend on a rooftop. No text.]'
+      : kind === 'fix' ? 'Murph that was the wrong pic, use this one [One attached JPEG photo, ordinal 1.]'
       : kind === 'yes' ? 'yeah please'
       : kind === 'progress' ? 'Murph, who checked in today and yesterday?'
       : kind === 'window' ? 'Murph, who is ahead in our game overall, and what are our scores?'
@@ -50476,7 +50481,7 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
           } }, currentUserActionScope: () => ({ conversationId: 'synthetic-room', inboundMailboxItemIds: [], recipientKey: 'synthetic-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send.') } },
         model: config.model, modelProvider: config.modelProvider, reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
-        prompt: `Shared history: Alex and Sam have a walking challenge here. ${kind === 'quiet' ? 'Murph already introduced saving a chat photo earlier; Alex declined. Neither person is asking Murph to speak now.' : kind === 'yes' ? 'Murph just asked Alex: Want me to use this as your check-in photo? The server has that exact pending photo selection.' : ''}\nCurrent accepted message from Alex (Message ref: ${inputId}): ${message}`,
+        prompt: `Shared history: Alex and Sam have a walking challenge here. ${kind === 'quiet' || kind === 'done' ? 'Murph already introduced saving a chat photo earlier; Alex declined. Neither person is asking Murph to speak now.' : kind === 'asked' ? 'Alex said the app would not post their walk photo. Murph replied: Send the walk pic here and I will save it.' : kind === 'fix' ? 'Earlier today Alex sent a photo and said done; Murph saved that photo from this chat as Alex\'s check-in.' : kind === 'yes' ? 'Murph just asked Alex: Want me to use this as your check-in photo? The server has that exact pending photo selection.' : ''}\nCurrent accepted message from Alex (Message ref: ${inputId}): ${message}`,
       })
       process.stdout.write(JSON.stringify({ scenario: name, reply: result.finalMessage, actions: calls.map((call) => call.action), finalAction: result.finalAction }) + '\n')
       const photos = calls.filter((call) => call.action === 'game_photo')
@@ -50489,18 +50494,19 @@ describeRealCodex('real Codex game progress and photo journeys', () => {
         expect(result.finalMessage).toMatch(/nice|good|glad|well done|great|still|effort|walk/iu)
         expect(result.finalMessage).not.toMatch(/(?:I(?:’|')?ve|I|you(?:’|')?re) (?:saved|logged|checked)|it counts|counted toward|try again|use the app/iu)
         expect(result.finalMessage.length).toBeLessThanOrEqual(220)
-      } else if (kind === 'offer' || kind === 'save' || kind === 'save-any' || kind === 'yes') {
+      } else if (kind === 'offer' || kind === 'save' || kind === 'save-any' || kind === 'yes' || kind === 'done' || kind === 'asked' || kind === 'fix') {
         expect(calls.map((call) => call.action)).toEqual(['read_game', 'game_photo'])
         expect(photos[0]).toMatchObject({ origin: { kind: 'accepted_input', assistantInputId: inputId }, photo: { operation: kind === 'offer' ? 'offer' : 'save', gameId: game.id } })
         if (kind === 'yes') expect(photos[0].photo.sourceMessageRef).toBeUndefined()
         else expect(photos[0].photo).toMatchObject({ sourceMessageRef: inputId, attachmentOrdinal: 1 })
+        if (kind === 'fix') expect(photos[0].photo.replaceEntryId).toBe('gce_synthetic')
+        else expect(photos[0].photo.replaceEntryId).toBeUndefined()
         if (kind === 'offer') { expect(result.finalMessage).toMatch(/want|use|save/iu); expect(result.finalMessage).toContain('?'); expect(result.finalMessage).not.toMatch(/saved|logged|checked you in/iu) }
         else { expect(result.finalMessage).toMatch(/saved|logged|checked.in|check-in/iu); expect(result.finalMessage).not.toMatch(/want me|confirm|are you sure/iu) }
       } else {
         expect(photos).toHaveLength(0)
-        if (kind === 'quiet' || kind === 'quiet-new-room') { expect(result.finalAction).toEqual({ kind: 'none' }); expect(result.finalMessage).toBe('') }
+        if (kind === 'quiet') { expect(result.finalAction).toEqual({ kind: 'none' }); expect(result.finalMessage).toBe('') }
         else expect(calls.map((call) => call.action)).toEqual(['read_game'])
-        if (kind === 'quiet-new-room') expect(calls.map((call) => call.action)).toEqual(['read_game'])
         if (kind === 'replace') { expect(result.finalMessage).toMatch(/replace|retake/iu); expect(result.finalMessage).toContain('?'); expect(result.finalMessage).not.toMatch(/saved|logged/iu) }
         if (kind === 'progress') { expect(result.finalMessage).toMatch(/Sam/iu); expect(result.finalMessage).toMatch(/yesterday/iu); expect(result.finalMessage).not.toMatch(/Alex.{0,20}missed today|Sam.{0,20}missed today/iu) }
         if (kind === 'window') {
