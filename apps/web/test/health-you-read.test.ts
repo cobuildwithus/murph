@@ -61,6 +61,7 @@ const profile = { age: 46, age_as_of: asOf, sex: "male" },
     timeZone: "UTC",
     historyFrom: asOf,
     sourceRevision: ref.dataVersion,
+    hasWearableData: false,
     availability: {},
     markers: [],
   };
@@ -135,7 +136,7 @@ describe("private view authority and dependency lifecycle", () => {
     for (const [platform, build, typed] of [["ios", "127", false], ["ios", "128", true], ["android", "128", false]] as const) {
       const headers = new Headers({ "X-Murph-Client-Platform": platform, "X-Murph-Client-Version": "1.0", "X-Murph-Client-Build": build });
       const view = await readPrivateYou(auth, "you", signal, undefined, headers);
-      expect(view).toMatchObject({ questions: [typed ? { key: "quitDate", inputKind: "date" } : { options: expect.arrayContaining([expect.objectContaining({ value: expect.any(String) })]) }] });
+      expect(view).toMatchObject({ questions: [typed ? { key: "quitDate", inputKind: "date", precision: "month" } : { options: expect.arrayContaining([expect.objectContaining({ value: expect.any(String) })]) }] });
     }
     expect(await readPrivateYou(auth, "you", signal)).toMatchObject({ questions: bundle.optionQuestions });
   });
@@ -172,7 +173,9 @@ describe("private view authority and dependency lifecycle", () => {
     warm();
     const old = buildViews({ ...snapshot, hasAnswerProjection: true });
     expect(old.you.questions[0].key).toBe("smoking");
-    mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: old })]);
+    mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: {
+      ...old, you: { ...old.you, notCounted: [{ key: "smoking", icon: "smoking", label: "Smoking", action: "answer", primary: true }] },
+    } }, (key, value) => key === "featured" ? undefined : value)]);
     const next = { ...ref, dataVersion: "f".repeat(64) };
     mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: next });
     mocks.inputs.mockResolvedValue({ ...snapshot, sourceRevision: next.dataVersion, hasAnswerProjection: true,

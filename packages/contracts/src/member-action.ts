@@ -555,17 +555,28 @@ export const foodWeekLimits = {
   seafood: 21, plant_oil: 100, fried_days: 7, packaged_days: 7, alcohol: 100, max_occasion: 30,
 } as const;
 export type FoodWeekKey = keyof typeof foodWeekLimits;
+export const foodWeekDependencies: Partial<Record<FoodWeekKey, { maxFrom: FoodWeekKey; message: string }>> = {
+  fried_days: { maxFrom: "eating_days", message: "Days with fried foods cannot exceed the number of days you ate." },
+  packaged_days: { maxFrom: "eating_days", message: "Days with salty snacks cannot exceed the number of days you ate." },
+  max_occasion: { maxFrom: "alcohol", message: "Drinks in one sitting cannot exceed your total drinks for the week." },
+};
 const foodAnswer = z.object({
   key: z.custom<FoodWeekKey>(v => typeof v === "string" && Object.hasOwn(foodWeekLimits, v)),
   value: z.number().finite().nonnegative(),
 }).strict().refine(({ key, value }) => value <= foodWeekLimits[key] && (!key.endsWith("_days") || Number.isInteger(value)));
 export const foodWeekAnswersSchema = z.array(foodAnswer).min(1).max(15).refine(rows => {
   const values = new Map(rows.map(row => [row.key, row.value]));
-  const eatingDays = values.get("eating_days") ?? 7;
+
   return ["vegetables", "fruit", "whole_grains", "plants", "red_meat", "processed_meat", "sweet_drinks", "sweets", "eating_days"]
-    .every(key => rows.some(row => row.key === key)) && values.size === rows.length && (values.get("fried_days") ?? 0) <= eatingDays
-    && (values.get("packaged_days") ?? 0) <= eatingDays
-    && (values.get("max_occasion") ?? 0) <= (values.get("alcohol") ?? 100);
+    .every(key => rows.some(row => row.key === key)) && values.size === rows.length;
+}).superRefine((rows, ctx) => {
+  const values = new Map(rows.map(row => [row.key, row.value]));
+  for (const { key, value } of rows) {
+    const limit = foodWeekDependencies[key];
+    if (limit && value > (values.get(limit.maxFrom) ?? foodWeekLimits[limit.maxFrom])) {
+      ctx.addIssue({ code: "custom", message: limit.message });
+    }
+  }
 });
 const yesNoUnsure = z.enum(["yes", "no", "unsure"]);
 export const oneOffAnswerSchema = z.discriminatedUnion("key", [

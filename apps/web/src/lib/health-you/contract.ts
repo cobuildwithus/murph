@@ -21,6 +21,7 @@ const factor = z.object({
   inTarget: maybe(z.boolean()),
   years: n,
   yearsText: s,
+  featured: z.boolean().default(false),
   whatItIs: s.optional(),
   whatLowersIt: s.optional(),
   rank: maybe(z.object({ percentile: n, label: s, cohort: s })),
@@ -36,7 +37,7 @@ const notCounted = z.object({
   action: z.enum(["combine", "foodWeek", "addBloodPressure", "connectWearable", "bloodWork", "answer"]),
   primary: z.boolean(),
 });
-const question = z.object({ key: s, text: s, inputKind: z.enum(["options", "date", "number"]).optional(), unit: s.optional(), min: n.optional(), max: n.optional(), options: z.array(z.object({ value: s, label: s })) });
+const question = z.object({ key: s, text: s, inputKind: z.enum(["options", "date", "number"]).optional(), precision: z.literal("month").optional(), unit: s.optional(), min: n.optional(), max: n.optional(), options: z.array(z.object({ value: s, label: s })) });
 const weekRow = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("challenge"),

@@ -11,7 +11,7 @@ const questions: Record<string, Question> = {
     options: options(["pregnant", "Currently pregnant"], ["postpartum", "Gave birth in the past 180 days"], ["neither", "Neither"]) },
   smoking: { key: "smoking", text: "Have you smoked at least 100 cigarettes in your life? If so, do you smoke now?",
     options: options(["never", "Fewer than 100"], ["former", "100 or more and stopped"], ["current", "100 or more and smoke now"], ["unsure", "Not sure"]) },
-  quitDate: { key: "quitDate", text: "When did you last stop smoking cigarettes and stay stopped?", inputKind: "date", options: [] },
+  quitDate: { key: "quitDate", text: "When did you last stop smoking cigarettes and stay stopped?", inputKind: "date", precision: "month", options: [] },
   alcohol: { key: "alcoholDrinksPerWeek", text: "How many standard drinks are typical for you in a week?", inputKind: "number", unit: "standard drinks per week", min: 0, max: 150, options: [] },
   disease: { key: "seriousDisease", text: "Has a clinician ever told you that you had heart failure, a heart attack, a stroke or cancer?", options: yesNo },
   diabetes: { key: "diabetes", text: "Have you been diagnosed with diabetes outside of pregnancy?", options: yesNo },

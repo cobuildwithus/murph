@@ -16,7 +16,8 @@ import { buildViews, favorableRank } from "../src/lib/health-you/views";
 import { score } from "../src/lib/health-you/engine";
 import { combineAgeEffect } from "../src/lib/health-you/checkins";
 import { nextQuestion } from "../src/lib/health-you/questions";
-import { offset } from "../src/lib/health-you/engine/model";
+import { youLabel } from "../src/lib/health-you/labels";
+import { model, offset } from "../src/lib/health-you/engine/model";
 
 const today = "2032-03-01",
   clock = new Date("2032-03-02T03:15:00Z");
@@ -133,7 +134,7 @@ describe("dated private replica projections", () => {
     ];
     const result = buildViews(read(r));
     expect(result.you.factors).toContainEqual(expect.objectContaining({ key: "rdw", unit: "%" }));
-    expect(result.markers["red-cell-distribution-width"]).toMatchObject({ value: 13, unit: "%" });
+    expect(result.markers["red-cell-distribution-width"]).toMatchObject({ value: 13, unit: "%", label: "Red cell size range" });
     expect(JSON.stringify(result)).not.toContain("synthetic");
     const prior = r.labResultRows[0];
     prior.date = offset(today, -4);
@@ -406,16 +407,35 @@ describe("round 3 private views", () => {
       week: { daysAged: 7, partial: true, basis: "referenceOnly" },
     });
     expect(views.week).toMatchObject({ daysAged: 7, helped: [], cost: [] });
-    expect(views.you.notCounted).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ key: "sleepTime", action: "connectWearable" }),
-        expect.objectContaining({ key: "grip", action: "combine" }),
-        expect.objectContaining({ key: "bloodPressure", action: "addBloodPressure" }),
-        expect.objectContaining({ key: "albumin", action: "bloodWork" }),
-        expect.objectContaining({ key: "fruit", action: "foodWeek" }),
-        expect.objectContaining({ key: "smoking", action: "answer" }),
-      ]),
-    );
+    expect(views.you.notCounted.map(tile => tile.action)).toEqual(["bloodWork", "connectWearable", "foodWeek", "addBloodPressure"]);
+    expect(views.you.notCounted.filter(tile => tile.primary)).toEqual([views.you.notCounted[0]]);
+  });
+  it("keeps a connected device out of the action list even with just one context-only sample", () => {
+    const r = replica();
+    r.metricRows = [{ ...r.metricRows[0], metricKey: "hrv-rmssd", value: 38, unit: "ms" }];
+    const view = buildViews(read(r)).you;
+    expect(view.factors).toEqual([]);
+    expect(view.notCounted.map(tile => tile.action)).not.toContain("connectWearable");
+  });
+  it("features only the five largest contributions and retains the full blood panel in detail", () => {
+    const input = read(replica());
+    const panel = { albumin: 4.5, rdw: 13, wbc: 6, ggt: 20, alp: 80, sodium: 140, potassium: 4 };
+    input.evidence.labs = Object.entries(panel).map(([marker, value]) => ({
+      date: today, marker, value, unit: model.labs[marker as keyof typeof panel][1],
+    }));
+    const { you, blood } = buildViews(input);
+    expect(blood.factors).toHaveLength(Object.keys(panel).length);
+    expect(you.factors.map(f => Math.abs(f.years))).toEqual(you.factors.map(f => Math.abs(f.years)).sort((a, b) => b - a));
+    expect(you.factors.filter(f => f.featured)).toEqual(you.factors.slice(0, 5));
+    expect(blood.factors).toEqual(you.factors.filter(f => f.group === "blood"));
+  });
+  it("has a display label for every frozen factor and marker", () => {
+    const keys = new Set([...Object.keys(model.display), ...Object.keys(model.coef), ...model.optional,
+      ...Object.keys(model.labs), ...model.feeds.known_markers, ...Object.keys(model.bridges.markers)]);
+    for (const key of keys) expect(youLabel(key), key).toMatch(/^[A-Z][^_]+$/);
+    expect(["alp", "ast", "rdw", "egfr", "hs-crp", "hba1c"].map(youLabel)).toEqual([
+      "Alkaline phosphatase", "Liver enzyme AST", "Red cell size range", "Kidney filtration", "Inflammation", "Blood sugar (A1c)",
+    ]);
   });
   it("withholds a single wearable comparison and a birth-year eligibility boundary", () => {
     const sparse = buildViews(read(replica()));

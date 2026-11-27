@@ -1,6 +1,6 @@
 import "server-only";
 import {
-  addDaysToIsoDate, bloodPressureFields, combineTestsSchema, foodWeekAnswersSchema, memberActionIdV1Schema,
+  addDaysToIsoDate, bloodPressureFields, combineTestsSchema, foodWeekAnswersSchema, foodWeekDependencies, memberActionIdV1Schema,
   oneOffAnswerSchema, projectedCheckInSchema, toLocalDayKey, type MemberActionV1, type CheckInInstrument,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -92,7 +92,15 @@ export async function saveBloodPressure(request: Request, auth: HostedNativeMemb
 
 const foodRequest = z.object({ id, answers: foodWeekAnswersSchema }).strict();
 export async function saveFoodWeek(request: Request, auth: HostedNativeMemberAuth) {
-  const { id, answers } = validate(foodRequest, await body(request));
+  const parsed = foodRequest.safeParse(await body(request));
+  if (!parsed.success) {
+    const messages = Object.values(foodWeekDependencies).map(limit => limit.message);
+    const issue = parsed.error.issues.find(issue => messages.includes(issue.message));
+    throw error(400, issue?.message ?? "Check the submitted values and try again.");
+  }
+  const { id, answers } = parsed.data;
+  if (answers.some(row => row.key === "max_occasion" && row.value > 0) && !answers.some(row => row.key === "alcohol"))
+    throw error(400, "Enter your total drinks for the week first.");
   await checkInReplica(request, auth);
   return submit(auth, id, { kind: "assessment.respond", version: 1,
     response: { instrument: "food-week", instrumentVersion: 1, answers: answers.sort((a, b) => a.key.localeCompare(b.key)) } });

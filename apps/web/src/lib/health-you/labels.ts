@@ -1,0 +1,144 @@
+import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
+import { lookup } from "./engine/model";
+
+// Use catalog names when they already describe the measurement. Keep the public keys stable.
+const labels: Record<string, string> = {
+  sleep: "Sleep duration",
+  pulse: "Resting heart rate",
+  steps: "Daily steps",
+  activity: "Active minutes",
+  hip_minutes: "Active minutes",
+  vo2_peak: "Cardio fitness",
+  vo2: "Cardio fitness",
+  sbp: "Blood pressure",
+  floor_rise: "Sit and rise",
+  lifting: "Strength training",
+  sleep_regularity: "Sleep regularity",
+  l5_midpoint: "Timing of your least active hours",
+  smoking: "Smoking history",
+  alcohol: "Usual alcohol intake",
+  disease: "Health history",
+  diabetes: "Diabetes",
+  health: "Self-rated health",
+  phq9: "Mood questionnaire",
+  bmi: "Body mass index",
+  waist: "Waist size",
+  fev1: "Lung function",
+  fibre: "Dietary fibre",
+  gait: "Walking speed",
+  gait_speed: "Walking speed",
+  knee: "Knee strength",
+  balance: "One-leg balance",
+  grip: "Grip strength",
+  vilpa: "Short bursts of vigorous activity",
+  sedentary: "Sedentary time",
+  running: "Running",
+  sauna: "Sauna use",
+  diet_pattern: "Eating pattern",
+  whole_grains: "Whole grains",
+  vegetables: "Vegetables",
+  fruit: "Fruit",
+  nuts: "Nuts",
+  legumes: "Beans and lentils",
+  fish: "Fish",
+  red_meat: "Red meat",
+  processed_meat: "Processed meat",
+  sugary_drinks: "Sugary drinks",
+  acr: "Urine albumin-to-creatinine ratio",
+  urine_acr: "Urine albumin-to-creatinine ratio",
+  non_hdl: "Non-HDL cholesterol",
+  ldl_c: "LDL cholesterol",
+  hdl_c: "HDL cholesterol",
+  red_cell_distribution_width: "Red cell size range",
+  mean_corpuscular_volume: "Average red cell size",
+  hs_crp: "Inflammation",
+  hba1c: "Blood sugar (A1c)",
+  ast: "Liver enzyme AST",
+  alt: "Liver enzyme ALT",
+  ggt: "Liver enzyme GGT",
+  egfr: "Kidney filtration",
+  egfr_ckd_epi: "Kidney filtration (CKD-EPI)",
+  gfr_mdrd_af_amer: "Kidney filtration (MDRD, Black reference)",
+  gfr_mdrd_non_af_amer: "Kidney filtration (MDRD, non-Black reference)",
+  lymph: "Lymphocyte percentage",
+  vitamin_d_25oh: "Vitamin D",
+  fib4: "Liver fibrosis score",
+  apob: "Apolipoprotein B",
+  dha: "Omega-3 fat (DHA)",
+  dpa: "Omega-3 fat (DPA)",
+  epa: "Omega-3 fat (EPA)",
+  free_t3: "Free thyroid hormone T3",
+  free_t4: "Free thyroid hormone T4",
+  dhea_sulfate: "Adrenal hormone DHEA sulfate",
+  magnesium_rbc: "Red blood cell magnesium",
+  ldl_calculated: "Calculated LDL cholesterol",
+  ldl_chol_calc_nih: "Calculated LDL cholesterol (NIH)",
+  ldl_pattern: "LDL cholesterol particle pattern",
+  ldl_large_particles: "Large LDL cholesterol particles",
+  ldl_small_particles: "Small LDL cholesterol particles",
+  ldl_medium_particles: "Medium LDL cholesterol particles",
+  ldl_particle_number: "LDL cholesterol particle count",
+  ldl_peak_size: "LDL cholesterol particle size",
+  hdl_large_particles: "Large HDL cholesterol particles",
+  vldl: "VLDL cholesterol",
+  bun_creatinine_ratio: "Urea nitrogen to creatinine ratio",
+  chol_hdl_ratio: "Total to HDL cholesterol ratio",
+  psa_free: "Free prostate-specific antigen",
+  psa_percent_free: "Free prostate-specific antigen percentage",
+  psa_total: "Total prostate-specific antigen",
+  ana_screen: "Antinuclear antibody screen",
+  poc_troponin_i: "Point-of-care troponin I",
+  ldh: "Lactate dehydrogenase",
+  aa_epa_ratio: "Arachidonic acid to EPA ratio",
+  arachidonic_acid_epa_ratio: "Arachidonic acid to EPA ratio",
+  amylase: "Amylase",
+  lipase: "Lipase",
+  leptin: "Leptin",
+  calcium_adjusted: "Adjusted calcium",
+  basophils_abs: "Basophil count",
+  basophils_pct: "Basophil percentage",
+  eosinophils_abs: "Eosinophil count",
+  eosinophils_pct: "Eosinophil percentage",
+  immature_granulocytes_abs: "Immature granulocyte count",
+  immature_granulocytes_pct: "Immature granulocyte percentage",
+  lymphocytes_abs: "Lymphocyte count",
+  monocytes_abs: "Monocyte count",
+  monocytes_pct: "Monocyte percentage",
+  neutrophils_abs: "Neutrophil count",
+  neutrophils_pct: "Neutrophil percentage",
+  omega3_total: "Total omega-3 fats",
+  omega6_omega3_ratio: "Omega-6 to omega-3 ratio",
+  urine_albumin_random: "Urine albumin",
+  urine_ph: "Urine acidity",
+  urine_specific_gravity: "Urine concentration",
+};
+
+export function youLabel(key: string): string | undefined {
+  const normalized = key.replaceAll("-", "_");
+  const definition = resolveLabResultMetricDefinition(key);
+  return lookup(labels, normalized) ?? (definition && lookup(labels, definition.key.replaceAll("-", "_")))
+    ?? definition?.displayName.replace(/(?<=\s)[A-Z][a-z]+\b/g, word => word.toLowerCase());
+}
+
+export function markerSystem(key: string) {
+  if (["hdl", "ldl", "total_cholesterol", "non_hdl", "lpa", "apob", "triglycerides"].includes(key))
+    return "Blood fats";
+  if (
+    [
+      "rdw",
+      "wbc",
+      "mcv",
+      "hemoglobin",
+      "platelets",
+      "lymphocytes_pct",
+      "hematocrit",
+      "red_blood_cell_count",
+    ].includes(key)
+  )
+    return "Blood counts";
+  if (["creatinine", "egfr", "bun", "urine_acr"].includes(key)) return "Kidney";
+  if (["alt", "ast", "ggt", "alp", "bilirubin_total", "albumin", "globulin", "total_protein"].includes(key))
+    return "Liver";
+  if (["hba1c", "glucose", "insulin"].includes(key)) return "Blood sugar";
+  return "Other markers";
+}

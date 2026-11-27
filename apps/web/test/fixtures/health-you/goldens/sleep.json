@@ -416,6 +416,7 @@
       },
       "years": -0.1,
       "yearsText": "−0.1",
+      "featured": true,
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
       "rank": null,
