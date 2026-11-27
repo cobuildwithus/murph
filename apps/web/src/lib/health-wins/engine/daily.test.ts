@@ -138,6 +138,15 @@ describe("best_month", () => {
     expect(card?.subtitle).toBe("February, tied for best month in the past 12 months");
   });
 
+  it("compares the monthly means as the title shows them", () => {
+    // A wearable's VO2 max estimate creeps up 0.1 a month: every month reads 45.
+    const creeping = [44.8, 44.9, 45, 45.2, 45.3];
+    const flat = full.flatMap((month, index) => monthOf("vo2max", month, creeping[index], 15));
+    expect(cards([...flat, ...monthOf("vo2max", "2032-02", 45.4, 14)]).some(card => card.kind === "best_month")).toBe(false);
+    const clear = cards([...flat, ...monthOf("vo2max", "2032-02", 46.6, 14)]).find(card => card.kind === "best_month");
+    expect(clear?.title).toEqual({ number: "47 mL/kg/min", measure: "VO2 max" });
+  });
+
   it("keeps rounding differences from turning flat monthly means into a best", () => {
     const series = [...full, "2032-02"].flatMap(month => monthOf("sleep_efficiency", month, 93.4, month === "2032-02" ? 14 : 15));
     expect(cards(series).some(card => card.kind === "best_month")).toBe(false);
