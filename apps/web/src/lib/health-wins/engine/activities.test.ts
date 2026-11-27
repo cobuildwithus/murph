@@ -139,7 +139,7 @@ describe("finished experiments", () => {
 
   it.each([
     { metric: "rhr_bpm", mean: 68, step: 2, favorable: -1, subject: "RHR", label: "Resting heart rate" },
-    { metric: "hrv_ms", mean: 50, step: 3, favorable: 1, subject: "Heart rate variability", label: "Heart rate variability" },
+    { metric: "hrv_ms", mean: 50, step: 5, favorable: 1, subject: "Heart rate variability", label: "Heart rate variability" },
     { metric: "sleep_efficiency", mean: 83, step: 1, favorable: 1, subject: "Sleep efficiency", label: "Sleep efficiency" },
     { metric: "sleep_score", mean: 75, step: 2, favorable: 1, subject: "Sleep", label: "Sleep score" },
     { metric: "sleep_total_min", mean: 434, step: 15, favorable: 1, subject: "Sleep", label: "Sleep" },
