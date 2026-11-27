@@ -1,7 +1,8 @@
 import type { Bundle, Factor, Person, ThisWeekRow, YouView } from "./contract";
 import { recentSleepNights } from "./engine/observations";
+import { finishFactors, missingEvidence } from "./engine/report";
 import { MODEL_VERSION, score } from "./engine";
-import { fields, model, number, offset, rowDay, YEAR, type Contribution } from "./engine/model";
+import { fields, lookup, model, number, offset, rowDay, YEAR, type Contribution } from "./engine/model";
 import type { MarkerInput, YouInputs } from "./evidence";
 
 const keys: Record<string, [string, string]> = {
@@ -43,7 +44,7 @@ const fitness = new Set([
   "vo2_peak",
   "fev1",
 ]);
-const activities = new Set(["steps", "hip_minutes", "activity", "lifting", "vilpa", "sedentary"]);
+const activities = new Set(["steps", "hip_minutes", "activity", "running", "lifting", "vilpa", "sedentary"]);
 const fmt = (v: number, decimals = 1) => v.toLocaleString("en-US", { maximumFractionDigits: decimals });
 function signed(v: number) {
   return (v < 0 ? "−" : "+") + Math.abs(v).toFixed(1);
@@ -75,6 +76,8 @@ function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs,
     unit,
     years: tenths / 10,
     yearsText: signed(tenths / 10),
+    whatItIs: lookup(model.display, k)?.what_it_is,
+    whatLowersIt: lookup(model.display, k)?.what_helps,
     rank,
     target,
     state: "counted",
@@ -91,16 +94,58 @@ function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs,
     markerKey: marker?.key,
   };
 }
-function offerings(rows: Record<string, Contribution>) {
+function offerings(input: YouInputs, rows: Record<string, Contribution>) {
   const options: YouView["notCounted"] = [];
-  for (const [key, label, action, present] of [
-    ["strength", "Strength test", "combine", rows.grip || rows.floor_rise || rows.balance],
-    ["food", "Food week", "foodWeek", [...food].some((k) => k !== "alcohol" && rows[k])],
-    ["bloodPressure", "Blood pressure", "addBloodPressure", rows.sbp],
-    ["sleepTime", "Sleep duration", "connectWearable", rows.sleep],
-  ] as const)
-    if (!present) options.push({ key, label, icon: key, action, primary: options.length === 0 });
+  const seen = new Set<string>();
+  for (const { key: k } of missingEvidence(input.evidence, input.asOf, rows)) {
+    const factor = k.replace(/^food_week\.|^labs\./, "");
+    const action = missingAction(k, factor);
+    const [key, label] = keys[k] ?? [
+      k,
+      factor
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .replace(/^./, (c) => c.toUpperCase()),
+    ];
+    if (seen.has(key)) continue;
+    options.push({ key, label, icon: key, action, primary: !options.length });
+    seen.add(key);
+  }
   return options;
+}
+function missingAction(k: string, factor: string): YouView["notCounted"][number]["action"] {
+  if (factor === "sbp" || k === "blood_pressure_protocol") return "addBloodPressure";
+  else if (
+    fields[factor]?.group === "blood" ||
+    k.startsWith("labs.") ||
+    ["lpa", "ldl_c", "unmapped_lab"].includes(factor)
+  )
+    return "bloodWork";
+  else if (k.startsWith("food_week.") || (food.has(k) && k !== "alcohol") || k === "meals") return "foodWeek";
+  else if (
+    model.feeds.combine.includes(k) ||
+    ["grip", "floor_rise", "balance", "fitness_tests", "combine_task"].includes(k)
+  )
+    return "combine";
+  else if (
+    activities.has(k) ||
+    [
+      "sleep",
+      "pulse",
+      "vo2_peak",
+      "vo2",
+      "sleep_regularity",
+      "l5_midpoint",
+      "workouts",
+      "workout_minutes",
+      "hrv",
+    ].includes(k) ||
+    Object.hasOwn(model.feeds.daily, k) ||
+    k.startsWith("daily.") ||
+    k.startsWith("sleep_sessions.")
+  )
+    return "connectWearable";
+  else return "answer";
 }
 export function ownTargets(input: YouInputs): ThisWeekRow[] {
   const monday = weekStart(input.asOf),
@@ -139,6 +184,13 @@ export function ownTargets(input: YouInputs): ThisWeekRow[] {
 }
 function weekStart(date: string) {
   return offset(date, -((new Date(date).getUTCDay() + 6) % 7));
+}
+function markerText(last: MarkerInput) {
+  const text = lookup(model.display, last.modelKey);
+  return {
+    whatLowersIt: text?.what_helps,
+    whatItIs: text?.what_it_is ?? last.label + " is reported in " + last.unit + " on your lab panel.",
+  };
 }
 function bloodViews(input: YouInputs, factors: Factor[], notCounted: YouView["notCounted"]) {
   const markers: Bundle["markers"] = {},
@@ -188,7 +240,7 @@ function bloodViews(input: YouInputs, factors: Factor[], notCounted: YouView["no
       years: f?.years,
       target: f?.target,
       history: daily.flatMap((r) => (r?.unit === last.unit ? [{ date: r.date, value: r.value }] : [])),
-      whatItIs: last.label + " is reported in " + last.unit + " on your lab panel.",
+      ...markerText(last),
     };
   }
   const bloodFactors = factors.filter((f) => f.group === "blood" && f.key !== "bloodPressure");
@@ -255,29 +307,62 @@ export function emptyYou(profile: Person, asOf: string): YouView {
     questions: [],
   };
 }
+type Score = NonNullable<ReturnType<typeof score>>;
+function ambiguousBirthYear(input: YouInputs, at: string) {
+  const p = input.evidence.profile;
+  return p.approximate_birth_date && [20, 80].includes(Number(at.slice(0, 4)) - Number(p.birth_year));
+}
+function supportedWeek(input: YouInputs, current: Score) {
+  return (
+    !current.outside &&
+    !current.flags.includes("chronological_age_extrapolation") &&
+    !ambiguousBirthYear(input, input.asOf)
+  );
+}
+function withheld(input: YouInputs, at: string, current: Score | null) {
+  if (ambiguousBirthYear(input, at))
+    return "Your birth year alone cannot confirm whether you are in the supported age range.";
+  if (!current) return null;
+  if (current.outside || current.flags.includes("chronological_age_extrapolation"))
+    return "The comparison falls outside the age range supported by this model.";
+  const keys = Object.keys(current.parts);
+  if (keys.length === 1 && (current.rows[keys[0]].quality < 1 || model.optional.includes(keys[0])))
+    return "Another independent measurement is needed for an age estimate from this panel.";
+  return null;
+}
+function viewFactors(input: YouInputs, current: Score | null) {
+  if (!current) return [];
+  const measured = finishFactors(current.rows, current.parts, current.age, current.sex);
+  return Object.entries(measured)
+    .map(([k, r]) => factorFor(k, { ...r, grade: r.evidence_grade }, r.contribution_tenths, input, current.real))
+    .sort((a, b) => Math.abs(b.years) - Math.abs(a.years) || a.key.localeCompare(b.key));
+}
 export function buildViews(input: YouInputs): Bundle {
+  // Pin an undated reported age to this refresh across every historical snapshot.
+  const p = input.evidence.profile;
+  if (p.age != null && !p.age_as_of)
+    input = { ...input, evidence: { ...input.evidence, profile: { ...p, age_as_of: input.asOf } } };
   const { asOf, evidence } = input;
   const you = emptyYou({ memberId: "", firstName: "" }, asOf);
   const current = score(evidence, asOf);
   const rows = current?.rows ?? {},
-    factors = current
-      ? Object.entries(current.parts)
-          .map(([k, v]) => factorFor(k, rows[k], v, input, current.real))
-          .sort((a, b) => Math.abs(b.years) - Math.abs(a.years) || a.key.localeCompare(b.key))
-      : [];
-  const ready = !!current && !current.outside && factors.length > 0;
-  you.state = !current || current.outside ? "paused" : ready ? "ready" : "building";
+    factors = viewFactors(input, current);
+  const reason = withheld(input, asOf, current);
+  const ready = !!current && !reason && Object.keys(current.parts).length > 0;
+  you.state = reason ? "building" : !current ? "paused" : ready ? "ready" : "building";
   if (you.state === "paused")
     you.paused = { text: "An age estimate is outside the model’s supported range for this profile." };
   if (you.state === "building") {
-    you.building = {
-      have: recentSleepNights(evidence, asOf),
-      need: model.policy.minimum_observed_days,
-      text: "7 recent nights of measured sleep, or a qualifying measurement",
-    };
+    you.building = reason
+      ? { have: 0, need: 1, text: reason }
+      : {
+          have: recentSleepNights(evidence, asOf),
+          need: model.policy.minimum_observed_days,
+          text: "Recent measurements are needed to build your age comparison.",
+        };
   }
   you.factors = factors;
-  you.notCounted = offerings(rows);
+  you.notCounted = current ? offerings(input, rows) : [];
   you.thisWeek = ownTargets(input);
   if (input.needsWhoopAnswer && you.state !== "paused")
     you.questions = [
@@ -297,8 +382,8 @@ export function buildViews(input: YouInputs): Bundle {
     const { value, real, gap, low, high } = current;
     you.age = { value, real, gap, low, high };
     age = ageHistory(input, current, you.age);
-    week = weekView(input, current, you);
   }
+  if (current && supportedWeek(input, current)) week = weekView(input, current, you);
   return {
     you,
     age,
@@ -347,14 +432,14 @@ function displayValue(k: string, r: Contribution) {
 function factorRank(r: Contribution, input: YouInputs, age: number) {
   const percentile = r.percentile;
   if (percentile === null) return null;
-  // R2 ranks the raw observation. A high exposure may carry a higher risk.
+  // The model ranks the raw observation. A high exposure may carry a higher risk.
   const sex = String(input.evidence.profile.sex).toLowerCase();
   const last = percentile % 10;
   const suffix =
     percentile % 100 >= 11 && percentile % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][last] ?? "th");
   return {
     percentile,
-    label: percentile + suffix + " percentile",
+    label: percentile + suffix + " percentile" + (r.reference.includes("wear unknown") ? " (lower bound)" : ""),
     cohort: (sex === "female" || sex === "f" ? "Women" : "Men") + " near age " + Math.floor(age),
   };
 }
@@ -367,11 +452,19 @@ function ageHistory(
   const { asOf, evidence } = input;
   const history: NonNullable<Bundle["age"]>["history"] = [],
     weeks: NonNullable<Bundle["age"]>["weeks"] = [];
+  const events: NonNullable<Bundle["age"]>["events"] = [];
   for (let i = 0; i <= 52; i++) {
     const date = offset(asOf, -7 * i);
     if (date < input.historyFrom) break;
     const past = i === 0 ? current : score(evidence, date);
-    if (!past || past.outside || !Object.keys(past.parts).length) continue;
+    if (!past || withheld(input, date, past) || !Object.keys(past.parts).length) continue;
+    if (past.residual && offset(date, -7) >= input.historyFrom)
+      events.push({
+        date,
+        kind: "evidenceChange",
+        label: "Change in measurement evidence",
+        evidenceChangeYears: past.residual,
+      });
     history.unshift({ date, age: past.value, real: past.real });
     if (i < 12 && past.days !== null && offset(date, -7) >= input.historyFrom)
       weeks.unshift({
@@ -380,7 +473,6 @@ function ageHistory(
         basis: Object.keys(past.changes).length ? "observed" : "referenceOnly",
       });
   }
-  const events: NonNullable<Bundle["age"]>["events"] = [];
   for (const [records, kind, label] of [
     [evidence.labs, "bloodWork", "Blood work"],
     [evidence.bp, "bloodPressure", "Blood pressure"],
@@ -424,14 +516,19 @@ function weekView(input: YouInputs, current: NonNullable<ReturnType<typeof score
     });
     const saved = Math.round((7 - current.days) * 100) / 100;
     const observedDays = new Set(
-      [...(evidence.daily ?? []), ...(evidence.sleep_sessions ?? []), ...(evidence.checkins ?? [])]
+      [
+        ...(evidence.daily ?? []),
+        ...(evidence.sleep_sessions ?? []),
+        ...(evidence.checkins ?? []),
+        ...(evidence.workouts ?? []),
+      ]
         .map(rowDay)
         .filter((d) => d >= offset(asOf, -6) && d <= asOf),
     );
     you.week = {
       daysAged: current.days,
       saved,
-      partial: observedDays.size < 7,
+      partial: !Object.keys(current.changes).length || observedDays.size < 7,
       basis: Object.keys(current.changes).length ? "observed" : "referenceOnly",
     };
     return {

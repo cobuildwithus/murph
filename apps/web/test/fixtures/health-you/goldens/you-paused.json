@@ -1,6 +1,6 @@
 {
-  "version": "r2.0",
-  "asOf": "2024-09-16",
+  "version": "r3.0",
+  "asOf": "2025-03-29",
   "state": "paused",
   "profile": {
     "memberId": "synthetic-member",
@@ -22,35 +22,6 @@
     }
   ],
   "factors": [],
-  "notCounted": [
-    {
-      "key": "strength",
-      "label": "Strength test",
-      "icon": "strength",
-      "action": "combine",
-      "primary": true
-    },
-    {
-      "key": "food",
-      "label": "Food week",
-      "icon": "food",
-      "action": "foodWeek",
-      "primary": false
-    },
-    {
-      "key": "bloodPressure",
-      "label": "Blood pressure",
-      "icon": "bloodPressure",
-      "action": "addBloodPressure",
-      "primary": false
-    },
-    {
-      "key": "sleepTime",
-      "label": "Sleep duration",
-      "icon": "sleepTime",
-      "action": "connectWearable",
-      "primary": false
-    }
-  ],
+  "notCounted": [],
   "questions": []
 }

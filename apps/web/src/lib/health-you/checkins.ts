@@ -1,7 +1,7 @@
 import { toLocalDayKey } from "@murphai/contracts";
 import type { BrowserVaultEntity, BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import { isRecord } from "../primitives";
-import { day, type MemberEvidence, type Observation } from "./engine/model";
+import { day, lookup, type MemberEvidence, type Observation } from "./engine/model";
 import { score } from "./engine";
 
 function projectedAssessment(row: BrowserVaultEntity, from: string, asOf: string, timeZone: string) {
@@ -39,14 +39,27 @@ export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf:
       response.answer.key === "whoopZones" &&
       ["yes", "no", "notSure"].includes(String(response.answer.value))
     ) {
-      checkins.push({ ...value, whoop_zones: response.answer.value });
+      checkins.push({ ...value, whoop_standard_zones: response.answer.value });
     }
     if (response.instrument === "food-week" && Array.isArray(response.answers)) {
-      // Serving categories and the reported week are insufficient to establish habitual daily grams.
-      checkins.push({ ...value, food_week: true });
+      const aliases: Record<string, string> = {
+        plants: "beans_nuts_seeds",
+        sweet_drinks: "sweet_drinks_juice",
+        seafood: "fish",
+        plant_oil: "plant_oil_pct",
+        packaged_days: "salty_days",
+      };
+      const answers = Object.fromEntries(
+        response.answers.flatMap((a) =>
+          isRecord(a) && typeof a.key === "string" && typeof a.value === "number"
+            ? [[lookup(aliases, a.key) ?? a.key, a.value]]
+            : [],
+        ),
+      );
+      checkins.push({ ...value, food_week: { complete: true, answers } });
     }
     if (response.instrument === "combine" && response.date === value.date && Array.isArray(response.tests)) {
-      tests.push(...submittedTests(response.tests, value));
+      tests.push(...submittedTests(response.tests, { ...value, session_id: row.id }));
     }
   }
   return { checkins, tests };
@@ -61,17 +74,64 @@ function submittedTests(input: unknown[], event: Observation): Observation[] {
       !Number.isFinite(test.value)
     )
       return [];
-    return [{ ...event, test: test.key, value: test.value, protocol: "murph-combine-v1", source: "self-report" }];
+    const stations: Record<string, [string, string]> = {
+      sitting_rising: ["sit_and_rise", "points"],
+      single_leg_10s: ["one_leg_balance", "s"],
+      grip_strength: ["grip_strength", "kg"],
+      broad_jump: ["standing_broad_jump", "cm"],
+      chair_stand_30s: ["chair_stands", "count"],
+      squats_max: ["squats", "count"],
+      step_3min: ["step_recovery", "bpm"],
+      march_2min: ["march_recovery", "count"],
+    };
+    const [key, unit] = lookup(stations, test.key) ?? [test.key, undefined];
+    return [
+      {
+        ...event,
+        test: key,
+        value: test.value,
+        unit,
+        variant: test.variant,
+        protocol: "murph-combine-v1",
+        verified: "self",
+        source: "self-report",
+      },
+    ];
   });
+}
+function pressureMethod(row: BrowserVaultMetricRow) {
+  const q = isRecord(row.context.qualifiers) ? row.context.qualifiers : {};
+  return {
+    source: String(row.context.provider ?? row.sourceLabel ?? "canonical-measurement"),
+    setting: row.context.setting ?? q.setting,
+    validated: row.context.validated ?? q.validated,
+  };
+}
+function pressureIdentity(r: BrowserVaultMetricRow) {
+  // Canonical pairs share their event ID. Relay observations must carry an acquisition
+  // instant and an identified source; day aggregates cannot establish a pair.
+  return r.sourceKind === "measurement" && r.recordIds.length === 1
+    ? r.recordIds[0]
+    : r.sourceKind === "observation" && r.grain === "event" && r.sourceLabel
+      ? "relay"
+      : null;
 }
 /** A daily rollup cannot establish simultaneous readings. Use the canonical action pair identity and local time. */
 export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string): Observation[] {
   const pairs = new Map<
     string,
-    { date: string; time: string; upper: Set<number>; lower: Set<number>; validated: boolean; setting: string }
+    {
+      date: string;
+      time: string;
+      upper: Set<number>;
+      lower: Set<number>;
+      validated: unknown;
+      setting: unknown;
+      source: string;
+    }
   >();
   for (const r of rows) {
-    const id = r.sourceKind === "measurement" && r.recordIds.length === 1 ? r.recordIds[0] : null;
+    const id = pressureIdentity(r);
     if (
       typeof id !== "string" ||
       !id ||
@@ -97,17 +157,9 @@ export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string):
       .format(stamp)
       .replace(" ", "T");
     if (day(local) !== r.date) continue;
-    const k = JSON.stringify([id, r.observedAt, r.date]),
-      setting = String(r.context.setting ?? "home");
-    const pair = pairs.get(k) ?? {
-      date: r.date,
-      time: local,
-      upper: new Set(),
-      lower: new Set(),
-      validated: r.context.validated === true,
-      setting,
-    };
-    if (pair.setting !== setting || r.context.validated !== true) pair.validated = false;
+    const method = pressureMethod(r);
+    const k = JSON.stringify([id, r.observedAt, r.date, method]);
+    const pair = pairs.get(k) ?? { date: r.date, time: local, upper: new Set(), lower: new Set(), ...method };
     (r.metricKey === "systolic-blood-pressure" ? pair.upper : pair.lower).add(r.value);
     pairs.set(k, pair);
   }
@@ -119,7 +171,7 @@ export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string):
       systolic: [...p.upper][0],
       diastolic: [...p.lower][0],
       unit: "mmHg",
-      source: "canonical-measurement",
+      source: p.source,
       setting: p.setting,
       validated: p.validated,
     }));

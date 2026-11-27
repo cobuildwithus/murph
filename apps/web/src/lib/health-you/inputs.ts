@@ -15,44 +15,30 @@ import type {
 import type { BrowserVaultLabResultRow } from "@murphai/query/browser-replica";
 import { isRecord } from "../primitives";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
-import { canonicalProvider } from "../health-wins/engine/daily-clean";
-import { day, distance, fields, model, offset, rowDay, type MemberEvidence } from "./engine/model";
+import { adapt } from "./engine/feeds";
+import {
+  day,
+  distance,
+  fields,
+  model,
+  offset,
+  rowDay,
+  type MemberEvidence,
+  type Observation,
+} from "./engine/model";
 import { bedtimeProgress } from "./bedtime";
 import { assessmentInputs, pressureInputs } from "./checkins";
 import { inputState, type MarkerInput, type YouInputs } from "./evidence";
 
 const pressureKeys = ["systolic-blood-pressure", "diastolic-blood-pressure"];
-const metricKeys = [
-  "activity-minutes",
-  "resting-heart-rate",
-  "steps",
-  "total-sleep-minutes",
-  "estimated-vo2-max",
-  "body-height",
-  "body-weight",
-  "waist-circumference",
-];
+const metricKeys = ["activity-minutes", ...model.feeds.projectable.filter((k) => !pressureKeys.includes(k))];
 const labAliases: Record<string, string> = {
-  "hdl-c": "hdl",
-  "ldl-c": "ldl",
+  ...model.feeds.labs,
   "ldl-calculated": "ldl",
   "ldl-chol-calc-nih": "ldl",
-  "lipoprotein-a": "lpa",
-  "non-hdl-cholesterol": "non_hdl",
-  "red-cell-distribution-width": "rdw",
-  "white-blood-cell-count": "wbc",
-  "hs-crp": "hs_crp",
-  "vitamin-d": "vitamin_d_25oh",
-  "blood-urea-nitrogen": "bun",
   "total-globulin": "globulin",
-  "gamma-glutamyl-transferase": "ggt",
-  "alkaline-phosphatase": "alp",
-  "lymphocyte-percentage": "lymphocytes_pct",
-  "mean-corpuscular-volume": "mcv",
-  "platelet-count": "platelets",
   "carbon-dioxide": "co2",
   "total-bilirubin": "bilirubin_total",
-  "urine-albumin-creatinine-ratio": "urine_acr",
 };
 const labs: Record<string, string[]> = model.labs;
 function system(key: string) {
@@ -94,53 +80,64 @@ export function projectYouInputs(
     asOf = toLocalDayKey(clock, timeZone);
   const from = offset(asOf, -364),
     demo = client.replica.demographics;
-  const evidence: MemberEvidence = {
-    profile: { birth_year: demo.birthYear, sex: demo.biologicalSex },
-    joined: toLocalDayKey(joinedAt, timeZone),
-    daily: [],
-    sleep_sessions: [],
-    body: [],
-    vo2: [],
-    labs: [],
-    checkins: [],
-    bp: [],
-    fitness_tests: [],
-  };
+  const metrics: Observation[] = [],
+    labRows: Observation[] = [];
   const markers: MarkerInput[] = [];
   const minutes = new Map<string, Set<number>>();
   for (const key of [...metricKeys, ...pressureKeys]) {
     if ("metricCoverage" in client && client.metricCoverage.get(key).status === "unloaded")
       throw new Error("Required metric bucket unavailable");
     if (pressureKeys.includes(key)) continue;
-    for (const row of client.metrics.series({ metricKey: key, from, to: asOf, grain: "day" })) {
-      recordMetric(evidence, minutes, row, key, from, asOf);
+    const samples =
+      Object.hasOwn(model.feeds.body, key) || key === "estimated-vo2-max"
+        ? client.metrics.list({ metricKey: key, from, to: asOf })
+        : client.metrics.series({ metricKey: key, from, to: asOf, grain: "day" });
+    for (const row of samples) {
+      recordMetric(metrics, minutes, row, key, from, asOf);
     }
   }
-  readLabs(client.labResults.list({ from, to: asOf }), from, asOf, evidence, markers);
+  readLabs(client.labResults.list({ from, to: asOf }), from, asOf, labRows, markers);
   const assessments = assessmentInputs(
     client.entities.list({ families: ["assessment"], from: offset(from, -1), to: offset(asOf, 1) }),
     from,
     asOf,
     timeZone,
   );
-  evidence.checkins = assessments.checkins;
-  evidence.fitness_tests = assessments.tests;
-  evidence.bp = pressureInputs(
-    pressureKeys.flatMap((metricKey) => client.metrics.list({ metricKey, from, to: asOf })),
-    timeZone,
-  );
+  const pressureRows = pressureKeys.flatMap((metricKey) => client.metrics.list({ metricKey, from, to: asOf }));
+  const bp = pressureInputs(pressureRows, timeZone);
   const activeMinutes = [...minutes].flatMap(([date, values]) =>
     values.size === 1 ? [{ date, value: [...values][0] }] : [],
   );
-  const lifts = completedLifts(
-    client.entities.list({
-      families: ["event"],
-      kinds: ["activity_session"],
-      from: offset(asOf, -183),
-      to: asOf,
+  const trainingRows = client.entities.list({
+    families: ["event"],
+    kinds: ["activity_session"],
+    from: offset(asOf, -183),
+    to: asOf,
+  });
+  const lifts = completedLifts(trainingRows, asOf);
+  const workouts = [
+    ...("activitySessions" in replica && Array.isArray(replica.activitySessions) ? replica.activitySessions : []),
+    ...trainingRows.flatMap((r) => {
+      const t = r.attributes.training;
+      return r.date &&
+        isRecord(t) &&
+        t.state === "completed" &&
+        strengthTypes.includes(String(t.activityType)) &&
+        typeof t.durationMinutes === "number"
+        ? [{ date: r.date, type: "strength_training", minutes: t.durationMinutes }]
+        : [];
     }),
-    asOf,
-  );
+  ];
+  const evidence = adapt({
+    profile: { birth_year: demo.birthYear, biological_sex: demo.biologicalSex },
+    joined: toLocalDayKey(joinedAt, timeZone),
+    metrics,
+    labs: labRows,
+    bp,
+    workouts,
+    checkins: assessments.checkins,
+    fitness_tests: assessments.tests,
+  });
   const availability = inputAvailability(evidence, asOf, markers);
   const timing = "sleepTiming" in replica ? replica.sleepTiming : undefined;
   const bedtime = bedtimeProgress(timing, asOf);
@@ -170,7 +167,9 @@ function needsWhoopAnswer(evidence: MemberEvidence, asOf: string) {
   const whoop = [...(evidence.daily ?? []), ...(evidence.sleep_sessions ?? [])].some(
     (row) => row.source === "whoop" && distance(asOf, rowDay(row)) <= 42,
   );
-  return whoop && !(evidence.checkins ?? []).some((row) => row.whoop_zones != null && rowDay(row) <= asOf);
+  return (
+    whoop && !(evidence.checkins ?? []).some((row) => row.whoop_standard_zones != null && rowDay(row) <= asOf)
+  );
 }
 
 export async function readYouInputs(
@@ -207,8 +206,34 @@ function validMetric(row: BrowserVaultMetricRow, from: string, asOf: string) {
   const value = normalized.canonicalValue;
   return value !== null && Number.isFinite(value) ? normalized : null;
 }
+// Only an identified original measuring device can establish a wearable series.
+function measuringDevice(label: unknown) {
+  if (typeof label !== "string") return undefined;
+  const key = label
+    .trim()
+    .toLowerCase()
+    .replace(/[-_ ]+/g, "_");
+  if (
+    [
+      "apple_health",
+      "apple_healthkit",
+      "apple_health_kit",
+      "healthkit",
+      "junction",
+      "health_connect",
+      "google_fit",
+    ].includes(key)
+  )
+    return undefined;
+  const aliases: Record<string, string> = model.feeds.provider_aliases;
+  const provider = Object.hasOwn(aliases, key) ? aliases[key] : key;
+  return ["apple", "garmin", "oura", "whoop", "fitbit"].includes(provider) ||
+    resolveWearableProviderDescriptor(provider)
+    ? provider
+    : undefined;
+}
 function recordMetric(
-  evidence: MemberEvidence,
+  metrics: Observation[],
   minutes: Map<string, Set<number>>,
   row: BrowserVaultMetricRow,
   key: string,
@@ -218,35 +243,30 @@ function recordMetric(
   const normalized = validMetric(row, from, asOf);
   if (!normalized || normalized.canonicalValue === null) return;
   const value = normalized.canonicalValue;
-  const source = canonicalProvider(row.sourceLabel ?? ""),
-    date = row.date;
-  const item = { date, source, unit: normalized.canonicalUnit };
-  if (key === "body-height" || key === "body-weight" || key === "waist-circumference") {
-    evidence.body!.push({
-      ...item,
-      [{ "body-height": "height_cm", "body-weight": "weight_kg", "waist-circumference": "waist_cm" }[key]]: value,
-    });
-  } else if (
-    resolveWearableProviderDescriptor(source) ||
-    ["apple", "apple watch", "oura", "garmin", "whoop", "fitbit"].includes(source)
-  ) {
-    if (key === "activity-minutes" && value >= 0 && value <= 1440) {
-      const values = minutes.get(date) ?? new Set<number>();
-      values.add(value);
-      minutes.set(date, values);
-    }
-    if (key === "resting-heart-rate") evidence.daily!.push({ ...item, rhr: value });
-    if (key === "total-sleep-minutes" && row.context.sleepType !== "nap")
-      evidence.sleep_sessions!.push({ ...item, asleep_min: value, type: "main" });
-    if (key === "steps")
-      evidence.daily!.push({
-        ...item,
-        steps: value,
-        wear_complete: row.context.wearComplete,
-        worn_min: row.context.wornMinutes,
-      });
-    if (key === "estimated-vo2-max") evidence.vo2!.push({ ...item, value, method: "device_estimate" });
+  const date = row.date,
+    ctx = row.context;
+  const qualifiers = isRecord(ctx.qualifiers) ? ctx.qualifiers : {};
+  const provider = measuringDevice(ctx.provider ?? row.sourceLabel);
+  if (key === "activity-minutes") {
+    if (!provider || model.feeds.excluded_providers.includes(provider) || value < 0 || value > 1440) return;
+    const values = minutes.get(date) ?? new Set<number>();
+    values.add(value);
+    minutes.set(date, values);
+    return;
   }
+  metrics.push({
+    date,
+    key,
+    value,
+    provider,
+    unit: normalized.canonicalUnit === "kg/m^2" ? "kg/m2" : normalized.canonicalUnit,
+    method: ctx.measurementMethodKey ?? ctx.method,
+    nap: ctx.sleepType === "nap" || ctx.isNap === true,
+    partial: ctx.partial ?? qualifiers.partial,
+    off_body: ctx.offBody ?? qualifiers.off_body,
+    wear_complete: ctx.wearComplete ?? qualifiers.wear_complete,
+    worn_min: ctx.wornMinutes ?? qualifiers.worn_min,
+  });
 }
 
 // Source-unit catalog entries may retain an arbitrary reporting unit. Only publish known physical units.
@@ -284,7 +304,7 @@ function readLabs(
   rows: BrowserVaultLabResultRow[],
   from: string,
   asOf: string,
-  evidence: MemberEvidence,
+  labRows: Observation[],
   markers: MarkerInput[],
 ) {
   for (const row of rows) {
@@ -293,12 +313,13 @@ function readLabs(
     const marker = labAliases[def.key] ?? def.key.replaceAll("-", "_");
     const unit = normalizeUnit(row.normalizedUnit);
     const researchUnit = labs[marker]?.[1];
-    evidence.labs!.push({
+    labRows.push({
       date: row.date,
       marker,
       value: row.normalizedValue,
       unit: researchUnit && normalizeUnit(researchUnit) === unit ? researchUnit : unit,
-      panel_id: row.drawId,
+      draw_id: row.drawId,
+      ...(row.parentResultStatus === "pending" ? { status: "pending" } : {}),
       comparator: row.comparator,
       source: "normalized-lab",
     });
@@ -325,6 +346,7 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
   for (const [k, field] of [
     ["sleep", "asleep_min"],
     ["pulse", "rhr"],
+    ["steps", "steps"],
     ["vo2_peak", "value"],
     ["bmi", "weight_kg"],
     ["waist", "waist_cm"],
@@ -332,7 +354,7 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
     const rows =
       k === "sleep"
         ? evidence.sleep_sessions
-        : k === "pulse"
+        : k === "pulse" || k === "steps"
           ? evidence.daily
           : k === "vo2_peak"
             ? evidence.vo2
@@ -354,6 +376,15 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
   return availability;
 }
 
+const strengthTypes = [
+  "strength",
+  "strength-training",
+  "weight-training",
+  "weightlifting",
+  "resistance-training",
+  "strength_training",
+  "weight_training",
+];
 function completedLifts(rows: BrowserVaultEntity[], asOf: string) {
   const lifts: string[] = [];
   for (const entity of rows) {
@@ -365,9 +396,7 @@ function completedLifts(rows: BrowserVaultEntity[], asOf: string) {
       distance(asOf, date) <= 183 &&
       isRecord(training) &&
       training.state === "completed" &&
-      ["strength", "strength-training", "weight-training", "weightlifting", "resistance-training"].includes(
-        String(training.activityType),
-      )
+      strengthTypes.includes(String(training.activityType))
     )
       lifts.push(date);
   }

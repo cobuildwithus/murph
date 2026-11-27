@@ -22,6 +22,8 @@ import {
   type Sex,
 } from "./model";
 
+import { pressurePairs } from "./feeds";
+
 export function restrictions(p: Observation) {
   const cond = Array.isArray(p.conditions) ? p.conditions : [],
     meds = Array.isArray(p.meds) ? p.meds : [];
@@ -43,7 +45,7 @@ export function restrictions(p: Observation) {
   };
 }
 
-type Stream = keyof typeof model.policy.wearable_tau_days;
+type Stream = "steps" | "step_proxy" | "sleep" | "pulse" | "hip_minutes" | "activity";
 type StreamDates = Map<string, Map<string, Set<number>>>;
 type AddSample = (key: Stream, value: number | null, min: number, max: number) => void;
 function recordIntensity(r: Observation, source: string, add: AddSample) {
@@ -67,17 +69,23 @@ function recordIntensity(r: Observation, source: string, add: AddSample) {
       add("activity", 7 * (mod + 2 * vig), 0, 13440);
   }
 }
+function unknownWear(r: Observation) {
+  return r.projected && r.wear_complete == null && r.worn_min == null;
+}
+function streamSource(r: Observation) {
+  return typeof r.source === "string" && r.series_method ? r.source + "|" + r.series_method : r.source;
+}
 function observedStreams(data: MemberEvidence, at: string) {
   const limit = restrictions(data.profile);
   const streams = new Map<Stream, Map<string, Map<string, Set<number>>>>();
   for (const group of ["daily", "sleep_sessions"] as const) {
     for (const r of dated(data, group, at, Infinity)) {
-      const source = r.source,
+      const source = streamSource(r),
         date = rowDay(r);
       if (
         typeof source !== "string" ||
         !source ||
-        ["phone", "schedule"].includes(source) ||
+        ["phone", "schedule"].includes(String(r.source)) ||
         ["partial", "off_body", "unfinished", "nap", "is_nap"].some((k) => r[k])
       )
         continue;
@@ -96,6 +104,8 @@ function observedStreams(data: MemberEvidence, at: string) {
         continue;
       }
       if (!limit.pulse) add("pulse", number(r.rhr), 30, 180);
+      if (!limit.restricted && unknownWear(r))
+        add("step_proxy", number(r.steps), model.policy.minimum_step_proxy, 65000);
       if (
         limit.restricted ||
         !(r.wear_complete === true || (r.wear_complete == null && (number(r.worn_min) ?? 0) >= 1296))
@@ -153,10 +163,16 @@ function smoothStream(key: Stream, dates: StreamDates, data: MemberEvidence, at:
       const values = window.map((x) => x.value).sort((a, b) => a - b);
       const x = (values[Math.floor((values.length - 1) / 2)] + values[Math.floor(values.length / 2)]) / 2;
       rec =
-        key === "steps" || key === "hip_minutes"
-          ? device(key, x, age, sex)
+        key === "steps" || key === "hip_minutes" || key === "step_proxy"
+          ? device(key === "step_proxy" ? "steps" : key, x, age, sex)
           : native(key, x, age, sex, { sleep: 0.45, pulse: 0.5, activity: 0.35 }[key]);
       if (!rec) continue;
+      if (key === "step_proxy") {
+        rec.years = Math.min(0, rec.years) * model.policy.production_step_quality;
+        rec.quality *= model.policy.production_step_quality;
+        rec.reference = "hip-monitor percentile of recorded steps; wear unknown";
+        rec.source = "recorded steps, conservative lower-bound proxy";
+      }
       const rate = model.policy.max_wearable_change_years_per_stream_day;
       state =
         state === null
@@ -164,14 +180,18 @@ function smoothStream(key: Stream, dates: StreamDates, data: MemberEvidence, at:
           : state +
             Math.max(
               -rate,
-              Math.min(rate, (rec.years - state) * -Math.expm1(-1 / model.policy.wearable_tau_days[key])),
+              Math.min(
+                rate,
+                (rec.years - state) *
+                  -Math.expm1(-1 / model.policy.wearable_tau_days[key === "step_proxy" ? "steps" : key]),
+              ),
             );
     } else state = null;
     last = date;
     source = src;
   }
   if (rec && state !== null && distance(at, last) <= model.policy.fresh_days)
-    return { ...rec, years: state, series: JSON.stringify([source, start]) };
+    return { ...rec, years: state, series: JSON.stringify([key, source, start]) };
   return null;
 }
 export function habits(data: MemberEvidence, at: string, age: number, sex: Sex) {
@@ -179,6 +199,10 @@ export function habits(data: MemberEvidence, at: string, age: number, sex: Sex) 
   for (const [key, dates] of observedStreams(data, at)) {
     const r = smoothStream(key, dates, data, at, age, sex);
     if (r) result[key] = r;
+  }
+  if (result.step_proxy) {
+    result.steps ??= result.step_proxy;
+    delete result.step_proxy;
   }
   if (result.hip_minutes || result.steps) delete result.activity;
   if (result.hip_minutes) delete result.steps;
@@ -202,6 +226,12 @@ function last(rows: Candidate[]) {
   const latest = rows.sort(cmp).at(-1)!;
   return unique(rows.filter((r) => cmp(r, latest) === 0).map((r) => r.value));
 }
+function validLabValue(key: string, v: number, profile: Observation) {
+  if (key === "crp") return v <= model.policy.protocol.crp_max;
+  if (["hdl", "total_cholesterol"].includes(key)) return v > 0 && v < model.policy.protocol.max_component_lipid;
+  if (["ldl", "lpa"].includes(key)) return v <= model.policy.protocol.max_lipid;
+  return !(key === "a1c" && profile.unreliable_a1c);
+}
 function labCandidate(
   r: Observation,
   key: string,
@@ -220,7 +250,7 @@ function labCandidate(
     ["final", "corrected", "amended"].includes(String(r.status ?? "final")) &&
     validUnit &&
     between(v, f?.min ?? 0, f?.max ?? 799.999) &&
-    !(key === "a1c" && data.profile.unreliable_a1c);
+    validLabValue(key, v, data.profile);
   return {
     date,
     collected: String(r.collected_at ?? ""),
@@ -288,7 +318,7 @@ function bpReading(r: Observation) {
 }
 function bpValue(data: MemberEvidence, at: string) {
   const groups = new Map<string, Map<string, Map<number, number[]>>>();
-  for (const r of dated(data, "bp", at, 28)) {
+  for (const r of [...dated(data, "bp", at, 28), ...pressurePairs(data, at)]) {
     const reading = bpReading(r);
     if (!reading) continue;
     const { source, s, date, minute } = reading;
@@ -357,7 +387,7 @@ function bodyFactors(data: MemberEvidence, at: string, add: AddClinical) {
         const bmi = between(h, 100, 230) && w !== null ? w / (h / 100) ** 2 : null;
         return between(bmi, 12, 95) ? [{ date: rowDay(r), bmi }] : [];
       });
-      add("bmi", pick(bmis, "bmi"));
+      add("bmi", pick(bmis, "bmi") ?? pick(current, "bmi"));
     }
   }
 }
@@ -368,23 +398,26 @@ function smokingFactor(ci: Observation[], at: string, add: AddClinical, result: 
   );
   add("smoking", smoking === "never" ? 0 : smoking === "former" ? 0.4 : smoking === "current" ? 1 : null);
   if (smoking === "former") {
-    const latest = ci
-      .filter((r) => r.smoking === "former")
+    const prior = ci
+      .filter((r) => r.smoking === "current")
       .map(rowDay)
       .sort()
       .at(-1)!;
     const quit = day(
       pick(
-        ci.filter((r) => rowDay(r) === latest && r.smoking === "former"),
+        ci.filter((r) => !prior || rowDay(r) >= prior),
         "quit_date",
       ),
     );
-    if (quit && quit <= latest) {
+    if (quit && quit <= at && (!prior || quit >= prior)) {
       const f = catalog.smoking,
         log = logTable(f, distance(at, quit) / YEAR);
       if (log !== null) {
         add("smoking", log / Math.log(f.curve.current!));
-        result.smoking.quit = quit;
+        if (result.smoking) {
+          result.smoking.quit = quit;
+          result.smoking.source = "joint smoking fit with published cessation trajectory";
+        }
       }
     }
   }
@@ -461,7 +494,9 @@ export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex
     phq9: "phq9",
     activity: "leisure_moderate_equivalent_min_week",
   })) {
-    const v = pick(k === "disease" ? ci : recent, field);
+    const v =
+      pick(k === "disease" ? ci.filter((r) => typeof r[field] === "boolean") : recent, field) ??
+      (k === "diabetes" && typeof pick(ci, field) === "boolean" ? pick(ci, field) : null);
     add(k, typeof v === "boolean" && ["disease", "diabetes"].includes(k) ? Number(v) : v);
   }
   for (const [k, field] of Object.entries({

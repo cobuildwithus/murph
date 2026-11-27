@@ -7,7 +7,7 @@
     "priority": 2,
     "title": "See what goes into your age estimate",
     "summary": "In the private You preview, see how your available measurements contribute to a modeled age comparison.",
-    "details": "The estimate includes a range. You can open a factor to see the observations behind it.",
+    "details": "Open a factor to see what it measures and what helps explain it. The weekly view marks weeks that have too little comparable data to measure a change.",
     "relevanceTags": ["health", "measurements"],
     "sourcePullRequests": []
   }

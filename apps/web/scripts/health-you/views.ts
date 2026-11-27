@@ -1,10 +1,11 @@
 /** Rebuild the companion's byte-for-byte examples from synthetic reference inputs. */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import reference from "../../test/fixtures/health-you/reference.json";
+import { adapt } from "../../src/lib/health-you/engine/feeds";
+import type { Observation } from "../../src/lib/health-you/engine/model";
 import { bundleSchema } from "../../src/lib/health-you/contract";
-import type { MemberEvidence } from "../../src/lib/health-you/engine";
+
 import { buildViews, emptyYou } from "../../src/lib/health-you/views";
 import type { YouInputs } from "../../src/lib/health-you/evidence";
 
@@ -13,21 +14,26 @@ mkdirSync(dir, { recursive: true });
 function write(name: string, value: unknown) {
   writeFileSync(path.join(dir, name + ".json"), JSON.stringify(value, null, 2) + "\n");
 }
-const asOf = "2024-09-16",
-  profile = { memberId: "synthetic-member", firstName: "Example" };
-const scenarios: Record<string, Omit<MemberEvidence, "profile">> = reference.inputs;
-for (const [name, kind, years] of [
-  ["complete", "full", 57],
-  ["wearable", "athlete", 41],
-  ["labs", "blood", 57],
-  ["building", "phone", 27],
-  ["paused", "empty", 17],
+const profile = { memberId: "synthetic-member", firstName: "Example" };
+const cases: { case: string; member: Observation; history: Observation; as_of: string }[] = JSON.parse(
+  readFileSync(new URL("../../test/fixtures/health-you/reference.json", import.meta.url), "utf8"),
+);
+const asOf = cases.find((r) => r.case === "watch_panel-08")!.as_of;
+for (const [name, id] of [
+  ["complete", "watch_panel-08"],
+  ["wearable", "watch-08"],
+  ["labs", "watch_panel-08"],
+  ["building", "phone-08"],
+  ["paused", "phone-08"],
 ] as const) {
-  const evidence = {
-    ...scenarios[kind],
-    joined: "2024-05-01",
-    profile: { age: years, age_as_of: asOf, sex: "female" },
-  };
+  const row = cases.find((r) => r.case === id)!;
+  const evidence = adapt(row.member, row.history);
+  if (name === "labs") {
+    evidence.daily = [];
+    evidence.sleep_sessions = [];
+    evidence.vo2 = [];
+  }
+  if (name === "paused") evidence.profile = { age: 17, sex: "female" };
   const markers: YouInputs["markers"] = (evidence.labs ?? []).map((r) => ({
     date: String(r.date),
     key: String(r.marker).replaceAll("_", "-"),
@@ -35,6 +41,8 @@ for (const [name, kind, years] of [
       {
         rdw: "Red cell distribution width",
         albumin: "Albumin",
+        hdl: "HDL cholesterol",
+        total_cholesterol: "Total cholesterol",
         hs_crp: "hs-CRP",
         non_hdl: "Non-HDL cholesterol",
       } as Record<string, string>
@@ -58,7 +66,7 @@ for (const [name, kind, years] of [
       timeZone: "UTC",
       evidence,
       sourceRevision: "synthetic",
-      historyFrom: "2024-05-01",
+      historyFrom: evidence.joined!,
       availability: {},
       markers,
       lifts: name === "complete" ? [asOf] : [],

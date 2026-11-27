@@ -1,17 +1,18 @@
 {
   "key": "albumin",
   "label": "Albumin",
-  "value": 4.6,
+  "value": 4.2,
   "unit": "g/dL",
-  "years": -2.5,
+  "years": 0,
   "target": {
     "text": "Comparison value 4.6 g/dL"
   },
   "history": [
     {
-      "date": "2024-09-16",
-      "value": 4.6
+      "date": "2025-01-23",
+      "value": 4.2
     }
   ],
-  "whatItIs": "Albumin is reported in g/dL on your lab panel."
+  "whatItIs": "Albumin is the main protein in the liquid part of blood.",
+  "whatLowersIt": "Seeing albumin beside total protein gives the result more context."
 }

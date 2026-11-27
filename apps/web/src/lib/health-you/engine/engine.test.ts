@@ -1,30 +1,35 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import golden from "../../../../test/fixtures/health-you/reference.json";
-import { score, type MemberEvidence } from "./index";
-import { curveAt, model, refs } from "./model";
+import { fromRaw, score } from "./index";
+import { curveAt, isObject, model, refs, type Observation } from "./model";
 
-const sources: Record<string, Omit<MemberEvidence, "profile">> = golden.inputs;
-describe("R2 Python parity", () => {
-  for (const test of golden.cases)
-    it([test.kind, test.profile.sex, test.profile.age, test.date].join(" "), () => {
-      const data = { ...sources[test.kind], profile: test.profile };
-      const actual = score(data, test.date)!;
-      expect(actual.value).toBeCloseTo(test.age, 1);
-      expect(actual.parts).toEqual(test.tenths);
-      expect(actual.real).toBe(test.real);
-      if (test.days === null) expect(actual.days).toBeNull();
-      else expect(actual.days).toBeCloseTo(test.days, 1);
-      expect(Object.fromEntries(Object.entries(actual.rows).map(([k, r]) => [k, r.percentile]))).toEqual(
-        test.ranks,
-      );
-      const targets: Record<string, number | string | null | undefined> = test.targets;
-      expect(Object.keys(actual.rows).sort()).toEqual(Object.keys(targets).sort());
-      for (const [k, r] of Object.entries(actual.rows)) {
-        expect(r.target).toBe(targets[k]);
-        expect(Number.isFinite(r.years)).toBe(true);
-      }
-      expect(Object.values(actual.parts).reduce((s, n) => s + n, 0)).toBe(Math.round(actual.gap * 10));
-      expect(score(data, test.date)).toEqual(actual);
+const cases: { case: string; member: Observation; history: Observation; as_of: string; expected: unknown }[] =
+  JSON.parse(
+    readFileSync(new URL("../../../../test/fixtures/health-you/reference.json", import.meta.url), "utf8"),
+  );
+
+// Match the research verifier's exact display, shape and attribution checks.
+function compare(actual: unknown, expected: unknown, path: string) {
+  if (
+    typeof expected === "number" &&
+    !Number.isInteger(expected) &&
+    /\.(years|probability|quality|value|target)$/.test(path)
+  ) {
+    expect(typeof actual, path).toBe("number");
+    expect(Math.abs(Number(actual) - expected), path).toBeLessThanOrEqual(1e-10);
+  } else if (Array.isArray(expected) && Array.isArray(actual)) {
+    expect(actual.length, path).toBe(expected.length);
+    expected.forEach((x, i) => compare(actual[i], x, path + "." + i));
+  } else if (isObject(expected) && isObject(actual)) {
+    expect(Object.keys(actual).sort(), path).toEqual(Object.keys(expected).sort());
+    for (const [k, v] of Object.entries(expected)) compare(actual[k], v, path + "." + k);
+  } else expect(actual, path).toEqual(expected);
+}
+describe("round 3 scorer parity", () => {
+  it("contains the entire synthetic release", () => expect(new Set(cases.map((r) => r.case)).size).toBe(120));
+  for (const row of cases)
+    it(row.case, () => {
+      compare(fromRaw(row.member, row.as_of, row.history), row.expected, row.case);
     });
   it("centers an absent lab at its age and sex expectation", () => {
     const date = "2024-02-11",

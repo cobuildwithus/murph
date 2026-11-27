@@ -1,43 +1,62 @@
 {
-  "daysAged": 7,
-  "saved": 0,
+  "daysAged": 8.45,
+  "saved": -1.45,
   "days": [
     {
-      "date": "2024-09-10",
-      "label": "Tue",
-      "aged": 1
-    },
-    {
-      "date": "2024-09-11",
-      "label": "Wed",
-      "aged": 1
-    },
-    {
-      "date": "2024-09-12",
-      "label": "Thu",
-      "aged": 1
-    },
-    {
-      "date": "2024-09-13",
-      "label": "Fri",
-      "aged": 1
-    },
-    {
-      "date": "2024-09-14",
-      "label": "Sat",
-      "aged": 1
-    },
-    {
-      "date": "2024-09-15",
+      "date": "2025-03-23",
       "label": "Sun",
-      "aged": 1
+      "aged": 1.36
     },
     {
-      "date": "2024-09-16",
+      "date": "2025-03-24",
       "label": "Mon",
-      "aged": 1
+      "aged": 1.36
+    },
+    {
+      "date": "2025-03-25",
+      "label": "Tue",
+      "aged": 1.35
+    },
+    {
+      "date": "2025-03-26",
+      "label": "Wed",
+      "aged": 1.35
+    },
+    {
+      "date": "2025-03-27",
+      "label": "Thu",
+      "aged": 1.01
+    },
+    {
+      "date": "2025-03-28",
+      "label": "Fri",
+      "aged": 1.01
+    },
+    {
+      "date": "2025-03-29",
+      "label": "Sat",
+      "aged": 1.01
     }
   ],
   "helped": [],
-  "cost": []
+  "cost": [
+    {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "days": 0.76
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "days": 0.34
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "days": 0.36
+    }
+  ]
 }

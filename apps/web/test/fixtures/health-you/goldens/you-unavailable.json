@@ -1,6 +1,6 @@
 {
-  "version": "r2.0",
-  "asOf": "2024-09-16",
+  "version": "r3.0",
+  "asOf": "2025-03-29",
   "profile": {
     "memberId": "synthetic-member",
     "firstName": "Example"

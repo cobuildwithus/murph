@@ -65,21 +65,33 @@ function replica(): BrowserVaultReplica {
     weeklySampleSummaries: [],
   };
 }
+function addPulse(r: BrowserVaultReplica) {
+  r.metricRows.push(
+    ...r.metricRows
+      .filter((row) => row.metricKey === "total-sleep-minutes")
+      .map((row) => ({ ...row, id: "pulse-" + row.id, metricKey: "resting-heart-rate", value: 62, unit: "bpm" })),
+  );
+  return r;
+}
 function read(r: BrowserVaultReplica) {
   return projectYouInputs(createBrowserVaultQueryClient(r), clock, new Date("2030-01-01T00:00:00Z"));
 }
 describe("dated private replica projections", () => {
   it("uses the vault date, year precision, qualified sleep and the evidence horizon", () => {
-    const input = read(replica()),
+    const input = read(addPulse(replica())),
       views = buildViews(input);
     expect(input.asOf).toBe(today);
-    expect(input.evidence.profile).not.toHaveProperty("birth_date");
-    expect(input.availability).toMatchObject({ sleep: "counted", bedtime: "unavailable", pulse: "absent" });
+    expect(input.evidence.profile).toMatchObject({
+      birth_year: 1982,
+      approximate_birth_date: true,
+      birth_date: "1982-07-01",
+    });
+    expect(input.availability).toMatchObject({ sleep: "counted", bedtime: "unavailable", pulse: "counted" });
     expect(views.you.state).toBe("ready");
-    expect(views.you.age?.real).toBe(50);
+    expect(views.you.age?.real).toBe(49.7);
     expect(views.age?.history.every((p) => p.date >= offset(today, -14) && p.date <= today)).toBe(true);
     expect(views.week?.days).toHaveLength(7);
-    expect(views.you.factors.map((f) => f.key)).toEqual(["sleepTime"]);
+    expect(views.you.factors.map((f) => f.key).sort()).toEqual(["restingHeartRate", "sleepTime"]);
   });
   it("converts a normalized lab unit to the research scale and publishes only derived marker fields", () => {
     const r = replica();
@@ -173,11 +185,11 @@ describe("canonical check-in and sleep timing projections", () => {
       experimentSlug: null,
     });
     const input = read(r);
-    expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_zones: "notSure" });
+    expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_standard_zones: "notSure" });
     expect(buildViews(input).you.questions).toEqual([]);
   });
   it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
-    const r = replica();
+    const r = addPulse(replica());
     const upper = {
       ...r.metricRows[0]!,
       id: "synthetic-upper",
@@ -190,11 +202,13 @@ describe("canonical check-in and sleep timing projections", () => {
     const lower = { ...upper, id: "synthetic-lower", metricKey: "diastolic-blood-pressure", value: 76 };
     r.metricRows.push(upper, lower);
     const input = read(r);
-    expect(input.evidence.bp).toMatchObject([{ systolic: 124, diastolic: 76, validated: false }]);
+    expect(input.evidence.bp).toMatchObject([{ systolic: 124, diastolic: 76, validated: undefined }]);
     const bundle = buildViews(input);
     expect(bundle.age?.events).toContainEqual({ date: today, kind: "bloodPressure", label: "Blood pressure" });
     expect(bundle.you.factors.some((f) => f.key === "bloodPressure")).toBe(false);
-    const split = r.metricRows.map(row => row.id === lower.id ? { ...row, recordIds: ["other-synthetic-event"] } : row);
+    const split = r.metricRows.map((row) =>
+      row.id === lower.id ? { ...row, recordIds: ["other-synthetic-event"] } : row,
+    );
     expect(read({ ...r, metricRows: split }).evidence.bp).toEqual([]);
   });
   it("uses observed nights on both sides of midnight for the weekly bedtime target", () => {
@@ -215,5 +229,129 @@ describe("canonical check-in and sleep timing projections", () => {
       expect.objectContaining({ factor: "bedtime", value: 1 }),
     );
     expect(input.availability.sleep_regularity).not.toBe("counted");
+  });
+});
+
+describe("round 3 private views", () => {
+  it("marks a reference week partial even with daily phone samples", () => {
+    const r = replica();
+    r.metricRows = r.metricRows.map((row) => ({
+      ...row,
+      metricKey: "steps",
+      value: 9300,
+      unit: "count",
+      sourceLabel: "iPhone",
+    }));
+    const views = buildViews(read(r));
+    expect(views.you).toMatchObject({
+      state: "building",
+      week: { daysAged: 7, partial: true, basis: "referenceOnly" },
+    });
+    expect(views.week).toMatchObject({ daysAged: 7, helped: [], cost: [] });
+    expect(views.you.notCounted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "sleepTime", action: "connectWearable" }),
+        expect.objectContaining({ key: "grip", action: "combine" }),
+        expect.objectContaining({ key: "bloodPressure", action: "addBloodPressure" }),
+        expect.objectContaining({ key: "albumin", action: "bloodWork" }),
+        expect.objectContaining({ key: "fruit", action: "foodWeek" }),
+        expect.objectContaining({ key: "smoking", action: "answer" }),
+      ]),
+    );
+  });
+  it("withholds a single wearable comparison and a birth-year eligibility boundary", () => {
+    const sparse = buildViews(read(replica()));
+    expect(sparse.you).toMatchObject({
+      state: "building",
+      building: { text: expect.stringContaining("independent") },
+    });
+    const boundary = addPulse(replica());
+    boundary.demographics = { ...boundary.demographics!, birthYear: 2012 };
+    const views = buildViews(read(boundary));
+    expect(views.you).toMatchObject({
+      state: "building",
+      building: { text: expect.stringContaining("birth year") },
+    });
+    expect(views.you.age).toBeUndefined();
+  });
+  it("keeps relay-only steps, manual fitness estimates and switched acquisition methods out of wearable credit", () => {
+    const r = replica();
+    r.metricRows = r.metricRows.flatMap((row, i) => [
+      { ...row, context: { measurementMethodKey: i % 2 ? "method-a" : "method-b" } },
+      { ...row, id: "relay-" + i, sourceLabel: "Apple Health", metricKey: "steps", unit: "count", value: 12000 },
+      {
+        ...row,
+        id: "manual-" + i,
+        sourceLabel: "Garmin",
+        metricKey: "estimated-vo2-max",
+        unit: "mL/kg/min",
+        value: 41,
+        context: { measurementMethodKey: "manual" },
+      },
+    ]);
+    expect(buildViews(read(r)).you.factors).toEqual([]);
+  });
+  it("scores canonical food portions and matched Combine stations after submission", () => {
+    const r = addPulse(replica());
+    r.demographics = { ...r.demographics!, birthYear: 1971 };
+    function assessment(response: Record<string, unknown>, id: string) {
+      r.entities.push({
+        id,
+        family: "assessment",
+        kind: "assessment",
+        recordClass: "ledger",
+        date: today,
+        occurredAt: today + "T15:00:00Z",
+        attributes: { checkIn: { date: today, response: { ...response, instrumentVersion: 1 } } },
+        tags: [],
+        lookupIds: [],
+        links: [],
+        title: null,
+        bodyPreview: null,
+        stream: null,
+        status: null,
+        experimentSlug: null,
+      });
+    }
+    assessment(
+      {
+        instrument: "food-week",
+        answers: Object.entries({
+          vegetables: 12,
+          fruit: 8,
+          whole_grains: 6,
+          plants: 4,
+          red_meat: 3,
+          processed_meat: 1,
+          sweet_drinks: 2,
+          sweets: 3,
+          eating_days: 7,
+          seafood: 2,
+        }).map(([key, value]) => ({ key, value })),
+      },
+      "food-fixture",
+    );
+    assessment(
+      {
+        instrument: "combine",
+        date: today,
+        tests: [
+          { key: "sitting_rising", value: 8 },
+          { key: "grip_strength", value: 39 },
+          { key: "single_leg_10s", skipped: true },
+        ],
+      },
+      "station-fixture",
+    );
+    const result = buildViews(read(r));
+    expect(result.you.factors.map((f) => f.key)).toEqual(
+      expect.arrayContaining(["fruit", "fish", "vegetables", "sitRise"]),
+    );
+    expect(result.you.factors.map((f) => f.key)).not.toContain("grip");
+    expect(result.you.factors.map((f) => f.key)).not.toContain("balance");
+    expect(result.age?.events).toContainEqual(
+      expect.objectContaining({ kind: "evidenceChange", date: today, evidenceChangeYears: expect.any(Number) }),
+    );
+    expect(JSON.stringify(result)).not.toContain("research_risk");
   });
 });

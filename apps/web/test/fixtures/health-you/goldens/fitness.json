@@ -1,16 +1,40 @@
 {
   "title": "Fitness",
   "hero": {
-    "value": "13.4",
+    "value": "12.7",
     "unit": "peak METs",
-    "years": -4.4
+    "years": -0.9
   },
   "chart": {
     "kind": "trend",
     "points": [
       {
-        "date": "2024-09-16",
-        "value": 47
+        "date": "2025-01-04",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-01-18",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-02-01",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-02-15",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-01",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-15",
+        "value": 44.333333333333336
+      },
+      {
+        "date": "2025-03-29",
+        "value": 44.333333333333336
       }
     ],
     "unit": "mL/kg/min"
@@ -21,36 +45,17 @@
       "label": "Cardio fitness",
       "icon": "cardioFitness",
       "group": "fitness",
-      "value": "13.4",
+      "value": "12.7",
       "unit": "peak METs",
       "target": {
         "text": "Comparison value 13 peak METs"
       },
-      "years": -2.7,
-      "yearsText": "−2.7",
+      "years": -0.8,
+      "yearsText": "−0.8",
+      "whatItIs": "This estimates the body's peak oxygen use during exercise.",
+      "whatLowersIt": "Use the same device or repeat the same lab test.",
       "rank": null,
       "grade": "A",
-      "detail": "fitness",
-      "state": "counted"
-    },
-    {
-      "key": "grip",
-      "label": "Grip",
-      "icon": "grip",
-      "group": "fitness",
-      "value": "41.5",
-      "unit": "kg, mean hand maximum",
-      "target": {
-        "text": "Comparison value 33.5 kg, mean hand maximum"
-      },
-      "years": -1,
-      "yearsText": "−1.0",
-      "rank": {
-        "percentile": 90,
-        "label": "90th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": "B",
       "detail": "fitness",
       "state": "counted"
     },
@@ -59,32 +64,59 @@
       "label": "Daily steps",
       "icon": "steps",
       "group": "activity",
-      "value": "11,500",
+      "value": "7,760",
       "unit": "steps/day",
       "target": {
-        "text": "Comparison value 13,024.5 steps/day"
+        "text": "Comparison value 13,649 steps/day"
       },
-      "years": -0.7,
-      "yearsText": "−0.7",
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
       "rank": {
-        "percentile": 82,
-        "label": "82nd percentile",
-        "cohort": "Women near age 57"
+        "percentile": 48,
+        "label": "48th percentile (lower bound)",
+        "cohort": "Women near age 51"
       },
       "grade": null,
       "detail": "fitness",
       "state": "counted"
     }
   ],
-  "notCounted": [],
-  "tiles": [
+  "notCounted": [
     {
-      "label": "Grip",
-      "value": "41.5 kg, mean hand maximum"
+      "key": "balance",
+      "label": "Balance",
+      "icon": "balance",
+      "action": "combine",
+      "primary": false
     },
     {
+      "key": "sitRise",
+      "label": "Sit and rise",
+      "icon": "sitRise",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "fitness_tests",
+      "label": "Fitness tests",
+      "icon": "fitness_tests",
+      "action": "combine",
+      "primary": false
+    }
+  ],
+  "tiles": [
+    {
       "label": "Daily steps",
-      "value": "11,500 steps/day"
+      "value": "7,760 steps/day"
     }
   ]
 }

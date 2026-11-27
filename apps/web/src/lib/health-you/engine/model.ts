@@ -6,6 +6,9 @@ export type Observation = Readonly<Record<string, unknown>>;
 export interface MemberEvidence {
   profile: Observation;
   joined?: string;
+  workouts?: Observation[];
+  feed_context?: Observation[];
+  pressure_components?: Observation[];
   daily?: Observation[];
   sleep_sessions?: Observation[];
   checkins?: Observation[];
@@ -26,6 +29,9 @@ export interface Contribution {
   percentile: number | null;
   target: Scalar | null;
   grade: string;
+  reference: string;
+  source: string;
+  target_source: string;
   series?: string;
   quit?: string;
 }
@@ -37,6 +43,7 @@ export const fields: Record<string, typeof model.fields.sleep> = model.fields;
 export const refs: Record<string, { sd: number; ref: Record<Sex, ({ mu: number; q: number[] } | null)[]> }> =
   model.ref;
 export interface Published {
+  source: string;
   grade: string;
   unit: string;
   shrinkage: number;
@@ -121,8 +128,11 @@ export function curveAt<T>(age: number, rows: (T | null)[], values: (r: T) => nu
     ),
   );
 }
+export function shrink(age: number) {
+  return interp(age, model.policy.age_shrink_knots, model.policy.age_shrink_values);
+}
 export function scale(age: number) {
-  return model.strength * interp(age, model.policy.age_shrink_knots, model.policy.age_shrink_values);
+  return model.strength * shrink(age);
 }
 export function roundEven(x: number) {
   const lo = Math.floor(x);
@@ -224,11 +234,14 @@ export function native(key: string, x: number, age: number, sex: Sex, quality = 
   return {
     value: x,
     unit: fields[key]?.unit ?? "g/day",
-    years: (z - mu) * (coef[key] / d.sd) * scale(age) * quality,
+    years: (z - mu) * (coef[key] / d.sd) * shrink(age) * model.strength * quality,
     quality,
     target: coef[key] ? target : null,
     percentile: rank,
-    grade: catalog[key]?.grade ?? "survey",
+    grade: ["alcohol", "fibre"].includes(key) ? catalog[key].grade : "survey",
+    reference: quality < 1 ? "survey proxy" : "survey",
+    source: ["alcohol", "fibre"].includes(key) ? "literature with NHANES centering" : "joint NHANES fit",
+    target_source: "Development NHANES age/sex comparison",
   };
 }
 export function device(key: string, x: number, age: number, sex: Sex): Contribution | null {
@@ -242,10 +255,39 @@ export function device(key: string, x: number, age: number, sex: Sex): Contribut
   return {
     value: x,
     unit: key === "steps" ? "steps/day" : "moderate-equivalent min/day",
-    years: model.policy.years_per_published_log_unit * Math.max(-cap, Math.min(cap, log)) * scale(age),
+    years:
+      model.policy.years_per_published_log_unit *
+      Math.max(-cap, Math.min(cap, log)) *
+      shrink(age) *
+      model.strength,
     quality: 0.5,
     percentile: percentile(x, qs),
     target: b ? qs[4] : null,
     grade: "survey bridge",
+    reference: "hip monitor proxy",
+    source: "adjusted hip accelerometer fit",
+    target_source: "Age/sex upper observed decile, research hip monitor",
   };
+}
+
+export function lookup<T>(table: Record<string, T>, key: unknown): T | undefined {
+  return typeof key === "string" && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+export function records(value: unknown): Observation[] {
+  return Array.isArray(value) ? value.filter(isObject) : [];
+}
+export function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// Compensated summation preserves small contributions in the weekly reconciliation.
+export function sumYears(values: number[]) {
+  let sum = 0,
+    correction = 0;
+  for (const value of values) {
+    const next = sum + value;
+    correction += Math.abs(sum) >= Math.abs(value) ? sum - next + value : value - next + sum;
+    sum = next;
+  }
+  return sum + correction;
 }

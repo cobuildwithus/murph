@@ -1,21 +1,21 @@
 {
-  "version": "r2.0",
-  "asOf": "2024-09-16",
+  "version": "r3.0",
+  "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
     "memberId": "synthetic-member",
     "firstName": "Example"
   },
   "age": {
-    "value": 38.7,
-    "real": 57,
-    "gap": -18.3,
-    "low": 26.4,
-    "high": 51
+    "value": 51.4,
+    "real": 51.2,
+    "gap": 0.2,
+    "low": 35.2,
+    "high": 67.6
   },
   "week": {
-    "daysAged": 7,
-    "saved": 0,
+    "daysAged": 8.45,
+    "saved": -1.45,
     "partial": false,
     "basis": "observed"
   },
@@ -72,24 +72,27 @@
   ],
   "factors": [
     {
-      "key": "smoking",
-      "label": "Smoking",
-      "icon": "smoking",
-      "group": "habits",
-      "value": "Never",
-      "unit": null,
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "group": "blood",
+      "value": "13.4",
+      "unit": "%",
       "target": {
-        "text": "Comparison value 0"
+        "text": "Comparison value 12.1 %"
       },
-      "years": -3.6,
-      "yearsText": "−3.6",
+      "years": 1.3,
+      "yearsText": "+1.3",
+      "whatItIs": "This measures how much red blood cells vary in size.",
+      "whatLowersIt": "Looking at red cell size and hemoglobin alongside this result gives a fuller picture.",
       "rank": {
-        "percentile": 27,
-        "label": "27th percentile",
-        "cohort": "Women near age 57"
+        "percentile": 79,
+        "label": "79th percentile",
+        "cohort": "Women near age 51"
       },
-      "grade": "B",
-      "detail": "none",
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "rdw",
       "state": "counted"
     },
     {
@@ -97,15 +100,86 @@
       "label": "Cardio fitness",
       "icon": "cardioFitness",
       "group": "fitness",
-      "value": "13.4",
+      "value": "12.7",
       "unit": "peak METs",
       "target": {
         "text": "Comparison value 13 peak METs"
       },
-      "years": -2.7,
-      "yearsText": "−2.7",
+      "years": -0.8,
+      "yearsText": "−0.8",
+      "whatItIs": "This estimates the body's peak oxygen use during exercise.",
+      "whatLowersIt": "Use the same device or repeat the same lab test.",
       "rank": null,
       "grade": "A",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "cholesterol",
+      "label": "Non-HDL cholesterol",
+      "icon": "cholesterol",
+      "group": "blood",
+      "value": "136",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 122.2 mg/dL"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This is total cholesterol minus HDL cholesterol from the same blood draw.",
+      "whatLowersIt": "Total cholesterol and HDL from the same draw give a comparable result.",
+      "rank": {
+        "percentile": 39,
+        "label": "39th percentile",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
+      "detail": "blood",
+      "state": "counted"
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "group": "sleep",
+      "value": "6h 37m",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 7"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This is the time spent asleep.",
+      "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
+      "rank": {
+        "percentile": 40,
+        "label": "40th percentile",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "7,760",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 13,649 steps/day"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
+      "rank": {
+        "percentile": 48,
+        "label": "48th percentile (lower bound)",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
       "detail": "fitness",
       "state": "counted"
     },
@@ -114,17 +188,19 @@
       "label": "Albumin",
       "icon": "albumin",
       "group": "blood",
-      "value": "4.6",
+      "value": "4.2",
       "unit": "g/dL",
       "target": {
         "text": "Comparison value 4.6 g/dL"
       },
-      "years": -2.5,
-      "yearsText": "−2.5",
+      "years": 0,
+      "yearsText": "+0.0",
+      "whatItIs": "Albumin is the main protein in the liquid part of blood.",
+      "whatLowersIt": "Seeing albumin beside total protein gives the result more context.",
       "rank": {
-        "percentile": 90,
-        "label": "90th percentile",
-        "cohort": "Women near age 57"
+        "percentile": 50,
+        "label": "50th percentile",
+        "cohort": "Women near age 51"
       },
       "grade": null,
       "detail": "marker",
@@ -132,281 +208,478 @@
       "state": "counted"
     },
     {
-      "key": "health",
-      "label": "Self-rated health",
-      "icon": "health",
-      "group": "habits",
-      "value": "2",
-      "unit": "ordinal 1–5",
-      "target": {
-        "text": "Comparison value 1 ordinal 1–5"
-      },
-      "years": -2.5,
-      "yearsText": "−2.5",
-      "rank": {
-        "percentile": 33,
-        "label": "33rd percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "none",
-      "state": "counted"
-    },
-    {
-      "key": "rdw",
-      "label": "Red cell distribution width",
-      "icon": "rdw",
-      "group": "blood",
-      "value": "12",
-      "unit": "%",
-      "target": {
-        "text": "Comparison value 12.1 %"
-      },
-      "years": -2.2,
-      "yearsText": "−2.2",
-      "rank": {
-        "percentile": 19,
-        "label": "19th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "marker",
-      "markerKey": "rdw",
-      "state": "counted"
-    },
-    {
-      "key": "disease",
-      "label": "Health history",
-      "icon": "disease",
-      "group": "habits",
-      "value": "No",
-      "unit": null,
-      "target": {
-        "text": "Comparison value 0"
-      },
-      "years": -1.4,
-      "yearsText": "−1.4",
-      "rank": {
-        "percentile": 42,
-        "label": "42nd percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "none",
-      "state": "counted"
-    },
-    {
-      "key": "grip",
-      "label": "Grip",
-      "icon": "grip",
-      "group": "fitness",
-      "value": "41.5",
-      "unit": "kg, mean hand maximum",
-      "target": {
-        "text": "Comparison value 33.5 kg, mean hand maximum"
-      },
-      "years": -1,
-      "yearsText": "−1.0",
-      "rank": {
-        "percentile": 90,
-        "label": "90th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": "B",
-      "detail": "fitness",
-      "state": "counted"
-    },
-    {
       "key": "restingHeartRate",
       "label": "Resting heart rate",
       "icon": "restingHeartRate",
       "group": "habits",
-      "value": "54",
+      "value": "73",
       "unit": "bpm",
       "target": {
-        "text": "Comparison value 64 bpm"
-      },
-      "years": -1,
-      "yearsText": "−1.0",
-      "rank": {
-        "percentile": 10,
-        "label": "10th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "none",
-      "state": "counted"
-    },
-    {
-      "key": "steps",
-      "label": "Daily steps",
-      "icon": "steps",
-      "group": "activity",
-      "value": "11,500",
-      "unit": "steps/day",
-      "target": {
-        "text": "Comparison value 13,024.5 steps/day"
-      },
-      "years": -0.7,
-      "yearsText": "−0.7",
-      "rank": {
-        "percentile": 82,
-        "label": "82nd percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "fitness",
-      "state": "counted"
-    },
-    {
-      "key": "bloodPressure",
-      "label": "Blood pressure",
-      "icon": "bloodPressure",
-      "group": "blood",
-      "value": "158",
-      "unit": "mmHg",
-      "target": {
-        "text": "Comparison value 113.9 mmHg"
-      },
-      "years": 0.6,
-      "yearsText": "+0.6",
-      "rank": {
-        "percentile": 90,
-        "label": "90th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "bloodPressure",
-      "state": "counted"
-    },
-    {
-      "key": "fibre",
-      "label": "Dietary fibre",
-      "icon": "fibre",
-      "group": "food",
-      "value": "31",
-      "unit": "g/day",
-      "target": {
-        "text": "Comparison value 25.9 g/day"
-      },
-      "years": -0.5,
-      "yearsText": "−0.5",
-      "rank": {
-        "percentile": 90,
-        "label": "90th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": "B",
-      "detail": "food",
-      "state": "counted"
-    },
-    {
-      "key": "diabetes",
-      "label": "Diabetes",
-      "icon": "diabetes",
-      "group": "habits",
-      "value": "No",
-      "unit": null,
-      "target": {
-        "text": "Comparison value 0"
-      },
-      "years": -0.3,
-      "yearsText": "−0.3",
-      "rank": {
-        "percentile": 45,
-        "label": "45th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "none",
-      "state": "counted"
-    },
-    {
-      "key": "sleepTime",
-      "label": "Sleep duration",
-      "icon": "sleepTime",
-      "group": "sleep",
-      "value": "7h 25m",
-      "unit": null,
-      "target": {
-        "text": "Comparison value 7"
-      },
-      "years": -0.3,
-      "yearsText": "−0.3",
-      "rank": {
-        "percentile": 64,
-        "label": "64th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "sleep",
-      "state": "counted"
-    },
-    {
-      "key": "cholesterol",
-      "label": "Non-HDL cholesterol",
-      "icon": "cholesterol",
-      "group": "blood",
-      "value": "117",
-      "unit": "mg/dL",
-      "target": {
-        "text": "Comparison value 126.5 mg/dL"
-      },
-      "years": -0.2,
-      "yearsText": "−0.2",
-      "rank": {
-        "percentile": 18,
-        "label": "18th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": null,
-      "detail": "marker",
-      "markerKey": "non-hdl",
-      "state": "counted"
-    },
-    {
-      "key": "alcohol",
-      "label": "Alcohol",
-      "icon": "alcohol",
-      "group": "food",
-      "value": "4",
-      "unit": "g/day",
-      "target": {
-        "text": "Comparison value 0.2 g/day"
+        "text": "Comparison value 64.8 bpm"
       },
       "years": 0,
       "yearsText": "+0.0",
+      "whatItIs": "This is the heart rate recorded while resting.",
+      "whatLowersIt": "Compare resting readings from the same device across several days.",
       "rank": {
-        "percentile": 78,
-        "label": "78th percentile",
-        "cohort": "Women near age 57"
-      },
-      "grade": "B",
-      "detail": "food",
-      "state": "counted"
-    },
-    {
-      "key": "phq9",
-      "label": "Mood questionnaire",
-      "icon": "phq9",
-      "group": "habits",
-      "value": "3",
-      "unit": "points",
-      "target": {
-        "text": "Comparison value 0 points"
-      },
-      "years": 0,
-      "yearsText": "+0.0",
-      "rank": {
-        "percentile": 59,
-        "label": "59th percentile",
-        "cohort": "Women near age 57"
+        "percentile": 51,
+        "label": "51st percentile",
+        "cohort": "Women near age 51"
       },
       "grade": null,
       "detail": "none",
       "state": "counted"
     }
   ],
-  "notCounted": [],
+  "notCounted": [
+    {
+      "key": "acr",
+      "label": "Urine albumin-to-creatinine ratio",
+      "icon": "acr",
+      "action": "bloodWork",
+      "primary": true
+    },
+    {
+      "key": "activeMinutes",
+      "label": "Active minutes",
+      "icon": "activeMinutes",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "alcohol",
+      "label": "Alcohol",
+      "icon": "alcohol",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "alp",
+      "label": "Alp",
+      "icon": "alp",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "ast",
+      "label": "Ast",
+      "icon": "ast",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "balance",
+      "label": "Balance",
+      "icon": "balance",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "calcium",
+      "label": "Calcium",
+      "icon": "calcium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "chloride",
+      "label": "Chloride",
+      "icon": "chloride",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "diabetes",
+      "label": "Diabetes",
+      "icon": "diabetes",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "diet_pattern",
+      "label": "Diet pattern",
+      "icon": "diet_pattern",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "disease",
+      "label": "Health history",
+      "icon": "disease",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "fev1",
+      "label": "Lung function",
+      "icon": "fev1",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "fibre",
+      "label": "Dietary fibre",
+      "icon": "fibre",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "fish",
+      "label": "Fish",
+      "icon": "fish",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "sitRise",
+      "label": "Sit and rise",
+      "icon": "sitRise",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "fruit",
+      "label": "Fruit",
+      "icon": "fruit",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "gait",
+      "label": "Gait",
+      "icon": "gait",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "gait_speed",
+      "label": "Gait speed",
+      "icon": "gait_speed",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "ggt",
+      "label": "Ggt",
+      "icon": "ggt",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "globulin",
+      "label": "Globulin",
+      "icon": "globulin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "health",
+      "label": "Self-rated health",
+      "icon": "health",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hemoglobin",
+      "label": "Hemoglobin",
+      "icon": "hemoglobin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "homocysteine",
+      "label": "Homocysteine",
+      "icon": "homocysteine",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "knee",
+      "label": "Knee",
+      "icon": "knee",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "l5_midpoint",
+      "label": "L5 midpoint",
+      "icon": "l5_midpoint",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "cholesterol",
+      "label": "LDL cholesterol",
+      "icon": "cholesterol",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "legumes",
+      "label": "Legumes",
+      "icon": "legumes",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "lifts",
+      "label": "Strength training",
+      "icon": "lifts",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "lpa",
+      "label": "Lipoprotein(a)",
+      "icon": "lpa",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "lymph",
+      "label": "Lymph",
+      "icon": "lymph",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "mcv",
+      "label": "Mcv",
+      "icon": "mcv",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "nuts",
+      "label": "Nuts",
+      "icon": "nuts",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "phosphate",
+      "label": "Phosphate",
+      "icon": "phosphate",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "phq9",
+      "label": "Mood questionnaire",
+      "icon": "phq9",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "platelets",
+      "label": "Platelets",
+      "icon": "platelets",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "potassium",
+      "label": "Potassium",
+      "icon": "potassium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "processed_meat",
+      "label": "Processed meat",
+      "icon": "processed_meat",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "red_meat",
+      "label": "Red meat",
+      "icon": "red_meat",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "sauna",
+      "label": "Sauna",
+      "icon": "sauna",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    },
+    {
+      "key": "sedentary",
+      "label": "Sedentary",
+      "icon": "sedentary",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "bedtime",
+      "label": "Sleep regularity",
+      "icon": "bedtime",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "smoking",
+      "label": "Smoking",
+      "icon": "smoking",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "sodium",
+      "label": "Sodium",
+      "icon": "sodium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "sugary_drinks",
+      "label": "Sugary drinks",
+      "icon": "sugary_drinks",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "total_protein",
+      "label": "Total protein",
+      "icon": "total_protein",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "uric_acid",
+      "label": "Uric acid",
+      "icon": "uric_acid",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "vegetables",
+      "label": "Vegetables",
+      "icon": "vegetables",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "vilpa",
+      "label": "Vilpa",
+      "icon": "vilpa",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "vitamin_d_25oh",
+      "label": "Vitamin d 25oh",
+      "icon": "vitamin_d_25oh",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "cardioFitness",
+      "label": "Cardio fitness",
+      "icon": "cardioFitness",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "wbc",
+      "label": "White blood cell count",
+      "icon": "wbc",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "whole_grains",
+      "label": "Whole grains",
+      "icon": "whole_grains",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "workouts",
+      "label": "Workouts",
+      "icon": "workouts",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "meals",
+      "label": "Meals",
+      "icon": "meals",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "fitness_tests",
+      "label": "Fitness tests",
+      "icon": "fitness_tests",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "family_history",
+      "label": "Family history",
+      "icon": "family_history",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "social_connection",
+      "label": "Social connection",
+      "icon": "social_connection",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "stress",
+      "label": "Stress",
+      "icon": "stress",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "medications",
+      "label": "Medications",
+      "icon": "medications",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hrv",
+      "label": "Hrv",
+      "icon": "hrv",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "other_fields",
+      "label": "Other fields",
+      "icon": "other_fields",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hrv-rmssd",
+      "label": "Hrv rmssd",
+      "icon": "hrv-rmssd",
+      "action": "connectWearable",
+      "primary": false
+    }
+  ],
   "questions": []
 }

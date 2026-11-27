@@ -21,6 +21,8 @@ const factor = z.object({
   inTarget: maybe(z.boolean()),
   years: n,
   yearsText: s,
+  whatItIs: s.optional(),
+  whatLowersIt: s.optional(),
   rank: maybe(z.object({ percentile: n, label: s, cohort: s })),
   grade: maybe(z.enum(["A", "B", "C"])),
   detail: z.enum(["sleep", "fitness", "blood", "marker", "combine", "food", "bloodPressure", "none"]),
@@ -82,7 +84,12 @@ const ageDetail = age.extend({
   historyLabel: s,
   weeks: z.array(z.object({ weekStart: date, daysAged: n, basis: maybe(z.enum(["observed", "referenceOnly"])) })),
   events: z.array(
-    z.object({ date, kind: z.enum(["bloodWork", "combine", "foodWeek", "bloodPressure"]), label: s }),
+    z.object({
+      date,
+      kind: z.enum(["bloodWork", "combine", "foodWeek", "bloodPressure", "evidenceChange"]),
+      label: s,
+      evidenceChangeYears: n.optional(),
+    }),
   ),
 });
 const change = z.object({ key: s, label: s, icon: s, days: n });
@@ -125,6 +132,7 @@ const marker = z.object({
   target: maybe(target),
   history: z.array(point),
   whatItIs: s,
+  whatLowersIt: s.optional(),
 });
 export const bundleSchema = z.object({
   you: youViewSchema,
