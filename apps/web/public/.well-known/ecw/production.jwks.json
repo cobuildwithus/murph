@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-ecw-production-rGAFbPD-AKxg",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "1ju9H3KwE3FfiQGTcba_Vtk7-ZDv-GaAa-YJIMVVQwUOw4-MBYeWjvn5iLnwLv1ElbSC2ZmXmw2A8l4UsC2JDOPksv4lH80DJ7NJY4nG4XhngQ40eTX8bqJf8V1UqsVnrsPtIoBGfoxuuiKQhkQTO-DlAQ_VU-sjHH-9dJn3WnhfFHZ4uyqw-2U_JxHRH2C4_ZTPC4omCEBCGWBFJ4wXXE4rDYVc171WJ4CrH5Z29qPgjWt_PiCxRoV4kJX3UTeiXhEnbsokVWZwVxV8b-Ibz3EtELlbnY5sauOmJVSBF2yi-50BZjZocI8AfEMYc0rpFounyjfZAAaZ-Je2T5yRzw",
+      "e": "AQAB"
+    }
+  ]
+}
