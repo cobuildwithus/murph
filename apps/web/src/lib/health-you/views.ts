@@ -9,6 +9,17 @@ import { fields, lookup, model, number, offset, rowDay, YEAR, type Contribution 
 import type { MarkerInput, YouInputs } from "./evidence";
 
 const keys: Record<string, string> = {
+  onset_sd: "bedtime",
+  meal_fibre: "mealFibre",
+  food_pattern: "foodPattern",
+  ldl: "cholesterol",
+  lpa_molar: "lpa",
+  omega_3_index: "omega3Index",
+  lean_change: "leanMassChange",
+  whtr: "waistToHeight",
+  weight_loss: "weightLoss",
+  fasting_glucose: "fastingGlucose",
+  homa_ir: "insulinResistance",
   sleep: "sleepTime",
   pulse: "restingHeartRate",
   activity: "activeMinutes",
@@ -24,7 +35,28 @@ const keys: Record<string, string> = {
   a1c: "bloodSugar",
   crp: "inflammation",
 };
-const food = new Set([...model.overlap.absolute_log_caps.food.factors, "alcohol"]);
+const bloodKeys = new Set([
+  "lpa",
+  "ldl_c",
+  "ldl",
+  "lpa_molar",
+  "apob",
+  "egfr",
+  "fasting_glucose",
+  "homa_ir",
+  "triglycerides",
+  "iron",
+  "ferritin",
+  "folate",
+  "b12",
+  "omega_3_index",
+]);
+const food = new Set([
+  ...model.overlap.absolute_log_caps.food.factors,
+  "alcohol",
+  "meal_fibre",
+  "food_pattern",
+]);
 const fitness = new Set([
   "grip",
   "balance",
@@ -36,7 +68,16 @@ const fitness = new Set([
   "vo2_peak",
   "fev1",
 ]);
-const activities = new Set(["steps", "hip_minutes", "activity", "running", "lifting", "vilpa", "sedentary"]);
+const activities = new Set([
+  "steps",
+  "hip_minutes",
+  "activity",
+  "aerobic",
+  "running",
+  "lifting",
+  "vilpa",
+  "sedentary",
+]);
 const fmt = (v: number, decimals = 1) => v.toLocaleString("en-US", { maximumFractionDigits: decimals });
 function signed(v: number) {
   return (v < 0 ? "−" : "+") + Math.abs(v).toFixed(1);
@@ -88,7 +129,13 @@ export function ownTargets(input: YouInputs): ThisWeekRow[] {
   const monday = weekStart(input.asOf),
     inWeek = (date: string) => date >= monday && date <= input.asOf;
   const rows: ThisWeekRow[] = [];
-  function add(factor: string, title: string, icon: "lifts" | "active" | "bedtime", value: number, goal: number) {
+  function add(
+    factor: string,
+    title: string,
+    icon: "lifts" | "active" | "bedtime",
+    value: number,
+    goal: number,
+  ) {
     rows.push({
       kind: "target",
       factor,
@@ -295,7 +342,7 @@ export function buildViews(input: YouInputs): Bundle {
       ? { have: 0, need: 1, text: reason }
       : {
           have: recentSleepNights(evidence, asOf),
-          need: model.policy.minimum_observed_days,
+          need: model.daily.minimum,
           text: "Recent measurements are needed to build your age comparison.",
         };
   }
@@ -313,7 +360,9 @@ export function buildViews(input: YouInputs): Bundle {
   if (current && supportedWeek(input, current)) week = weekView(input, current, you);
   return {
     you,
-    optionQuestions: you.questions.some(q => !q.options.length) ? nextQuestion(input, rows, true) : you.questions,
+    optionQuestions: you.questions.some((q) => !q.options.length)
+      ? nextQuestion(input, rows, true)
+      : you.questions,
     age,
     week,
     ...bloodViews(input, factors, you.notCounted),
@@ -323,15 +372,15 @@ export function buildViews(input: YouInputs): Bundle {
 }
 
 function factorGroup(k: string): Factor["group"] {
-  return fields[k]?.group === "blood" || ["lpa", "ldl_c", "sbp"].includes(k)
+  return fields[k]?.group === "blood" || bloodKeys.has(k) || k === "sbp"
     ? "blood"
-    : ["sleep", "sleep_regularity", "l5_midpoint"].includes(k)
+    : ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint"].includes(k)
       ? "sleep"
       : fitness.has(k)
         ? "fitness"
         : activities.has(k)
           ? "activity"
-          : ["bmi", "waist"].includes(k)
+          : ["bmi", "waist", "lean_change", "weight_loss", "whtr"].includes(k)
             ? "body"
             : food.has(k)
               ? "food"
@@ -360,7 +409,18 @@ function displayValue(k: string, r: Contribution) {
 // Only directional, age/sex-matched norms can support a favorable rank.
 export function favorableRank(key: string, raw: number | null) {
   if (raw === null) return null;
-  const higher = ["steps", "hip_minutes", "activity", "grip", "vo2", "vo2_peak", "gait", "gait_speed", "knee", "fev1"];
+  const higher = [
+    "steps",
+    "hip_minutes",
+    "activity",
+    "grip",
+    "vo2",
+    "vo2_peak",
+    "gait",
+    "gait_speed",
+    "knee",
+    "fev1",
+  ];
   const lower = ["non_hdl", "ldl_c", "lpa", "rdw", "acr"];
   const percentile = higher.includes(key) ? raw : lower.includes(key) ? 100 - raw : null;
   if (percentile === null || percentile < 40) return null;
@@ -371,7 +431,10 @@ function factorRank(key: string, r: Contribution, input: YouInputs, age: number)
   const rank = favorableRank(key, r.percentile);
   if (!rank) return null;
   const sex = String(input.evidence.profile.sex).toLowerCase();
-  return { ...rank, cohort: (sex === "female" || sex === "f" ? "Women" : "Men") + " near age " + Math.floor(age) };
+  return {
+    ...rank,
+    cohort: (sex === "female" || sex === "f" ? "Women" : "Men") + " near age " + Math.floor(age),
+  };
 }
 
 function ageHistory(
@@ -426,7 +489,11 @@ function ageHistory(
   };
 }
 
-function weekView(input: YouInputs, current: NonNullable<ReturnType<typeof score>>, you: YouView): Bundle["week"] {
+function weekView(
+  input: YouInputs,
+  current: NonNullable<ReturnType<typeof score>>,
+  you: YouView,
+): Bundle["week"] {
   const { asOf, evidence } = input;
   const rows = current.rows;
   if (current.days !== null) {
@@ -437,7 +504,9 @@ function weekView(input: YouInputs, current: NonNullable<ReturnType<typeof score
       if (daily?.days != null && date >= input.historyFrom)
         days.push({
           date,
-          label: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(new Date(date)),
+          label: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(
+            new Date(date),
+          ),
           aged: daily.days,
         });
     }

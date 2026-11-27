@@ -24,6 +24,7 @@ import { getPrisma } from "../prisma";
 import { bundleSchema, type Person } from "./contract";
 import { MODEL_VERSION } from "./engine";
 import { readYouInputs } from "./inputs";
+import { gameProofs, habitEvidence } from "./game-habits";
 import { buildViews, emptyYou } from "./views";
 import { readThisWeek } from "./this-week";
 
@@ -51,6 +52,7 @@ export function dependencyKey(
   ref: NonNullable<ReturnType<typeof parseHostedBrowserVaultReplicaRef>>,
   zone: string,
   date: string,
+  gameRevision = "",
 ) {
   return createHostedOpaqueIdentifier(
     "health-you-view",
@@ -64,6 +66,7 @@ export function dependencyKey(
       ref.generation,
       zone,
       date,
+      gameRevision,
     ]),
   )!;
 }
@@ -72,7 +75,8 @@ export async function publishCache(
   observed: HealthYouCache | null,
   row: HealthYouCache,
 ) {
-  if (!observed) return (await tx.healthYouCache.createMany({ data: [row], skipDuplicates: true })).count === 1;
+  if (!observed)
+    return (await tx.healthYouCache.createMany({ data: [row], skipDuplicates: true })).count === 1;
   return (
     (
       await tx.healthYouCache.updateMany({
@@ -94,23 +98,36 @@ function unavailable() {
     message: "Your health view could not load. Try again.",
   });
 }
-async function computed(member: { id: string; createdAt: Date }, clock: Date, signal: AbortSignal,
-  checkAuthority: (tx: Prisma.TransactionClient) => Promise<void>, refreshOwner = false) {
-  const db = getPrisma(), memberId = member.id;
+async function computed(
+  member: { id: string; createdAt: Date },
+  clock: Date,
+  signal: AbortSignal,
+  checkAuthority: (tx: Prisma.TransactionClient) => Promise<void>,
+  refreshOwner = false,
+) {
+  const db = getPrisma(),
+    memberId = member.id;
   const observed = await db.healthYouCache.findUnique({ where: { memberId } });
   const workspace = await readHostedBrowserVaultReplicaState({ userId: memberId });
-  const ref = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Private health view");
+  const ref = parseHostedBrowserVaultReplicaRef(
+    workspace?.browserVaultReplicaRef ?? null,
+    "Private health view",
+  );
   const fresh =
     assessBrowserVaultReplicaFreshness({ now: clock.toISOString(), replicaRef: ref }).freshness === "fresh";
   if (!fresh && refreshOwner) scheduleBrowserVaultRefresh(memberId);
   if (!ref) throw unavailable();
+  const proofs = await gameProofs(db, memberId, clock);
   const cached = observed ? await open(observed, signal) : null;
   if (
     cached &&
-    observed?.dependency === dependencyKey(memberId, ref, cached.timeZone, toLocalDayKey(clock, cached.timeZone))
+    observed?.dependency ===
+      dependencyKey(memberId, ref, cached.timeZone, toLocalDayKey(clock, cached.timeZone), proofs.revision)
   ) {
     return {
-      views: cached.views, revision: observed.revision, timeZone: cached.timeZone,
+      views: cached.views,
+      revision: observed.revision,
+      timeZone: cached.timeZone,
       stale: fresh ? null : { since: ref.generatedAt, text: "Showing your last available measurements." },
     };
   }
@@ -124,14 +141,15 @@ async function computed(member: { id: string; createdAt: Date }, clock: Date, si
     ).allowed
   )
     throw unavailable();
-  const inputs = await readYouInputs(memberId, signal, clock, member.createdAt, workspace).catch(error => {
+  const inputs = await readYouInputs(memberId, signal, clock, member.createdAt, workspace).catch((error) => {
     signal.throwIfAborted();
     if (isHostedOnboardingError(error) && error.httpStatus < 500) throw error;
     throw unavailable();
   });
   if (inputs.sourceRevision !== ref.dataVersion) throw unavailable();
+  inputs.evidence.habits = await habitEvidence(db, memberId, proofs.rows, inputs.timeZone, signal);
   const views = buildViews(inputs),
-    dependency = dependencyKey(memberId, ref, inputs.timeZone, inputs.asOf),
+    dependency = dependencyKey(memberId, ref, inputs.timeZone, inputs.asOf, proofs.revision),
     revision = randomUUID();
   keepDailyQuestions(views, cached?.views);
   const [viewsEncrypted] = await sealHealthTexts(
@@ -147,7 +165,13 @@ async function computed(member: { id: string; createdAt: Date }, clock: Date, si
     );
     if (
       !latest ||
-      dependencyKey(memberId, latest, inputs.timeZone, toLocalDayKey(new Date(), inputs.timeZone)) !== dependency
+      dependencyKey(
+        memberId,
+        latest,
+        inputs.timeZone,
+        toLocalDayKey(new Date(), inputs.timeZone),
+        (await gameProofs(tx, memberId, new Date())).revision,
+      ) !== dependency
     )
       throw unavailable();
     return publishCache(tx, observed, { memberId, dependency, revision, viewsEncrypted });
@@ -198,9 +222,13 @@ export async function readPrivateYou(
       };
       let result: Awaited<ReturnType<typeof computed>>;
       try {
-        result = await computed(auth.member, clock, signal, tx => authority(auth, tx), true);
+        result = await computed(auth.member, clock, signal, (tx) => authority(auth, tx), true);
       } catch (error) {
-        if (isHostedOnboardingError(error) && error.code !== "HEALTH_YOU_UNAVAILABLE" && error.httpStatus < 500)
+        if (
+          isHostedOnboardingError(error) &&
+          error.code !== "HEALTH_YOU_UNAVAILABLE" &&
+          error.httpStatus < 500
+        )
           throw error;
         requestSignal.throwIfAborted();
         if (kind === "you" && saved?.timeZone) return emptyYou(profile, toLocalDayKey(clock, saved.timeZone));
@@ -219,7 +247,11 @@ export async function readPrivateYou(
         };
       }
       const detail =
-        kind === "marker" ? (key && Object.hasOwn(views.markers, key) ? views.markers[key] : null) : views[kind];
+        kind === "marker"
+          ? key && Object.hasOwn(views.markers, key)
+            ? views.markers[key]
+            : null
+          : views[kind];
       if (!detail) {
         if (kind === "marker") throw gameNotFound();
         throw hostedOnboardingError({
@@ -239,20 +271,40 @@ export async function readYouAgeForPin(memberId: string) {
   const db = getPrisma();
   const check = (tx: Prisma.TransactionClient) => assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
   try {
-    return await withInputAuthority(() => check(db), async () => {
-      const member = await db.hostedMember.findUniqueOrThrow({ where: { id: memberId }, select: { id: true, createdAt: true } });
-      const { views, revision, timeZone, stale } = await computed(member, new Date(), AbortSignal.timeout(12000), check);
-      const age = views.you.age;
-      return !stale && views.you.state === "ready" && age ? { value: age.value, gap: age.gap, revision, timeZone } : null;
-    });
+    return await withInputAuthority(
+      () => check(db),
+      async () => {
+        const member = await db.hostedMember.findUniqueOrThrow({
+          where: { id: memberId },
+          select: { id: true, createdAt: true },
+        });
+        const { views, revision, timeZone, stale } = await computed(
+          member,
+          new Date(),
+          AbortSignal.timeout(12000),
+          check,
+        );
+        const age = views.you.age;
+        return !stale && views.you.state === "ready" && age
+          ? { value: age.value, gap: age.gap, revision, timeZone }
+          : null;
+      },
+    );
   } catch (error) {
-    if (isHostedOnboardingError(error) && (error.code === "HEALTH_YOU_UNAVAILABLE" || [403, 404].includes(error.httpStatus))) return null;
+    if (
+      isHostedOnboardingError(error) &&
+      (error.code === "HEALTH_YOU_UNAVAILABLE" || [403, 404].includes(error.httpStatus))
+    )
+      return null;
     throw error;
   }
 }
 
-export async function isYouAgePinCurrent(tx: Prisma.TransactionClient, memberId: string,
-  offer: { revision: string; timeZone: string }) {
+export async function isYouAgePinCurrent(
+  tx: Prisma.TransactionClient,
+  memberId: string,
+  offer: { revision: string; timeZone: string },
+) {
   // Lock both the publication pointer and cache row through the pin write.
   const [row] = await tx.$queryRaw<{ ref: unknown; dependency: string }[]>`
     SELECT w.browser_vault_replica_ref AS ref, c.dependency
@@ -260,6 +312,17 @@ export async function isYouAgePinCurrent(tx: Prisma.TransactionClient, memberId:
     WHERE w.user_id = ${memberId} AND c.revision = ${offer.revision}::uuid FOR SHARE OF w, c`;
   const ref = row && parseHostedBrowserVaultReplicaRef(row.ref, "Private health pin");
   const clock = new Date();
-  return Boolean(ref && assessBrowserVaultReplicaFreshness({ now: clock.toISOString(), replicaRef: ref }).freshness === "fresh"
-    && row.dependency === dependencyKey(memberId, ref, offer.timeZone, toLocalDayKey(clock, offer.timeZone)));
+  return Boolean(
+    ref &&
+      assessBrowserVaultReplicaFreshness({ now: clock.toISOString(), replicaRef: ref }).freshness ===
+        "fresh" &&
+      row.dependency ===
+        dependencyKey(
+          memberId,
+          ref,
+          offer.timeZone,
+          toLocalDayKey(clock, offer.timeZone),
+          (await gameProofs(tx, memberId, clock)).revision,
+        ),
+  );
 }

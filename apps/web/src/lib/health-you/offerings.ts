@@ -22,7 +22,7 @@ export function offerings(input: YouInputs, rows: Rows, age: number): Tile[] {
   }
   const missingVariance = (keys: string[]) => keys.reduce((sum, key) => sum + (rows[key] ? 0 : coef[key] ** 2), 0);
   const years = model.policy.years_per_published_log_unit;
-  const missingLpa = rows.lpa ? 0 : publishedRange("lpa", age) * years;
+  const missingLpa = rows.lpa || rows.lpa_molar ? 0 : publishedRange("lpa", age) * years;
   add("bloodWork", "blood", "Blood work", missingVariance(model.calibration.blood_keys) + missingLpa ** 2);
   add("addBloodPressure", "bloodPressure", "Blood pressure", missingVariance(["sbp"]));
   if (!input.hasWearableData)
@@ -34,7 +34,7 @@ export function offerings(input: YouInputs, rows: Rows, age: number): Tile[] {
     add("combine", "strength", "Strength", (range * years * model.feeds.self_test_quality) ** 2);
   }
   const recentFoodWeek = dated(input.evidence, "checkins", input.asOf, model.policy.protocol.food_days).some(row => row.food_week);
-  if (!recentFoodWeek && !profile.eating_disorder && !(Array.isArray(profile.conditions) && profile.conditions.includes("eating_disorder")) && !rows.diet_pattern) {
+  if (!recentFoodWeek && !profile.eating_disorder && !(Array.isArray(profile.conditions) && profile.conditions.includes("eating_disorder")) && !rows.diet_pattern && !rows.food_pattern) {
     const missing = Object.keys(model.feeds.portion_grams).filter(key =>
       !rows[key] && !(rows.fibre && model.overlap.suppresses.fibre.includes(key)));
     const range = missing.reduce((sum, key) => sum + publishedRange(key, age), 0);

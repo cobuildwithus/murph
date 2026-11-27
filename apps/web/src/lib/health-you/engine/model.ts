@@ -6,6 +6,8 @@ export type Observation = Readonly<Record<string, unknown>>;
 export interface MemberEvidence {
   profile: Observation;
   joined?: string;
+  habits?: Observation[];
+  food_weeks?: Observation[];
   workouts?: Observation[];
   feed_context?: Observation[];
   pressure_components?: Observation[];
@@ -32,6 +34,8 @@ export interface Contribution {
   reference: string;
   source: string;
   target_source: string;
+  level?: number;
+  confidence?: number;
   series?: string;
   quit?: string;
 }
@@ -78,7 +82,9 @@ export function day(v: unknown): string {
   if (typeof v !== "string") return "";
   const s = v.slice(0, 10);
   const ms = Date.parse(s);
-  return /^\d{4}-\d\d-\d\d$/.test(s) && Number.isFinite(ms) && new Date(ms).toISOString().startsWith(s) ? s : "";
+  return /^\d{4}-\d\d-\d\d$/.test(s) && Number.isFinite(ms) && new Date(ms).toISOString().startsWith(s)
+    ? s
+    : "";
 }
 export function distance(to: string, from: string) {
   return (Date.parse(to) - Date.parse(from)) / 86400000;
@@ -87,7 +93,7 @@ export function offset(date: string, days: number) {
   return new Date(Date.parse(date) + days * 86400000).toISOString().slice(0, 10);
 }
 export function rowDay(r: Observation) {
-  return day(r.date ?? r.end ?? r.datetime ?? r.end_at ?? r.collected_at);
+  return day(r.date ?? r.timestamp ?? r.end ?? r.datetime ?? r.end_at ?? r.collected_at);
 }
 export function released(r: Observation, at: string) {
   return ["reported_at", "received_at"].every((k) => r[k] == null || (day(r[k]) && day(r[k]) <= at));
@@ -169,7 +175,8 @@ export function logTable(f: Published, x: unknown): number | null {
   if (!right || x <= Number(left.value) || ["bins", "zero_bins"].includes(kind)) return Math.log(left.ratio);
   return (
     Math.log(left.ratio) +
-    ((x - Number(left.value)) / (Number(right.value) - Number(left.value))) * Math.log(right.ratio / left.ratio)
+    ((x - Number(left.value)) / (Number(right.value) - Number(left.value))) *
+      Math.log(right.ratio / left.ratio)
   );
 }
 export function contrast(f: Published, x: unknown) {
@@ -231,7 +238,9 @@ export function native(key: string, x: number, age: number, sex: Sex, quality = 
   if (categories?.length) {
     target = Math.min(...categories.map(([level]) => level));
     rank = categories.some(([level]) => level === x)
-      ? roundEven(100 * categories.reduce((s, [level, p]) => s + p * (level < x ? 1 : level === x ? 0.5 : 0), 0))
+      ? roundEven(
+          100 * categories.reduce((s, [level, p]) => s + p * (level < x ? 1 : level === x ? 0.5 : 0), 0),
+        )
       : null;
   }
   return {
@@ -254,7 +263,15 @@ export function device(key: string, x: number, age: number, sex: Sex): Contribut
   const [center, ...qs] = row,
     b = Math.min(0, d.beta) / d.sd,
     cap = model.policy.hip_absolute_log_cap;
-  const log = model.policy.watch_hip_reliability * b * (Math.log1p(x) - center);
+  const steps = key === "steps",
+    settings = model.daily;
+  const quality = steps ? settings.step_quality : model.policy.watch_hip_reliability;
+  const dose = steps
+    ? Math.log(
+        Math.max(settings.step_floor, Math.min(x, settings.step_plateau[Number(age >= settings.step_age)])),
+      )
+    : Math.log1p(x);
+  const log = quality * b * (dose - center);
   return {
     value: x,
     unit: key === "steps" ? "steps/day" : "moderate-equivalent min/day",
@@ -263,7 +280,7 @@ export function device(key: string, x: number, age: number, sex: Sex): Contribut
       Math.max(-cap, Math.min(cap, log)) *
       shrink(age) *
       model.strength,
-    quality: 0.5,
+    quality,
     percentile: percentile(x, qs),
     target: b ? qs[4] : null,
     grade: "survey bridge",

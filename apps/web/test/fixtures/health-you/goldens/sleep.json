@@ -3,7 +3,7 @@
   "hero": {
     "value": "6h 37m",
     "unit": null,
-    "years": -0.1
+    "years": -0.5
   },
   "chart": {
     "kind": "trend",
@@ -245,22 +245,6 @@
         "value": 5.783333333333333
       },
       {
-        "date": "2025-02-19",
-        "value": 5.716666666666667
-      },
-      {
-        "date": "2025-02-20",
-        "value": 5.75
-      },
-      {
-        "date": "2025-02-21",
-        "value": 5.783333333333333
-      },
-      {
-        "date": "2025-02-22",
-        "value": 5.716666666666667
-      },
-      {
         "date": "2025-02-23",
         "value": 5.75
       },
@@ -405,6 +389,26 @@
   },
   "factors": [
     {
+      "key": "bedtime",
+      "label": "Bedtime regularity",
+      "icon": "bedtime",
+      "group": "sleep",
+      "value": "0.4",
+      "unit": "h SD",
+      "target": {
+        "text": "Comparison value 0.8 h SD"
+      },
+      "years": -0.6,
+      "yearsText": "−0.6",
+      "featured": true,
+      "whatItIs": "How much your sleep start time varies across nights.",
+      "whatLowersIt": "Recording weekday and weekend nights gives a fuller picture.",
+      "rank": null,
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    },
+    {
       "key": "sleepTime",
       "label": "Sleep duration",
       "icon": "sleepTime",
@@ -412,11 +416,11 @@
       "value": "6h 37m",
       "unit": null,
       "target": {
-        "text": "Comparison value 7"
+        "text": "Comparison value 7.5"
       },
-      "years": -0.1,
-      "yearsText": "−0.1",
-      "featured": true,
+      "years": 0.1,
+      "yearsText": "+0.1",
+      "featured": false,
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
       "rank": null,
@@ -426,5 +430,10 @@
     }
   ],
   "notCounted": [],
-  "tiles": []
+  "tiles": [
+    {
+      "label": "Bedtime regularity",
+      "value": "0.4 h SD"
+    }
+  ]
 }

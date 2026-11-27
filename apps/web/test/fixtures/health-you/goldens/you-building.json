@@ -1,5 +1,5 @@
 {
-  "version": "r3.0",
+  "version": "r4.0",
   "asOf": "2025-03-29",
   "state": "building",
   "profile": {
@@ -8,7 +8,7 @@
   },
   "building": {
     "have": 0,
-    "need": 7,
+    "need": 3,
     "text": "Recent measurements are needed to build your age comparison."
   },
   "week": {

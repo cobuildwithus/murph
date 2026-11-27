@@ -1,3 +1,4 @@
+import { DETAILED_WORKOUT_TYPES } from "./activity-session-types.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -66,11 +67,13 @@ const sleepTimingSchema = z.array(z.object({
   timeZone: z.string().min(1),
 }).strict());
 
-const activitySessionsSchema = z.array(z.object({
+const sessionSchema = z.object({
   type: z.enum(["run", "walk", "sauna", "hiit", "basketball", "other"]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
   minutes: z.number().positive().max(1440),
-}).strict());
+}).strict();
+const activitySessionsSchema = z.array(sessionSchema);
+const detailedWorkoutsSchema = z.array(sessionSchema.extend({ type: z.enum(DETAILED_WORKOUT_TYPES) }));
 
 const companionRunsProjectionSchema = z.object({
   schemaVersion: z.literal(1),
@@ -116,7 +119,9 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.sleepTimingProviders === undefined ? {} : { sleepTimingProviders: z.record(z.iso.date(), z.string().min(1)).parse(record.sleepTimingProviders) }),
     ...(record.sleepTiming === undefined ? {} : { sleepTiming: sleepTimingSchema.parse(record.sleepTiming) }),
+    ...(record.detailedWorkouts === undefined ? {} : { detailedWorkouts: detailedWorkoutsSchema.parse(record.detailedWorkouts) }),
     ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
@@ -161,7 +166,9 @@ export function parseBrowserVaultCoreShard(
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.sleepTimingProviders === undefined ? {} : { sleepTimingProviders: z.record(z.iso.date(), z.string().min(1)).parse(record.sleepTimingProviders) }),
     ...(record.sleepTiming === undefined ? {} : { sleepTiming: sleepTimingSchema.parse(record.sleepTiming) }),
+    ...(record.detailedWorkouts === undefined ? {} : { detailedWorkouts: detailedWorkoutsSchema.parse(record.detailedWorkouts) }),
     ...(record.activitySessions === undefined ? {} : { activitySessions: activitySessionsSchema.parse(record.activitySessions) }),
     ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     policy: parsePolicy(record.policy, `${label}.policy`),

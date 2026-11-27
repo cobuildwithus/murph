@@ -1,5 +1,7 @@
-import { clinical, habits, restrictions } from "./observations";
-import { workoutFactor } from "./workouts";
+import { clinical, habits, labValues } from "./observations";
+import { foodFactors } from "./food";
+import { capFamily, clinicalMarkers } from "./clinical-markers";
+import { workoutFactors, verifiedHabits } from "./workouts";
 import { finishFactors, missingEvidence, absoluteRisk } from "./report";
 import { adapt } from "./feeds";
 import { published } from "./extensions";
@@ -17,6 +19,7 @@ import {
   pick,
   distance,
   model,
+  lookup,
   number,
   offset,
   rowDay,
@@ -62,27 +65,49 @@ export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex
     };
   }
   const { result, ci, labs } = clinical(data, at, age, sex);
+  if (["night", "rotating"].includes(String(pick(ci, "work_schedule"))))
+    data = { ...data, profile: { ...data.profile, shift_worker: true } };
   const wear = habits(data, at, age, sex);
   if (wear.steps || wear.hip_minutes || wear.activity) delete result.activity;
   Object.assign(result, wear);
-  if (
-    !["steps", "hip_minutes", "activity", "vo2", "knee", "gait"].some((k) => result[k]) &&
-    !restrictions(data.profile).restricted
-  ) {
-    const unit = model.policy.years_per_published_log_unit * shrink(age) * model.strength;
-    const workout = workoutFactor(data, at, unit);
-    if (workout) {
-      const [key, rec] = workout;
-      const remaining = Math.max(
-        0,
-        model.overlap.absolute_log_caps.conditioning.max_abs_log * unit - Math.abs(result.pulse?.years ?? 0),
-      );
-      result[key] = { ...rec, years: Math.max(-remaining, rec.years) };
-    }
-  }
-  return Object.assign(result, published(data, at, age, sex, result, ci, labs));
+  const mult = model.policy.years_per_published_log_unit * shrink(age) * model.strength;
+  const workouts = workoutFactors(data, at, age, sex, result, mult);
+  Object.assign(result, workouts, foodFactors(data, at, age, sex, ci, { ...result, ...workouts }, mult));
+  const caps = model.overlap.absolute_log_caps;
+  Object.assign(
+    result,
+    published(
+      data,
+      at,
+      age,
+      sex,
+      result,
+      result.food_pattern ? ci.filter((r) => !("food_proxy" in r)) : ci,
+      labs,
+    ),
+  );
+  if (caps.food.factors.some((k) => k !== "fibre" && result[k])) delete result.food_pattern;
+  const streaks = verifiedHabits(data, at, age, sex, result, mult);
+  Object.assign(result, streaks);
+  if (result.sleep_regularity) delete result.onset_sd;
+  capFamily(result, [...caps.food.factors, "food_pattern", "meal_fibre"], model.daily.food_cap * mult);
+  capFamily(result, ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint"], model.daily.sleep_cap * mult);
+  if ([wear, workouts, streaks].some((r) => Object.keys(r).length))
+    capFamily(
+      result,
+      [...caps.conditioning.factors, "pulse", "hip_minutes", "activity", "aerobic", "knee", "gait", "vo2"],
+      mult * caps.conditioning.max_abs_log,
+    );
+  clinicalMarkers(result, data, at, age, sex, mult, labs.non_hdl);
+  return result;
 }
-export function comparableMovement(data: MemberEvidence, at: string, cutoff: string, current: Rows, before: Rows) {
+export function comparableMovement(
+  data: MemberEvidence,
+  at: string,
+  cutoff: string,
+  current: Rows,
+  before: Rows,
+) {
   const changes: Record<string, number> = {};
   for (const [k, r] of Object.entries(current)) {
     const old = before[k];
@@ -91,13 +116,18 @@ export function comparableMovement(data: MemberEvidence, at: string, cutoff: str
       (r.series && r.series === old.series) ||
       (k === "smoking" && r.quit && (r.quit === old.quit || old.value === 1))
     )
-      changes[k] = r.years - old.years;
+      changes[k] =
+        r.level !== undefined && old.level !== undefined
+          ? (r.level - old.level) * Math.min(r.confidence!, old.confidence!)
+          : r.years - old.years;
   }
   for (const [group, keys] of [
-    ["daily", ["pulse", "steps", "hip_minutes", "activity"]],
-    ["sleep_sessions", ["sleep"]],
-    ["workouts", ["running", "lifting"]],
-    ["checkins", ["smoking", "alcohol", "fibre"]],
+    ["daily", ["pulse", "steps", "hip_minutes", "activity", "hrv"]],
+    ["sleep_sessions", ["sleep", "onset_sd"]],
+    ["workouts", ["aerobic", "lifting", "sauna"]],
+    ["meals", ["meal_fibre"]],
+    ["habits", ["steps", "lifting", "sauna", "alcohol"]],
+    ["checkins", ["smoking", "alcohol", "fibre", "meal_fibre"]],
   ] as const) {
     if (
       data[group]?.some((r) =>
@@ -143,7 +173,12 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     value = age + gap;
   const tenth = (n: number) => Math.floor(n * 10 + 0.5 + 1e-10);
   const parts: Record<string, number> = Object.fromEntries(
-    factors.filter(([k, r]) => r.years || (coef[k] ?? 1)).map(([k, r]) => [k, Math.floor(r.years * 10)]),
+    factors
+      .filter(
+        ([k, r]) =>
+          r.years || (r.quality && (coef[k] ?? 1) && (lookup(model.clinical_fit.coefficients, k) ?? 1)),
+      )
+      .map(([k, r]) => [k, Math.floor(r.years * 10)]),
   );
   const extra = tenth(value) - tenth(age) - Object.values(parts).reduce((s, n) => s + n, 0);
   const remainder = (k: string) => rows[k].years * 10 - parts[k];
@@ -180,7 +215,13 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     ...(p.approximate_birth_date ? ["birth_year_midpoint_assumed"] : []),
     ...(value < 20 || value > 79 ? ["age_equivalent_outside_training_range"] : []),
     ...(ageAt(data, at, at).whole === 80 ? ["chronological_age_extrapolation"] : []),
-    ...(factors.some(([k]) => model.optional.includes(k)) ? ["published_extension_unvalidated_as_combined"] : []),
+    ...(factors.some(
+      ([k]) =>
+        model.optional.includes(k) ||
+        ["onset_sd", "meal_fibre", "food_pattern", "aerobic", "apob", "steps", "sleep", "pulse"].includes(k),
+    )
+      ? ["published_extension_unvalidated_as_combined"]
+      : []),
   ];
   return {
     flags,
@@ -245,10 +286,21 @@ export function fromRaw(member: Observation, at: string, history?: Observation) 
     factors,
     days_aged: result.days,
     weekly_state:
-      result.days == null ? "unavailable" : Object.keys(result.changes).length ? "observed" : "reference_only",
+      result.days == null
+        ? "unavailable"
+        : Object.keys(result.changes).length
+          ? "observed"
+          : "reference_only",
     evidence_change_years: result.residual,
     flags: result.flags,
     not_counted_yet: missingEvidence(data, at, result.rows),
-    research_risk: absoluteRisk(result.unrounded, result.sex, Number(at.slice(0, 4)), result.rows),
+    research_risk: absoluteRisk(
+      result.unrounded,
+      result.sex,
+      Number(at.slice(0, 4)),
+      result.rows,
+      result.age,
+      labValues(data, at).non_hdl,
+    ),
   };
 }

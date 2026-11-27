@@ -43,7 +43,9 @@ export interface BrowserVaultCoreShard extends Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "sleepTimingProviders"
   | "sleepTiming"
+  | "detailedWorkouts"
   | "activitySessions"
   | "runs"
   | "timelineRows"
@@ -177,7 +179,9 @@ export async function splitBrowserVaultReplica(
       ...(replica.demographics === undefined ? {} : { demographics: replica.demographics }),
       ...(replica.displayName === undefined ? {} : { displayName: replica.displayName }),
       ...(replica.meals === undefined ? {} : { meals: replica.meals }),
+      ...(replica.sleepTimingProviders === undefined ? {} : { sleepTimingProviders: replica.sleepTimingProviders }),
       ...(replica.sleepTiming === undefined ? {} : { sleepTiming: replica.sleepTiming }),
+      ...(replica.detailedWorkouts === undefined ? {} : { detailedWorkouts: replica.detailedWorkouts }),
       ...(replica.activitySessions === undefined ? {} : { activitySessions: replica.activitySessions }),
       ...(replica.runs === undefined ? {} : { runs: replica.runs }),
       policy: replica.policy,
@@ -223,7 +227,9 @@ export function assembleBrowserVaultCoreReplica(core: BrowserVaultCoreShard): Br
     ...(core.demographics === undefined ? {} : { demographics: core.demographics }),
     ...(core.displayName === undefined ? {} : { displayName: core.displayName }),
     ...(core.meals === undefined ? {} : { meals: core.meals }),
+    ...(core.sleepTimingProviders === undefined ? {} : { sleepTimingProviders: core.sleepTimingProviders }),
     ...(core.sleepTiming === undefined ? {} : { sleepTiming: core.sleepTiming }),
+    ...(core.detailedWorkouts === undefined ? {} : { detailedWorkouts: core.detailedWorkouts }),
     ...(core.activitySessions === undefined ? {} : { activitySessions: core.activitySessions }),
     ...(core.runs === undefined ? {} : { runs: core.runs }),
     policy: core.policy,

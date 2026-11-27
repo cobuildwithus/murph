@@ -20,8 +20,8 @@ import {
   day,
   distance,
   fields,
-  model,
   lookup,
+  model,
   offset,
   rowDay,
   released,
@@ -30,13 +30,14 @@ import {
 } from "./engine/model";
 import { markerSystem, youLabel } from "./labels";
 import { bedtimeProgress } from "./bedtime";
-import { assessmentInputs, pressureInputs } from "./checkins";
+import { assessmentInputs, localPressureTime, pressureInputs } from "./checkins";
 import { inputState, type MarkerInput, type YouInputs } from "./evidence";
 
 const pressureKeys = ["systolic-blood-pressure", "diastolic-blood-pressure"];
 const metricKeys = ["activity-minutes", ...model.feeds.projectable.filter((k) => !pressureKeys.includes(k))];
 const labAliases: Record<string, string> = {
   ...model.feeds.labs,
+  "egfr-ckd-epi": "egfr",
   "ldl-calculated": "ldl",
   "ldl-chol-calc-nih": "ldl",
   "total-globulin": "globulin",
@@ -84,7 +85,9 @@ export function projectYouInputs(
     asOf,
     timeZone,
   );
-  const pressureRows = pressureKeys.flatMap((metricKey) => client.metrics.list({ metricKey, from, to: asOf }));
+  const pressureRows = pressureKeys.flatMap((metricKey) =>
+    client.metrics.list({ metricKey, from, to: asOf }),
+  );
   const bp = pressureInputs(pressureRows, timeZone);
   const activeMinutes = [...minutes].flatMap(([date, values]) =>
     values.size === 1 ? [{ date, value: [...values][0] }] : [],
@@ -96,31 +99,36 @@ export function projectYouInputs(
     to: asOf,
   });
   const lifts = completedLifts(trainingRows, asOf);
-  const workouts = [
-    ...("activitySessions" in replica && Array.isArray(replica.activitySessions) ? replica.activitySessions : []),
-    ...trainingRows.flatMap((r) => {
-      const t = r.attributes.training;
-      return r.date &&
-        isRecord(t) &&
-        t.state === "completed" &&
-        strengthTypes.includes(String(t.activityType)) &&
-        typeof t.durationMinutes === "number"
-        ? [{ date: r.date, type: "strength_training", minutes: t.durationMinutes }]
-        : [];
-    }),
-  ];
+  const publication = toLocalDayKey(replica.generatedAt, timeZone);
+  const { sessions, training } = projectWorkouts(replica, trainingRows, publication, asOf);
+  const { timing, sleep_sessions } = sleepTimingEvidence(replica, from, asOf);
+  const meals = client.replica.meals.days
+    .filter((d) => d.date >= from && d.date <= asOf)
+    .flatMap((d) =>
+      d.meals.map((m) => ({
+        id: m.id,
+        date: d.date,
+        timestamp: m.eatenAt,
+        fiber_g: m.fiberGrams,
+        calories: m.calories,
+        protein_g: m.proteinGrams,
+        carbs_g: m.carbsGrams,
+        fat_g: m.fatGrams,
+      })),
+    );
   const evidence = adapt({
     profile: { birth_year: demo.birthYear, biological_sex: demo.biologicalSex },
     joined: toLocalDayKey(joinedAt, timeZone),
     metrics,
     labs: labRows,
     bp,
-    workouts,
+    workouts: [...sessions, ...training],
+    sleep_sessions,
+    meals,
     checkins: assessments.checkins,
     fitness_tests: assessments.tests,
   });
   const availability = inputAvailability(evidence, asOf, markers);
-  const timing = "sleepTiming" in replica ? replica.sleepTiming : undefined;
   const bedtime = bedtimeProgress(timing, asOf);
   if (bedtime)
     availability.bedtime = inputState(
@@ -145,17 +153,82 @@ export function projectYouInputs(
     activeMinutes,
     sourceRevision: replica.source.dataVersion,
     historyFrom,
-    ageHistoryFrom: workoutHistoryFrom(historyFrom, toLocalDayKey(replica.generatedAt, timeZone), asOf, workouts),
+    ageHistoryFrom: [
+      historyFrom,
+      ...(sessions.length ? [offset(publication, -62 + 27)] : []),
+      ...(training.length ? [offset([publication, asOf].sort().at(-1)!, -183 + 27)] : []),
+    ]
+      .sort()
+      .at(-1)!,
   };
 }
 
-function workoutHistoryFrom(from: string, publication: string, asOf: string, workouts: { type: string }[]) {
-  // Historical scores need the whole rolling window inside the retained source.
-  const kinds = new Set(workouts.map(w => lookup(model.policy.workout_types, w.type)));
-  const bounds = [from];
-  if (kinds.has("running")) bounds.push(offset(publication, -62 + model.policy.workout_days - 1));
-  if (kinds.has("lifting")) bounds.push(offset(asOf, -183 + model.policy.workout_days - 1));
-  return bounds.sort().at(-1)!;
+function sleepTimingEvidence(
+  replica: BrowserVaultCoreCapableQueryClient["replica"],
+  from: string,
+  asOf: string,
+) {
+  const timing = "sleepTiming" in replica ? replica.sleepTiming : undefined;
+  const providers = "sleepTimingProviders" in replica ? replica.sleepTimingProviders : undefined;
+  const sleep_sessions = (timing ?? []).flatMap((night) => {
+    const source = measuringDevice(providers?.[night.date]);
+    if (!source || night.date < from || night.date > asOf) return [];
+    return [
+      {
+        date: night.date,
+        source,
+        method: "main_sleep_window",
+        type: "main",
+        start_at: night.startAt,
+        end_at: night.endAt,
+        start_offset_min: zoneOffset(night.startAt, night.timeZone),
+        end_offset_min: zoneOffset(night.endAt, night.timeZone),
+      },
+    ];
+  });
+  return { timing, sleep_sessions };
+}
+function projectWorkouts(
+  replica: BrowserVaultCoreCapableQueryClient["replica"],
+  trainingRows: BrowserVaultEntity[],
+  publication: string,
+  asOf: string,
+) {
+  const sessions = [
+    ...("activitySessions" in replica ? (replica.activitySessions ?? []) : []),
+    ...("detailedWorkouts" in replica ? (replica.detailedWorkouts ?? []) : []),
+  ].flatMap((r) => {
+    const type = workoutType(r.type);
+    return type && r.date >= offset(publication, -62) && r.date <= asOf ? [{ ...r, type }] : [];
+  });
+  const training = trainingRows.flatMap((r) => {
+    const t = r.attributes.training;
+    if (
+      !r.date ||
+      r.date < offset(publication, -183) ||
+      r.date > asOf ||
+      !isRecord(t) ||
+      t.state !== "completed" ||
+      typeof t.durationMinutes !== "number"
+    )
+      return [];
+    const type = workoutType(t.activityType);
+    return type ? [{ date: r.date, type, minutes: t.durationMinutes }] : [];
+  });
+  return { sessions, training };
+}
+function workoutType(value: unknown) {
+  if (typeof value !== "string") return null;
+  if (strengthTypes.includes(value)) return "strength_training";
+  const type = value === "walk" ? "walking" : value.toLowerCase().replaceAll("-", "_");
+  return Object.hasOwn(model.daily.workout_proxy, type) ? type : null;
+}
+function zoneOffset(instant: string, timeZone: string) {
+  const stamp = new Date(instant);
+  return (
+    (Date.parse(localPressureTime(stamp, timeZone) + "Z") - Math.floor(stamp.valueOf() / 60_000) * 60_000) /
+    60_000
+  );
 }
 
 function needsWhoopAnswer(evidence: MemberEvidence, asOf: string) {
@@ -182,13 +255,15 @@ export async function readYouInputs(
     requestedShards: ["core", "metricsIndex", "labs"],
     timeoutMs: 6000,
   });
-  if (saved.state !== "ready" || saved.freshness !== "fresh") throw new Error("Private projection unavailable");
+  if (saved.state !== "ready" || saved.freshness !== "fresh")
+    throw new Error("Private projection unavailable");
   return projectYouInputs(saved.client, clock, joinedAt);
 }
 
 function validMetric(row: BrowserVaultMetricRow, from: string, asOf: string) {
   if (
-    (row.metricKey === "total-sleep-minutes" && (row.context.sleepType === "short_sleep" || row.context.sleepState === "tentative")) ||
+    (row.metricKey === "total-sleep-minutes" &&
+      (row.context.sleepType === "short_sleep" || row.context.sleepState === "tentative")) ||
     !day(row.date) ||
     row.date < from ||
     row.date > asOf ||
@@ -280,6 +355,8 @@ const sourceLabUnits = new Set([
     "mg/dL",
     "nmol/L",
     "ng/mL",
+    "mg/L",
+    "mcg/dL",
     "µg/dL",
     "pg/mL",
     "mIU/L",
@@ -296,7 +373,12 @@ const sourceLabUnits = new Set([
   ].map(normalizeUnit),
 ]);
 function markerReading(row: BrowserVaultLabResultRow, unit: string | null, canonical: string | null) {
-  if (row.comparator !== null || row.normalizedValue === null || !Number.isFinite(row.normalizedValue) || !unit)
+  if (
+    row.comparator !== null ||
+    row.normalizedValue === null ||
+    !Number.isFinite(row.normalizedValue) ||
+    !unit
+  )
     return null;
   if (!sourceLabUnits.has(unit) && normalizeUnit(canonical) !== unit) return null;
   const flag: MarkerInput["flag"] =
@@ -304,6 +386,16 @@ function markerReading(row: BrowserVaultLabResultRow, unit: string | null, canon
   return { value: row.normalizedValue, unit: unit === "percent" ? "%" : unit, flag };
 }
 
+function labFactorKey(marker: string, unit: string | null, row: BrowserVaultLabResultRow) {
+  return (
+    labs[marker]?.[0] ??
+    (marker === "lpa" && unit === normalizeUnit("nmol/L")
+      ? "lpa_molar"
+      : marker === "glucose" && row.fastingStatus === "fasting"
+        ? "fasting_glucose"
+        : marker)
+  );
+}
 function readLabs(
   rows: BrowserVaultLabResultRow[],
   from: string,
@@ -313,16 +405,19 @@ function readLabs(
 ) {
   for (const row of rows) {
     const def = resolveLabResultMetricDefinition(row.metricKey);
-    if (row.parentResultStatus === "pending" || !def || !day(row.date) || row.date < from || row.date > asOf) continue;
+    if (row.parentResultStatus === "pending" || !def || !day(row.date) || row.date < from || row.date > asOf)
+      continue;
     const marker = labAliases[def.key] ?? def.key.replaceAll("-", "_");
     const unit = normalizeUnit(row.normalizedUnit);
-    const researchUnit = labs[marker]?.[1];
+    const researchUnit = labs[marker]?.[1] ?? lookup(model.candidates, marker)?.unit;
     labRows.push({
       date: row.date,
       marker,
       value: row.normalizedValue,
       unit: researchUnit && normalizeUnit(researchUnit) === unit ? researchUnit : unit,
       draw_id: row.drawId,
+      fasting:
+        row.fastingStatus === "fasting" ? true : row.fastingStatus === "non_fasting" ? false : undefined,
       comparator: row.comparator,
       source: "normalized-lab",
     });
@@ -334,7 +429,7 @@ function readLabs(
       label: youLabel(marker) ?? youLabel(def.key)!,
       ...reading,
       system: markerSystem(marker),
-      modelKey: labs[marker]?.[0] ?? (marker === "ldl" ? "ldl_c" : marker),
+      modelKey: labFactorKey(marker, unit, row),
     });
   }
 }
@@ -365,7 +460,7 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
     availability[k] = inputState(
       (rows ?? []).filter((r) => r[field] != null).map(rowDay),
       asOf,
-      k === "vo2_peak" ? 42 : ["bmi", "waist"].includes(k) ? 180 : 2,
+      k === "vo2_peak" ? 42 : ["bmi", "waist"].includes(k) ? 180 : model.daily.fresh,
     );
   }
   for (const [k, f] of Object.entries(fields))

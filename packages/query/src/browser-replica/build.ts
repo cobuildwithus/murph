@@ -133,8 +133,8 @@ export async function createBrowserVaultReplica(
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
     ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
-    sleepTiming: projectSleepTiming(wearableDataset.sleepWindows, cutoff, today, zone),
-    activitySessions: projectActivitySessions(defaultProjectedVault, wearableDataset, today),
+    ...projectSleepTiming(wearableDataset.sleepWindows, cutoff, today, zone),
+    ...projectActivitySessions(defaultProjectedVault, wearableDataset, today),
     runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, today),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&

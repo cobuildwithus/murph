@@ -1,5 +1,5 @@
 {
-  "version": "r3.0",
+  "version": "r4.0",
   "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
@@ -7,15 +7,15 @@
     "firstName": "Example"
   },
   "age": {
-    "value": 51.4,
+    "value": 44.8,
     "real": 51.2,
-    "gap": 0.2,
-    "low": 35.2,
-    "high": 67.6
+    "gap": -6.4,
+    "low": 29.4,
+    "high": 60.1
   },
   "week": {
-    "daysAged": 8.45,
-    "saved": -1.45,
+    "daysAged": 10.5,
+    "saved": -3.5,
     "partial": false,
     "basis": "observed"
   },
@@ -72,68 +72,238 @@
   ],
   "factors": [
     {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "group": "blood",
+      "value": "4.6",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 4.6 g/dL"
+      },
+      "years": -1.9,
+      "yearsText": "−1.9",
+      "featured": true,
+      "whatItIs": "Albumin is the main protein in the liquid part of blood.",
+      "whatLowersIt": "Seeing albumin beside total protein gives the result more context.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "albumin",
+      "state": "counted"
+    },
+    {
+      "key": "lymph",
+      "label": "Lymphocyte percentage",
+      "icon": "lymph",
+      "group": "blood",
+      "value": "32",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 35.5 %"
+      },
+      "years": -0.7,
+      "yearsText": "−0.7",
+      "featured": true,
+      "whatItIs": "This is the share of white blood cells called lymphocytes.",
+      "whatLowersIt": "Read the percentage alongside the total white blood cell count.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "lymphocytes-pct",
+      "state": "counted"
+    },
+    {
+      "key": "mcv",
+      "label": "Average red cell size",
+      "icon": "mcv",
+      "group": "blood",
+      "value": "88",
+      "unit": "fL",
+      "target": {
+        "text": "Comparison value 90.2 fL"
+      },
+      "years": -0.7,
+      "yearsText": "−0.7",
+      "featured": true,
+      "whatItIs": "This measures the average size of a red blood cell.",
+      "whatLowersIt": "Hemoglobin and the spread of red cell sizes help explain this average.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "mcv",
+      "state": "counted"
+    },
+    {
       "key": "rdw",
       "label": "Red cell size range",
       "icon": "rdw",
       "group": "blood",
-      "value": "13.4",
+      "value": "12.5",
       "unit": "%",
       "target": {
         "text": "Comparison value 12.1 %"
       },
-      "years": 1.3,
-      "yearsText": "+1.3",
+      "years": -0.7,
+      "yearsText": "−0.7",
       "featured": true,
       "whatItIs": "This measures how much red blood cells vary in size.",
       "whatLowersIt": "Looking at red cell size and hemoglobin alongside this result gives a fuller picture.",
-      "rank": null,
+      "rank": {
+        "percentile": 53,
+        "label": "Average",
+        "cohort": "Women near age 51"
+      },
       "grade": null,
       "detail": "marker",
       "markerKey": "rdw",
       "state": "counted"
     },
     {
-      "key": "cardioFitness",
-      "label": "Cardio fitness",
-      "icon": "cardioFitness",
-      "group": "fitness",
-      "value": "12.7",
-      "unit": "peak METs",
+      "key": "bedtime",
+      "label": "Bedtime regularity",
+      "icon": "bedtime",
+      "group": "sleep",
+      "value": "0.4",
+      "unit": "h SD",
       "target": {
-        "text": "Comparison value 13 peak METs"
+        "text": "Comparison value 0.8 h SD"
       },
-      "years": -0.8,
-      "yearsText": "−0.8",
+      "years": -0.6,
+      "yearsText": "−0.6",
       "featured": true,
-      "whatItIs": "This estimates the body's peak oxygen use during exercise.",
-      "whatLowersIt": "Use the same device or repeat the same lab test.",
+      "whatItIs": "How much your sleep start time varies across nights.",
+      "whatLowersIt": "Recording weekday and weekend nights gives a fuller picture.",
       "rank": null,
-      "grade": "A",
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    },
+    {
+      "key": "mealFibre",
+      "label": "Fibre from meals",
+      "icon": "mealFibre",
+      "group": "food",
+      "value": "27",
+      "unit": "g/day",
+      "target": {
+        "text": "Comparison value 30 g/day"
+      },
+      "years": -0.5,
+      "yearsText": "−0.5",
+      "featured": false,
+      "whatItIs": "Fibre in meals on days marked complete.",
+      "whatLowersIt": "Include all meals and confirm the day when finished.",
+      "rank": null,
+      "grade": null,
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "9,560",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 11,000 steps/day"
+      },
+      "years": -0.5,
+      "yearsText": "−0.5",
+      "featured": false,
+      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
+      "rank": {
+        "percentile": 58,
+        "label": "Average",
+        "cohort": "Women near age 51"
+      },
+      "grade": null,
       "detail": "fitness",
       "state": "counted"
     },
     {
-      "key": "cholesterol",
-      "label": "Non-HDL cholesterol",
-      "icon": "cholesterol",
+      "key": "hemoglobin",
+      "label": "Hemoglobin",
+      "icon": "hemoglobin",
       "group": "blood",
-      "value": "136",
+      "value": "15.2",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 13.8 g/dL"
+      },
+      "years": -0.3,
+      "yearsText": "−0.3",
+      "featured": false,
+      "whatItIs": "This protein inside red blood cells carries oxygen.",
+      "whatLowersIt": "Tracking hemoglobin alongside red cell size helps show changes over time.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "hemoglobin",
+      "state": "counted"
+    },
+    {
+      "key": "apob",
+      "label": "Apolipoprotein B",
+      "icon": "apob",
+      "group": "blood",
+      "value": "79",
       "unit": "mg/dL",
       "target": {
-        "text": "Comparison value 122.2 mg/dL"
+        "text": "Comparison value 90 mg/dL"
+      },
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "featured": false,
+      "whatItIs": "ApoB reflects the number of circulating atherogenic particles.",
+      "whatLowersIt": "A dated result with units supports comparison across draws.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "apob",
+      "state": "counted"
+    },
+    {
+      "key": "foodPattern",
+      "label": "Weekly eating pattern",
+      "icon": "foodPattern",
+      "group": "food",
+      "value": "81.5",
+      "unit": "partial pattern /100",
+      "target": {
+        "text": "Comparison value 100 partial pattern /100"
+      },
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "featured": false,
+      "whatItIs": "Seven-day portions reflecting several components of diet quality.",
+      "whatLowersIt": "A complete week captures foods eaten occasionally as well as daily staples.",
+      "rank": null,
+      "grade": null,
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "homocysteine",
+      "label": "Homocysteine",
+      "icon": "homocysteine",
+      "group": "blood",
+      "value": "8",
+      "unit": "umol/L",
+      "target": {
+        "text": "Comparison value 7.3 umol/L"
       },
       "years": -0.1,
       "yearsText": "−0.1",
-      "featured": true,
-      "whatItIs": "This is total cholesterol minus HDL cholesterol from the same blood draw.",
-      "whatLowersIt": "Total cholesterol and HDL from the same draw give a comparable result.",
-      "rank": {
-        "percentile": 61,
-        "label": "Top 39%",
-        "cohort": "Women near age 51"
-      },
+      "featured": false,
+      "whatItIs": "This is a substance formed as the body processes an amino acid.",
+      "whatLowersIt": "Using the same lab and units helps show longer-term changes.",
+      "rank": null,
       "grade": null,
-      "detail": "blood",
+      "detail": "marker",
+      "markerKey": "homocysteine",
       "state": "counted"
     },
     {
@@ -144,11 +314,11 @@
       "value": "6h 37m",
       "unit": null,
       "target": {
-        "text": "Comparison value 7"
+        "text": "Comparison value 7.5"
       },
-      "years": -0.1,
-      "yearsText": "−0.1",
-      "featured": true,
+      "years": 0.1,
+      "yearsText": "+0.1",
+      "featured": false,
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
       "rank": null,
@@ -157,48 +327,270 @@
       "state": "counted"
     },
     {
-      "key": "steps",
-      "label": "Daily steps",
-      "icon": "steps",
-      "group": "activity",
-      "value": "7,760",
-      "unit": "steps/day",
+      "key": "wbc",
+      "label": "White blood cells",
+      "icon": "wbc",
+      "group": "blood",
+      "value": "5.8",
+      "unit": "Thousand/uL",
       "target": {
-        "text": "Comparison value 13,649 steps/day"
+        "text": "Comparison value 4.7 Thousand/uL"
       },
       "years": -0.1,
       "yearsText": "−0.1",
-      "featured": true,
-      "whatItIs": "This counts the steps the device recorded each day.",
-      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
-      "rank": {
-        "percentile": 48,
-        "label": "Average",
-        "cohort": "Women near age 51"
-      },
+      "featured": false,
+      "whatItIs": "This counts the white blood cells that help fight infection.",
+      "whatLowersIt": "A note about illness at the time helps explain changes between blood draws.",
+      "rank": null,
       "grade": null,
-      "detail": "fitness",
+      "detail": "marker",
+      "markerKey": "wbc",
       "state": "counted"
     },
     {
-      "key": "albumin",
-      "label": "Albumin",
-      "icon": "albumin",
-      "group": "blood",
-      "value": "4.2",
-      "unit": "g/dL",
+      "key": "alcohol",
+      "label": "Usual alcohol intake",
+      "icon": "alcohol",
+      "group": "food",
+      "value": "4",
+      "unit": "g/day",
       "target": {
-        "text": "Comparison value 4.6 g/dL"
+        "text": "Comparison value 0 g/day"
       },
       "years": 0,
       "yearsText": "+0.0",
       "featured": false,
-      "whatItIs": "Albumin is the main protein in the liquid part of blood.",
-      "whatLowersIt": "Seeing albumin beside total protein gives the result more context.",
+      "whatItIs": "This estimates the average alcohol in usual daily drinks.",
+      "whatLowersIt": "Tracking drink sizes makes weekly totals easier to compare.",
+      "rank": null,
+      "grade": "B",
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "alp",
+      "label": "Alkaline phosphatase",
+      "icon": "alp",
+      "group": "blood",
+      "value": "66",
+      "unit": "U/L",
+      "target": {
+        "text": "Comparison value 46.3 U/L"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "This enzyme comes mainly from the liver and bones.",
+      "whatLowersIt": "The lab's own range helps put this enzyme level in context.",
       "rank": null,
       "grade": null,
       "detail": "marker",
-      "markerKey": "albumin",
+      "markerKey": "alp",
+      "state": "counted"
+    },
+    {
+      "key": "b12",
+      "label": "Vitamin B12",
+      "icon": "b12",
+      "group": "blood",
+      "value": "480",
+      "unit": "pg/mL",
+      "target": {
+        "text": "Comparison value 300 pg/mL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Vitamin B12 measured in blood.",
+      "whatLowersIt": "Record supplements alongside the result.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "b12",
+      "state": "counted"
+    },
+    {
+      "key": "bloodSugar",
+      "label": "Blood sugar (A1c)",
+      "icon": "bloodSugar",
+      "group": "blood",
+      "value": "5.2",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 5.4 %"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "This shows the share of hemoglobin carrying sugar over recent months.",
+      "whatLowersIt": "Following several results shows how average blood sugar changes over time.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "hba1c",
+      "state": "counted"
+    },
+    {
+      "key": "creatinine",
+      "label": "Creatinine",
+      "icon": "creatinine",
+      "group": "blood",
+      "value": "0.9",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 0.7 mg/dL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Creatinine is a waste product that kidneys filter from blood.",
+      "whatLowersIt": "Compare the result with prior creatinine and the lab's kidney filtration estimate.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "creatinine",
+      "state": "counted"
+    },
+    {
+      "key": "egfr",
+      "label": "Kidney filtration",
+      "icon": "egfr",
+      "group": "blood",
+      "value": "110",
+      "unit": "mL/min/1.73m2",
+      "target": {
+        "text": "Comparison value 90 mL/min/1.73m2"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "An estimate of how quickly the kidneys filter blood.",
+      "whatLowersIt": "Compare the result with urine albumin and previous kidney measurements.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "egfr",
+      "state": "counted"
+    },
+    {
+      "key": "fastingGlucose",
+      "label": "Fasting blood sugar",
+      "icon": "fastingGlucose",
+      "group": "blood",
+      "value": "89",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 95 mg/dL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Blood glucose after a fast.",
+      "whatLowersIt": "Confirm fasting status and units on the report.",
+      "rank": null,
+      "grade": null,
+      "detail": "blood",
+      "state": "counted"
+    },
+    {
+      "key": "ferritin",
+      "label": "Iron stores",
+      "icon": "ferritin",
+      "group": "blood",
+      "value": "95",
+      "unit": "ng/mL",
+      "target": {
+        "text": "Comparison value 35 ng/mL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "This protein stores iron and can rise during illness.",
+      "whatLowersIt": "Recording illness around the blood draw helps interpret changes in iron stores.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "ferritin",
+      "state": "counted"
+    },
+    {
+      "key": "hrv",
+      "label": "Overnight heart rate variability",
+      "icon": "hrv",
+      "group": "habits",
+      "value": "58",
+      "unit": "ms RMSSD",
+      "target": null,
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Overnight beat-to-beat variability on one device.",
+      "whatLowersIt": "Compare measurements taken with the same method.",
+      "rank": null,
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "inflammation",
+      "label": "Inflammation",
+      "icon": "inflammation",
+      "group": "blood",
+      "value": "0.6",
+      "unit": "mg/L",
+      "target": {
+        "text": "Comparison value 2 mg/L"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "This protein rises with inflammation, including during short illnesses.",
+      "whatLowersIt": "A reading taken when well is easier to compare with earlier results.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "hs-crp",
+      "state": "counted"
+    },
+    {
+      "key": "insulinResistance",
+      "label": "Insulin resistance estimate",
+      "icon": "insulinResistance",
+      "group": "blood",
+      "value": "1.1",
+      "unit": "index",
+      "target": {
+        "text": "Comparison value 2 index"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Fasting insulin and glucose from the same draw estimate insulin resistance.",
+      "whatLowersIt": "Record both results and the fasting status.",
+      "rank": null,
+      "grade": null,
+      "detail": "blood",
+      "state": "counted"
+    },
+    {
+      "key": "iron",
+      "label": "Blood iron",
+      "icon": "iron",
+      "group": "blood",
+      "value": "95",
+      "unit": "ug/dL",
+      "target": {
+        "text": "Comparison value 75 ug/dL"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Iron circulating in the blood.",
+      "whatLowersIt": "Interpret alongside ferritin, hemoglobin and recent illness.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "iron",
       "state": "counted"
     },
     {
@@ -206,10 +598,10 @@
       "label": "Resting heart rate",
       "icon": "restingHeartRate",
       "group": "habits",
-      "value": "73",
-      "unit": "bpm",
+      "value": "61",
+      "unit": "bpm asleep",
       "target": {
-        "text": "Comparison value 64.8 bpm"
+        "text": "Comparison value 60 bpm asleep"
       },
       "years": 0,
       "yearsText": "+0.0",
@@ -235,13 +627,6 @@
       "label": "Strength",
       "icon": "strength",
       "action": "combine",
-      "primary": false
-    },
-    {
-      "key": "food",
-      "label": "Food",
-      "icon": "food",
-      "action": "foodWeek",
       "primary": false
     },
     {

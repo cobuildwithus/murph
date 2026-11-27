@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { lookup, model } from "../../src/lib/health-you/engine/model";
 import { adapt } from "../../src/lib/health-you/engine/feeds";
 import type { Observation } from "../../src/lib/health-you/engine/model";
 import { bundleSchema } from "../../src/lib/health-you/contract";
@@ -33,6 +34,14 @@ for (const [name, id] of [
     evidence.daily = [];
     evidence.sleep_sessions = [];
     evidence.vo2 = [];
+    evidence.workouts = [];
+    evidence.meals = [];
+    evidence.food_weeks = [];
+    evidence.checkins = [];
+    evidence.habits = [];
+    evidence.fitness_tests = [];
+    evidence.body = [];
+    evidence.bp = [];
   }
   if (name === "paused") evidence.profile = { age: 17, sex: "female" };
   const markers: YouInputs["markers"] = (evidence.labs ?? []).map((r) => ({
@@ -43,7 +52,7 @@ for (const [name, id] of [
     value: Number(r.value),
     system: markerSystem(String(r.marker)),
     flag: r.marker === "rdw" && Number(r.value) > 15 ? "high" : "normal",
-    modelKey: r.marker === "hs_crp" ? "crp" : String(r.marker),
+    modelKey: lookup(model.labs, r.marker)?.[0] ?? String(r.marker),
   }));
   const bundle = bundleSchema.parse(
     buildViews({
