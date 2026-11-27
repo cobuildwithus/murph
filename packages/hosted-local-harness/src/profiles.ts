@@ -8,7 +8,7 @@ export type HostedLocalProfileMode = "dev" | "test" | "debug";
 
 export interface HostedLocalProfile {
   description: string;
-  envDefaults: NodeJS.ProcessEnv;
+  envDefaults: Readonly<Record<string, string>>;
   mode: HostedLocalProfileMode;
   name: HostedLocalProfileName;
 }
