@@ -1,6 +1,7 @@
 ---
 title: 'create-worktree refuses at the worktree ceiling while merged clean worktrees stay registered'
 severity: 'minor'
+issue: 'cobuildwithus/murph#5050'
 ---
 
 ## Expected Behavior

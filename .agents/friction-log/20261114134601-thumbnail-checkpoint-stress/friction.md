@@ -1,6 +1,7 @@
 ---
 title: 'Thumbnail checkpoint stress test exceeds the shared-host timeout'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4964'
 ---
 
 ## Expected Behavior

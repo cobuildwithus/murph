@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare Vitest finds no tests when run from the app directory'
 severity: 'minor'
+issue: 'cobuildwithus/murph#5048'
 ---
 
 ## Expected Behavior

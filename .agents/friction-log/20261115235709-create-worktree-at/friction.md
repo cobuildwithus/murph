@@ -1,6 +1,7 @@
 ---
 title: 'create-worktree at the regular-worktree ceiling gives no path to a free slot'
 severity: 'minor'
+issue: 'cobuildwithus/murph#5051'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'Real-model recap journeys read the public fallback comedy skill instead of the managed one'
 severity: 'minor'
+issue: 'cobuildwithus/murph#5049'
 ---
 
 ## Expected Behavior

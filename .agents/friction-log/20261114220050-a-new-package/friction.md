@@ -1,6 +1,7 @@
 ---
 title: 'A new package entrypoint passes every local check and fails CI until its source path map is added'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4984'
 ---
 
 ## Expected Behavior

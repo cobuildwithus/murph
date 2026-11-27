@@ -1,6 +1,7 @@
 ---
 title: 'Complexity diff treats a moved and simplified function as new debt'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4920'
 ---
 
 ## Expected Behavior
