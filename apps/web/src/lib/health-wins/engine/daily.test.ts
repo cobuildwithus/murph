@@ -215,13 +215,16 @@ describe("best_month", () => {
 });
 
 it("cumulative distance includes big days and labels walking and running together", () => {
-  const daily = [0.5, 1, 1.5, 1, 0.5, 1, 21].map((value, i): DailySample => ({
-    metric: "distance_km", provider: "apple-health-kit", date: `2032-01-0${i + 1}`, value,
+  const daily = [0.5, 1, 1.5, 1, 0.5, 1, 21, ...Array<number>(21).fill(0)].map((value, i): DailySample => ({
+    metric: "distance_km", provider: "apple-health-kit", date: `2032-01-${String(i + 1).padStart(2, "0")}`, value,
   }));
-  const card = cards([...daily, { ...daily[0], date: "2031-12-31", value: 8 },
+  const cumulative = (rows: DailySample[]) => cards([...rows, { ...daily[0], date: "2031-12-31", value: 8 },
     { ...daily[6], provider: "garmin", value: 19 }]).find(card => card.kind === "cumulative");
+  // A year-to-date total waits for a month of tracked days: no "3 miles this year" on Jan 2.
+  expect(cumulative(daily.slice(0, 27))).toBeUndefined();
+  const card = cumulative(daily);
   expect(card?.title).toEqual({ number: "16", measure: "miles on foot" });
   expect(card?.subtitle).toBe("walking and running, this year");
-  expect(card?.chart.days).toBe(7);
+  expect(card?.chart.days).toBe(28);
   expect(card?.chart.totalMiles).toBeCloseTo(26.5 / 1.609344);
 });

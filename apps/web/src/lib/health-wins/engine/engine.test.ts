@@ -34,7 +34,7 @@ describe("generateHealthWins", () => {
       ...Array.from({ length: 27 }, (_, i): DailySample => ({
         metric: "steps", date: `2034-04-${String(i + 1).padStart(2, "0")}`, provider: "garmin", value: 3845,
       })),
-      { metric: "steps", date: member.today, provider: "whoop", value: 8150 },
+      { metric: "steps", date: member.today, provider: "garmin", value: 8150 },
       { metric: "steps", date: member.today, provider: "apple", value: 12020 },
       { metric: "vo2max", date: member.today, provider: "garmin", value: 46 },
     ];
@@ -178,6 +178,17 @@ describe("generateHealthWins", () => {
       expect(card).not.toHaveProperty("date");
       expect(card).not.toHaveProperty("eventDate");
     }
+  });
+
+  it("offers lab cards only for a draw from the past year", () => {
+    const labs = (latest: string) => [
+      { analyte: "ldl", date: "2032-01-15", unit: "mg/dL", value: 130 },
+      { analyte: "ldl", date: "2032-03-09", unit: "mg/dL", value: 128 },
+      { analyte: "ldl", date: latest, unit: "mg/dL", value: 103 },
+    ];
+    const kinds = (latest: string) => generateHealthWins({ member, rank: () => null, labs: labs(latest) }).map(card => card.kind);
+    expect(kinds("2033-05-16")).toEqual(["lab_change"]);
+    expect(kinds("2033-05-15")).toEqual([]);
   });
 
   it("keeps a distance trend and the highest monthly mileage as distinct claims", () => {

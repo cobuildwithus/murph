@@ -12,7 +12,7 @@ function dateAt(offset: number, asOf = TODAY): string {
   return date.toISOString().slice(0, 10);
 }
 
-function sample(metric: Metric, date: string, value: number, provider = "whoop"): DailySample {
+function sample(metric: Metric, date: string, value: number, provider = "garmin"): DailySample {
   return { metric, date, value, provider };
 }
 
@@ -124,7 +124,8 @@ describe("personal_record", () => {
     ];
     const fresh = cards("steps", rows).find(c => c.kind === "personal_record");
     expect(fresh?.chart.highlight).toEqual({ date: "2032-02-28", label: "Feb 28", value: 12600 });
-    expect(fresh?.subtitle).toBe("on Feb 28, tied for most this year");
+    // 28 tracked days this year are too few for "this year": the past 12 months it is.
+    expect(fresh?.subtitle).toBe("on Feb 28, tied for most in the past 12 months");
     const stale = [...rows.slice(0, -1), sample("steps", dateAt(-61), 12600), sample("steps", TODAY, 8500)];
     expect(cards("steps", stale)).toHaveLength(0);
     expect(cards("steps", [sample("steps", TODAY, 7200)])).toHaveLength(0);
@@ -149,8 +150,19 @@ describe("personal_record", () => {
     });
   });
 
+  it("never takes a WHOOP day, which can span two calendar days, as a steps record", () => {
+    const rows = trackedMonth("steps", 3500, 7200);
+    const whoop = rows.map(row => ({ ...row, provider: "whoop" }));
+    expect(cards("steps", whoop).some(c => c.kind === "personal_record")).toBe(false);
+    expect(cards("steps", rows).some(c => c.kind === "personal_record")).toBe(true);
+    expect(cards("hrv_ms", trackedMonth("hrv_ms", 43, 49).map(row => ({ ...row, provider: "whoop" })))
+      .some(c => c.kind === "personal_record")).toBe(true);
+  });
+
   it("dates a sleep record and names the comparison window when the year changes", () => {
     const rows = [
+      // A quarter of 2034 tracked, so December's record is the year's.
+      ...Array.from({ length: 70 }, (_, index) => sample("sleep_deep_min", dateAt(index - 150, "2034-12-19"), 70)),
       ...trackedMonth("sleep_deep_min", 76, 104, "2034-12-19"),
       sample("sleep_deep_min", "2035-01-02", 90), sample("sleep_deep_min", "2035-01-04", 87),
     ];
@@ -163,7 +175,7 @@ describe("personal_record", () => {
     });
     expect(january).toMatchObject({
       subtitle: "on Dec 19, 2034, most in the past 12 months",
-      source_note: "Recorded on Dec 19, 2034. Based on 30 tracked days.",
+      source_note: "Recorded on Dec 19, 2034. Based on 100 tracked days.",
       chart: { highlight: { label: "Dec 19, 2034" }, pills: ["Dec 19, 2034"] },
     });
     expect(january?.id).toBe(december?.id);

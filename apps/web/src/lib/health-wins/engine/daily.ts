@@ -129,7 +129,8 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
   const series = rows.filter(row => row.date.startsWith(year))
     .map(row => ({ date: row.date, miles: milesFromKm(row.value) }));
   const totalMiles = series.reduce((sum, row) => sum + row.miles, 0);
-  if (totalMiles <= 0) return [];
+  // "3 miles this year" on Jan 2 is no win: wait for a month of tracked days.
+  if (totalMiles <= 0 || series.length < 28) return [];
   const candidates: Candidate[] = [{
     date: series[series.length - 1].date, effect: 0, noise: 1,
     card: {

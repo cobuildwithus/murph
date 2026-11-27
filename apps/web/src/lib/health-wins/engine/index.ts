@@ -6,7 +6,7 @@ import { dietCandidates } from "./diet";
 import { labCandidates } from "./labs";
 import { percentileCandidates } from "./percentiles";
 import { newestHealthWinsFirst, rankCandidates } from "./ranking";
-import { isDate } from "./shared";
+import { dayNumber, isDate } from "./shared";
 import type { CardSpec, DetectedHealthWins, HealthWinsInput, SelectedHealthWin } from "./types";
 
 export { canonicalProvider } from "./daily-clean";
@@ -27,7 +27,8 @@ export function detectHealthWins(input: HealthWinsInput): DetectedHealthWins {
     ...dailyCandidates(daily, today),
     ...dietCandidates(input.meals ?? [], today),
     ...percentileCandidates(input, daily, rank),
-    ...labCandidates(input, rank),
+    // A lab card reads as news, and names no year: offer draws from the past year only.
+    ...labCandidates(input, rank).filter(({ date }) => dayNumber(today) - dayNumber(date) <= 365),
     ...activityCandidates(input),
   ], today);
 }
