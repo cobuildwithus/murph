@@ -210,10 +210,10 @@ afterEach(() => {
 });
 
 describe("executeHostedMailboxEvent", () => {
-  it("renders the fixed notice privately and checkpoints a run pointer on replay", async () => {
+  it("queues a records review and reports a missing saved reply on replay", async () => {
     const workspace = await createHostedRuntimeWorkspace("clinical-pointer-");
     const runtime = createRuntime();
-    const readNotification = vi.fn().mockResolvedValue({ mode: "notice", threadId: "synthetic-thread" });
+    const readNotification = vi.fn().mockResolvedValue({ mode: "detail", threadId: "synthetic-thread" });
     const wake = { kind: "clinical-records.change-recorded" as const, eventId: "synthetic-event",
       generation: 2, occurredAt: "2026-11-01T18:00:00.000Z", runId: "synthetic-run", userId: "synthetic-member" };
     try {
@@ -225,9 +225,7 @@ describe("executeHostedMailboxEvent", () => {
       const first = await consume();
       expect(first.postCheckpointRecord).toBeNull();
       expect((await consume()).deliveryIntentIds).toEqual(first.deliveryIntentIds);
-      expect(await listAssistantOutboxIntents(workspace.vaultRoot)).toMatchObject([{
-        message: "New records came in. Want me to go through them?",
-      }]);
+      expect(await listAssistantOutboxIntents(workspace.vaultRoot)).toHaveLength(0);
       const savedTurnId = "turn_" + "a".repeat(32);
       readNotification.mockResolvedValueOnce({ mode: "detail", threadId: "synthetic-thread", savedTurnId })
         .mockResolvedValueOnce({ mode: "off" });

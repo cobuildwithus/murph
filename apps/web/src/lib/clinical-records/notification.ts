@@ -171,7 +171,7 @@ export async function readClinicalNotificationDecision(input: RunPointer & { sav
   if (!authority || authority.run.notificationCoverage === "attempted" && !authority.run.notificationTurnId) return { mode: "off" };
   const threadId = await readHostedMemberHomeLinqChatId(authority.routing, prisma);
   if (!threadId || createHostedLinqChatLookupKey(threadId) !== authority.chatLookupKey) return { mode: "off" };
-  return authority.mode === "detail" && authority.run.notificationTurnId
+  return authority.run.notificationTurnId
     ? { mode: "detail", threadId, savedTurnId: authority.run.notificationTurnId }
     : { mode: authority.mode, threadId };
 }
@@ -190,10 +190,10 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
     await closeUnauthorizedClinicalReply(tx, pointer);
     return "clinical_authority_unavailable";
   }
-  if (authority.mode !== key.mode || !matchesClinicalRoute(input.route, authority)) {
+  if (!matchesClinicalRoute(input.route, authority)) {
     return "clinical_authority_unavailable";
   }
-  const block = clinicalCheckpointBlock(key, authority.run, input.providerEntry);
+  const block = clinicalCheckpointBlock(key, authority.run.notificationTurnId, input.providerEntry);
   if (block) return block;
   if (input.providerEntry && key.turnId && key.suffix !== ":bubble:0" && !key.suffix.startsWith(":bubble:0:")
     && authority.run.notificationCoverage === "published") {
@@ -209,14 +209,10 @@ export async function clinicalEgressBlock(tx: Prisma.TransactionClient, input: {
 }
 
 function clinicalCheckpointBlock(key: NonNullable<ReturnType<typeof parseClinicalDeliveryKey>>,
-  run: { notificationCoverage: string | null; notificationTurnId: string | null }, providerEntry?: boolean) {
-  if (key.mode === "notice" && run.notificationCoverage === "attempted") return "clinical_authority_unavailable";
-  if (key.mode === "detail") {
-    const bound = run.notificationTurnId;
-    if (bound && bound !== key.turnId) return "clinical_authority_unavailable";
-    if (providerEntry && (!bound || !key.turnId)) return "clinical_checkpoint_pending";
-    if (!key.turnId && key.suffix) return "clinical_authority_unavailable";
-  }
+  bound: string | null, providerEntry?: boolean) {
+  if (bound && bound !== key.turnId) return "clinical_authority_unavailable";
+  if (providerEntry && (!bound || !key.turnId)) return "clinical_checkpoint_pending";
+  if (!key.turnId && key.suffix) return "clinical_authority_unavailable";
   return null;
 }
 
@@ -302,16 +298,15 @@ export async function recordClinicalDispatchClaim(tx: Prisma.TransactionClient, 
 
 export async function recordClinicalProviderAttempt(tx: Prisma.TransactionClient, memberId: string, idempotencyKey: string | null) {
   const key = parseClinicalDeliveryKey(idempotencyKey);
-  if (!key) return;
-  if (key.turnId) {
-    const deferred = await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId,
-      notificationTurnId: key.turnId, notificationCoverage: "published", notificationDeferral: { in: ["window", "route"] } },
-      data: { notificationCoverage: "attempted" } });
-    if (deferred.count) return;
-  }
-  await tx.clinicalRecordRetrievalRun.updateMany({ where: { id: key.runId, memberId, notificationTurnId: key.turnId,
-    notificationCoverage: "published" }, data: { notificationCoverage: "attempted", notificationDeferral: null,
-      notificationRetryAt: key.turnId ? new Date(Date.now() + 15 * 60_000) : null } });
+  if (!key?.turnId) return;
+  const where = { id: key.runId, memberId, notificationTurnId: key.turnId, notificationCoverage: "published" };
+  const deferred = await tx.clinicalRecordRetrievalRun.updateMany({
+    where: { ...where, notificationDeferral: { in: ["window", "route"] } },
+    data: { notificationCoverage: "attempted" },
+  });
+  if (deferred.count) return;
+  await tx.clinicalRecordRetrievalRun.updateMany({ where, data: { notificationCoverage: "attempted",
+    notificationDeferral: null, notificationRetryAt: new Date(Date.now() + 15 * 60_000) } });
 }
 
 /** Caller holds the member row lock. Proof, coverage and encrypted mailbox publication share its transaction. */

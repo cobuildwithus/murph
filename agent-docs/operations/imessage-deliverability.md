@@ -424,11 +424,12 @@ bridge's original provider; standalone imports retain their supplied provider.
 ## Daily hospital record texts
 
 Daily admission freezes the verified participant, assigned line and private chat
-only after Web verifies serving revision 3 for the runner and port. At provider
+only after Web verifies serving revision 4 for the runner and port. At provider
 entry Web authorizes only that run and exact private thread. Every bubble of a
 detail reply must belong to the turn bound by the encrypted checkpoint. Linq
-may select iMessage, RCS or SMS. The fixed notice omits the hospital name. Detail
-requires the member’s existing explicit detail setting. Each attempt, including
+may select iMessage, RCS or SMS. With texts on by default, one scheduled turn
+reviews the daily run’s records. An exhausted allowance or unavailable model
+holds the review silently. Each attempt, including
 a retry or another bubble, must recheck the run, preference, named approvals,
 private recipient, proactive pause, line health and recipient-region window.
 A group, replacement thread or different channel cannot receive the text.

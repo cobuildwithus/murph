@@ -55,6 +55,26 @@ describe.skipIf(!enabled)("clinical state cleanup migrations", () => {
         { id: "current", mode: "off", revision: 1 }, { id: "new", mode: "notice", revision: 0 },
         { id: "renewed", mode: "off", revision: 1 }, { id: "withdrawn", mode: "off", revision: 1 },
       ]);
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261126151000_clinical_detail_default/migration.sql", import.meta.url,
+      ), "utf8"));
+      await client.query("INSERT INTO hosted_member (id, clinical_record_message_mode) VALUES ('legacy', 'notice')");
+      expect(await rows()).toEqual(expect.arrayContaining([
+        { id: "legacy", mode: "detail", revision: 0 }, { id: "new", mode: "notice", revision: 0 },
+      ]));
+      await client.query(await readFile(new URL(
+        "../prisma/migrations/20261126151100_clinical_detail_backfill/migration.sql", import.meta.url,
+      ), "utf8"));
+      expect(await rows()).toEqual([
+        { id: "current", mode: "off", revision: 1 }, { id: "legacy", mode: "detail", revision: 0 },
+        { id: "new", mode: "detail", revision: 1 },
+        { id: "renewed", mode: "off", revision: 1 }, { id: "withdrawn", mode: "off", revision: 1 },
+      ]);
+      await client.query("INSERT INTO hosted_member (id) VALUES ('default')");
+      await client.query("UPDATE hosted_member SET clinical_record_message_mode = 'notice' WHERE id = 'new'");
+      expect(await rows()).toEqual(expect.arrayContaining([
+        { id: "default", mode: "detail", revision: 0 }, { id: "new", mode: "detail", revision: 1 },
+      ]));
     } finally {
       try {
         await client.query("ROLLBACK");

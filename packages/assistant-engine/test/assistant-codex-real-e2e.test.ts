@@ -19385,19 +19385,19 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
 })
 
 describeRealCodex('daily clinical notification modes', () => {
-  it('stages silence and fixed notice without generation and explains one synthetic detail receipt', async () => {
+  it('leaves off silent and explains a new synthetic hospital record', async () => {
     const config = await resolveRealCodexE2eConfig()
     const vault = await mkdtemp(path.join(tmpdir(), 'clinical-mode-journey-'))
     try {
       await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
       const threadId = 'synthetic-private-thread'
       const paths = resolveAssistantStatePaths(vault)
-      for (const mode of ['off', 'notice', 'detail'] as const) {
+      for (const mode of ['off', 'detail'] as const) {
         const decision = mode === 'off' ? { mode } : { mode, threadId }
         await queueClinicalChange({ vault, decision, runId: `synthetic-${mode}`, occurredAt: new Date().toISOString() })
         expect((await readAssistantCronStore(paths)).jobs).toHaveLength(mode === 'detail' ? 1 : 0)
         const intents = await listAssistantOutboxIntents(vault)
-        expect(intents.map(intent => intent.message)).toEqual(mode === 'off' ? [] : ['New records came in. Want me to go through them?'])
+        expect(intents).toHaveLength(0)
       }
       const [job] = (await readAssistantCronStore(paths)).jobs
       const result = await executeRealCodexAppServerTurn({
@@ -19413,7 +19413,7 @@ describeRealCodex('daily clinical notification modes', () => {
       if (decision.kind !== 'send_message') throw new Error('Expected a private detail reply')
       expect(decision.text).toMatch(/physical therapy|physiotherap/iu)
       expect(decision.text).not.toMatch(/receipt|run reference|synthetic|\byou.re scheduled/iu)
-      process.stdout.write(`[daily clinical modes] off=silent notice=fixed detail=${decision.text}\n`)
+      process.stdout.write(`[daily clinical modes] off=silent detail=${decision.text}\n`)
     } finally {
       await removeRealCodexTemporaryPaths([vault, ...config.temporaryPaths])
     }
