@@ -1,86 +1,16 @@
 // Interactive proof against the fixed Epic sandbox. All OAuth state lives in this process.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { createServer } from "node:https";
+import { readJson, receiveCode, step } from "./clinical-sandbox-consent";
 import published from "../public/.well-known/epic/sandbox.jwks.json";
 import { epicAssertionSigner } from "../src/lib/clinical-records/epic-client-auth";
 import { EPIC_AUTOMATIC_RESOURCE_TYPES, EPIC_BETA_REQUESTED_BASE_SCOPES } from "../src/lib/clinical-records/epic-policy";
-import { readClinicalResponseBytes } from "../src/lib/clinical-records/response-bytes";
-import { clinicalReturnQuery } from "../src/lib/clinical-records/return-query";
 import {
   buildSmartAuthorizationUrl, createSmartPkce, createSmartState, discoverSmartConfiguration,
   exchangeSmartAuthorizationCode, refreshSmartAccessToken,
 } from "../src/lib/clinical-records/smart";
 
 const fhirBaseUrl = "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4";
-
-async function step<T>(label: string, run: () => Promise<T>) {
-  try {
-    const result = await run();
-    console.log(label, "PASS");
-    return result;
-  } catch {
-    console.log(label, "FAIL");
-    throw new Error("Sandbox proof failed");
-  }
-}
-
-async function readJson(url: string, headers?: HeadersInit) {
-  const response = await fetch(url, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
-  assert(response.ok);
-  const bytes = await readClinicalResponseBytes(response, 1024 * 1024);
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-
-async function receiveCode(redirect: URL, tls: { cert: Buffer; key: Buffer }, authorizationUrl: string, state: string) {
-  const server = createServer(tls);
-  const launch = new URL(`/start/${randomUUID()}`, redirect.origin);
-  let launched = false;
-  try {
-    return await new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("Consent timed out")), 600_000);
-      server.once("close", () => clearTimeout(timer));
-      server.once("error", reject);
-      server.on("request", (req, res) => {
-        res.setHeader("Cache-Control", "no-store");
-        res.setHeader("Referrer-Policy", "no-referrer");
-        const url = URL.parse(req.url ?? "/", redirect.origin);
-        if (req.method !== "GET" || req.headers.host !== redirect.host || url?.origin !== redirect.origin) {
-          res.writeHead(404).end();
-          return;
-        }
-        if (!launched && url.href === launch.href) {
-          launched = true;
-          res.writeHead(302, { Location: authorizationUrl }).end();
-          return;
-        }
-        if (url.pathname !== redirect.pathname) {
-          res.writeHead(404).end();
-          return;
-        }
-        const query = clinicalReturnQuery(url.searchParams);
-        if (!query || query.get("state") !== state) {
-          res.writeHead(400).end();
-          return;
-        }
-        res.end("Return to the terminal.");
-        const code = query.get("code");
-        if (code) resolve(code);
-        else reject(new Error("Consent declined"));
-      });
-      server.listen(Number(redirect.port), redirect.hostname, () => {
-        const browser = spawn(process.platform === "darwin" ? "open" : "xdg-open", [launch.href], { stdio: "ignore" });
-        browser.once("error", reject);
-        browser.once("exit", status => { if (status !== 0) reject(new Error("Browser launch failed")); });
-      });
-    });
-  } finally {
-    server.close();
-    server.closeAllConnections();
-  }
-}
 
 async function main() {
   const [clientId, pemPath, kid, jwksUrl, redirectUri, certPath, tlsKeyPath] = process.argv.slice(2);

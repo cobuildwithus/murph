@@ -19,6 +19,8 @@ import {
   isOracleProfile,
   requireOracleSmartEndpoint,
   resolveOracleClientAuth,
+  resolveOracleStart,
+  ORACLE_STORED_CLIENT_REFERENCE,
   type ClinicalGrantProfile,
 } from "./oracle-integration";
 import { buildOracleRetrievalPlan } from "./oracle-policy";
@@ -50,7 +52,6 @@ import {
 import { clinicalRecordsError } from "./errors";
 import {
   type ClinicalProviderDirectoryEntry,
-  type EpicProviderDirectoryEntry,
 } from "./provider-directory";
 import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
 import {
@@ -121,12 +122,15 @@ async function startAuthorization(input: {
   const { auth } = input;
   const prisma = getPrisma();
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma });
-  const provider = requireEpicProviderEntry(input.providerDirectoryEntryId);
+  const provider = requireProviderEntry(input.providerDirectoryEntryId, auth.member.id);
   await assertClinicalRecordConnectionAvailable({
     memberId: auth.member.id,
     providerDirectoryEntryId: provider.id,
   });
-  const configuration = resolveEpicClient(provider);
+  const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
+  const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
+  const configuration = provider.sourceSystem === "cerner-fhir"
+    ? resolveOracleStart(provider, auth.member.id, redirectUri) : resolveEpicClient(provider);
   const { clientId } = configuration.auth;
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, prisma);
   const intent = input.claim === null ? null : await claimClinicalRecordConnectIntentForStart({
@@ -137,14 +141,13 @@ async function startAuthorization(input: {
 
   try {
     const smart = await discoverSmartConfiguration({
+      ...("endpointTrust" in configuration && { endpointTrust: configuration.endpointTrust, permissionVersion: configuration.permissionVersion }),
       requestOfflineAccess: configuration.auth.method !== "public",
       fetchImpl: input.fetchImpl,
       fhirBaseUrl: provider.fhirBaseUrl,
       requestedBaseScopes: provider.requestedBaseScopes,
       resourceTypes: configuration.resourceTypes,
     });
-    const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
-    const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
     const pkce = createSmartPkce();
     const state = createSmartState(input.appReturn);
     const now = new Date();
@@ -152,14 +155,15 @@ async function startAuthorization(input: {
     const codeVerifierEncrypted = await sealClinicalOauthVerifier({
       memberId: auth.member.id,
       stateHash: state.stateHash,
-      value: process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES === "1"
+      // The Oracle binding is intrinsic to an Oracle start, not only implied by its flag gate.
+      value: isOracleProfile(configuration.profile) || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES === "1"
         ? JSON.stringify({ version: 1, verifier: pkce.verifier, profile: configuration.profile,
           brandName: provider.brandName, fhirBaseUrl: provider.fhirBaseUrl, resourceTypes: configuration.resourceTypes })
         : pkce.verifier,
     });
 
     const data = {
-      clientId,
+      clientId: isOracleProfile(configuration.profile) ? ORACLE_STORED_CLIENT_REFERENCE : clientId,
       codeVerifierEncrypted,
       appReturn: input.appReturn,
       connectIntentClaimHash: intent?.claimHash ?? null,
@@ -290,15 +294,17 @@ async function finishAuthorization(input: {
   const stored = { clientId: session.clientId, grant: "callback" as const };
   const configuration = (() => {
     if (!saved) {
-      const provider = requireEpicProviderEntry(session.providerDirectoryEntryId);
+      const provider = requireProviderEntry(session.providerDirectoryEntryId);
+      if (provider.sourceSystem !== "epic-fhir") throw providerConfigurationChangedError();
       return { ...resolveEpicClient(provider, stored), provider };
     }
     const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
     // The saved profile, not the current directory, selects the integration.
     if (isOracleProfile(saved.profile)) {
-      return { auth: resolveOracleClientAuth(saved.profile, stored), resourceTypes: saved.resourceTypes,
+      return { auth: resolveOracleClientAuth(saved.profile, provider, { ...stored, redirectUri: session.redirectUri }), resourceTypes: saved.resourceTypes,
         hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
     }
+    if (provider.id.startsWith("oracle-")) throw providerConfigurationChangedError();
     return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
       resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
       provider: { ...provider, sourceSystem: "epic-fhir" as const } };
@@ -686,22 +692,13 @@ async function assertClinicalRecordConnectionAvailable(
   return existing;
 }
 
-function requireEpicProviderEntry(entryId: string): EpicProviderDirectoryEntry {
-  const entry = resolveClinicalProviderDirectoryEntry(entryId);
+function requireProviderEntry(entryId: string, memberId?: string) {
+  const entry = resolveClinicalProviderDirectoryEntry(entryId, memberId);
   if (!entry) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_PROVIDER_NOT_FOUND",
       httpStatus: 404,
       message: "The selected Clinical Records provider is unavailable.",
-    });
-  }
-  // Starts for other integrations arrive with their own writer; until then they fail before egress.
-  if (entry.sourceSystem !== "epic-fhir") {
-    throw clinicalRecordsError({
-      code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED",
-      httpStatus: 503,
-      message: "The selected Clinical Records provider is not configured yet.",
-      retryable: true,
     });
   }
   return entry;

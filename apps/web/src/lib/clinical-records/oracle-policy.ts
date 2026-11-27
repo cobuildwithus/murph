@@ -47,8 +47,10 @@ const QUERIES: readonly OracleQuery[] = [
   search("goals", "Goal"),
   search("care-teams", "CareTeam"),
   search("care-plans", "CarePlan", [{ name: "category", value: "assess-plan" }]),
-  // Oracle documents `status` as required beside `patient`; the O3 secure-sandbox check settles it before any run.
-  search("encounters", "Encounter", [count("100")], "lt"),
+  // Oracle requires one `status` beside `patient` and documents four values; a
+  // comma-separated list returns 500 on the open sandbox, so each is its own query.
+  ...["planned", "in-progress", "finished", "cancelled"].map((status) =>
+    search(`encounters-${status}`, "Encounter", [count("100"), { name: "status", value: status }], "lt")),
   search("procedures", "Procedure", [], "lt"),
   search("immunizations", "Immunization"),
   search("medication-dispenses", "MedicationDispense", [count("100")]),

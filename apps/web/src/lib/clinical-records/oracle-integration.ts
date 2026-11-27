@@ -2,10 +2,12 @@ import "server-only";
 
 import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/oracle/production.jwks.json";
+import sandboxSet from "../../../public/.well-known/oracle/sandbox.jwks.json";
+import type { OracleProviderDirectoryEntry } from "./provider-directory";
 import { epicAssertionSigner, type EpicClientAuth } from "./epic-client-auth";
 import { epicProfileSchema } from "./epic-import-config";
 import { clinicalRecordsError } from "./errors";
-import { isOracleQuery, ORACLE_INTEGRATION_ID } from "./oracle-policy";
+import { isOracleQuery, ORACLE_INTEGRATION_ID, ORACLE_ACQUISITION_POLICY_ID, ORACLE_RESOURCE_TYPES, ORACLE_REQUESTED_BASE_SCOPES } from "./oracle-policy";
 import type { SmartEndpointTrust } from "./smart";
 
 // Oracle Health Millennium patient access (`cerner-fhir`). Everything here is
@@ -14,6 +16,16 @@ import type { SmartEndpointTrust } from "./smart";
 const ORACLE_AUTHORIZATION_ORIGIN = "https://authorization.cerner.com";
 const ORACLE_FHIR_HOST = "fhir-myrecord.cerner.com";
 const ORACLE_FHIR_BASE_PATH = /^\/r4\/([A-Za-z0-9-]{1,64})$/u;
+
+export const ORACLE_SANDBOX_ENTRY = {
+  id: "oracle-sandbox", integration: ORACLE_INTEGRATION_ID, policyId: ORACLE_ACQUISITION_POLICY_ID,
+  sourceSystem: "cerner-fhir", brandName: "Patient sandbox", aliases: [], facilities: [],
+  fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/ec2458f2-1e24-41c8-b71b-0e701af7583d",
+  requestedBaseScopes: ORACLE_REQUESTED_BASE_SCOPES, resourceTypes: ORACLE_RESOURCE_TYPES,
+} as const satisfies OracleProviderDirectoryEntry;
+
+export const ORACLE_SANDBOX_CALLBACK = "https://127.0.0.1:8443/api/clinical-records/oauth/callback";
+const PRODUCTION_CALLBACK = "https://www.withmurph.ai/api/clinical-records/oauth/callback";
 
 export const oracleProfileSchema = z.object({
   integration: z.literal(ORACLE_INTEGRATION_ID),
@@ -95,21 +107,43 @@ export const ORACLE_SMART_ENDPOINT_TRUST: SmartEndpointTrust = {
   token: (value, fhirBase) => requireOracleSmartEndpoint("token", value, fhirBase),
 };
 
-/** The signer for an Oracle grant; the private key lives only in hosted secrets. */
+export function resolveOracleStart(provider: OracleProviderDirectoryEntry, memberId: string, redirectUri: string) {
+  if (!oracleStartsEnabledFor(memberId) || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES !== "1") throw notConfigured();
+  const profile: OracleProfile = { integration: provider.integration, method: "private_key_jwt",
+    environment: provider.id === ORACLE_SANDBOX_ENTRY.id ? "sandbox" : "production" };
+  return { profile, auth: resolveOracleClientAuth(profile, provider, { redirectUri }),
+    resourceTypes: ORACLE_RESOURCE_TYPES, endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1" as const };
+}
+
+type OracleGrant = { redirectUri: string; clientId?: string } | { grant: "refresh"; clientId: string };
+
+function registrationMatches(profile: OracleProfile, provider: { id: string; fhirBaseUrl: string }, grant: OracleGrant) {
+  if (profile.integration !== ORACLE_INTEGRATION_ID || profile.method !== "private_key_jwt") return false;
+  const sandbox = profile.environment === "sandbox";
+  if ("redirectUri" in grant && grant.redirectUri !== (sandbox ? ORACLE_SANDBOX_CALLBACK : PRODUCTION_CALLBACK)) return false;
+  if (sandbox) return provider.id === ORACLE_SANDBOX_ENTRY.id && provider.fhirBaseUrl === ORACLE_SANDBOX_ENTRY.fhirBaseUrl;
+  const tenant = ORACLE_FHIR_BASE_PATH.exec(URL.parse(provider.fhirBaseUrl)?.pathname ?? "")?.[1];
+  return profile.environment === "production" && provider.id.startsWith("oracle-") && provider.id !== ORACLE_SANDBOX_ENTRY.id
+    && provider.fhirBaseUrl !== ORACLE_SANDBOX_ENTRY.fhirBaseUrl && Boolean(tenant)
+    && provider.fhirBaseUrl === `https://${ORACLE_FHIR_HOST}/r4/${tenant}`;
+}
+
 export function resolveOracleClientAuth(
-  profile: OracleProfile,
-  stored?: { clientId: string },
+  profile: OracleProfile, provider: { id: string; fhirBaseUrl: string }, grant: OracleGrant,
 ): Extract<EpicClientAuth, { method: "private_key_jwt" }> {
-  // No sandbox key set is published; the dev app runs only through a local proof.
-  if (oracleEgressDisabled() || profile.environment !== "production") throw notConfigured();
-  const clientId = process.env.ORACLE_SMART_CLIENT_ID?.trim();
-  if (!clientId || clientId.length > 512) throw notConfigured();
-  if (stored && stored.clientId !== ORACLE_STORED_CLIENT_REFERENCE) {
+  if (oracleEgressDisabled() || !registrationMatches(profile, provider, grant)) throw notConfigured();
+  const sandbox = profile.environment === "sandbox";
+  const sandboxId = process.env.ORACLE_SANDBOX_SMART_CLIENT_ID?.trim();
+  const productionId = process.env.ORACLE_SMART_CLIENT_ID?.trim();
+  const clientId = sandbox ? sandboxId : productionId;
+  if (!clientId || clientId.length > 512 || sandboxId === productionId) throw notConfigured();
+  if (grant.clientId !== undefined && grant.clientId !== ORACLE_STORED_CLIENT_REFERENCE) {
     throw clinicalRecordsError({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED", httpStatus: 409,
       message: "The provider configuration changed. Start the connection again." });
   }
   try {
-    return epicAssertionSigner(clientId, process.env.ORACLE_SMART_PRIVATE_KEY_PEM ?? "", productionSet.keys);
+    const pem = sandbox ? process.env.ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM : process.env.ORACLE_SMART_PRIVATE_KEY_PEM;
+    return epicAssertionSigner(clientId, pem ?? "", sandbox ? sandboxSet.keys : productionSet.keys);
   } catch {
     throw notConfigured();
   }

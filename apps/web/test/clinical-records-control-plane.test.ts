@@ -4,11 +4,14 @@ import { signerPem } from "./clinical-records-synthetic-signer";
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
+vi.mock("../public/.well-known/oracle/sandbox.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
 vi.mock("../public/.well-known/oracle/production.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
 import { clinicalFhirRetrievalPlanSchema } from "@murphai/clinical-records";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,7 +87,7 @@ import { buildHostedDeviceSyncAppCompletionProof } from "@/src/lib/device-sync/b
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-policy";
 import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
-import { ORACLE_STORED_CLIENT_REFERENCE } from "@/src/lib/clinical-records/oracle-integration";
+import { ORACLE_SANDBOX_ENTRY, ORACLE_SANDBOX_CALLBACK, ORACLE_SMART_ENDPOINT_TRUST, ORACLE_STORED_CLIENT_REFERENCE } from "@/src/lib/clinical-records/oracle-integration";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   finishClinicalRecordAuthorization,
@@ -488,6 +491,18 @@ describe("Clinical Records authorization persistence", () => {
     }
     expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
       auth: expect.objectContaining({ method: "private_key_jwt", clientId: "signed", kid: "fixture-key" }),
+    }));
+  });
+
+  it.each([
+    "pkce-verifier",
+    '{"version":1,"verifier":"pkce-verifier","profile":{"environment":"production","method":"public","hospitalApproved":false},"brandName":"Example Health","fhirBaseUrl":"https://fhir.example.test/FHIR/R4","resourceTypes":["Patient","Observation"]}',
+  ])("exchanges a historical Epic verifier serialization", async serialized => {
+    mocks.getPrisma.mockReturnValue(createHarness(null).prisma);
+    mocks.openClinicalOauthVerifier.mockResolvedValue(serialized);
+    await finishAuthorization();
+    expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
+      verifier: "pkce-verifier", auth: { method: "public", clientId: "epic-client-id" },
     }));
   });
 
@@ -1345,6 +1360,7 @@ describe("Oracle-bound callbacks", () => {
     vi.stubEnv("ORACLE_SMART_CLIENT_ID", "synthetic-oracle-client");
     vi.stubEnv("ORACLE_SMART_PRIVATE_KEY_PEM", signerPem);
     const harness = createHarness(null, { clientId: ORACLE_STORED_CLIENT_REFERENCE, providerDirectoryEntryId: ORACLE_ID, tokenEndpoint: TOKEN,
+      redirectUri: "https://www.withmurph.ai/api/clinical-records/oauth/callback",
       fhirBaseHash: createHash("sha256").update(BASE).digest("hex"), requestedScopesJson: SCOPES, ...sessionOverrides });
     mocks.getPrisma.mockReturnValue(harness.prisma);
     mocks.openClinicalOauthVerifier.mockResolvedValue(binding());
@@ -1404,15 +1420,67 @@ describe("Oracle-bound callbacks", () => {
     expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
   });
 
-  it("starts only Epic entries until the Oracle writer ships", async () => {
+  function sandboxStart() {
     const harness = createHarness(null);
     mocks.getPrisma.mockReturnValue(harness.prisma);
-    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ aliases: [], brandName: "Synthetic Valley Hospital", facilities: [],
-      fhirBaseUrl: BASE, id: ORACLE_ID, integration: "oracle-millennium-r4", policyId: "oracle-millennium-r4-v1",
-      requestedBaseScopes: ["openid"], resourceTypes: ["Patient", "Observation"], sourceSystem: "cerner-fhir" });
-    await expect(startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: ORACLE_ID,
-      request: new Request("https://app.example.test/start", { method: "POST" }) }))
-      .rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
+    mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue(ORACLE_SANDBOX_ENTRY);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", MEMBER_ID);
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "1");
+    vi.stubEnv("ORACLE_SANDBOX_SMART_CLIENT_ID", "synthetic-sandbox");
+    vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", signerPem);
+    vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", new URL(ORACLE_SANDBOX_CALLBACK).origin);
+    const start = () => startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: ORACLE_SANDBOX_ENTRY.id,
+      request: new Request(ORACLE_SANDBOX_CALLBACK, { method: "POST" }) });
+    return { start, harness };
+  }
+
+  it("writes a sandbox binding and completes the saved session after starts and profile writes stop", async () => {
+    const { start, harness } = sandboxStart();
+    const tenant = ORACLE_SANDBOX_ENTRY.fhirBaseUrl.split("/").pop()!;
+    const tokenEndpoint = TOKEN.replace("0aB1cD2e-synthetic", tenant);
+    mocks.discoverSmartConfiguration.mockResolvedValue({ tokenEndpoint, requestedScopes: SCOPES });
+    await start();
+    expect(mocks.discoverSmartConfiguration).toHaveBeenCalledWith(expect.objectContaining({
+      endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1", fhirBaseUrl: ORACLE_SANDBOX_ENTRY.fhirBaseUrl,
+    }));
+    expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ clientId: "synthetic-sandbox" }));
+    const stored = harness.oauthSessionCreate.mock.lastCall![0].data;
+    expect(stored).toMatchObject({ clientId: ORACLE_STORED_CLIENT_REFERENCE, redirectUri: ORACLE_SANDBOX_CALLBACK });
+    const binding = mocks.sealClinicalOauthVerifier.mock.lastCall![0].value;
+    expect(JSON.parse(binding).profile).toEqual({ ...PROFILE, environment: "sandbox" });
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "0");
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "0");
+    harness.oauthSessionFindUnique.mockResolvedValueOnce({ ...oauthSession(), ...stored });
+    mocks.openClinicalOauthVerifier.mockResolvedValue(binding);
+    mocks.exchangeSmartAuthorizationCode.mockResolvedValue({ accessToken: "synthetic-access", refreshToken: "synthetic-refresh",
+      expiresInSeconds: 570, grantedScopes: SCOPES, patientId: "76543" });
+    await finishAuthorization();
+    expect(harness.durableConnections).toMatchObject([{ sourceSystem: "cerner-fhir", requiresProcessorApprovals: true }]);
+    const sealed = mocks.sealClinicalConnectionSecret.mock.calls.find(([input]) => input.field === "refreshToken")![0];
+    expect(JSON.parse(sealed.value)).toMatchObject({ profile: { ...PROFILE, environment: "sandbox" }, clientId: ORACLE_STORED_CLIENT_REFERENCE });
+  });
+
+  it.each([
+    ["starts off", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "")],
+    ["member outside allowlist", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "other")],
+    ["profile writer off", () => vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "")],
+    ["kill switch", () => vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1")],
+    ["wrong callback", () => vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://127.0.0.1:8444")],
+    ["missing sandbox key", () => vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", "")],
+    ["unpublished sandbox key", () => vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", generateKeyPairSync("rsa", { modulusLength: 2048 })
+      .privateKey.export({ format: "pem", type: "pkcs8" }).toString())],
+    ["wrong tenant on the same host", () => mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, fhirBaseUrl: BASE })],
+    ["unknown integration", () => mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, integration: "unregistered" })],
+    ["production entry with sandbox credentials", () => {
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://www.withmurph.ai");
+      vi.stubEnv("ORACLE_SMART_CLIENT_ID", "");
+      mocks.resolveClinicalProviderDirectoryEntry.mockReturnValue({ ...ORACLE_SANDBOX_ENTRY, id: ORACLE_ID, fhirBaseUrl: BASE });
+    }],
+  ])("refuses %s before discovery", async (_label, change) => {
+    const { start, harness } = sandboxStart();
+    change();
+    await expect(start()).rejects.toMatchObject({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" });
     expect(mocks.discoverSmartConfiguration).not.toHaveBeenCalled();
     expect(harness.oauthSessionCreate).not.toHaveBeenCalled();
   });
