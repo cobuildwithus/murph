@@ -101,6 +101,11 @@ function intervalSubtitle({ low, high }: Interval, unit: string): string {
   return `${high!.inclusive ? "at or below" : "below"} ${formatLabValue(high!.value, unit)}`;
 }
 
+/** Decimal places the lab reported, at most two. */
+function reportedPlaces(draws: readonly LabDraw[]): number {
+  return Math.min(2, Math.max(...draws.map(({ value }) => String(value).split(".")[1]?.length ?? 0)));
+}
+
 function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: string): Candidate | undefined {
   if (!rule.step || labUnitKey(rule.unit) !== labUnitKey(latest.unit)) return;
   let reference = prior;
@@ -112,7 +117,9 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   }
   if (reference.length < 2) return;
   const values = reference.map(draw => draw.value);
-  const baseline = median(values);
+  // The median of an even count can land between two reported values (130.5 from 141 and 120):
+  // the usual value reads at the precision the lab reports.
+  const baseline = Number(median(values).toFixed(reportedPlaces([latest, ...reference])));
   // Decimal lab units can land one floating-point ulp below an exact clinical step.
   const delta = Number((latest.value - baseline).toPrecision(12));
   const effect = latest.analyte === "hdl" ? delta : -delta;
