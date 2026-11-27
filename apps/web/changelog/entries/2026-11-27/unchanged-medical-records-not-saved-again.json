@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 200,
+  "item": {
+    "id": "unchanged-medical-records-not-saved-again",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Unchanged medical records are not saved again",
+    "summary": "A daily portal update no longer saves another copy of a record that hasn't changed, and a source with no changes shows nothing new.",
+    "details": "Corrections, new results and withdrawn records still update your vault as before.",
+    "relevanceTags": ["medical-records"],
+    "sourcePullRequests": [5437]
+  }
+}
