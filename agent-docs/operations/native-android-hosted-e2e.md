@@ -45,7 +45,10 @@ workflow receives:
 The private workflow independently checks its event ref, tag name, and
 `github.sha` against those inputs before checkout. The public controller accepts
 success only from the exact returned run id, `workflow_dispatch` event, and
-resolved Android SHA. If polling or the bounded wait fails while that run is
+resolved Android SHA. After dispatch, GitHub can take time to expose the run.
+The controller polls the receipted id for up to 30 seconds on an initial HTTP
+404. Once the run is visible, any subsequent 404 fails immediately.
+If polling or the bounded wait fails while that run is
 nonterminal, the controller requests cancellation, escalates to force-cancel,
 and waits for the exact run to become terminal. If cancellation or status
 cannot be attested, it holds the execution fence through the dispatch expiry,
