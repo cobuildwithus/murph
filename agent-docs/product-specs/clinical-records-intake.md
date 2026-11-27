@@ -368,20 +368,24 @@ held: any change to an existing entry's URL (path included), client key or
 policy keeps the published value; an existing entry missing upstream stays as
 published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
 on an endpoint origin a production entry already uses. The sandbox host does
-not count as a production host. The run opens or updates the GitHub issue
-“Clinical directory changes need review” listing every held change. The issue
+not count as a production host. A run that holds changes opens or updates the
+GitHub issue “Clinical directory changes need review” listing every held
+change, even when the directory itself is unchanged; a run that holds nothing
+closes that issue. The issue
 says its upstream values are unverified and must be re-checked against
 open.epic.com, and a report over the issue size limit ends with a count of
 unlisted rows. To accept one, a person changes the committed directory in
 their own pull request.
 
-The publish job installs no dependencies and never sees the Epic download.
-With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
-reruns the directory parser, the count floor and the hold rule on the
-candidate, which must hold nothing against the committed directory. It then
-reports held changes and, in the main-only
-`frog-reconciliation` environment, mints a repository App token with contents
-and pull-request write access. The App opens a ready PR for normal CI. The PR
+The report and publish jobs install no dependencies and never see the Epic
+download. With Node and the committed checkout, each runs
+`scripts/check-clinical-provider-directory.mjs`, which reruns the directory
+parser, the count floor and the hold rule on the candidate. The candidate must
+hold nothing against the committed directory. The report job then writes the
+issue with only issue write access. When the candidate changed the directory,
+the publish job, in the main-only `frog-reconciliation` environment, mints a
+repository App token with contents and pull-request write access. The App
+opens a ready PR for normal CI. The PR
 lookup is qualified by the repository owner, so a fork's branch of the same
 name is ignored. The workflow waits for GitHub's protected merge state,
 verifies the same head and requests a regular squash merge. Required status
