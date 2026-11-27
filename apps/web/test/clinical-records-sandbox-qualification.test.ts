@@ -25,10 +25,16 @@ it("rejects foreign destinations, signers, patients, and budget overflow before 
   expect(send).toHaveBeenCalledTimes(1);
 });
 
-it("requires named families and retains only structural local fixture fields", () => {
-  const counts = Object.fromEntries(families.map(k => [k, 1]));
+it("holds the measured family bands and retains only structural local fixture fields", () => {
+  // The 2026-11-27 live counts for each account.
+  const none = Object.fromEntries(families.map(k => [k, 0]));
+  const camila = { ...none, Patient: 1, AllergyIntolerance: 1, Condition: 7, MedicationRequest: 1, Observation: 264, DiagnosticReport: 6,
+    DocumentReference: 4, Encounter: 5, Procedure: 1, Immunization: 1, CarePlan: 1, CareTeam: 1, Goal: 2, ServiceRequest: 4 };
+  const counts = { ...none, Patient: 1, AllergyIntolerance: 1, Condition: 2, MedicationRequest: 1, Observation: 1615, CarePlan: 1, Goal: 2, ServiceRequest: 1 };
+  expect(withinBands("fhircamila", camila)).toBe(true);
   expect(withinBands("fhirderrick", counts)).toBe(true);
-  expect(withinBands("fhirderrick", { ...counts, Condition: 0 })).toBe(false);
+  for (const drift of [{ Condition: 0 }, { Observation: 4000 }, { Encounter: 6 }, { MedicationStatement: 1 }, { Patient: 2 }] as Record<string, number>[])
+    expect(withinBands("fhirderrick", { ...counts, ...drift })).toBe(false);
   const fixture = fixtureResource({ resourceType: "Observation", id: "synthetic-id", status: "final", text: "private-marker",
     extension: [{ token: "private-marker" }], link: [{ url: "private-marker" }] });
   expect(fixture).toEqual({ resourceType: "Observation", id: expect.stringMatching(/^[0-9a-f]{64}$/), status: "final" });

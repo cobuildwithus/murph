@@ -50,11 +50,27 @@ export function safeCounts(value: Record<string, number> | undefined) {
   return Object.fromEntries([...families, "upsert", "review", "retract", "downloaded", "parsed", "queued"].flatMap(key =>
     value && Number.isSafeInteger(value[key]) && value[key]! >= 0 ? [[key, value[key]]] : []));
 }
+type Band = readonly [min: number, max: number];
+// Measured live on 2026-11-27. Each band is about 0.5x to 2x the measured count because the sandbox drifts weekly.
+// A requested family measured at zero allows up to 5. Epic retrieval never requests FamilyMemberHistory or
+// MedicationStatement, so they stay at zero. fhirdesiree is unmeasured and keeps its provisional published-chart bands.
+const measuredBands: Record<string, Partial<Record<string, Band>>> = {
+  fhircamila: { AllergyIntolerance: [1, 2], Condition: [4, 14], MedicationRequest: [1, 2], Observation: [132, 528],
+    DiagnosticReport: [3, 12], DocumentReference: [2, 8], Encounter: [3, 10], Procedure: [1, 2], Immunization: [1, 2],
+    CarePlan: [1, 2], CareTeam: [1, 2], Goal: [1, 4], ServiceRequest: [2, 8] },
+  fhirderrick: { AllergyIntolerance: [1, 2], Condition: [1, 4], MedicationRequest: [1, 2], Observation: [808, 3230],
+    CarePlan: [1, 2], Goal: [1, 4], ServiceRequest: [1, 2] },
+};
+const provisional: Record<string, string[]> = { fhirdesiree: ["Immunization", "Observation"] };
+function band(patient: string, family: string): Band {
+  if (family === "Patient") return [1, 1];
+  if (family === "FamilyMemberHistory" || family === "MedicationStatement") return [0, 0];
+  const measured = measuredBands[patient];
+  return measured ? measured[family] ?? [0, 5] : [provisional[patient]!.includes(family) ? 1 : 0, 500];
+}
 export function withinBands(patient: string, counts: Record<string, number>) {
-  const expected: Record<string, string[]> = {
-    fhircamila: ["Patient", "Observation", "DiagnosticReport", "MedicationRequest", "Procedure", "Goal"],
-    fhirderrick: ["Patient", "Condition", "CarePlan", "Goal", "MedicationRequest", "Observation"],
-    fhirdesiree: ["Patient", "Immunization", "Observation"],
-  };
-  return families.every(key => Number.isInteger(counts[key]) && counts[key]! >= (expected[patient]!.includes(key) ? 1 : 0) && counts[key]! <= (key === "Patient" ? 1 : 500));
+  return families.every(key => {
+    const [min, max] = band(patient, key);
+    return Number.isInteger(counts[key]) && counts[key]! >= min && counts[key]! <= max;
+  });
 }
