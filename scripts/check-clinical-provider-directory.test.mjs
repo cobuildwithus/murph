@@ -20,51 +20,89 @@ function directory(entries) {
   });
 }
 
-const current = directory([["epic-alder", "https://alder.example.test/r4", "Alder `@team` | Health"],
-  ["epic-birch", "https://birch.example.test/r4"]]);
+const alder = ["epic-alder", "https://alder.example.test/r4", "Alder `@team` | Health"];
+const birch = ["epic-birch", "https://birch.example.test/r4"];
+const current = directory([alder, birch]);
 const publish = (entries, held = [], options = {}) =>
   checkPublication({ currentText: current, candidateText: directory(entries), heldText: JSON.stringify(held), ...options });
 
-test("publication accepts path-only changes and new entries", () => {
-  assert.equal(publish([
-    ["epic-alder", "https://alder.example.test/fhir/r4"],
-    ["epic-birch", "https://birch.example.test/r4"],
-    ["epic-cedar", "https://cedar.example.test/r4"],
-  ]), "");
+// Each case is a change only a person may publish.
+const heldCases = {
+  "a path-only endpoint change": [["epic-alder", "https://alder.example.test/fhir/r4"], birch],
+  "a host move": [["epic-alder", "https://other.example.test/r4"], birch],
+  "a port move": [["epic-alder", "https://alder.example.test:8443/r4"], birch],
+  "a removal": [birch],
+  "a new entry on an unknown host": [alder, birch, ["epic-cedar", "https://cedar.example.test/r4"]],
+};
+
+test("publication accepts unchanged endpoints and new entries on known hosts", () => {
+  assert.equal(publish([alder, ["epic-alder-2", "https://alder.example.test/r4/other"], birch]), "");
 });
 
-test("publication rejects a candidate that moves an existing entry's host, scheme or port", () => {
-  for (const moved of ["https://other.example.test/r4", "https://alder.example.test:8443/r4"]) {
-    assert.throws(() => publish([["epic-alder", moved], ["epic-birch", "https://birch.example.test/r4"]]),
-      /epic-alder: https:\/\/alder\.example\.test\/r4 ->/u);
+test("publication rejects every change the refresh must hold, even when a count drop is allowed", () => {
+  for (const [name, entries] of Object.entries(heldCases)) {
+    assert.throws(() => publish(entries, [], { allowCountDrop: true }), /only a person may publish:\n- epic-(alder|birch|cedar)/u, name);
   }
 });
 
-test("publication reports held moves with mention-safe cells and rejects reports that do not match", () => {
-  const entries = [["epic-alder", "https://alder.example.test/r4"], ["epic-birch", "https://birch.example.test/r4"]];
-  const held = [{ id: "epic-alder", current: "https://alder.example.test/r4", candidate: "https://moved.example.test/r4|`x`" }];
-  const report = publish(entries, held);
-  assert.ok(report.includes("| `epic-alder` | `Alder @team  Health` | `https://alder.example.test/r4` | `https://moved.example.test/r4%60x%60` |"));
+test("publication reports each kind of held change with mention-safe cells", () => {
+  const held = [
+    { kind: "endpoint", id: "epic-alder", current: alder[1], candidate: "https://moved.example.test/r4|`x`" },
+    { kind: "removal", id: "epic-birch", current: birch[1] },
+    { kind: "new-host", id: "epic-cedar", brandName: "Cedar @team", candidate: "https://cedar.example.test/r4" },
+  ];
+  const report = publish([alder, birch], held);
+  assert.ok(report.includes(
+    "| `epic-alder` | `Alder @team  Health` | Endpoint change | `https://alder.example.test/r4` | `https://moved.example.test/r4%60x%60` |"));
+  assert.ok(report.includes("| `epic-birch` | `epic-birch` | Removed upstream | `https://birch.example.test/r4` |  |"));
+  assert.ok(report.includes("| `epic-cedar` | `Cedar @team` | New entry on a new host |  | `https://cedar.example.test/r4` |"));
+});
+
+test("publication rejects held reports that do not match the candidate", () => {
+  const entries = [alder, birch];
+  const endpoint = { kind: "endpoint", id: "epic-alder", current: alder[1], candidate: "https://alder.example.test/v2/r4" };
+  const newHost = { kind: "new-host", id: "epic-cedar", brandName: "Cedar", candidate: "https://cedar.example.test/r4" };
   for (const wrong of [
-    [{ ...held[0], current: "https://elsewhere.example.test/r4" }],
-    [{ ...held[0], candidate: "https://alder.example.test/other" }],
-    [{ ...held[0], id: "epic-unknown" }],
-    [held[0], held[0]],
-  ]) assert.throws(() => publish(entries, wrong), /does not match/u);
+    [{ ...endpoint, current: "https://elsewhere.example.test/r4" }],
+    [{ ...endpoint, candidate: alder[1] }],
+    [{ ...endpoint, candidate: "https://alder.example.test/r4?next=1" }],
+    [{ ...endpoint, id: "epic-unknown" }],
+    [{ ...endpoint, kind: "constructor" }],
+    [{ kind: "removal", id: "epic-birch", current: birch[1], candidate: "https://birch.example.test/v2" }],
+    [{ kind: "removal", id: "epic-unknown" }],
+    [null],
+    [{ ...newHost, candidate: "https://birch.example.test/v2" }],
+    [{ ...newHost, id: "epic-birch" }],
+    [{ ...newHost, id: "Epic Cedar" }],
+    [endpoint, endpoint],
+  ]) assert.throws(() => publish(entries, wrong), /does not match/u, JSON.stringify(wrong));
+});
+
+test("publication truncates a held report that would exceed GitHub's issue body limit", () => {
+  const held = Array.from({ length: 600 }, (_, index) => ({
+    kind: "new-host", id: `epic-new-${index}`, brandName: "N".repeat(160), candidate: `https://new-${index}.example.test/r4`,
+  }));
+  const report = publish([alder, birch], held);
+  assert.ok(report.length < 65_536);
+  assert.match(report, /\n\d+ more held changes are not listed\.\n$/u);
 });
 
 test("publication keeps the count floor unless an operator allows the drop", () => {
-  const smaller = [["epic-alder", "https://alder.example.test/r4"]];
-  assert.throws(() => publish(smaller), /decreased by more than 10%/u);
-  assert.equal(publish(smaller, [], { allowCountDrop: true }), "");
+  const shrunk = JSON.parse(current);
+  shrunk.entries[0].locations = [];
+  const check = allowCountDrop =>
+    checkPublication({ allowCountDrop, currentText: current, candidateText: JSON.stringify(shrunk), heldText: "[]" });
+  assert.throws(() => check(false), /decreased by more than 10%/u);
+  assert.equal(check(true), "");
 });
 
-test("bot pull requests cannot move an existing endpoint host; people can", () => {
-  const moved = directory([["epic-alder", "https://moved.example.test/r4"], ["epic-birch", "https://birch.example.test/r4"],
-    ["epic-cedar", "https://cedar.example.test/r4"]]);
-  assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: current, headText: moved }), /epic-alder/u);
-  assert.match(checkPullRequest({ authorType: "User", baseText: current, headText: moved }), /A person authored/u);
-  const pathOnly = directory([["epic-alder", "https://alder.example.test/v2/r4"], ["epic-birch", "https://birch.example.test/r4"],
-    ["epic-cedar", "https://cedar.example.test/r4"]]);
-  assert.match(checkPullRequest({ authorType: "Bot", baseText: current, headText: pathOnly }), /No existing/u);
+test("bot pull requests cannot make a held change; people can", () => {
+  for (const [name, entries] of Object.entries(heldCases)) {
+    const headText = directory(entries);
+    assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: current, headText }),
+      /cannot make these directory changes:\n- epic-/u, name);
+    assert.match(checkPullRequest({ authorType: "User", baseText: current, headText }), /A person authored/u, name);
+  }
+  const known = directory([alder, birch, ["epic-birch-2", "https://birch.example.test/r4"]]);
+  assert.match(checkPullRequest({ authorType: "Bot", baseText: current, headText: known }), /keeps its endpoint/u);
 });

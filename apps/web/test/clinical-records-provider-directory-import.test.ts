@@ -83,28 +83,40 @@ describe("Epic Clinical Records provider directory importer", () => {
     expect(() => parseClinicalProviderDirectory(artifact)).toThrow(/coordinate/u);
   });
 
-  it("keeps an existing entry on its FHIR host and publishes path changes and new entries", () => {
-    const previous = parseClinicalProviderDirectory(buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle())));
-    const refresh = (address: string, extraBrand = false) => {
+  it("holds endpoint changes, removals and new hosts, and publishes new entries on known hosts", () => {
+    const current = "https://fhir.example.test/FHIR/R4";
+    const previousArtifact = buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle()));
+    const previous = JSON.stringify(previousArtifact);
+    const refresh = (change: (bundle: ReturnType<typeof makeBundle>) => void) => {
       const bundle = makeBundle();
-      bundle.entry[0]!.resource.address = address;
-      if (extraBrand) bundle.entry.push(...makeBrand("brand-456", "https://new.example.test/FHIR/R4"));
+      change(bundle);
       return refreshEpicProviderDirectory(JSON.stringify(bundle), previous);
     };
-    const url = (artifact: ReturnType<typeof refresh>["artifact"], id: string) =>
-      artifact.entries.find(entry => entry.id === id)?.fhirBaseUrl;
+    const entry = (artifact: ReturnType<typeof refresh>["artifact"], id: string) =>
+      artifact.entries.find(candidate => candidate.id === id);
 
-    const moved = refresh("https://moved.example.test/FHIR/R4");
-    expect(moved.held).toEqual([{
-      id: "epic-brand-123", current: "https://fhir.example.test/FHIR/R4", candidate: "https://moved.example.test/FHIR/R4",
+    for (const address of [
+      "https://fhir.example.test/v2/FHIR/R4", "https://moved.example.test/FHIR/R4", "https://fhir.example.test:8443/FHIR/R4",
+    ]) {
+      const moved = refresh(bundle => { bundle.entry[0]!.resource.address = address; });
+      expect(moved.held).toEqual([{ kind: "endpoint", id: "epic-brand-123", current, candidate: address }]);
+      expect(entry(moved.artifact, "epic-brand-123")?.fhirBaseUrl).toBe(current);
+    }
+
+    const removed = refresh(bundle => { bundle.entry[1]!.resource.active = false; });
+    expect(removed.held).toEqual([{ kind: "removal", id: "epic-brand-123", current }]);
+    expect(entry(removed.artifact, "epic-brand-123")).toEqual(previousArtifact.entries.find(item => item.id === "epic-brand-123"));
+
+    const added = refresh(bundle => {
+      bundle.entry.push(...makeBrand("brand-456", "https://new.example.test/FHIR/R4"));
+      bundle.entry.push(...makeBrand("brand-789", "https://fhir.example.test/FHIR/R4/other"));
+    });
+    expect(added.held).toEqual([{
+      kind: "new-host", id: "epic-brand-456", brandName: "Second Health", candidate: "https://new.example.test/FHIR/R4",
     }]);
-    expect(url(moved.artifact, "epic-brand-123")).toBe("https://fhir.example.test/FHIR/R4");
-    expect(refresh("https://fhir.example.test:8443/FHIR/R4").held).toHaveLength(1);
-
-    const pathOnly = refresh("https://fhir.example.test/v2/FHIR/R4", true);
-    expect(pathOnly.held).toEqual([]);
-    expect(url(pathOnly.artifact, "epic-brand-123")).toBe("https://fhir.example.test/v2/FHIR/R4");
-    expect(url(pathOnly.artifact, "epic-brand-456")).toBe("https://new.example.test/FHIR/R4");
+    expect(entry(added.artifact, "epic-brand-456")).toBeUndefined();
+    expect(entry(added.artifact, "epic-brand-789")?.fhirBaseUrl).toBe("https://fhir.example.test/FHIR/R4/other");
+    expect(added.artifact.entries.map(item => item.id)).toEqual(["epic-brand-123", "epic-brand-789", "epic-sandbox"]);
   });
 
   it("rejects duplicate source identities", () => {

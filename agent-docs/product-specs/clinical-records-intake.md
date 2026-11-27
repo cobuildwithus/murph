@@ -358,25 +358,32 @@ or mapped facilities. After confirming a genuine large drop upstream, run the
 workflow manually with `allow_count_drop` checked; scheduled runs always keep
 the floor. It checks the tracked output and requires a nonempty source.
 
-The refresh never moves an existing entry to another FHIR server. When the
-upstream endpoint for a current entry changes scheme, host or port, the
-candidate keeps the current endpoint and the run opens or updates the GitHub
-issue “Clinical directory endpoint host changes need review”. A path change on
-the same origin and every new entry publish normally. To accept a move, a
-person changes the committed directory in their own pull request.
+A member's connection is bound to its entry id and a hash of that entry's
+exact FHIR base URL, so a changed URL would refuse every later reconnect.
+`holdDirectoryChangesForReview` in `provider-directory-artifact.ts` is the one
+refresh rule. Upstream facility and name updates publish. Three changes are
+held: any change to an existing entry's URL, path included, keeps the current
+URL; an existing entry missing upstream stays as published; a new entry whose
+endpoint origin the directory does not already use is left out. A new entry on
+a known origin publishes. The run opens or updates the GitHub issue “Clinical
+directory changes need review” listing every held change; a report over the
+issue size limit ends with a count of unlisted rows. To accept one, a person
+changes the committed directory in their own pull request.
 
 The publish job installs no dependencies and never sees the Epic download.
 With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
-reruns the directory parser, the count floor and the endpoint-host rule on
-the candidate. It then reports held moves and, in the main-only
+reruns the directory parser, the count floor and the hold rule on the
+candidate, which must hold nothing against the committed directory. It then
+reports held changes and, in the main-only
 `frog-reconciliation` environment, mints a repository App token with contents
 and pull-request write access. The App opens a ready PR for normal CI. The PR
 lookup is qualified by the repository owner, so a fork's branch of the same
 name is ignored. The workflow waits for GitHub's protected merge state,
 verifies the same head and requests a regular squash merge. Required status
 checks remain enforced: `Release verification plan (ubuntu)`, part of the
-required `Release checks (ubuntu)`, fails any bot-authored pull request that
-moves an existing endpoint to another host. An unchanged candidate skips
+required `Release checks (ubuntu)`, applies the same rule and fails any
+bot-authored pull request that makes a held change. The count floor compares
+each candidate with the committed directory. An unchanged candidate skips
 publication.
 
 Before enabling publication, grant the existing App key signer to this
@@ -396,11 +403,11 @@ To build the same artifact manually from the repository root:
 curl --fail --location --silent --show-error \
   https://open.epic.com/Endpoints/Brands |
   pnpm --dir apps/web clinical-records:providers:import -- --input - \
-  --held-output held-endpoints.json
+  --held-output held-changes.json
 ```
 
-The manual import applies the same endpoint-host hold against the committed
-directory and lists held moves in the optional `--held-output` file.
+The manual import applies the same hold rule against the committed directory
+and lists held changes in the optional `--held-output` file.
 
 Review the official source provenance and generated diff, then rerun the
 provider-directory tests. The importer is byte-deterministic for fixed source

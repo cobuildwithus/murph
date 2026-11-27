@@ -124,9 +124,10 @@ jobs:
         id: reach
         run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
 
-      # The weekly refresh merges itself, so a bot may add or update clinical
-      # facilities but only a person may move an entry's FHIR endpoint host.
-      - name: Keep automated clinical directory endpoints on their hosts
+      # The weekly refresh merges itself, so a bot may update facilities and add
+      # entries on known hosts, but only a person may change an existing entry's
+      # FHIR endpoint, remove an entry or add an entry on a new host.
+      - name: Hold automated clinical directory changes for a person
         if: ${{ github.event_name == 'pull_request' }}
         env:
           MURPH_PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}

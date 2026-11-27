@@ -15,7 +15,7 @@ Update the public facilities members can find when connecting medical records.
 
 ## Non-obvious affected surfaces
 
-Portal selection uses the refreshed public endpoints. Existing connections retain their own identity.
+Existing entries keep their published FHIR endpoints, so existing connections still reconnect. Endpoint changes, removals and new-host entries wait in the "Clinical directory changes need review" issue.
 
 ## Hot reply path impact
 

@@ -14,12 +14,11 @@ import {
   CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
   buildEpicProviderDirectoryEntryId,
   parseClinicalProviderDirectory,
-  type ClinicalProviderDirectory,
 } from "../src/lib/clinical-records/provider-directory";
 import {
   assertDirectoryRefreshCounts,
-  endpointOriginChanges,
-  type EndpointOriginChange,
+  holdDirectoryChangesForReview,
+  type HeldDirectoryChange,
 } from "../src/lib/clinical-records/provider-directory-artifact";
 
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
@@ -76,27 +75,30 @@ async function main(): Promise<void> {
   const sourceBytes = inputPath === "-"
     ? await readBoundedStdin()
     : await readFile(inputPath);
-  const previous = parseClinicalProviderDirectory(JSON.parse(await readFile(outputPath, "utf8")));
+  const previous = await readFile(outputPath, "utf8");
   const { artifact, held } = refreshEpicProviderDirectory(sourceBytes, previous, { allowCountDrop });
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
   if (heldOutputPath) await writeFile(heldOutputPath, `${JSON.stringify(held)}\n`, { encoding: "utf8", mode: 0o644 });
   process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
-  if (held.length) process.stdout.write(`Kept ${held.length} existing FHIR endpoints whose host changed upstream.\n`);
+  if (held.length) process.stdout.write(`Held ${held.length} directory changes for review.\n`);
 }
 
-// Never move an existing entry to another FHIR server automatically: keep its
-// current endpoint and return the change for a person to review.
+// Applies the shared refresh hold against the committed directory text: existing
+// entries keep their published endpoint, entries missing upstream stay as
+// published, new-host entries are left out, and the held changes go to a person.
 export function refreshEpicProviderDirectory(
   source: string | Uint8Array,
-  previous: ClinicalProviderDirectory,
+  previousText: string,
   options: { allowCountDrop?: boolean } = {},
-): { artifact: EpicProviderDirectoryArtifactV2; held: EndpointOriginChange[] } {
-  const artifact = buildEpicProviderDirectoryArtifact(source);
-  const held = endpointOriginChanges(previous, artifact);
-  const kept = new Map(held.map(change => [change.id, change.current]));
-  for (const entry of artifact.entries) entry.fhirBaseUrl = kept.get(entry.id) ?? entry.fhirBaseUrl;
+): { artifact: EpicProviderDirectoryArtifactV2; held: HeldDirectoryChange[] } {
+  // The production parser proves the committed shape before its raw entries are reused.
+  const previous: EpicProviderDirectoryArtifactV2 = JSON.parse(previousText);
+  const prior = parseClinicalProviderDirectory(previous);
+  const upstream = buildEpicProviderDirectoryArtifact(source);
+  const { entries, held } = holdDirectoryChangesForReview(previous, upstream);
+  const artifact = { ...upstream, entries };
   const parsed = parseClinicalProviderDirectory(artifact);
-  if (!options.allowCountDrop) assertDirectoryRefreshCounts(previous, parsed);
+  if (!options.allowCountDrop) assertDirectoryRefreshCounts(prior, parsed);
   return { artifact, held };
 }
 
@@ -247,7 +249,7 @@ function parseArguments(args: string[]) {
   const input = values.get("--input");
   if (!input) {
     throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>] "
-      + "[--held-output <held endpoint report>] [--allow-count-drop]");
+      + "[--held-output <held change report>] [--allow-count-drop]");
   }
   const heldOutput = values.get("--held-output");
   return {

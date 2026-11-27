@@ -64,9 +64,15 @@ export interface OwnedDirectoryPolicy {
   integration?: typeof ORACLE_INTEGRATION_ID;
 }
 
-export interface EndpointOriginChange {
-  candidate: string;
-  current: string;
+/** A refresh change only a person may publish. */
+export type HeldDirectoryChange =
+  | { kind: "endpoint"; id: string; current: string; candidate: string }
+  | { kind: "removal"; id: string; current: string }
+  | { kind: "new-host"; id: string; brandName: string; candidate: string };
+
+interface DirectoryEndpointEntry {
+  brandName: string;
+  fhirBaseUrl: string;
   id: string;
 }
 
@@ -121,18 +127,37 @@ export function assertDirectoryRefreshCounts(previous: ClinicalProviderDirectory
   }
 }
 
-/** Existing entries whose FHIR endpoint would move to another scheme, host or port. Only a person may approve that. */
-export function endpointOriginChanges(
-  current: { entries: readonly { fhirBaseUrl: string; id: string }[] },
-  candidate: { entries: readonly { fhirBaseUrl: string; id: string }[] },
-): EndpointOriginChange[] {
-  const currentUrls = new Map(current.entries.map(entry => [entry.id, entry.fhirBaseUrl]));
-  return candidate.entries.flatMap(({ fhirBaseUrl, id }) => {
-    const prior = currentUrls.get(id);
-    return prior && new URL(prior).origin !== new URL(fhirBaseUrl).origin
-      ? [{ candidate: fhirBaseUrl, current: prior, id }]
-      : [];
+/**
+ * The one rule for automatic directory refreshes. A connection is bound to its entry's exact
+ * endpoint URL, so an existing entry keeps its endpoint and is never removed automatically, and a new entry
+ * publishes only on an endpoint host the directory already uses. Everything else is held: the
+ * returned entries keep the current state and `held` lists what upstream asked for. A candidate
+ * that is safe to publish automatically holds nothing against the directory it replaces.
+ */
+export function holdDirectoryChangesForReview<Entry extends DirectoryEndpointEntry>(
+  current: { entries: readonly Entry[] },
+  upstream: { entries: readonly Entry[] },
+): { entries: Entry[]; held: HeldDirectoryChange[] } {
+  const upstreamById = new Map(upstream.entries.map(entry => [entry.id, entry]));
+  const currentIds = new Set(current.entries.map(entry => entry.id));
+  const currentHosts = new Set(current.entries.map(entry => new URL(entry.fhirBaseUrl).origin));
+  const held: HeldDirectoryChange[] = [];
+  const entries = current.entries.map(entry => {
+    const next = upstreamById.get(entry.id);
+    if (!next) {
+      held.push({ kind: "removal", id: entry.id, current: entry.fhirBaseUrl });
+      return entry;
+    }
+    if (next.fhirBaseUrl === entry.fhirBaseUrl) return next;
+    held.push({ kind: "endpoint", id: entry.id, current: entry.fhirBaseUrl, candidate: next.fhirBaseUrl });
+    return { ...next, fhirBaseUrl: entry.fhirBaseUrl };
   });
+  for (const entry of upstream.entries) {
+    if (currentIds.has(entry.id)) continue;
+    if (currentHosts.has(new URL(entry.fhirBaseUrl).origin)) entries.push(entry);
+    else held.push({ kind: "new-host", id: entry.id, brandName: entry.brandName, candidate: entry.fhirBaseUrl });
+  }
+  return { entries: entries.sort((left, right) => left.id.localeCompare(right.id)), held };
 }
 
 /** Each listed policy must equal an owned definition; unlisted owned policies are simply unused. */
