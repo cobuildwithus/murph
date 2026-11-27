@@ -2,6 +2,7 @@ import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import sandboxSet from "../public/.well-known/epic/sandbox.jwks.json";
 import productionSet from "../public/.well-known/epic/production.jwks.json";
+import oracleProductionSet from "../public/.well-known/oracle/production.jwks.json";
 import { epicAssertionSigner } from "@/src/lib/clinical-records/epic-client-auth";
 import { describe, expect, it, vi } from "vitest";
 
@@ -353,11 +354,13 @@ describe("Epic signed client authentication", () => {
     expect(result).toMatchObject({ refreshToken: "retained", successorReturned: false });
   });
 
-  it("publishes only distinct RSA verification keys across both environments", () => {
+  it("publishes only distinct RSA verification keys across both environments and integrations", () => {
     const kids = new Set<string>();
     const moduli = new Set<string>();
     expect(sandboxSet.keys.length).toBeGreaterThan(0);
-    for (const set of [sandboxSet, productionSet]) {
+    // Oracle registers this URL; its key is separate from every Epic key.
+    expect(oracleProductionSet.keys.map((key) => key.kid)).toEqual(["murph-oracle-production-4D9w9oKpPTN3"]);
+    for (const set of [sandboxSet, productionSet, oracleProductionSet]) {
       expect(Object.keys(set)).toEqual(["keys"]);
       for (const key of set.keys) {
         expect(Object.keys(key).sort()).toEqual(["alg", "e", "kid", "kty", "n", "use"]);

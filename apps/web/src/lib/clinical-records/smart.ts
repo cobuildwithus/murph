@@ -58,12 +58,27 @@ export function normalizeSmartStateHash(state: string): string | null {
   return isClinicalReturnState(state) ? hashSmartState(state) : null;
 }
 
+type SmartPermissionVersion = "v1" | "v2";
+
+/** Decides which advertised OAuth endpoints may receive credentials. */
+export interface SmartEndpointTrust {
+  authorization(value: unknown, fhirBase: URL): string;
+  token(value: unknown, fhirBase: URL): string;
+}
+
+const SAME_ORIGIN_ENDPOINT_TRUST: SmartEndpointTrust = {
+  authorization: (value, fhirBase) => requirePinnedEndpoint(value, fhirBase, "SMART authorization endpoint"),
+  token: (value, fhirBase) => requirePinnedEndpoint(value, fhirBase, "SMART token endpoint"),
+};
+
 export async function discoverSmartConfiguration(input: {
   requestOfflineAccess?: boolean;
   fetchImpl?: typeof fetch;
   fhirBaseUrl: string;
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
+  endpointTrust?: SmartEndpointTrust;
+  permissionVersion?: SmartPermissionVersion;
 }): Promise<SmartConfiguration> {
   const fhirBase = new URL(input.fhirBaseUrl);
   const metadataUrl = new URL(`${fhirBase.pathname.replace(/\/$/u, "")}/.well-known/smart-configuration`, fhirBase.origin);
@@ -86,21 +101,25 @@ export async function discoverSmartConfiguration(input: {
   const capabilities = requireStringArray(body.capabilities, "SMART capabilities", 128);
   const scopeSelection = selectSmartRequestedScopes({
     capabilities,
+    permissionVersion: input.permissionVersion,
     requestOfflineAccess: input.requestOfflineAccess,
     requestedBaseScopes: input.requestedBaseScopes,
     resourceTypes: input.resourceTypes,
   });
+  const trust = input.endpointTrust ?? SAME_ORIGIN_ENDPOINT_TRUST;
   return {
-    authorizationEndpoint: requirePinnedEndpoint(body.authorization_endpoint, fhirBase, "SMART authorization endpoint"),
+    authorizationEndpoint: trust.authorization(body.authorization_endpoint, fhirBase),
     requestedResourceTypes: scopeSelection.resourceTypes,
     requestedScopes: scopeSelection.scopes,
-    tokenEndpoint: requirePinnedEndpoint(body.token_endpoint, fhirBase, "SMART token endpoint"),
+    tokenEndpoint: trust.token(body.token_endpoint, fhirBase),
   };
 }
 
 export function selectSmartRequestedScopes(input: {
   requestOfflineAccess?: boolean;
   capabilities: readonly string[];
+  /** A registration pinned to one SMART version requires that exact capability. */
+  permissionVersion?: SmartPermissionVersion;
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
 }): { resourceTypes: string[]; scopes: string[] } {
@@ -111,11 +130,13 @@ export function selectSmartRequestedScopes(input: {
       "The provider does not advertise standalone patient launch support.",
     );
   }
-  const permissionVersion = capabilities.has("permission-v2")
-    ? "v2"
-    : capabilities.has("permission-v1")
-      ? "v1"
-      : null;
+  const permissionVersion = input.permissionVersion
+    ? capabilities.has(`permission-${input.permissionVersion}`) ? input.permissionVersion : null
+    : capabilities.has("permission-v2")
+      ? "v2"
+      : capabilities.has("permission-v1")
+        ? "v1"
+        : null;
   if (!permissionVersion) {
     throw providerUnavailable(
       "CLINICAL_RECORD_SMART_SCOPES_UNSUPPORTED",

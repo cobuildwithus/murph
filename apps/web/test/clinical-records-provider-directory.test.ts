@@ -15,6 +15,11 @@ import {
   buildEpicBetaRetrievalPlan,
 } from "@/src/lib/clinical-records/epic-policy";
 import { selectSmartRequestedScopes } from "@/src/lib/clinical-records/smart";
+import {
+  ORACLE_ACQUISITION_POLICY,
+  ORACLE_REQUESTED_BASE_SCOPES,
+  ORACLE_RESOURCE_TYPES,
+} from "@/src/lib/clinical-records/oracle-policy";
 
 const generatedAt = "2026-07-10T00:00:00.000Z";
 
@@ -286,7 +291,7 @@ describe("Clinical Records provider directory", () => {
         { ...EPIC_ACQUISITION_POLICY, id: "a-policy" },
       ],
       policyId: "z-policy",
-    }))).toThrow(/exactly one owned policy/u);
+    }))).toThrow(/exactly match an owned policy/u);
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [{
         ...EPIC_ACQUISITION_POLICY,
@@ -296,18 +301,76 @@ describe("Clinical Records provider directory", () => {
           ...EPIC_ACQUISITION_POLICY.registrationApis.slice(2),
         ],
       }],
-    }))).toThrow(/exactly match the owned Epic policy/u);
+    }))).toThrow(/exactly match an owned policy/u);
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       policies: [{
         ...EPIC_ACQUISITION_POLICY,
         registrationApis: EPIC_ACQUISITION_POLICY.registrationApis.slice(1),
       }],
-    }))).toThrow(/exactly match the owned Epic policy/u);
+    }))).toThrow(/exactly match an owned policy/u);
     expect(() => parseClinicalProviderDirectory(makeDirectory({
       sourceBundleSha256: "not-a-sha256",
     }))).toThrow(/source bundle hash/u);
 
 
+  });
+});
+
+describe("Clinical Records provider directory policy set", () => {
+  const oracleEntry = (overrides: Record<string, unknown> = {}) => ({
+    aliases: [], brandName: "Synthetic Valley Hospital", fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic",
+    id: "oracle-0123456789abcdef0123", integration: "oracle-millennium-r4", locations: [],
+    policyId: ORACLE_ACQUISITION_POLICY.id, ...overrides,
+  });
+  const expanded = (entryOverrides: Record<string, unknown> = {}, policies: unknown[] = [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY]) => {
+    const base = makeDirectory({});
+    return { ...base, policies: JSON.parse(JSON.stringify(policies)), entries: [...base.entries, oracleEntry(entryOverrides)] };
+  };
+
+  it("reads the untouched Epic-only artifact and the later artifact with server-owned Oracle entries", () => {
+    expect(parseClinicalProviderDirectory(makeDirectory({})).entries.map((entry) => entry.sourceSystem)).toEqual(["epic-fhir"]);
+    const directory = parseClinicalProviderDirectory(expanded());
+    expect(directory.entries[1]).toEqual({
+      aliases: [], brandName: "Synthetic Valley Hospital", facilities: [], fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic",
+      id: "oracle-0123456789abcdef0123", integration: "oracle-millennium-r4", policyId: "oracle-millennium-r4-v1",
+      requestedBaseScopes: ORACLE_REQUESTED_BASE_SCOPES, resourceTypes: ORACLE_RESOURCE_TYPES, sourceSystem: "cerner-fhir",
+    });
+    expect(directory.entries[0]).toMatchObject({ sourceSystem: "epic-fhir", clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" });
+    expect(parseClinicalProviderDirectory(expanded({}, [ORACLE_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY])).entries).toHaveLength(2);
+  });
+
+  it.each([
+    ["a registration key", { clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" }, /integration is unsupported/u],
+    ["no integration", { integration: undefined }, /integration is unsupported/u],
+    ["another vendor's id", { id: "epic-synthetic-valley" }, /integration is unsupported|strictly sorted/u],
+  ])("rejects an Oracle entry with %s", (_label, overrides, message) => {
+    expect(() => parseClinicalProviderDirectory(expanded(overrides))).toThrow(message);
+  });
+
+  it("rejects missing, duplicate, altered or extra policies", () => {
+    expect(() => parseClinicalProviderDirectory(expanded({}, [EPIC_ACQUISITION_POLICY]))).toThrow(/unknown policy/u);
+    expect(() => parseClinicalProviderDirectory(expanded({}, [EPIC_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY]))).toThrow(/duplicates/u);
+    expect(() => parseClinicalProviderDirectory(expanded({}, [EPIC_ACQUISITION_POLICY,
+      { ...ORACLE_ACQUISITION_POLICY, queries: ORACLE_ACQUISITION_POLICY.queries.slice(1) }]))).toThrow(/exactly match an owned policy/u);
+    expect(() => parseClinicalProviderDirectory(expanded({}, []))).toThrow(/policy count/u);
+    expect(() => parseClinicalProviderDirectory(expanded({}, [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY])))
+      .toThrow(/policy count/u);
+  });
+
+  it("filters vendors before ranking, grouping and the twenty-result cap", () => {
+    const base = makeDirectory({ id: "epic-z-clinic" });
+    const oracle = Array.from({ length: 21 }, (_, index) => oracleEntry({
+      brandName: "Clinic", id: `oracle-${String(index).padStart(20, "0")}`, fhirBaseUrl: `https://fhir-myrecord.cerner.com/r4/tenant-${index}`,
+    }));
+    const directory = parseClinicalProviderDirectory({ ...base, policies: [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY],
+      entries: [{ ...base.entries[0], brandName: "Test Health Clinic" }, ...oracle] });
+    for (const grouped of [false, true]) {
+      expect(searchClinicalProviderDirectorySnapshot(directory, { grouped, query: "Clinic" }).providers.map((row) => row.id))
+        .toEqual(["epic-z-clinic"]);
+      const mixed = searchClinicalProviderDirectorySnapshot(directory, { grouped, query: "Clinic", sourceSystems: ["epic-fhir", "cerner-fhir"] });
+      expect(mixed.providers).toHaveLength(20);
+      expect(mixed.providers.every((row) => row.sourceSystem === "cerner-fhir")).toBe(true);
+    }
   });
 });
 

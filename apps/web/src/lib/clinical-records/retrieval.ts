@@ -9,6 +9,8 @@ import { publishClinicalChangeTx } from "./notification";
 import { closeClinicalRunTx } from "./run-lifecycle";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES, CLINICAL_RECORD_TERMINAL_RUN_STATUSES } from "./client-contracts";
 import { epicImportQueryEnabled } from "./epic-import-config";
+import { readOracleQueryGate } from "./oracle-integration";
+import { buildOracleInitialFhirPageUrl } from "./oracle-policy";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { readClinicalTransportAccess } from "./transport-access";
@@ -16,6 +18,7 @@ import { readClinicalTransportAccess } from "./transport-access";
 import { createHash, randomBytes } from "node:crypto";
 
 import {
+  CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
   clinicalFhirRetrievalPlanSchema,
   clinicalSourceSystemSchema,
   hashClinicalFhirPageUrl,
@@ -205,9 +208,8 @@ export async function fetchClinicalRetrievalPage(input: {
   if (!retrievalSlice) {
     return unavailable("retrieval-identity-mismatch", false);
   }
-  if (!epicImportQueryEnabled(run.connection.providerDirectoryEntryId, retrievalSlice.queryScopeId)) {
-    return unavailable("hospital-approval-required", false);
-  }
+  const gated = readClinicalQueryGate(run.connection, retrievalSlice.queryScopeId);
+  if (gated) return unavailable(gated.code, gated.retryable);
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
   }
@@ -253,6 +255,7 @@ export async function fetchClinicalRetrievalPage(input: {
             fhirBaseUrl,
             patientId,
             retrievalSlice,
+            sourceSystem: run.connection.sourceSystem,
           });
           return { raw: url.toString(), url };
         })();
@@ -438,9 +441,8 @@ async function loadClinicalDocumentRequest(input: {
       && entry.sliceId === ticket.sliceId && entry.queryFingerprint === ticket.queryFingerprint
       && entry.resourceType === ticket.resourceType);
     if (!slice) return { unavailable: "document-ticket-invalid", retryable: false };
-    if (!epicImportQueryEnabled(input.run.connection.providerDirectoryEntryId, slice.queryScopeId)) {
-      return { unavailable: "hospital-approval-required", retryable: false };
-    }
+    const gated = readClinicalQueryGate(input.run.connection, slice.queryScopeId);
+    if (gated) return { unavailable: gated.code, retryable: gated.retryable };
     const sourceKind = ticket.sourceKind ?? "binary";
     if (sourceKind === "media" && !epicMediaReadIsGranted(input.grantedScopes)) return { unavailable: "media-scope-unavailable", retryable: false };
     return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl, patientIdHash };
@@ -867,11 +869,31 @@ function parseRunnableClinicalConfiguration(record: {
   }
 }
 
+/** Each integration's gate covers frozen plans too; it returns the refusal or null. */
+function readClinicalQueryGate(
+  connection: Pick<RunnableClinicalRun["connection"], "providerDirectoryEntryId" | "sourceSystem">,
+  queryScopeId: string,
+): { code: string; retryable: boolean } | null {
+  switch (connection.sourceSystem) {
+    case "epic-fhir":
+      return epicImportQueryEnabled(connection.providerDirectoryEntryId, queryScopeId)
+        ? null : { code: "hospital-approval-required", retryable: false };
+    case "cerner-fhir":
+      return readOracleQueryGate(queryScopeId);
+    default:
+      return { code: "integration-unavailable", retryable: false };
+  }
+}
+
+/** Frozen slices resolve only inside their own vendor catalog. */
 function buildInitialFhirPageUrl(input: {
   fhirBaseUrl: string;
   patientId: string;
   retrievalSlice: ClinicalFhirRetrievalSlice;
+  sourceSystem: ClinicalSourceSystem;
 }): URL {
+  if (input.sourceSystem === "cerner-fhir") return buildOracleInitialFhirPageUrl(input);
+  if (input.sourceSystem !== "epic-fhir") throw new TypeError("Unsupported clinical source system.");
   return buildEpicBetaInitialFhirPageUrl({
     fhirBaseUrl: input.fhirBaseUrl,
     pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
@@ -1066,7 +1088,8 @@ async function readSanitizedFhirPage(input: {
     validated = record;
   } else {
     if (record.resourceType !== "Bundle") throw invalidFhirResponseError();
-    const entries = record.entry === undefined ? [] : requireBoundedArray(record.entry, 500);
+    // The shared raw-manifest bound, so Web never rejects a page the runtime and importer accept.
+    const entries = record.entry === undefined ? [] : requireBoundedArray(record.entry, CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE);
     entries.forEach((entry) => {
       const entryRecord = requireRecord(entry);
       const resource = requireRecord(entryRecord.resource);

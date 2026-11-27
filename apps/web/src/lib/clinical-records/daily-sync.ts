@@ -19,6 +19,8 @@ import { readHostedConsentStatus } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
 import { buildEpicDailyRetrievalPlan } from "./epic-policy";
+import { oracleEgressDisabled } from "./oracle-integration";
+import { buildOracleDailyRetrievalPlan } from "./oracle-policy";
 import { appendClinicalRetrievalWakeTx, endUnusableRunTx, signalClinicalRetrievalWake } from "./retrieval";
 
 // Just under the 15-minute sweep, so the next sweep sees the row.
@@ -210,7 +212,7 @@ async function admitClinicalRun(input: DailyAdmission, readLockedSample: () => C
       const grantedScopesJson = previous.grantedScopesJson;
       if (!Array.isArray(grantedScopesJson) || !grantedScopesJson.every((value) => typeof value === "string")) return null;
       const generation = connection.retrievalGeneration + 1;
-      const retrievalPlanJson = buildEpicDailyRetrievalPlan({
+      const retrievalPlanJson = buildClinicalDailyPlan(connection.sourceSystem, {
         previous: clinicalFhirRetrievalPlanSchema.parse(previous.retrievalPlanJson), now: input.now, generation,
       });
       if (lifecycle === "recoverable") {
@@ -245,9 +247,19 @@ async function admitClinicalRun(input: DailyAdmission, readLockedSample: () => C
   });
 }
 
+/** Each vendor's frozen slices resolve only inside its own catalog. */
+function buildClinicalDailyPlan(sourceSystem: string, input: Parameters<typeof buildEpicDailyRetrievalPlan>[0]) {
+  return sourceSystem === "cerner-fhir" ? buildOracleDailyRetrievalPlan(input) : buildEpicDailyRetrievalPlan(input);
+}
+
+// While the Oracle kill switch is on, its grants stay saved and back off a day without a run.
+function dailyChecksEnabled(sourceSystem: string) {
+  return sourceSystem !== "cerner-fhir" || !oracleEgressDisabled();
+}
+
 function hasDueClinicalGrant(connection: {
-  status: string; refreshTokenEncrypted: string | null; patientIdEncrypted: string | null; nextSyncAt: Date | null;
+  sourceSystem: string; status: string; refreshTokenEncrypted: string | null; patientIdEncrypted: string | null; nextSyncAt: Date | null;
 }, now: Date) {
-  return ["active", "error"].includes(connection.status) && Boolean(connection.refreshTokenEncrypted)
+  return dailyChecksEnabled(connection.sourceSystem) && ["active", "error"].includes(connection.status) && Boolean(connection.refreshTokenEncrypted)
     && Boolean(connection.patientIdEncrypted) && connection.nextSyncAt !== null && connection.nextSyncAt <= now;
 }

@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveEpicClient } from "@/src/lib/clinical-records/epic-import-config";
 import { resolveClinicalProviderDirectoryEntry } from "@/src/lib/clinical-records/provider-directory-store";
 
-const provider = resolveClinicalProviderDirectoryEntry("epic-sandbox")!;
+const sandboxEntry = resolveClinicalProviderDirectoryEntry("epic-sandbox");
+if (sandboxEntry?.sourceSystem !== "epic-fhir") throw new TypeError("Committed Epic sandbox entry is missing.");
+const provider = sandboxEntry;
 const prefix = "EPIC_SMART_NON_PRODUCTION_";
 
 function setBasic(clientId: string) {

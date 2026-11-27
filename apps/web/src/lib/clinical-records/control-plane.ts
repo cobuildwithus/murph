@@ -13,7 +13,15 @@ import { hasImportCapacity, countedSourceFilter } from "./source-state";
 import { prepareClinicalPersistentAccess } from "./persistent-access";
 
 import * as z from "@murphai/contracts/zod-runtime";
-import { epicProfileSchema, resolveSavedEpicAuth, resolveEpicClient, type EpicProfile } from "./epic-import-config";
+import { resolveSavedEpicAuth, resolveEpicClient } from "./epic-import-config";
+import {
+  clinicalGrantProfileSchema,
+  isOracleProfile,
+  requireOracleSmartEndpoint,
+  resolveOracleClientAuth,
+  type ClinicalGrantProfile,
+} from "./oracle-integration";
+import { buildOracleRetrievalPlan } from "./oracle-policy";
 
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
 
@@ -42,6 +50,7 @@ import {
 import { clinicalRecordsError } from "./errors";
 import {
   type ClinicalProviderDirectoryEntry,
+  type EpicProviderDirectoryEntry,
 } from "./provider-directory";
 import { resolveClinicalProviderDirectoryEntry } from "./provider-directory-store";
 import {
@@ -76,7 +85,7 @@ const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
 const CLINICAL_RETRIEVAL_RUN_ID_PREFIX = "crr_";
 
 const authorizationBinding = z.object({
-  version: z.literal(1), verifier: z.string().min(1).max(128), profile: epicProfileSchema,
+  version: z.literal(1), verifier: z.string().min(1).max(128), profile: clinicalGrantProfileSchema,
   brandName: z.string().min(1).max(160), fhirBaseUrl: z.string().url().max(2048),
   resourceTypes: z.array(z.string().min(1).max(80)).min(1).max(100),
 }).strict();
@@ -112,7 +121,7 @@ async function startAuthorization(input: {
   const { auth } = input;
   const prisma = getPrisma();
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma });
-  const provider = requireProviderEntry(input.providerDirectoryEntryId);
+  const provider = requireEpicProviderEntry(input.providerDirectoryEntryId);
   await assertClinicalRecordConnectionAvailable({
     memberId: auth.member.id,
     providerDirectoryEntryId: provider.id,
@@ -281,17 +290,24 @@ async function finishAuthorization(input: {
   const stored = { clientId: session.clientId, grant: "callback" as const };
   const configuration = (() => {
     if (!saved) {
-      const provider = requireProviderEntry(session.providerDirectoryEntryId);
+      const provider = requireEpicProviderEntry(session.providerDirectoryEntryId);
       return { ...resolveEpicClient(provider, stored), provider };
+    }
+    const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
+    // The saved profile, not the current directory, selects the integration.
+    if (isOracleProfile(saved.profile)) {
+      return { auth: resolveOracleClientAuth(saved.profile, stored), resourceTypes: saved.resourceTypes,
+        hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
     }
     return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
       resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
-      provider: { id: session.providerDirectoryEntryId, brandName: saved.brandName,
-        fhirBaseUrl: saved.fhirBaseUrl, sourceSystem: "epic-fhir" as const } };
+      provider: { ...provider, sourceSystem: "epic-fhir" as const } };
   })();
   const { provider } = configuration;
   if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) throw providerConfigurationChangedError();
-  requirePinnedEndpoint(session.tokenEndpoint, new URL(provider.fhirBaseUrl), "token endpoint");
+  const fhirBase = new URL(provider.fhirBaseUrl);
+  if (provider.sourceSystem === "cerner-fhir") requireOracleSmartEndpoint("token", session.tokenEndpoint, fhirBase);
+  else requirePinnedEndpoint(session.tokenEndpoint, fhirBase, "token endpoint");
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
   const verifier = saved?.verifier ?? opened;
@@ -398,7 +414,7 @@ async function consumeClinicalOauthSession(input: {
 }
 
 async function persistClinicalConnection(input: {
-  profile?: EpicProfile;
+  profile?: ClinicalGrantProfile;
   clientId: string;
   tokenEndpoint: string;
   hospitalApprovedImports: boolean;
@@ -507,12 +523,14 @@ async function persistClinicalConnection(input: {
     id: retrievalRunId,
     memberId: input.memberId,
     grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
-    retrievalPlanJson: buildEpicBetaRetrievalPlan({
-      hospitalApprovedImports: input.hospitalApprovedImports,
-      frozenAt: input.now,
-      pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
-      resourceTypes: input.resourceTypes,
-    }),
+    retrievalPlanJson: input.provider.sourceSystem === "cerner-fhir"
+      ? buildOracleRetrievalPlan({ resourceTypes: input.resourceTypes })
+      : buildEpicBetaRetrievalPlan({
+          hospitalApprovedImports: input.hospitalApprovedImports,
+          frozenAt: input.now,
+          pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+          resourceTypes: input.resourceTypes,
+        }),
     retrievalProtocol: "query-slices-v2",
     status: "queued",
   } satisfies Omit<Prisma.ClinicalRecordRetrievalRunUncheckedCreateInput, "generation">;
@@ -668,13 +686,22 @@ async function assertClinicalRecordConnectionAvailable(
   return existing;
 }
 
-function requireProviderEntry(entryId: string): ClinicalProviderDirectoryEntry {
+function requireEpicProviderEntry(entryId: string): EpicProviderDirectoryEntry {
   const entry = resolveClinicalProviderDirectoryEntry(entryId);
   if (!entry) {
     throw clinicalRecordsError({
       code: "CLINICAL_RECORD_PROVIDER_NOT_FOUND",
       httpStatus: 404,
       message: "The selected Clinical Records provider is unavailable.",
+    });
+  }
+  // Starts for other integrations arrive with their own writer; until then they fail before egress.
+  if (entry.sourceSystem !== "epic-fhir") {
+    throw clinicalRecordsError({
+      code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED",
+      httpStatus: 503,
+      message: "The selected Clinical Records provider is not configured yet.",
+      retryable: true,
     });
   }
   return entry;
