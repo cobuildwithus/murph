@@ -1399,6 +1399,44 @@ test("importEventBatch applies a newer source retraction and replays it idempote
   assert.deepEqual(records[1]!.evidence, retraction.evidence);
 });
 
+test("importEventBatch keeps the active revision when a later retrieval reads the same content", async () => {
+  const vaultRoot = await makeVault("murph-event-batch-retrieval-reread");
+  const read = (version: string, value = 72, retrieval = "retrieval-2") => ({
+    action: "upsert" as const,
+    retrievalRevision: true as const,
+    payload: {
+      ...buildClinicalMeasurementPayload(version, value),
+      evidence: [{ rawRef: `raw/clinical/fhir/connection-1/${retrieval}/Observation/page-1.json`, sourceLabel: "Observation/observation-1" }],
+    },
+  });
+  const first = await importEventBatch({ vaultRoot, decisions: [read("2026-03-10T08:00:00.000Z", 72, "retrieval-1")], apply: true });
+  const shard = () => readEventShard(vaultRoot, first.eventShardPaths[0]!);
+
+  const reread = await importEventBatch({ vaultRoot, decisions: [read("2026-03-11T08:00:00.000Z")], apply: true });
+  assert.equal(reread.applied, false);
+  assert.equal(reread.skippedExistingCount, 1);
+  assert.equal(reread.supersededCount, 0);
+  assert.equal((await shard()).length, 1);
+
+  // Without the flag the version is a source change time and still supersedes.
+  const { retrievalRevision: _flag, ...sourceDated } = read("2026-03-11T08:00:00.000Z");
+  assert.equal((await importEventBatch({ vaultRoot, decisions: [sourceDated], apply: false })).supersededCount, 1);
+
+  const changed = await importEventBatch({ vaultRoot, decisions: [read("2026-03-12T08:00:00.000Z", 75)], apply: true });
+  assert.equal(changed.supersededCount, 1);
+  const withdraw = (version: string) => ({ action: "retract" as const, retrievalRevision: true as const,
+    externalRef: { ...read(version).payload.externalRef }, reason: "FHIR resource entered in error" });
+  assert.equal((await importEventBatch({ vaultRoot, decisions: [withdraw("2026-03-13T08:00:00.000Z")], apply: true })).retractedCount, 1);
+  const withdrawnAgain = await importEventBatch({ vaultRoot, decisions: [withdraw("2026-03-14T08:00:00.000Z")], apply: true });
+  assert.equal(withdrawnAgain.applied, false);
+  assert.equal(withdrawnAgain.retractedCount, 0);
+  assert.deepEqual((await shard()).map((record) => [record.externalRef?.version, record.lifecycle?.state ?? "active"]), [
+    ["2026-03-10T08:00:00.000Z", "active"],
+    ["2026-03-12T08:00:00.000Z", "active"],
+    ["2026-03-13T08:00:00.000Z", "deleted"],
+  ]);
+});
+
 test("importEventBatch rejects a versioned retraction when the stored source revision is unordered", async () => {
   const vaultRoot = await makeVault("murph-event-batch-unordered-retraction");
   const payload = buildSleepSessionPayload(10);

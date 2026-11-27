@@ -669,6 +669,7 @@ export const clinicalImportUpsertDecisionSchema = z
   .object({
     action: z.literal("upsert"),
     payload: clinicalImportUpsertPayloadSchema,
+    retrievalRevision: z.literal(true).optional(),
   })
   .strict();
 
@@ -688,6 +689,7 @@ export const clinicalImportReviewDecisionSchema = z
     externalRef: clinicalFhirExternalRefSchema.optional(),
     reason: z.string().min(1).max(240),
     evidence: clinicalDecisionEvidenceSchema,
+    retrievalRevision: z.literal(true).optional(),
   })
   .strict();
 

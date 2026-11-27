@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES, clinicalRawManifestSchema, clinicalRawPathSchema, type ClinicalRawManifest } from "@murphai/clinical-records";
+import type { ClinicalRawManifest } from "@murphai/clinical-records";
 import type { EventImportDecision, EventRecord } from "@murphai/contracts";
-import { findEventsByExternalRefs, resolveVaultPathOnDisk } from "@murphai/core";
+import { findEventsByExternalRefs } from "@murphai/core";
+
+import { readAttestedClinicalPage } from "./clinical-source-resources.ts";
 
 const parserReasons = new Set([
   "laboratory observation result is not importable",
@@ -95,28 +94,8 @@ function matchingSourceEvidence(held: EventRecord, decision: Upsert) {
   return { rawRef: evidence.rawRef, oldRawRef: oldEvidence.rawRef, resourceId };
 }
 
-async function readBoundedJson(vaultRoot: string, rawRef: string, maxBytes: number) {
-  const file = await resolveVaultPathOnDisk(vaultRoot, clinicalRawPathSchema.parse(rawRef));
-  const info = await stat(file.absolutePath);
-  if (!info.isFile() || info.size > maxBytes) throw new Error("Clinical hold evidence exceeds its bound.");
-  const bytes = await readFile(file.absolutePath);
-  if (bytes.length > maxBytes) throw new Error("Clinical hold evidence exceeds its bound.");
-  return { bytes, value: JSON.parse(bytes.toString("utf8")) as unknown };
-}
-
-async function readAttestedObservationPage(vaultRoot: string, rawRef: string, current: ClinicalRawManifest) {
-  const parts = clinicalRawPathSchema.parse(rawRef).split("/");
-  const manifestPath = `${parts.slice(0, 5).join("/")}/manifest.json`;
-  const manifest = clinicalRawManifestSchema.parse((await readBoundedJson(vaultRoot, manifestPath, 4 * 1024 * 1024)).value);
-  if (parts[3] !== manifest.connectionId || parts[4] !== manifest.retrievalJobId
-    || manifest.sourceSystem !== current.sourceSystem || manifest.fhirBaseUrlHash !== current.fhirBaseUrlHash
-    || manifest.patientIdHash !== current.patientIdHash) throw new Error("Clinical hold source binding is invalid.");
-  const files = manifest.resourceFiles.filter((file) => file.resourceType === "Observation"
-    && path.posix.join(path.posix.dirname(manifestPath), file.relativePath) === rawRef);
-  if (files.length !== 1) throw new Error("Clinical hold page is not manifest-bound.");
-  const page = await readBoundedJson(vaultRoot, rawRef, CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES);
-  if (createHash("sha256").update(page.bytes).digest("hex") !== files[0]!.sha256) throw new Error("Clinical hold page integrity mismatch.");
-  return page.value;
+async function readAttestedObservationPage(vaultRoot: string, rawRef: string, current: ClinicalRawManifest): Promise<unknown> {
+  return JSON.parse((await readAttestedClinicalPage(vaultRoot, rawRef, current, "Observation", "hold")).toString("utf8"));
 }
 
 function uniqueObservation(value: unknown, resourceId: string): Record<string, unknown> | undefined {

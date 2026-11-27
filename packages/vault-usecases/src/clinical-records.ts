@@ -48,6 +48,7 @@ import * as z from "@murphai/contracts/zod-runtime";
 
 import { clinicalStructuredSources, type ClinicalStructuredSource } from "./clinical-structured-enrichment.ts";
 import { retainUnchangedClinicalParserHolds } from "./clinical-parser-holds.ts";
+import { confirmUnchangedClinicalSources } from "./clinical-source-resources.ts";
 
 import { extractClinicalDocumentText } from "./clinical-document-text.js";
 import { readMinimizedClinicalDocument } from "./clinical-document-storage.ts";
@@ -561,8 +562,10 @@ export async function importClinicalFhirSnapshot(
       reviewDecisionCount += retained.retainedCount;
       retainedLabCount = retained.retainedLabCount;
       if (saved) return replayClinicalSnapshot(input, retained.decisions, saved);
-      return await importEventBatch({ apply: true, receiptIdentity: identity, decisions: retained.decisions,
+      const confirmed = await confirmUnchangedClinicalSources({ vaultRoot: input.vaultRoot, decisions: retained.decisions, manifest: prepared.manifest });
+      const result = await importEventBatch({ apply: true, receiptIdentity: identity, decisions: confirmed.decisions,
         signal: input.signal, vaultRoot: input.vaultRoot });
+      return { ...result, skippedExistingCount: result.skippedExistingCount + confirmed.unchangedCount };
     } catch (error) {
       rethrowClinicalFhirImportError(error);
     }

@@ -89,7 +89,8 @@ async function refreshPersistedGrant() {
   return before;
 }
 
-// Epic omits meta.lastUpdated, so each retrieval is the resource revision and a re-read supersedes in place.
+// Epic omits meta.lastUpdated, so each retrieval is the resource revision. An unchanged re-read writes nothing; the
+// weekly sandbox drift can still correct a record, so only additions and withdrawals must stay at zero.
 function checkUnchangedReceipt(counts: Awaited<ReturnType<typeof importGeneration>>["saved"]["outcomeCountsJson"]) {
   check(counts && typeof counts === "object" && !Array.isArray(counts));
   check(counts.createdCount === 0 && counts.retractedCount === 0);

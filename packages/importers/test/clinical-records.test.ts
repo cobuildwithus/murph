@@ -4712,7 +4712,17 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     const replay = await apply(await retrieval("retrieval-job-1-replay", "2026-07-01T12:00:00.000Z", heartRate(70)));
     expect(replay).toMatchObject({ applied: false, createdCount: 0, skippedExistingCount: 1, supersededCount: 0 });
 
-    // A later retrieval supersedes the earlier one in place.
+    // A later retrieval of the same content only says when it was read: the
+    // active revision stays, so stale and conflict checks still use it.
+    const reread = await apply(await retrieval("identical", "2026-07-01T18:00:00.000Z", heartRate(70)));
+    expect(reread).toMatchObject({ applied: false, skippedExistingCount: 1, supersededCount: 0 });
+    expect(await liveVersion()).toBe("2026-07-01T12:00:00.000Z");
+    const delayed0 = await apply(await retrieval("delayed-0", "2026-07-01T06:00:00.000Z", heartRate(75)));
+    expect(delayed0).toMatchObject({ applied: false, skippedExistingCount: 1, supersededCount: 0 });
+    await expect(apply(await retrieval("conflict", "2026-07-01T12:00:00.000Z", heartRate(76))))
+      .rejects.toMatchObject({ code: "EVENT_SOURCE_REVISION_CONFLICT" });
+
+    // A later correction supersedes the earlier one in place.
     const later = await apply(await retrieval("retrieval-job-2", "2026-07-02T12:00:00.000Z", heartRate(72)));
     expect(later).toMatchObject({ createdCount: 0, supersededCount: 1 });
     expect(await liveVersion()).toBe("2026-07-02T12:00:00.000Z");
@@ -4727,12 +4737,35 @@ describe("buildClinicalImportPlanFromSnapshot", () => {
     const hold = await apply(await retrieval("retrieval-job-4", "2026-07-03T12:00:00.000Z", heartRate(72, "preliminary")));
     expect(hold.retractedCount).toBe(1);
     expect(await liveVersion()).toBeNull();
+    const heldAgain = await apply(await retrieval("retrieval-job-4-reread", "2026-07-03T18:00:00.000Z", heartRate(72, "preliminary")));
+    expect(heldAgain).toMatchObject({ applied: false, retractedCount: 0, skippedExistingCount: 1 });
     const delayed = await apply(await retrieval("retrieval-job-5", "2026-07-02T12:00:00.000Z", heartRate(72)));
     expect(delayed).toMatchObject({ applied: false, createdCount: 0, supersededCount: 0 });
     expect(await liveVersion()).toBeNull();
     const recovery = await apply(await retrieval("retrieval-job-6", "2026-07-04T12:00:00.000Z", heartRate(74)));
     expect(recovery.createdCount).toBe(1);
     expect(await liveVersion()).toBe("2026-07-04T12:00:00.000Z");
+  });
+
+  it("keeps superseding unchanged content when the source's own lastUpdated advances", async () => {
+    const resourceId = "source-dated-heart-rate";
+    const canonicalVaultRoot = await initializeCanonicalFixtureVault();
+    const retrieval = async (retrievalJobId: string, lastUpdated: string) => {
+      const manifestPath = `raw/clinical/fhir/clinical-connection-1/${retrievalJobId}/manifest.json`;
+      const vaultRoot = await writeClinicalFixture({
+        addDefaultRevision: false,
+        manifest: { fetchedAt: "2026-07-05T12:00:00.000Z", retrievalJobId },
+        manifestPath,
+        resourceFiles: [{ resourceType: "Observation", relativePath: "Observation/page-1.json", count: 1 }],
+        pages: { "Observation/page-1.json": { ...heartRateResource(resourceId), meta: { lastUpdated } } },
+      });
+      const decisions = executableDecisions(await planFromFixture({ manifestPath, vaultRoot }));
+      expect(decisions).toEqual([expect.not.objectContaining({ retrievalRevision: expect.anything() })]);
+      return importEventBatch({ vaultRoot: canonicalVaultRoot, decisions, apply: true });
+    };
+
+    expect((await retrieval("source-dated-1", "2026-07-01T12:00:00.000Z")).createdCount).toBe(1);
+    expect(await retrieval("source-dated-2", "2026-07-02T12:00:00.000Z")).toMatchObject({ supersededCount: 1 });
   });
 
   it("routes oversized FHIR ids and source revisions to review without aborting the plan", async () => {

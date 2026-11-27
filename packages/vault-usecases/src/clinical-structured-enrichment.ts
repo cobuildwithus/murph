@@ -3,14 +3,16 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES, clinicalFhirResourceText, clinicalFhirResourceExtractionText, clinicalRawPathSchema,
-  externalRefForFhir, hashClinicalFhirPatientId, normalizeClinicalFhirPatientReference,
+  CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES, classifyClinicalFhirSourceRevision, clinicalFhirResourceText, clinicalFhirResourceExtractionText,
+  clinicalRawPathSchema, externalRefForFhir, hashClinicalFhirPatientId, normalizeClinicalFhirPatientReference,
   resolveClinicalFhirSourceRevision, selectClinicalFhirResource, indexClinicalFhirResources,
   type ClinicalImportPlan, type ClinicalRawManifest,
 } from "@murphai/clinical-records";
-import { isWritableIsoDateTime } from "@murphai/contracts";
+import { compareIsoTimestampsAscending, isWritableIsoDateTime } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import { findEventByExternalRef, resolveVaultPathOnDisk } from "@murphai/core";
+
+import { clinicalSourceDigest, createClinicalSourceDigests } from "./clinical-source-resources.ts";
 
 export const clinicalStructuredSourceSchema = z.object({
   rawRef: clinicalRawPathSchema,
@@ -64,25 +66,45 @@ export async function attestClinicalStructuredSource(input: {
     fhirBaseUrlHash: input.manifest.fhirBaseUrlHash, reference: subject.reference,
   }) : null;
   if (!patient || hashClinicalFhirPatientId(patient) !== input.manifest.patientIdHash) throw new Error("Clinical structured patient binding mismatch.");
-  const revision = resolveClinicalFhirSourceRevision({ lastUpdated: object(resource.meta) ? resource.meta.lastUpdated : undefined, fetchedAt: input.manifest.fetchedAt });
+  const lastUpdated = object(resource.meta) ? resource.meta.lastUpdated : undefined;
+  const revision = resolveClinicalFhirSourceRevision({ lastUpdated, fetchedAt: input.manifest.fetchedAt });
   if (!revision) throw new Error("Clinical structured revision is unavailable.");
-  const parentExternalRef = externalRefForFhir({ sourceSystem: input.manifest.sourceSystem,
+  const ref = externalRefForFhir({ sourceSystem: input.manifest.sourceSystem,
     fhirBaseUrlHash: input.manifest.fhirBaseUrlHash, patientIdHash: input.manifest.patientIdHash,
     resourceType: source.resourceType, resourceId: source.resourceId, version: revision });
-  const eligible = await hasActiveClinicalSourceParent(input.vaultRoot, source, parentExternalRef, revision);
+  const active = await readActiveClinicalSourceRevision({ vaultRoot: input.vaultRoot, manifest: input.manifest, source, ref, resource,
+    retrievalDated: classifyClinicalFhirSourceRevision(lastUpdated).source === "batch" });
+  const parentRevision = active ?? revision;
   return { documentPath: resolved.absolutePath, extractedText: clinicalFhirResourceExtractionText(resource),
     source: { rawRef: source.rawRef, sha256: files[0]!.sha256, byteLength: bytes.length, mediaType: "application/fhir+json", resource: source },
-    parent: { eligible, reason: eligible ? undefined : "Clinical structured source parent is withdrawn, changed or unavailable.",
-      parentExternalRef, parentRevision: revision, retrievedAt: input.manifest.fetchedAt,
+    parent: { eligible: active !== undefined, reason: active !== undefined ? undefined : "Clinical structured source parent is withdrawn, changed or unavailable.",
+      parentExternalRef: { ...ref, version: parentRevision }, parentRevision, retrievedAt: input.manifest.fetchedAt,
       clinicalOccurredAt: clinicalDate(resource) } };
 }
 
-async function hasActiveClinicalSourceParent(vaultRoot: string, source: ClinicalStructuredSource, parentExternalRef: ReturnType<typeof externalRefForFhir>, revision: string): Promise<boolean> {
-  const parent = await findEventByExternalRef({ vaultRoot, ...parentExternalRef, facet: null, includeDeleted: true });
-  return parent?.kind === "note" && parent.noteType?.startsWith("fhir_") === true
+/**
+ * The parent revision derived facts bind to, or undefined when the source note
+ * is withdrawn or was replaced by a newer revision. A later retrieval that reads
+ * the same source leaves the earlier revision active, so a retrieval-dated
+ * source binds to it only when the parent's stored resource equals this one.
+ */
+async function readActiveClinicalSourceRevision(input: { vaultRoot: string; manifest: ClinicalRawManifest;
+  source: ClinicalStructuredSource; ref: ReturnType<typeof externalRefForFhir>; resource: Record<string, unknown>; retrievalDated: boolean;
+}): Promise<string | undefined> {
+  const { source, ref } = input;
+  const { version: _version, ...identity } = ref;
+  const parent = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...identity, facet: null, includeDeleted: true });
+  const active = parent?.externalRef?.version;
+  const label = `${source.resourceType}/${source.resourceId}`;
+  const evidence = parent?.evidence?.find((item) => item.sourceLabel === label);
+  const current = parent?.kind === "note" && parent.noteType?.startsWith("fhir_") === true
     && !["DocumentReference", "DiagnosticReport"].includes(source.resourceType)
-    && parent.lifecycle?.state !== "deleted" && parent.externalRef?.version === revision
-    && parent.evidence?.some((evidence) => evidence.sourceLabel === `${source.resourceType}/${source.resourceId}`) === true;
+    && parent.lifecycle?.state !== "deleted" && evidence !== undefined;
+  if (!current || !active) return undefined;
+  if (active === ref.version) return active;
+  const earlier = input.retrievalDated && isWritableIsoDateTime(active) && compareIsoTimestampsAscending(active, ref.version) < 0;
+  return earlier && await createClinicalSourceDigests(input.vaultRoot, input.manifest)(evidence) === clinicalSourceDigest(input.resource)
+    ? active : undefined;
 }
 
 function clinicalDate(resource: Record<string, unknown>): string | undefined {

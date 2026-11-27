@@ -45,6 +45,12 @@ describe("clinical source state", () => {
       state: "sign_in_again", actions: ["remove"], lastImport: null,
     });
     expect(classifyClinicalSource("active", run("partial"), "provider-search-incomplete").reason).toBe("limited_by_hospital");
+    // A partial daily reread that wrote nothing keeps its partial state; missing counts still cannot claim it.
+    expect(classifyClinicalSource("active", run("partial", receipt), "provider-search-incomplete")).toMatchObject({
+      state: "ready_partial", reason: "limited_by_hospital", lastImport: { addedCount: 0 },
+    });
+    expect(classifyClinicalSource("active", run("partial", null), null).state).toBe("could_not_add");
+    expect(classifyClinicalSource("active", run("partial", receipt), "snapshot_rejected").state).toBe("could_not_add");
     expect(classifyClinicalSource("active", run("retrieving", null), null).actions).toEqual(["start_over", "remove"]);
     expect(classifyClinicalSource("disconnected", run("complete"), null, false).actions).toEqual([]);
   });

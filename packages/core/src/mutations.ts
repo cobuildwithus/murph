@@ -2124,7 +2124,8 @@ function deviceEventContentFingerprint(record: EventRecord): string {
 // keeps rawRefs. For unversioned rows, a rawRefs-only correction supersedes the
 // stored event. Comparable versioned rows are ordered by source revision:
 // older revisions are skipped, equal revisions must replay-match or the batch
-// is rejected as a conflict, and newer revisions supersede.
+// is rejected as a conflict, and newer revisions supersede. A newer
+// `retrievalRevision` that leaves the clinical content unchanged is skipped.
 function eventImportContentKey(record: EventRecord): string {
   const {
     id: _id,
@@ -2191,6 +2192,7 @@ type PreparedEventImportDecision =
       expectedLatest?: EventImportUpsertDecision["expectedLatest"];
       sourceParent?: EventImportUpsertDecision["sourceParent"];
       invalidateFacetPrefixes?: EventImportUpsertDecision["invalidateFacetPrefixes"];
+      retrievalRevision?: true;
     }
   | {
       action: "retract";
@@ -2198,6 +2200,7 @@ type PreparedEventImportDecision =
       evidence?: EventRecord["evidence"];
       reason: EventImportRetractionDecision["reason"];
       retractFacetPrefixes?: EventImportRetractionDecision["retractFacetPrefixes"];
+      retrievalRevision?: true;
       markerEntry: PreparedJsonlEntry<EventRecord>;
     };
 
@@ -5466,6 +5469,18 @@ function replaysEqualEventImportDecision(latest: EventRecord, incoming: EventRec
     `${ref.facet ? `#${ref.facet}` : ""}" has conflicting content for source revision "${ref.version}"; nothing was imported.`);
 }
 
+// A retrieval revision records when the source was read. A later read with the
+// active record's clinical content leaves that record as its revision.
+function rereadsActiveEventImportContent(latest: EventRecord, incoming: EventRecord): boolean {
+  return !isDeletedEventSpineRecord(latest) && clinicalReceiptContentKey(latest) === clinicalReceiptContentKey(incoming);
+}
+
+// An older revision is stale. The same revision, or a later retrieval read,
+// that still withdraws an already withdrawn source changes nothing.
+function retractionChangesNothing(comparison: number, latest: EventRecord, retrievalRevision: true | undefined): boolean {
+  return comparison < 0 || (isDeletedEventSpineRecord(latest) && (comparison === 0 || retrievalRevision === true));
+}
+
 function validateEventImportSourceOptions(decision: EventImportDecision): void {
   if (decision.action === "retract") {
     if (decision.retractFacetPrefixes && decision.externalRef.facet !== undefined) {
@@ -5659,7 +5674,7 @@ async function reconcileEventImportDecisionsByExternalRef(
             "cannot be retracted without comparable source revisions; nothing was imported.",
         );
       }
-      if (sourceVersionComparison < 0 || (sourceVersionComparison === 0 && isDeletedEventSpineRecord(latest))) {
+      if (retractionChangesNothing(sourceVersionComparison, latest, decision.retrievalRevision)) {
         skippedExistingCount += 1;
         continue;
       }
@@ -5729,6 +5744,11 @@ async function reconcileEventImportDecisionsByExternalRef(
         continue;
       }
       if (sourceVersionComparison === 0 && replaysEqualEventImportDecision(latest, entry.record, decision.allowsKindReplacement)) {
+        skippedExistingCount += 1;
+        continue;
+      }
+      // The incoming revision is newer here.
+      if (decision.retrievalRevision && rereadsActiveEventImportContent(latest, entry.record)) {
         skippedExistingCount += 1;
         continue;
       }
@@ -8468,6 +8488,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
           evidence: decision.evidence,
           reason: decision.reason,
           retractFacetPrefixes: decision.retractFacetPrefixes,
+          retrievalRevision: decision.retrievalRevision,
           markerEntry: {
             relativePath: toEventLedgerFile(markerRecord.occurredAt),
             record: markerRecord,
@@ -8487,6 +8508,7 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         ...(decision.expectedLatest ? { expectedLatest: decision.expectedLatest } : {}),
         sourceParent: decision.sourceParent,
         invalidateFacetPrefixes: decision.invalidateFacetPrefixes,
+        retrievalRevision: decision.retrievalRevision,
       });
     } catch (error) {
       failures.push({
@@ -8564,7 +8586,8 @@ async function replayOrCompleteEmptyClinicalImport(input: ImportEventDecisionBat
 
 // An undated typed fact's occurredAt is documentation time. FHIR source notes
 // also print their fallback time in a generated paragraph before the provider
-// JSON (in the first section for long notes). Preserve the provider text.
+// JSON (in the first section for long notes), and an undated document receipt
+// names it in one line. Preserve the provider text.
 function clinicalReceiptContentKey(record: EventRecord): string {
   if (record.kind !== "note") return eventImportSourceSemanticContentKey(record);
   if (record.noteType === "clinical_fact" && record.clinicalFact?.clinicalDate === null) {
@@ -8573,6 +8596,8 @@ function clinicalReceiptContentKey(record: EventRecord): string {
   if (!record.externalRef?.version || Date.parse(record.occurredAt) !== Date.parse(record.externalRef.version)) {
     return eventImportSourceSemanticContentKey(record);
   }
+  const receipt = withoutRetrievalReceiptLine(record);
+  if (receipt) return eventImportSourceSemanticContentKey(receipt);
   const text = record.sections?.[0]?.text ?? record.note;
   const observation = record.noteType === "fhir_observation_source";
   const history = record.noteType === `fhir_${record.externalRef.resourceType.replaceAll("-", "")}`
@@ -8584,6 +8609,13 @@ function clinicalReceiptContentKey(record: EventRecord): string {
   const normalized = text.replace(paragraph, "\n\n");
   const body = record.sections ? { sections: [{ ...record.sections[0]!, text: normalized }, ...record.sections.slice(1)] } : { note: normalized };
   return eventImportSourceSemanticContentKey({ ...record, ...body, occurredAt: "" });
+}
+
+// An undated document receipt names the retrieval it was read in.
+function withoutRetrievalReceiptLine(record: EventRecord): EventRecord | null {
+  const line = `\nRecord timestamp describes the retrieval revision: ${record.occurredAt}.`;
+  return record.kind === "note" && record.noteType === "clinical-document-receipt" && record.note?.includes(line)
+    ? { ...record, note: record.note.replace(line, ""), occurredAt: "" } : null;
 }
 
 function clinicalChangeForAppend({ record, previous }: EventImportAppendEntry, invalidated?: ReadonlyMap<string, number>): ClinicalRecordChange | null {

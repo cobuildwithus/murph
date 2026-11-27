@@ -615,7 +615,27 @@ SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 `fetchedAt` as the source revision, so later retrievals supersede earlier ones
-and replays stay idempotent. Comparable clinical holds retain the existing
+and replays stay idempotent. That revision records only when Murph read the
+resource. A later read writes nothing, and counts as nothing new, only when
+every source resource it cites equals the one the active record cites
+(excluding `meta`) and its clinical content matches, or when it still
+withdraws an already withdrawn record. Under the canonical lock the import
+compares the manifest-attested raw resources, because derived facts read more
+of a resource than its canonical note shows. Any other difference supersedes
+and invalidates derived facts as before. An undated document receipt ignores
+its retrieval timestamp line in that comparison. The active revision stays the
+stale and conflict boundary. Two connections can share one FHIR server and
+`fetchedAt` is run creation time, so a delayed retrieval newer than the active
+revision but older than a skipped read is treated as newer. Structured
+enrichment binds a later retrieval to an earlier active revision only when that
+revision's stored resource equals the job's, so the skipped read's job is held
+and the next read restores current content. A document with downloaded
+attachment bytes keeps a revision per retrieval because its canonical note
+does not show the bytes. At an unchanged revision, a source note whose
+rendering changed but whose stored resource is identical keeps its stored note
+instead of conflicting; its next source revision renders the new fields. A
+partial run that changed nothing still reports its partial state. Comparable
+clinical holds retain the existing
 revision protection. A refresh preserves an existing parser hold for an unchanged
 Observation at the same revision only when its exact historical parser reason,
 identity, manifest-bound source bytes and resource contents match. Component
