@@ -35,7 +35,7 @@ const metrics: Record<Metric, MetricInfo> = {
     min: 0, max: 100, physiological: true, priority: sleepDevices,
   },
   rhr_bpm: {
-    label: "RHR", unit: "bpm", filter: "Heart", direction: -1, trendStep: 1, record: true,
+    label: "RHR", unit: "bpm", filter: "Heart", direction: -1, trendStep: 2, record: true,
     min: 30, max: 120, physiological: true, priority: sleepDevices,
   },
   hrv_ms: {
