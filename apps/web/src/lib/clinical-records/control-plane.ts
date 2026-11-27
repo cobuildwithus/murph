@@ -128,7 +128,10 @@ async function startAuthorization(input: {
     providerDirectoryEntryId: provider.id,
   });
   const publicBaseUrl = resolveHostedPublicBaseUrl() ?? input.origin;
-  const redirectUri = new URL("/api/clinical-records/oauth/callback", `${publicBaseUrl}/`).toString();
+  // The public sandbox registration predates the hosted callback path.
+  const callbackPath = provider.id === "epic-sandbox" && publicBaseUrl === "https://127.0.0.1:8443"
+    ? "/callback" : "/api/clinical-records/oauth/callback";
+  const redirectUri = new URL(callbackPath, `${publicBaseUrl}/`).toString();
   const configuration = provider.sourceSystem === "cerner-fhir"
     ? resolveOracleStart(provider, auth.member.id, redirectUri) : resolveEpicClient(provider);
   const { clientId } = configuration.auth;

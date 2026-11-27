@@ -29,6 +29,7 @@ import { GET as callback } from "../app/api/clinical-records/oauth/callback/rout
 import { POST as complete } from "../app/api/clinical-records/companion/complete/route";
 import { POST as remove } from "../app/api/clinical-records/companion/sources/[id]/remove/route";
 import { checkpointClinicalMailboxItem } from "@murphai/assistant-runtime/clinical-connector-testkit";
+import { importGeneration as qualifyGeneration } from "../scripts/epic-proof/generation";
 import { createClinicalRuntimeRoutePort } from "./support/clinical-runtime-routes";
 import { createClinicalVendorSimulator, epicWireProfile } from "./support/clinical-vendor-simulator";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
@@ -62,7 +63,7 @@ function lab(id: string, value: number, updated: Date, status = "final", patient
     valueQuantity: { value, unit: "%", code: "%", system: "http://unitsofmeasure.org" } };
 }
 
-async function connect() {
+async function connect(grants = epicWireProfile.grants) {
   localRosterCrypto();
   // Internal fetch-page validates the real encrypted continuation envelope.
   setHostedSecureBoxStringTestCodecForTests(null);
@@ -91,7 +92,7 @@ async function connect() {
   const auth = await requireHostedMemberAuthFromBearerToken(post("/", {}));
   for (const processor of clinicalProcessors) await setClinicalProcessorApproval(auth, processor, processor.version, true);
   vi.spyOn(signal, "signalHostedMailboxAppendRuntime").mockResolvedValue({ signalAccepted: true, workflowId: "fixture" });
-  const vendor = createClinicalVendorSimulator(epicWireProfile, sandboxPublicKey);
+  const vendor = createClinicalVendorSimulator({ ...epicWireProfile, grants }, sandboxPublicKey);
   vi.stubGlobal("fetch", vendor.fetchImpl);
   const started = await start(post("/api/clinical-records/companion/start", { providerId: "epic-sandbox", appReturn: "ios" }));
   expect(started.status).toBe(200);
@@ -130,7 +131,7 @@ async function importGeneration(f: Connected, workspace: Awaited<ReturnType<type
   if (lease.status === "blocked" || !lease.owner.attemptId) throw new Error("Expected a runtime lease.");
   const runtimeAuthority = { attemptId: lease.owner.attemptId, generation: String(lease.owner.generation), workspaceVersion: String(current.version) };
   const restored = await createWorkspace();
-  const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority);
+  const port = await createClinicalRuntimeRoutePort(memberId, runtimeAuthority, vi.stubEnv);
   await checkpointClinicalMailboxItem({ ...workspace, item, wake, port, publishAndRestore: async snapshotRef => {
     const before = await prisma.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: run.id } });
     expect(before.completedAt).toBeNull();
@@ -185,6 +186,21 @@ function barrier() {
 }
 
 describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
+  it("checks restored vault decisions in the credential-isolated qualification runtime", async () => {
+    const f = await connect([...epicWireProfile.grants, "patient/DocumentReference.s", "patient/Binary.r"]);
+    const updated = new Date().toISOString();
+    f.vendor.setRead({ resourceType: "Binary", id: "sample-note", contentType: "text/plain",
+      data: Buffer.from("Synthetic document for parser verification.").toString("base64") });
+    f.vendor.setSearchResults("DocumentReference", "clinical-note", [{ resourceType: "DocumentReference", id: "sample-parent",
+      status: "current", date: updated, meta: { lastUpdated: updated }, subject: { reference: "Patient/" + epicWireProfile.patient },
+      content: [{ attachment: { contentType: "text/plain", url: "Binary/sample-note" } }] }]);
+    f.vendor.setSearchResults("Observation", "laboratory", [lab("test-result", 5, new Date())]);
+    const { workspaceRoot } = await createWorkspace();
+    const result = await qualifyGeneration(f.memberId, workspaceRoot, 1);
+    expect(result.counts).toMatchObject({ Patient: 1, Observation: 1, DocumentReference: 1, downloaded: 1, parsed: 1, queued: 1 });
+    expect((await f.projection())?.state).toBe("ready");
+  }, 120_000);
+
   it("publishes full, identical and corrected generations before removing local access", async () => {
     const f = await connect();
     const now = new Date();
