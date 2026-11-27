@@ -29,6 +29,7 @@ const families = [
   "pressure_components",
   "workouts",
   "meals",
+  "habits",
 ] as const;
 
 function demographics(member: Observation) {
@@ -67,7 +68,8 @@ export function adapt(member: Observation, history: Observation = {}): MemberEvi
     if (isObject(r.food_week)) weeks.push({ ...r, ...r.food_week });
     for (const [alias, key] of Object.entries(config.checkin_aliases)) if (alias in r) r[key] ??= r[alias];
     const drinks = number(r.alcohol_drinks_week);
-    if (between(drinks, 0, config.max_drinks_week)) r.alcohol_g_day ??= (drinks * config.ethanol_g_per_drink) / 7;
+    if (between(drinks, 0, config.max_drinks_week))
+      r.alcohol_g_day ??= (drinks * config.ethanol_g_per_drink) / 7;
     if (typeof r.health === "string") r.health = lookup(config.health, r.health.toLowerCase());
     if (Array.isArray(r.conditions) && r.conditions.some((k) => config.serious_conditions.includes(k)))
       r.serious_disease ??= true;
@@ -80,6 +82,12 @@ export function adapt(member: Observation, history: Observation = {}): MemberEvi
       result.fitness_tests!.push({ ...s, ...task, verified: "self", protocol: s.protocol });
   for (const r of result.fitness_tests!)
     if (typeof r.test === "string") context(r, config.combine.includes(r.test) ? r.test : "combine_task");
+  result.food_weeks = weeks;
+  result.sleep_sessions = result.sleep_sessions!.map((r) => ({
+    ...r,
+    source: r.source ?? r.provider,
+    series_method: r.series_method ?? (typeof r.method === "string" ? r.method.toLowerCase() : undefined),
+  }));
   projectFood(weeks, result, context);
   for (const r of result.workouts!) context(r, "workout_minutes");
   return result;
@@ -146,7 +154,7 @@ function watchEstimate(key: string, source: string, method: string) {
 }
 function wearableMetric(key: string, source: string, method: string) {
   return (
-    ["total-sleep-minutes", "steps", "resting-heart-rate"].includes(key) &&
+    ["total-sleep-minutes", "steps", "resting-heart-rate", "hrv-rmssd"].includes(key) &&
     source &&
     !config.excluded_providers.includes(source) &&
     !config.excluded_methods.includes(method)
@@ -193,8 +201,9 @@ function project(result: MemberEvidence, context: Context, r: Observation, key: 
   }
   if (wearableMetric(key, source, method)) {
     const row = { ...r, source, series_method: method };
-    if (key === "total-sleep-minutes") result.sleep_sessions!.push({ ...row, asleep_min: value, type: "main" });
-    else result.daily!.push({ ...row, [key === "steps" ? "steps" : "rhr"]: value, projected: true });
+    if (key === "total-sleep-minutes")
+      result.sleep_sessions!.push({ ...row, asleep_min: value, type: "main" });
+    else result.daily!.push({ ...row, [lookup(config.daily, key)!]: value, projected: true });
   } else context(r, key);
 }
 
@@ -223,6 +232,7 @@ function projectFood(weeks: Observation[], result: MemberEvidence, context: Cont
     )
       continue;
     for (const [key, grams] of Object.entries(config.portion_grams))
-      if (valid(key)) result.checkins!.push({ ...r, food_proxy: key, food_value: (grams * Number(a[key])) / 7 });
+      if (valid(key))
+        result.checkins!.push({ ...r, food_proxy: key, food_value: (grams * Number(a[key])) / 7 });
   }
 }

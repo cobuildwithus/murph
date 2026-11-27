@@ -4,7 +4,7 @@ Last verified: 2026-11-25
 
 ## Private You reads
 
-Native You routes require game authentication, feed and You allowlists, and current browser-vault authority before and after serving a view, including cached reads. A sealed cache binds the entire derived view set to its member and revision. Lab responses use catalog names and normalized numeric observations. Route errors omit replica contents. The public profile has a separate audience boundary.
+Native You routes require game authentication, feed and You allowlists, and current browser-vault authority before and after serving a view, including cached reads. A sealed cache binds the entire derived view set to its member and revision. Lab responses use catalog names and normalized numeric observations. Route errors omit replica contents. The public profile has a separate audience boundary. Habit evidence reads only credited, photo-backed posts from the member’s own joined games. The scorer receives the matched habit and dates. Task text, other players’ entries and media stay outside its inputs.
 
 ## Private weekly game images
 

@@ -1208,6 +1208,7 @@ test("private core keeps selected sleep instants across DST and only projects re
     ] }),
   });
   const decoded = parseBrowserVaultReplica(replica);
+  assert.deepEqual(decoded.sleepTimingProviders, {"2028-11-05":"oura"});
   assert.deepEqual(decoded.sleepTiming, [{ date: "2028-11-05", startAt, endAt, timeZone }]);
   assert.deepEqual(decoded.entities.find(row => row.id === "asmt_check")?.attributes.checkIn, checkIn);
   assert.equal(decoded.entities.find(row => row.id === "asmt_other")?.attributes.responses, undefined);

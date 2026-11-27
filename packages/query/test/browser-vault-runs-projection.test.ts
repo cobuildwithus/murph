@@ -125,6 +125,7 @@ test("completed session minutes survive the core round trip and mirrored imports
     sourceInstanceId: "watch-copy", sourceProviderSlug: "garmin", sourceType: "watch", version: 1 } };
   const replica = await runDays([
     watchRun("evt_course", date, "10", 6.8), watchRun("evt_import", date, "10", 6.8, "junction", duplicate),
+    loggedRun("evt_bike", "2026-11-12", 2, "cycling"),
     loggedRun("evt_indoor", "2026-11-13", 1.9, "walk"),
     { ...session("evt_completed", "2026-11-16", { interventionType: "dry-sauna", sessionStatus: "completed",
       durationMinutes: 13 }), kind: "intervention_session" },
@@ -133,7 +134,10 @@ test("completed session minutes survive the core round trip and mirrored imports
     session("evt_live", date, { activityType: "run", durationMinutes: 12, workout: { sourceApp: "murph-live" } }),
   ]);
   const { core } = await splitBrowserVaultReplica(replica);
-  assert.deepEqual(assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(core)).activitySessions, [
+  const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(core));
+  assert.deepEqual(decoded.detailedWorkouts, [{ date: "2026-11-12", minutes: 30, type: "cycling" }]);
+  assert.deepEqual(decoded.activitySessions, [
+    { date: "2026-11-12", minutes: 30, type: "other" },
     { date: "2026-11-13", minutes: 30, type: "walk" }, { date, minutes: 40, type: "run" },
     { date: "2026-11-16", minutes: 13, type: "sauna" },
   ]);

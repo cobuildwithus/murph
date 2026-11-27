@@ -80,12 +80,22 @@ function addPulse(r: BrowserVaultReplica) {
   r.metricRows.push(
     ...r.metricRows
       .filter((row) => row.metricKey === "total-sleep-minutes")
-      .map((row) => ({ ...row, id: "pulse-" + row.id, metricKey: "resting-heart-rate", value: 62, unit: "bpm" })),
+      .map((row) => ({
+        ...row,
+        id: "pulse-" + row.id,
+        metricKey: "resting-heart-rate",
+        value: 62,
+        unit: "bpm",
+      })),
   );
   return r;
 }
 function read(r: BrowserVaultReplica) {
-  return projectYouInputs(createBrowserVaultQueryClient(structuredClone(r)), clock, new Date("2030-01-01T00:00:00Z"));
+  return projectYouInputs(
+    createBrowserVaultQueryClient(structuredClone(r)),
+    clock,
+    new Date("2030-01-01T00:00:00Z"),
+  );
 }
 describe("dated private replica projections", () => {
   it("uses the vault date, year precision, qualified sleep and the evidence horizon", () => {
@@ -103,6 +113,19 @@ describe("dated private replica projections", () => {
     expect(views.age?.history.every((p) => p.date >= offset(today, -14) && p.date <= today)).toBe(true);
     expect(views.week?.days).toHaveLength(7);
     expect(views.you.factors.map((f) => f.key).sort()).toEqual(["restingHeartRate", "sleepTime"]);
+  });
+  it("qualifies sleep timing by the selected provider and preserves offsets across a clock change", () => {
+    const r = replica();
+    const date = "2031-11-02";
+    r.sleepTiming = [
+      { date, timeZone: "America/New_York", startAt: "2031-11-02T03:23:47Z", endAt: "2031-11-02T12:03:18Z" },
+    ];
+    const windows = () => read(r).evidence.sleep_sessions?.filter((night) => night.start_at);
+    expect(windows()).toEqual([]);
+    r.sleepTimingProviders = { [date]: "oura" };
+    expect(windows()).toEqual([
+      expect.objectContaining({ source: "oura", start_offset_min: -240, end_offset_min: -300 }),
+    ]);
   });
   it("converts a normalized lab unit to the research scale and publishes only derived marker fields", () => {
     const r = replica();
@@ -139,82 +162,171 @@ describe("dated private replica projections", () => {
     const prior = r.labResultRows[0];
     prior.date = offset(today, -4);
     prior.normalizedValue = 17;
-    const project = () => buildViews(projectYouInputs(createBrowserVaultQueryClient(structuredClone(r)), clock, clock));
+    const project = () =>
+      buildViews(projectYouInputs(createBrowserVaultQueryClient(structuredClone(r)), clock, clock));
     const baseline = project();
     expect(baseline.you.state).toBe("ready");
     expect(baseline.markers[prior.metricKey!]).toMatchObject({ value: 17 });
     expect(baseline.blood.all.total).toBe(1);
-    expect(baseline.age?.history.map(p => p.date)).toEqual([today]);
-    const repeat = { ...prior, id: "repeat", drawId: "new-draw", date: today, parentResultStatus: "pending" as const };
+    expect(baseline.age?.history.map((p) => p.date)).toEqual([today]);
+    const repeat = {
+      ...prior,
+      id: "repeat",
+      drawId: "new-draw",
+      date: today,
+      parentResultStatus: "pending" as const,
+    };
     r.labResultRows.push(repeat);
     expect(project()).toEqual(baseline);
     r.labResultRows[1] = { ...repeat, parentResultStatus: "abnormal" };
     expect(project().markers[prior.metricKey!].history).toHaveLength(2);
     expect(project().you.age).toEqual(baseline.you.age);
   });
-  it.each(["short_sleep", "tentative"])("counts only completed nights when a seventh is %s", flag => {
+  it("derives insulin resistance only from explicitly fasting results with the same draw", () => {
+    const r = replica();
+    const base = {
+      rowSchema: "murph.browser-vault.lab-result-row.v1" as const,
+      date: today,
+      observedAt: today + "T12:00:00Z",
+      biomarkerKey: null,
+      analyte: "Synthetic marker",
+      sourceLabel: null,
+      labName: null,
+      textValue: null,
+      comparator: null,
+      drawId: "same",
+      fastingStatus: "fasting" as const,
+      parentResultStatus: "normal" as const,
+      specimenKind: null,
+      referenceRange: null,
+      flag: null,
+    };
+    r.labResultRows = [
+      {
+        ...base,
+        id: "test-glucose",
+        metricKey: "glucose",
+        value: 100,
+        unit: "mg/dL",
+        normalizedValue: 100,
+        normalizedUnit: "mg/dL",
+      },
+      {
+        ...base,
+        id: "test-insulin",
+        metricKey: "insulin",
+        value: 12,
+        unit: "mIU/L",
+        normalizedValue: 12,
+        normalizedUnit: "mIU/L",
+      },
+    ];
+    const factors = () => score(read(r).evidence, today)?.rows;
+    expect(factors()?.homa_ir?.value).toBeCloseTo(1200 / 405);
+    r.labResultRows[1].drawId = "different";
+    expect(factors()?.homa_ir).toBeUndefined();
+    r.labResultRows[1].drawId = "same";
+    r.labResultRows[0].fastingStatus = "unknown";
+    expect(factors()?.homa_ir).toBeUndefined();
+  });
+  it.each(["short_sleep", "tentative"])("counts only completed nights when a third is %s", (flag) => {
     const r = addPulse(replica());
-    r.metricRows = r.metricRows.filter(row => row.metricKey !== "total-sleep-minutes" || row.date >= offset(today, -6));
-    const seventh = r.metricRows.find(row => row.date === today && row.metricKey === "total-sleep-minutes")!;
-    seventh.context = flag === "tentative" ? { sleepState: flag } : { sleepType: flag };
-    expect(read(r).evidence.sleep_sessions).toHaveLength(6);
-    expect(buildViews(read(r)).you.factors.map(f => f.key)).not.toContain("sleepTime");
-    seventh.context = { sleepType: "main_sleep" };
-    expect(buildViews(read(r)).you.factors.map(f => f.key)).toContain("sleepTime");
+    r.metricRows = r.metricRows.filter(
+      (row) => row.metricKey !== "total-sleep-minutes" || row.date >= offset(today, -2),
+    );
+    const third = r.metricRows.find((row) => row.date === today && row.metricKey === "total-sleep-minutes")!;
+    third.context = flag === "tentative" ? { sleepState: flag } : { sleepType: flag };
+    expect(read(r).evidence.sleep_sessions).toHaveLength(2);
+    expect(buildViews(read(r)).you.factors.map((f) => f.key)).not.toContain("sleepTime");
+    third.context = { sleepType: "main_sleep" };
+    expect(buildViews(read(r)).you.factors.map((f) => f.key)).toContain("sleepTime");
   });
   it("keeps late pulse backfill out of the saved-days comparison", () => {
     const r = addPulse(replica());
-    const base = r.metricRows.find(row => row.metricKey === "resting-heart-rate")!;
+    const base = r.metricRows.find((row) => row.metricKey === "resting-heart-rate")!;
     const pulse = Array.from({ length: 60 }, (_, i) => ({
-      ...base, date: offset(today, -i), id: "pulse-day-" + i, value: i < 7 ? 52 : 73,
+      ...base,
+      date: offset(today, -i),
+      id: "pulse-day-" + i,
+      value: i < 7 ? 52 : 73,
     }));
-    r.metricRows = [...r.metricRows.filter(row => row.metricKey !== base.metricKey), ...pulse];
+    r.metricRows = [...r.metricRows.filter((row) => row.metricKey !== base.metricKey), ...pulse];
     expect(buildViews(read(r)).week!.saved).toBeGreaterThan(0);
     for (const row of pulse.slice(0, 7)) row.context = { recordedAt: clock.toISOString() };
     const projected = read(r);
-    expect(projected.evidence.daily?.find(row => row.date === offset(today, -3))?.reported_at).toBe(today);
+    expect(projected.evidence.daily?.find((row) => row.date === offset(today, -3))?.reported_at).toBe(today);
     expect(buildViews(projected).week!.saved).toBe(0);
   });
   it("uses only complete workout windows across weekly publications", () => {
-    const snapshots = [0, 7].map(delta => {
+    const snapshots = [0, 7].map((delta) => {
       const date = offset(today, delta);
       const at = new Date(date + "T16:00:00Z");
       const r = replica();
       r.generatedAt = at.toISOString();
       const persistent = offset(today, -130);
-      r.labResultRows = [{ rowSchema: "murph.browser-vault.lab-result-row.v1", id: "prior-draw",
-        date: persistent, observedAt: persistent + "T12:00:00Z", metricKey: "red-cell-distribution-width",
-        biomarkerKey: null, analyte: "RDW", sourceLabel: null, labName: null, textValue: null,
-        comparator: null, drawId: "prior", fastingStatus: "unknown", parentResultStatus: "unknown",
-        specimenKind: null, referenceRange: null, flag: "normal", unit: "%", value: 14, normalizedValue: 14, normalizedUnit: "percent" }];
+      r.labResultRows = [
+        {
+          rowSchema: "murph.browser-vault.lab-result-row.v1",
+          id: "prior-draw",
+          date: persistent,
+          observedAt: persistent + "T12:00:00Z",
+          metricKey: "red-cell-distribution-width",
+          biomarkerKey: null,
+          analyte: "RDW",
+          sourceLabel: null,
+          labName: null,
+          textValue: null,
+          comparator: null,
+          drawId: "prior",
+          fastingStatus: "unknown",
+          parentResultStatus: "unknown",
+          specimenKind: null,
+          referenceRange: null,
+          flag: "normal",
+          unit: "%",
+          value: 14,
+          normalizedValue: 14,
+          normalizedUnit: "percent",
+        },
+      ];
       r.metricRows = [];
-      r.activitySessions = Array.from({ length: 63 }, (_, i) => ({ type: "run", minutes: 24, date: offset(date, -i) }));
-      const result = buildViews(projectYouInputs(createBrowserVaultQueryClient(r), at, new Date("2030-01-01")));
+      r.activitySessions = Array.from({ length: 63 }, (_, i) => ({
+        type: "run",
+        minutes: 24,
+        date: offset(date, -i),
+      }));
+      const result = buildViews(
+        projectYouInputs(createBrowserVaultQueryClient(r), at, new Date("2030-01-01")),
+      );
       expect(result.age?.history[0].date).toBe(offset(date, -35));
-      expect(result.you.factors.some(f => f.key === "running")).toBe(true);
+      expect(result.you.factors.some((f) => f.key === "aerobic")).toBe(true);
       return result.age!.history;
     });
-    for (const point of snapshots[1].filter(p => p.date <= today)) {
-      expect(snapshots[0].find(p => p.date === point.date)).toEqual(point);
+    for (const point of snapshots[1].filter((p) => p.date <= today)) {
+      expect(snapshots[0].find((p) => p.date === point.date)).toEqual(point);
     }
   });
-  it.each([[39, null], [40, "Average"], [59, "Average"], [60, "Top 40%"]] as const)(
-    "bands favorable percentiles at %i", (percentile, label) => {
-      expect(favorableRank("grip", percentile)?.label ?? null).toBe(label);
-      expect(favorableRank("ldl_c", 100 - percentile)?.label ?? null).toBe(label);
-      expect(favorableRank("sleep", percentile)).toBeNull();
-    });
+  it.each([
+    [39, null],
+    [40, "Average"],
+    [59, "Average"],
+    [60, "Top 40%"],
+  ] as const)("bands favorable percentiles at %i", (percentile, label) => {
+    expect(favorableRank("grip", percentile)?.label ?? null).toBe(label);
+    expect(favorableRank("ldl_c", 100 - percentile)?.label ?? null).toBe(label);
+    expect(favorableRank("sleep", percentile)).toBeNull();
+  });
   it("distinguishes a failed read, stale measurements and a readable empty panel", () => {
     const r = replica();
     expect(() => read({ ...r, demographics: undefined })).toThrow();
     const missing = read({ ...r, metricRows: [] });
     expect(buildViews(missing).you).toMatchObject({ state: "building" });
     expect(buildViews(missing).you.age).toBeUndefined();
-    const old = read({ ...r, metricRows: r.metricRows.slice(5) });
+    const old = read({ ...r, metricRows: r.metricRows.slice(8) });
     expect(old.availability.sleep).toBe("stale");
     expect(buildViews(old).you).toMatchObject({ state: "building", building: { have: 0 } });
-    const partial = read({ ...r, metricRows: r.metricRows.slice(0, 4) });
-    expect(buildViews(partial).you.building?.have).toBe(4);
+    const partial = read({ ...r, metricRows: r.metricRows.slice(0, 2) });
+    expect(buildViews(partial).you.building?.have).toBe(2);
   });
   it("withholds a precise headline for unsupported profiles", () => {
     const input = read(replica());
@@ -270,10 +382,28 @@ describe("canonical check-in and sleep timing projections", () => {
     const r = addPulse(replica());
     Object.assign(r, { generation: 21, sleepTiming: [] });
     const put = (key: string, value: string | number, date: string, hour: number) => {
-      r.entities.push({ id: "fixture-" + r.entities.length, family: "assessment", kind: "assessment",
-        recordClass: "ledger", date, occurredAt: date + "T" + hour + ":00:00Z", links: [], tags: [],
-        lookupIds: [], status: null, bodyPreview: null, experimentSlug: null, stream: null, title: null,
-        attributes: { checkIn: { date, response: { instrumentVersion: 1, instrument: "you-answer", answer: { key, value } } } } });
+      r.entities.push({
+        id: "fixture-" + r.entities.length,
+        family: "assessment",
+        kind: "assessment",
+        recordClass: "ledger",
+        date,
+        occurredAt: date + "T" + hour + ":00:00Z",
+        links: [],
+        tags: [],
+        lookupIds: [],
+        status: null,
+        bodyPreview: null,
+        experimentSlug: null,
+        stream: null,
+        title: null,
+        attributes: {
+          checkIn: {
+            date,
+            response: { instrumentVersion: 1, instrument: "you-answer", answer: { key, value } },
+          },
+        },
+      });
     };
     r.demographics = { ...r.demographics!, biologicalSex: "female" };
     expect(buildViews(read(r)).you).toMatchObject({ state: "ready", questions: [{ key: "ageEligibility" }] });
@@ -298,16 +428,35 @@ describe("canonical check-in and sleep timing projections", () => {
     put("diabetes", "unsure", today, 14);
     const input = read(r);
     expect(score(input.evidence, yesterday)?.rows).toMatchObject({
-      diabetes: { value: 1 }, disease: { value: 0 }, health: { value: 2 }, alcohol: { value: 7 },
+      diabetes: { value: 1 },
+      disease: { value: 0 },
+      health: { value: 2 },
+      alcohol: { value: 7 },
     });
     expect(score(input.evidence, today)?.rows.diabetes).toBeUndefined();
     expect(nextQuestion(input, {})).toEqual([]);
     const corrected = structuredClone(r);
-    const source = corrected.entities.find(e => e.attributes.checkIn && e.id === "fixture-0")!;
-    for (const [status, date] of [["current", yesterday], ["former", today]]) {
-      corrected.entities.push({ ...source, id: "smoking-" + status, date, occurredAt: date + "T16:00:00Z",
-        attributes: { checkIn: { date, response: { instrumentVersion: 1, instrument: "you-answer",
-          answer: { key: "smoking", value: status } } } } });
+    const source = corrected.entities.find((e) => e.attributes.checkIn && e.id === "fixture-0")!;
+    for (const [status, date] of [
+      ["current", yesterday],
+      ["former", today],
+    ]) {
+      corrected.entities.push({
+        ...source,
+        id: "smoking-" + status,
+        date,
+        occurredAt: date + "T16:00:00Z",
+        attributes: {
+          checkIn: {
+            date,
+            response: {
+              instrumentVersion: 1,
+              instrument: "you-answer",
+              answer: { key: "smoking", value: status },
+            },
+          },
+        },
+      });
     }
     expect(score(read(corrected).evidence, today)?.rows.smoking).not.toHaveProperty("quit");
   });
@@ -315,37 +464,74 @@ describe("canonical check-in and sleep timing projections", () => {
     const person = addPulse(replica());
     person.demographics = { ...person.demographics!, birthYear: 1967 };
     const input = read(person);
-    const session = { instrument: "combine", instrumentVersion: 1, date: today,
-      tests: [{ key: "sitting_rising", value: 4 }] } as const;
+    const session = {
+      instrument: "combine",
+      instrumentVersion: 1,
+      date: today,
+      tests: [{ key: "sitting_rising", value: 4 }],
+    } as const;
     const submitted = { ...session, tests: [...session.tests] };
     const years = combineAgeEffect(input, "session", submitted);
     expect(years).toEqual(expect.any(Number));
     expect(years).not.toBe(0);
-    input.evidence.fitness_tests = [{ session_id: "session", date: today, test: "sit_and_rise",
-      verified: "self", unit: "points", value: 4, protocol: "murph-combine-v1" }];
+    input.evidence.fitness_tests = [
+      {
+        session_id: "session",
+        date: today,
+        test: "sit_and_rise",
+        verified: "self",
+        unit: "points",
+        value: 4,
+        protocol: "murph-combine-v1",
+      },
+    ];
     expect(combineAgeEffect(input, "session", submitted)).toBe(years);
-    expect(combineAgeEffect(input, "session", { ...submitted, tests: [{ key: "pullups_max", value: 6 }] })).toBeUndefined();
+    expect(
+      combineAgeEffect(input, "session", { ...submitted, tests: [{ key: "pullups_max", value: 6 }] }),
+    ).toBeUndefined();
   });
-  it.each(["home", "clinic"] as const)("scores a canonical %s series after publication", async setting => {
+  it.each(["home", "clinic"] as const)("scores a canonical %s series after publication", async (setting) => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "synthetic-pressure-"));
     try {
       await initializeVault({ vaultRoot, timezone: "America/New_York", createdAt: clock.toISOString() });
       const times = setting === "home" ? ["07:00", "07:03", "19:00", "19:03"] : ["09:10", "09:12"];
       const days = setting === "home" ? 3 : 2;
-      for (let i = 0; i < days; i++) for (const time of times) {
-        const takenAt = new Date(offset(today, -i) + "T" + time + ":00-05:00").toISOString();
-        expect(await saveMemberCheckIn(vaultRoot, { kind: "measurement.blood-pressure", version: 1,
-          setting, systolic: 128, diastolic: 78, takenAt }, { actionId: randomUUID(), requestedAt: takenAt })).toBe("applied");
-      }
+      for (let i = 0; i < days; i++)
+        for (const time of times) {
+          const takenAt = new Date(offset(today, -i) + "T" + time + ":00-05:00").toISOString();
+          expect(
+            await saveMemberCheckIn(
+              vaultRoot,
+              {
+                kind: "measurement.blood-pressure",
+                version: 1,
+                setting,
+                systolic: 128,
+                diastolic: 78,
+                takenAt,
+              },
+              { actionId: randomUUID(), requestedAt: takenAt },
+            ),
+          ).toBe("applied");
+        }
       const vault = await readVault(vaultRoot);
-      const publication = await createBrowserVaultReplica({ vault, generatedAt: clock.toISOString(),
-        sourceBundleHash: "b".repeat(64), demographics: replica().demographics,
-        metricPoints: buildMetricProjection(vault).metricPoints });
+      const publication = await createBrowserVaultReplica({
+        vault,
+        generatedAt: clock.toISOString(),
+        sourceBundleHash: "b".repeat(64),
+        demographics: replica().demographics,
+        metricPoints: buildMetricProjection(vault).metricPoints,
+      });
       const input = read(publication);
       expect(input.evidence.bp).toHaveLength(days * times.length);
-      expect(score(input.evidence, today)?.rows.sbp).toMatchObject({ value: 128, quality: setting === "home" ? 0.75 : 1 });
-      expect(buildViews(input).you.factors.map(f => f.key)).toContain("bloodPressure");
-    } finally { await rm(vaultRoot, { recursive: true, force: true }); }
+      expect(score(input.evidence, today)?.rows.sbp).toMatchObject({
+        value: 128,
+        quality: setting === "home" ? 0.75 : 1,
+      });
+      expect(buildViews(input).you.factors.map((f) => f.key)).toContain("bloodPressure");
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
   });
   it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
     const r = addPulse(replica());
@@ -363,7 +549,11 @@ describe("canonical check-in and sleep timing projections", () => {
     const input = read(r);
     expect(input.evidence.bp).toMatchObject([{ systolic: 124, diastolic: 76, validated: undefined }]);
     const bundle = buildViews(input);
-    expect(bundle.age?.events).toContainEqual({ date: today, kind: "bloodPressure", label: "Blood pressure" });
+    expect(bundle.age?.events).toContainEqual({
+      date: today,
+      kind: "bloodPressure",
+      label: "Blood pressure",
+    });
     expect(bundle.you.factors.some((f) => f.key === "bloodPressure")).toBe(false);
     const split = r.metricRows.map((row) =>
       row.id === lower.id ? { ...row, recordIds: ["other-synthetic-event"] } : row,
@@ -387,11 +577,15 @@ describe("canonical check-in and sleep timing projections", () => {
     expect(buildViews(input).you.thisWeek).toContainEqual(
       expect.objectContaining({ factor: "bedtime", value: 1 }),
     );
-    expect(input.availability.sleep_regularity).not.toBe("counted");
+    expect(buildViews(input).you.factors.some((f) => f.key === "bedtime")).toBe(false);
+    Object.assign(r, { sleepTimingProviders: Object.fromEntries(timing.map((t) => [t.date, "garmin"])) });
+    expect(buildViews(read(r)).you.factors).toContainEqual(
+      expect.objectContaining({ key: "bedtime", label: "Bedtime regularity" }),
+    );
   });
 });
 
-describe("round 3 private views", () => {
+describe("round 4 private views", () => {
   it("marks a reference week partial even with daily phone samples", () => {
     const r = replica();
     r.metricRows = r.metricRows.map((row) => ({
@@ -456,7 +650,14 @@ describe("round 3 private views", () => {
     const r = replica();
     r.metricRows = r.metricRows.flatMap((row, i) => [
       { ...row, context: { measurementMethodKey: i % 2 ? "method-a" : "method-b" } },
-      { ...row, id: "relay-" + i, sourceLabel: "Apple Health", metricKey: "steps", unit: "count", value: 12000 },
+      {
+        ...row,
+        id: "relay-" + i,
+        sourceLabel: "Apple Health",
+        metricKey: "steps",
+        unit: "count",
+        value: 12000,
+      },
       {
         ...row,
         id: "manual-" + i,
@@ -522,13 +723,15 @@ describe("round 3 private views", () => {
       "station-fixture",
     );
     const result = buildViews(read(r));
-    expect(result.you.factors.map((f) => f.key)).toEqual(
-      expect.arrayContaining(["fruit", "fish", "vegetables", "sitRise"]),
-    );
+    expect(result.you.factors.map((f) => f.key)).toEqual(expect.arrayContaining(["foodPattern", "sitRise"]));
     expect(result.you.factors.map((f) => f.key)).not.toContain("grip");
     expect(result.you.factors.map((f) => f.key)).not.toContain("balance");
     expect(result.age?.events).toContainEqual(
-      expect.objectContaining({ kind: "evidenceChange", date: today, evidenceChangeYears: expect.any(Number) }),
+      expect.objectContaining({
+        kind: "evidenceChange",
+        date: today,
+        evidenceChangeYears: expect.any(Number),
+      }),
     );
     expect(JSON.stringify(result)).not.toContain("research_risk");
   });

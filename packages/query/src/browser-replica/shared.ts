@@ -1,4 +1,4 @@
-import type { ProjectedActivitySession } from "./activity-sessions.ts";
+import type { DetailedWorkout, ProjectedActivitySession } from "./activity-session-types.ts";
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type {
   BloodTestFastingStatus,
@@ -274,8 +274,11 @@ export interface BrowserVaultReplica {
   meals?: CompanionMealsProjection;
   /** Absent on replicas built before run days shipped: unknown, never zero. */
   runs?: CompanionRunsProjection;
-  /** Completed sessions after reconciling mirrored workout sources. Absent in older replicas. */
+  /** Provider of the selected main sleep window, keyed by local wake date. */
+  sleepTimingProviders?: Record<string, string>;
   sleepTiming?: { date: string; startAt: string; endAt: string; timeZone: string }[];
+  /** Recognized types for sessions represented as other in the legacy projection. */
+  detailedWorkouts?: DetailedWorkout[];
   activitySessions?: ProjectedActivitySession[];
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
@@ -303,7 +306,9 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "sleepTimingProviders"
   | "sleepTiming"
+  | "detailedWorkouts"
   | "activitySessions"
   | "runs"
   | "schema"

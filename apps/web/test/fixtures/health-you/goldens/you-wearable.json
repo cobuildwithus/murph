@@ -1,5 +1,5 @@
 {
-  "version": "r3.0",
+  "version": "r4.0",
   "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
@@ -7,15 +7,15 @@
     "firstName": "Example"
   },
   "age": {
-    "value": 51.1,
+    "value": 50.7,
     "real": 51.2,
-    "gap": -0.1,
-    "low": 34,
-    "high": 68.3
+    "gap": -0.5,
+    "low": 33.5,
+    "high": 67.9
   },
   "week": {
-    "daysAged": 8.29,
-    "saved": -1.29,
+    "daysAged": 9.3,
+    "saved": -2.3,
     "partial": false,
     "basis": "observed"
   },
@@ -33,23 +33,23 @@
   ],
   "factors": [
     {
-      "key": "restingHeartRate",
-      "label": "Resting heart rate",
-      "icon": "restingHeartRate",
-      "group": "habits",
-      "value": "73",
-      "unit": "bpm",
+      "key": "bedtime",
+      "label": "Bedtime regularity",
+      "icon": "bedtime",
+      "group": "sleep",
+      "value": "0.4",
+      "unit": "h SD",
       "target": {
-        "text": "Comparison value 62 bpm"
+        "text": "Comparison value 0.8 h SD"
       },
-      "years": 0.1,
-      "yearsText": "+0.1",
+      "years": -0.6,
+      "yearsText": "−0.6",
       "featured": true,
-      "whatItIs": "This is the heart rate recorded while resting.",
-      "whatLowersIt": "Compare resting readings from the same device across several days.",
+      "whatItIs": "How much your sleep start time varies across nights.",
+      "whatLowersIt": "Recording weekday and weekend nights gives a fuller picture.",
       "rank": null,
       "grade": null,
-      "detail": "none",
+      "detail": "sleep",
       "state": "counted"
     },
     {
@@ -60,16 +60,36 @@
       "value": "6h 37m",
       "unit": null,
       "target": {
-        "text": "Comparison value 7"
+        "text": "Comparison value 7.5"
       },
-      "years": -0.1,
-      "yearsText": "−0.1",
+      "years": 0.1,
+      "yearsText": "+0.1",
       "featured": true,
       "whatItIs": "This is the time spent asleep.",
       "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
       "rank": null,
       "grade": null,
       "detail": "sleep",
+      "state": "counted"
+    },
+    {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "group": "habits",
+      "value": "73",
+      "unit": "bpm",
+      "target": {
+        "text": "Comparison value 62 bpm"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": true,
+      "whatItIs": "This is the heart rate recorded while resting.",
+      "whatLowersIt": "Compare resting readings from the same device across several days.",
+      "rank": null,
+      "grade": null,
+      "detail": "none",
       "state": "counted"
     },
     {
@@ -80,10 +100,10 @@
       "value": "7,760",
       "unit": "steps/day",
       "target": {
-        "text": "Comparison value 14,995.3 steps/day"
+        "text": "Comparison value 11,000 steps/day"
       },
-      "years": -0.1,
-      "yearsText": "−0.1",
+      "years": 0,
+      "yearsText": "+0.0",
       "featured": true,
       "whatItIs": "This counts the steps the device recorded each day.",
       "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",

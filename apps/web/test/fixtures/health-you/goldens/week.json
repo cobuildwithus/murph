@@ -1,41 +1,41 @@
 {
-  "daysAged": 8.45,
-  "saved": -1.45,
+  "daysAged": 10.5,
+  "saved": -3.5,
   "days": [
     {
       "date": "2025-03-23",
       "label": "Sun",
-      "aged": 1.36
+      "aged": 1.73
     },
     {
       "date": "2025-03-24",
       "label": "Mon",
-      "aged": 1.36
+      "aged": 1.73
     },
     {
       "date": "2025-03-25",
       "label": "Tue",
-      "aged": 1.35
+      "aged": 1.73
     },
     {
       "date": "2025-03-26",
       "label": "Wed",
-      "aged": 1.35
+      "aged": 1.73
     },
     {
       "date": "2025-03-27",
       "label": "Thu",
-      "aged": 1.01
+      "aged": 1.22
     },
     {
       "date": "2025-03-28",
       "label": "Fri",
-      "aged": 1.01
+      "aged": 1.22
     },
     {
       "date": "2025-03-29",
       "label": "Sat",
-      "aged": 1.01
+      "aged": 1.15
     }
   ],
   "helped": [],
@@ -44,19 +44,31 @@
       "key": "restingHeartRate",
       "label": "Resting heart rate",
       "icon": "restingHeartRate",
-      "days": 0.76
+      "days": 0.59
+    },
+    {
+      "key": "bedtime",
+      "label": "Bedtime regularity",
+      "icon": "bedtime",
+      "days": 0.99
     },
     {
       "key": "sleepTime",
       "label": "Sleep duration",
       "icon": "sleepTime",
-      "days": 0.34
+      "days": 0.65
     },
     {
       "key": "steps",
       "label": "Daily steps",
       "icon": "steps",
-      "days": 0.36
+      "days": 0.69
+    },
+    {
+      "key": "mealFibre",
+      "label": "Fibre from meals",
+      "icon": "mealFibre",
+      "days": 0.58
     }
   ]
 }

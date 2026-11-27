@@ -1,4 +1,4 @@
-"""Import only frozen aggregate parameters and invented parity cases from the R3 release."""
+"""Import only frozen aggregate parameters and invented parity cases from the R4 release."""
 import json
 import sys
 from pathlib import Path
@@ -22,7 +22,11 @@ for key, row in age.CAT["factors"].items():
 model = {k: age.M[k] for k in ("version", "knots", "prob", "ref", "grip_ref")}
 model.update(coef=age.M["fit"]["coef"], strength=age.M["fit"]["strength"],
              fields={k: dict(zip(("group","unit","min","max","low","high","transform"), v)) for k,v in age.FIELDS.items()},
-             hip=age.HIP, policy=age.POLICY, ordinal=age.ORDINAL, catalog=catalog,
+             hip=age.HIP, daily=age.D, unlock=age.UNLOCK, clinical_fit=age.CF,
+             clinical_ranks=age.CLINICAL_RANKS,
+             lipids={k: dict(zip(("min","max","target","step","ratio","quality"), v)) for k,v in age.clinical.CFG["lipid"].items()},
+             candidates={k: dict(zip(("group","unit","min","max","target","step","sign"), v)) for k,v in age.clinical.CFG["candidates"].items()},
+             caps=age.clinical.CFG["caps"], lpa_molar=age.clinical.CFG["lpa_molar"], policy=age.POLICY, ordinal=age.ORDINAL, catalog=catalog,
              overlap=age.CAT["overlap"], optional=sorted(age.OPTIONAL), labs=age.LAB,
              feeds=age.CONFIG, extra_context=age.EXTRA_CONTEXT, bridges=age.BRIDGES,
              completion=age.COMPLETION, display=age.FACTOR_TEXT, extra_ranks=age.EXTRA_RANKS,
@@ -30,5 +34,5 @@ model.update(coef=age.M["fit"]["coef"], strength=age.M["fit"]["strength"],
 model["policy"]["protocol"]["member_entered_home_cuff_assumed_validated"] = True
 write(web / "src/lib/health-you/engine/model.json", model)
 cases = [row for path in sorted((study / "golden").glob("*.json")) for row in json.loads(path.read_text())]
-assert len({row["case"] for row in cases}) == len(cases) == 120
+assert len({row["case"] for row in cases}) == len(cases) == 168
 write(web / "test/fixtures/health-you/reference.json", cases)
