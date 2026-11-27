@@ -8586,7 +8586,8 @@ async function replayOrCompleteEmptyClinicalImport(input: ImportEventDecisionBat
 
 // An undated typed fact's occurredAt is documentation time. FHIR source notes
 // also print their fallback time in a generated paragraph before the provider
-// JSON (in the first section for long notes). Preserve the provider text.
+// JSON (in the first section for long notes), and an undated document receipt
+// names it in one line. Preserve the provider text.
 function clinicalReceiptContentKey(record: EventRecord): string {
   if (record.kind !== "note") return eventImportSourceSemanticContentKey(record);
   if (record.noteType === "clinical_fact" && record.clinicalFact?.clinicalDate === null) {
@@ -8595,6 +8596,8 @@ function clinicalReceiptContentKey(record: EventRecord): string {
   if (!record.externalRef?.version || Date.parse(record.occurredAt) !== Date.parse(record.externalRef.version)) {
     return eventImportSourceSemanticContentKey(record);
   }
+  const receipt = withoutRetrievalReceiptLine(record);
+  if (receipt) return eventImportSourceSemanticContentKey(receipt);
   const text = record.sections?.[0]?.text ?? record.note;
   const observation = record.noteType === "fhir_observation_source";
   const history = record.noteType === `fhir_${record.externalRef.resourceType.replaceAll("-", "")}`
@@ -8606,6 +8609,13 @@ function clinicalReceiptContentKey(record: EventRecord): string {
   const normalized = text.replace(paragraph, "\n\n");
   const body = record.sections ? { sections: [{ ...record.sections[0]!, text: normalized }, ...record.sections.slice(1)] } : { note: normalized };
   return eventImportSourceSemanticContentKey({ ...record, ...body, occurredAt: "" });
+}
+
+// An undated document receipt names the retrieval it was read in.
+function withoutRetrievalReceiptLine(record: EventRecord): EventRecord | null {
+  const line = `\nRecord timestamp describes the retrieval revision: ${record.occurredAt}.`;
+  return record.kind === "note" && record.noteType === "clinical-document-receipt" && record.note?.includes(line)
+    ? { ...record, note: record.note.replace(line, ""), occurredAt: "" } : null;
 }
 
 function clinicalChangeForAppend({ record, previous }: EventImportAppendEntry, invalidated?: ReadonlyMap<string, number>): ClinicalRecordChange | null {

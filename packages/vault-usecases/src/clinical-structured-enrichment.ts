@@ -12,6 +12,8 @@ import { compareIsoTimestampsAscending, isWritableIsoDateTime } from "@murphai/c
 import * as z from "@murphai/contracts/zod-runtime";
 import { findEventByExternalRef, resolveVaultPathOnDisk } from "@murphai/core";
 
+import { clinicalSourceDigest, createClinicalSourceDigests } from "./clinical-source-resources.ts";
+
 export const clinicalStructuredSourceSchema = z.object({
   rawRef: clinicalRawPathSchema,
   resourceType: z.string().min(1).max(100),
@@ -70,8 +72,8 @@ export async function attestClinicalStructuredSource(input: {
   const ref = externalRefForFhir({ sourceSystem: input.manifest.sourceSystem,
     fhirBaseUrlHash: input.manifest.fhirBaseUrlHash, patientIdHash: input.manifest.patientIdHash,
     resourceType: source.resourceType, resourceId: source.resourceId, version: revision });
-  const active = await readActiveClinicalSourceRevision(input.vaultRoot, source, ref,
-    classifyClinicalFhirSourceRevision(lastUpdated).source === "batch");
+  const active = await readActiveClinicalSourceRevision({ vaultRoot: input.vaultRoot, manifest: input.manifest, source, ref, resource,
+    retrievalDated: classifyClinicalFhirSourceRevision(lastUpdated).source === "batch" });
   const parentRevision = active ?? revision;
   return { documentPath: resolved.absolutePath, extractedText: clinicalFhirResourceExtractionText(resource),
     source: { rawRef: source.rawRef, sha256: files[0]!.sha256, byteLength: bytes.length, mediaType: "application/fhir+json", resource: source },
@@ -82,22 +84,27 @@ export async function attestClinicalStructuredSource(input: {
 
 /**
  * The parent revision derived facts bind to, or undefined when the source note
- * is withdrawn or was replaced by a newer revision. Core keeps the active
- * revision when a later retrieval reads the same content, so a source dated by
- * its retrieval binds to that earlier active revision.
+ * is withdrawn or was replaced by a newer revision. A later retrieval that reads
+ * the same source leaves the earlier revision active, so a retrieval-dated
+ * source binds to it only when the parent's stored resource equals this one.
  */
-async function readActiveClinicalSourceRevision(vaultRoot: string, source: ClinicalStructuredSource,
-  ref: ReturnType<typeof externalRefForFhir>, retrievalDated: boolean): Promise<string | undefined> {
+async function readActiveClinicalSourceRevision(input: { vaultRoot: string; manifest: ClinicalRawManifest;
+  source: ClinicalStructuredSource; ref: ReturnType<typeof externalRefForFhir>; resource: Record<string, unknown>; retrievalDated: boolean;
+}): Promise<string | undefined> {
+  const { source, ref } = input;
   const { version: _version, ...identity } = ref;
-  const parent = await findEventByExternalRef({ vaultRoot, ...identity, facet: null, includeDeleted: true });
+  const parent = await findEventByExternalRef({ vaultRoot: input.vaultRoot, ...identity, facet: null, includeDeleted: true });
   const active = parent?.externalRef?.version;
+  const label = `${source.resourceType}/${source.resourceId}`;
+  const evidence = parent?.evidence?.find((item) => item.sourceLabel === label);
   const current = parent?.kind === "note" && parent.noteType?.startsWith("fhir_") === true
     && !["DocumentReference", "DiagnosticReport"].includes(source.resourceType)
-    && parent.lifecycle?.state !== "deleted"
-    && parent.evidence?.some((evidence) => evidence.sourceLabel === `${source.resourceType}/${source.resourceId}`) === true;
+    && parent.lifecycle?.state !== "deleted" && evidence !== undefined;
   if (!current || !active) return undefined;
   if (active === ref.version) return active;
-  return retrievalDated && isWritableIsoDateTime(active) && compareIsoTimestampsAscending(active, ref.version) < 0 ? active : undefined;
+  const earlier = input.retrievalDated && isWritableIsoDateTime(active) && compareIsoTimestampsAscending(active, ref.version) < 0;
+  return earlier && await createClinicalSourceDigests(input.vaultRoot, input.manifest)(evidence) === clinicalSourceDigest(input.resource)
+    ? active : undefined;
 }
 
 function clinicalDate(resource: Record<string, unknown>): string | undefined {

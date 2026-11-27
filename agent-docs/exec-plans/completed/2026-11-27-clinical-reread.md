@@ -41,9 +41,11 @@ Updated: 2026-11-27
 1. Risk: an unchanged reread no longer advances the stored revision, so a
    delayed retrieval dated between the active revision and that reread looks
    newer than the active revision.
-   Mitigation: each connection imports retrievals in generation order, so this
-   needs out-of-order imports; the next read restores current content. A strong
-   fence would need persisted retrieval order, which is new state.
+   Mitigation (fix round): connections are unique per directory entry, not per
+   FHIR server, and `fetchedAt` is run creation time, so this can happen. The
+   skipped read's enrichment job is held by the source-equality gate below, and
+   the next read of the resource restores current content. A strict fence would
+   need persisted retrieval order, which is new state.
 2. Risk: a document's attachment bytes change while its FHIR JSON does not, and
    facts from the old bytes survive.
    Mitigation: parents with downloaded attachments keep a revision per
@@ -51,7 +53,13 @@ Updated: 2026-11-27
 3. Risk: structured enrichment for a later retrieval no longer finds a parent
    at that retrieval's revision and holds the source.
    Mitigation: a retrieval-dated source binds to the earlier active revision
-   and reuses its existing fact.
+   only when that revision's stored resource equals the job's, and then reuses
+   its existing fact; otherwise it holds.
+4. Risk (review finding): the content key misses source changes outside the
+   canonical note (narrative, `doNotPerform`, `isSubpotent`), so an obsolete
+   derived fact stays active.
+   Mitigation: the snapshot import keeps the mark only when every cited source
+   resource, excluding `meta`, equals the active record's stored resource.
 
 ## Tasks
 
@@ -72,7 +80,14 @@ Updated: 2026-11-27
   revision came from the retrieval, since that is what it knows.
 - Content equality uses `clinicalReceiptContentKey`, the key that already
   decides whether a revision is a member-visible change, so "no revision" and
-  "no change" agree.
+  "no change" agree. After review, the skip also requires source equality,
+  proven in `confirmUnchangedClinicalSources` from the manifest-attested raw
+  pages both records cite.
+- History notes add `doNotPerform`, `isSubpotent` and `subpotentReason`. An
+  unchanged source at an unchanged revision keeps its stored note instead of
+  conflicting, so the new fields appear at the next source revision.
+- A partial run that changed nothing reports `ready_partial` unless the runtime
+  stopped its import (`snapshot_rejected`, `cursor_cycle`, `invalid_fhir_page`).
 - A changed attachment behind unchanged document metadata is a content change:
   the parent takes the new revision so derived facts match the bytes.
 - Existing redundant revisions are left alone. Readers collapse a spine to its

@@ -1466,8 +1466,9 @@ export const eventImportUpsertDecisionSchema = z
     expectedLatest: expectedLatestEventSchema.optional(),
     sourceParent: versionedExternalRefSchema.optional(),
     invalidateFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
-    // The version is when the source was read, not when it changed: a later
-    // read that leaves the active record unchanged writes nothing.
+    // The version is when the source was read, not when it changed. Set it only
+    // when the source equals the active record's source: a later read whose
+    // clinical content also matches writes nothing.
     retrievalRevision: z.literal(true).optional(),
   })
   .strict();

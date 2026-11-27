@@ -800,10 +800,11 @@ function retractionDecision(
 }
 
 // A revision taken from the retrieval says when Murph read the resource, not
-// that it changed, so core keeps the active record when a later read matches
-// it. Downloaded attachment bytes are not part of that record: their parents
-// take a revision per retrieval so derived document facts stay bound to the
-// bytes they came from.
+// that it changed. The snapshot import keeps this mark only after proving the
+// resource equals the active record's stored source, and core then keeps that
+// record when the content matches too. Downloaded attachment bytes are not part
+// of the resource: their parents take a revision per retrieval so derived
+// document facts stay bound to the bytes they came from.
 function retrievalRevision(context: FhirResourceContext): { retrievalRevision?: true } {
   const { resource } = context;
   const downloaded = context.documents.metadata.some((attachment) => attachment.status === "downloaded"

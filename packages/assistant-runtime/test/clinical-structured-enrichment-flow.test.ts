@@ -23,7 +23,7 @@ const output: ClinicalDocumentExtractionOutput = { status: "complete", records: 
     title: "Resting heart rate", measurements: [{ metric: "resting-heart-rate", value: 73, unit: "bpm" }] },
 }] };
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
-async function fixture(resources: unknown[] = [source(), deterministic], resourceType: "Observation" | "Condition" = "Observation") {
+async function fixture(resources: unknown[] = [source(), deterministic], resourceType: ClinicalFhirSnapshotImportInput["retrievalSlices"][number]["resourceType"] = "Observation") {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-structured-flow-")); roots.push(vaultRoot);
   await initializeVault({ vaultRoot, timezone: "UTC", createdAt: revision });
   const input: ClinicalFhirSnapshotImportInput = { vaultRoot, sourceSystem: "epic-fhir", connectionId: "synthetic-connection",
@@ -373,4 +373,138 @@ it("exhausts a structured resource's retries by resource before its cursor sourc
   // The next resource keeps normal retry handling.
   expect(await deferClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId: f.jobId, reason: "Synthetic retry.",
     nextAttemptAt: "2026-07-01T12:02:00.000Z", cursorRef: next!.cursorRef })).toMatchObject({ nextAttemptAt: "2026-07-01T12:02:00.000Z" });
+});
+
+// Later retrievals of one synthetic page, imported and enqueued like the runtime does.
+async function retrieve(f: Awaited<ReturnType<typeof fixture>>, fetchedAt: string, resources: unknown[]) {
+  const imported = await importClinicalFhirSnapshot({ ...f.input, retrievalJobId: `read-${fetchedAt.slice(0, 10)}`, fetchedAt,
+    pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: resources.map((resource) => ({ resource })) }) }] });
+  const { jobId } = await enqueueClinicalEnrichment({ vaultRoot: f.vaultRoot, manifestPath: imported.manifestPath,
+    manifestSha256: imported.manifestSha256, structuredSources: imported.structuredEnrichmentSources });
+  return { imported, jobId };
+}
+async function enrich(f: Awaited<ReturnType<typeof fixture>>, jobId: string) {
+  await runCursorClinicalEnrichment(f.runtime);
+  const status = await readClinicalEnrichmentStatus({ vaultRoot: f.vaultRoot, jobId });
+  const applied = status.status === "prepared" ? await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, jobId }) : null;
+  await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId });
+  return applied;
+}
+const activeFacts = async (vaultRoot: string) => (await listCanonicalEntities(vaultRoot, { family: "event", kinds: ["note", "measurement"], limit: 50 }))
+  .flatMap((row) => row.attributes.clinicalFact ? [String((row.attributes.clinicalFact as { statement: string }).statement)]
+    : row.kind === "measurement" ? (row.attributes.measurements as { value: number }[]).map(({ value }) => `${value}`) : []);
+async function ledgerRows(vaultRoot: string) {
+  const ledger = path.join(vaultRoot, "ledger/events");
+  const shards = (await readdir(ledger, { recursive: true })).filter((file) => file.endsWith(".jsonl"));
+  return (await Promise.all(shards.map(async (file) => (await readFile(path.join(ledger, file), "utf8")).trimEnd().split("\n")))).flat().length;
+}
+const order = (fields: Record<string, unknown>) => ({ resourceType: "MedicationRequest", id: "synthetic-order", status: "active", intent: "order",
+  subject: source().subject, authoredOn: date, medicationCodeableConcept: { text: "Synthetic tablet" }, ...fields });
+const doseFact = (dose: string): ClinicalDocumentExtractionOutput => ({ status: "complete", records: [{ dateBasis: "unknown", excerpt: `Take ${dose}`,
+  payload: { kind: "note", title: "Medication dose", occurredAt: date, note: `Take ${dose}`, clinicalFact: {
+    category: "medication-order", label: "Dose", subject: "member", clinicalDate: null, statement: `Take ${dose}`, value: dose,
+  } } }] });
+
+it("supersedes a dose corrected only in the narrative and keeps only the corrected fact", async () => {
+  const narrative = (dose: string) => order({ text: { status: "generated", div: `<div>Take ${dose}</div>` } });
+  const f = await fixture([narrative("10 mg daily")], "MedicationRequest");
+  f.executeExtraction.mockImplementation(async (request) => {
+    await request.beforeProviderEntry?.();
+    return doseFact(request.extractedText?.includes("Take 1 mg daily") ? "1 mg daily" : "10 mg daily");
+  });
+  await runCursorClinicalEnrichment(f.runtime);
+  const statePath = path.join(f.vaultRoot, ".runtime/operations/clinical-records/enrichment", `${f.jobId}.json`);
+  const original = await readFile(statePath, "utf8");
+  expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
+  await readNextClinicalEnrichment(f);
+  expect(await activeFacts(f.vaultRoot)).toEqual(["Take 10 mg daily"]);
+
+  // The canonical note does not show the narrative, so only source equality notices the change.
+  const corrected = await retrieve(f, "2026-07-02T12:00:00.000Z", [narrative("1 mg daily")]);
+  expect(corrected.imported.canonical).toMatchObject({ createdCount: 0, supersededCount: 1, retractedCount: 1 });
+  expect(await activeFacts(f.vaultRoot)).toEqual([]);
+  expect(await enrich(f, corrected.jobId)).toMatchObject({ counts: { created: 1, held: 0 } });
+  expect(await activeFacts(f.vaultRoot)).toEqual(["Take 1 mg daily"]);
+
+  const rows = await ledgerRows(f.vaultRoot);
+  const identical = await retrieve(f, "2026-07-03T12:00:00.000Z", [narrative("1 mg daily")]);
+  expect(identical.imported.canonical).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
+  expect(await enrich(f, identical.jobId)).toMatchObject({ counts: { created: 0, existing: 1, held: 0 } });
+  expect(await ledgerRows(f.vaultRoot)).toBe(rows);
+
+  // The original source's frozen proposal cannot restore the obsolete dose.
+  await writeFile(statePath, original);
+  expect(await applyClinicalEnrichmentProposals(f)).toMatchObject({ canonical: null });
+  expect(await activeFacts(f.vaultRoot)).toEqual(["Take 1 mg daily"]);
+  expect(f.executeExtraction).toHaveBeenCalledTimes(2);
+});
+
+it("supersedes a medication order that becomes do-not-perform and shows it in the note", async () => {
+  const text = { status: "generated", div: "<div>Take 5 mg daily</div>" };
+  const f = await fixture([order({ text })], "MedicationRequest");
+  f.executeExtraction.mockResolvedValue(doseFact("5 mg daily"));
+  await runCursorClinicalEnrichment(f.runtime);
+  expect((await applyClinicalEnrichmentProposals(f)).counts.created).toBe(1);
+  await readNextClinicalEnrichment(f);
+  const flipped = await retrieve(f, "2026-07-02T12:00:00.000Z", [order({ text, doNotPerform: true })]);
+  expect(flipped.imported.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+  const notes = await listCanonicalEntities(f.vaultRoot, { family: "event", kinds: ["note"], limit: 20 });
+  expect(notes.find((row) => row.attributes.noteType === "fhir_medicationrequest")?.attributes.note).toContain('"doNotPerform": true');
+  expect(await activeFacts(f.vaultRoot)).toEqual([]);
+});
+
+it("holds a skipped reread's enrichment once a late, older retrieval changes the parent", async () => {
+  const lab = (bpm: number) => ({ ...source("late-lab"), meta: undefined, valueString: `Resting heart rate ${bpm} bpm.` });
+  const f = await fixture([lab(73)]);
+  f.executeExtraction.mockImplementation(async (request) => {
+    await request.beforeProviderEntry?.();
+    const bpm = request.extractedText?.includes("75 bpm") ? 75 : 73;
+    return { status: "complete", records: [{ dateBasis: "source", excerpt: `Resting heart rate ${bpm} bpm.`, payload: { kind: "measurement",
+      occurredAt: date, note: undefined, title: "Resting heart rate", measurements: [{ metric: "resting-heart-rate", value: bpm, unit: "bpm" }] } }] };
+  });
+  expect(await enrich(f, f.jobId)).toMatchObject({ counts: { created: 1 } });
+  const reread = await retrieve(f, "2026-07-03T12:00:00.000Z", [lab(73)]);
+  expect(reread.imported.canonical).toMatchObject({ supersededCount: 0, retractedCount: 0 });
+  // Another connection's run created on day 2 finishes after the day-3 reread.
+  const late = await retrieve(f, "2026-07-02T12:00:00.000Z", [lab(75)]);
+  expect(late.imported.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+  expect(await enrich(f, reread.jobId)).toBeNull();
+  expect(await readClinicalEnrichmentStatus({ vaultRoot: f.vaultRoot, jobId: reread.jobId }))
+    .toMatchObject({ status: "blocked", holdReasons: ["Clinical structured source parent is withdrawn, changed or unavailable."] });
+  expect(await enrich(f, late.jobId)).toMatchObject({ counts: { created: 1 } });
+  expect(await activeFacts(f.vaultRoot)).toEqual(["75"]);
+  // The next read of the current source restores it and its fact.
+  const restored = await retrieve(f, "2026-07-04T12:00:00.000Z", [lab(73)]);
+  expect(restored.imported.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+  expect(await enrich(f, restored.jobId)).toMatchObject({ counts: { created: 1 } });
+  expect(await activeFacts(f.vaultRoot)).toEqual(["73"]);
+});
+
+it("writes nothing for an unchanged undated document receipt", async () => {
+  const receipt = { resourceType: "DocumentReference", id: "undated-scan", status: "current", subject: source().subject,
+    type: { text: "Synthetic scan" }, content: [{ attachment: { contentType: "application/pdf", url: "Binary/undated-scan" } }] };
+  const f = await fixture([receipt], "DocumentReference");
+  expect(f.result.canonical.createdCount).toBe(1);
+  const rows = await ledgerRows(f.vaultRoot);
+  const reread = await retrieve(f, "2026-07-02T12:00:00.000Z", [receipt]);
+  expect(reread.imported.canonical).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
+  expect(await ledgerRows(f.vaultRoot)).toBe(rows);
+});
+
+it("keeps a same-revision note whose source is unchanged when only its rendering changed", async () => {
+  const dated = order({ meta: { lastUpdated: revision }, doNotPerform: true });
+  const f = await fixture([dated], "MedicationRequest");
+  // Rewrite the stored note as the earlier mapping rendered it, without doNotPerform.
+  const ledger = path.join(f.vaultRoot, "ledger/events");
+  const [shard] = (await readdir(ledger, { recursive: true })).filter((file) => file.endsWith(".jsonl")
+    && file.includes(date.slice(0, 4)));
+  const shardPath = path.join(ledger, shard!);
+  const stored = (await readFile(shardPath, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line) as { note?: string });
+  expect(stored).toHaveLength(1);
+  stored[0]!.note = stored[0]!.note!.replace('  "doNotPerform": true,\n', "");
+  await writeFile(shardPath, `${stored.map((row) => JSON.stringify(row)).join("\n")}\n`);
+  const replay = await retrieve(f, "2026-07-02T12:00:00.000Z", [dated]);
+  expect(replay.imported.canonical).toMatchObject({ applied: false, createdCount: 0, supersededCount: 0, skippedExistingCount: 1 });
+  // A different source at the same revision is still a conflict.
+  await expect(retrieve(f, "2026-07-03T12:00:00.000Z", [{ ...dated, status: "stopped" }])).rejects.toThrow();
 });
