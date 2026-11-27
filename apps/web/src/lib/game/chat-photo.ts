@@ -7,7 +7,7 @@ import type { HostedGamePhoto, HostedGameToolResponse } from "@murphai/hosted-ex
 import { getPrisma } from "../prisma";
 import { mediaKeyPrefixFor } from "./access";
 import { putGameMedia } from "./media";
-import { readGamePhotoPostingStateTx, runGameCommand } from "./service";
+import { readGamePhotoPostingStateTx, runGameCommand, swapGameChatPhoto } from "./service";
 import { addDays, dayStartInstant } from "./time";
 import { downloadGameChatPhoto, gamePhotoAttachment, GameChatPhotoImportError } from "./chat-photo-media";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
@@ -37,29 +37,29 @@ export async function handleGameChatPhoto(input: Input): Promise<PhotoResult> {
     logHostedOnboardingWarning("game.chat.photo-import", { reason: error instanceof GameChatPhotoImportError ? error.reason : "store" });
     return rejected("photo_unavailable_resend_or_use_app");
   }
-  const entryId = photoEntryId(input, prepared.offer);
-  const result = await runGameCommand({
-    actorMemberId: input.actor, multiplayer: input.multiplayer, chatContainerMemberId: input.containerMemberId, chatPlayerMemberIds: input.playerMemberIds,
-    command: { type: "post", gameId: input.photo.gameId, entryId, kind: "photo", mediaKeys: [stored] },
-    postGuard: { dayIndex: prepared.offer.dayIndex, replaceEntryId: input.photo.replaceEntryId ?? null },
-    beforeMutationTx: async (tx) => {
-      await requireSourceActor(input, tx, prepared.offer.sourceMessageRef);
-      if (Date.parse(prepared.offer.expiresAt) <= Date.now()) throw new Error("Game photo request expired.");
-      if (!input.photo.sourceMessageRef) {
-        const profile = await tx.gameProfile.findUnique({ where: { memberId: input.actor }, select: { chatPhotoOffer: true } });
-        const pending = offerSchema.safeParse(profile?.chatPhotoOffer);
-        if (!pending.success || !sameOfferSource(pending.data, prepared.offer) || pending.data.resolutionMessageRef !== null && pending.data.resolutionMessageRef !== input.messageRef) throw new Error("Game photo selection changed.");
-      }
-      await tx.gameProfile.update({ where: { memberId: input.actor }, data: {
-        chatPhotoIntroducedAt: new Date(), chatPhotoOffer: { ...prepared.offer, resolutionMessageRef: input.messageRef },
-      } });
-    },
-  });
+  const beforeMutationTx = async (tx: Prisma.TransactionClient) => {
+    await requireSourceActor(input, tx, prepared.offer.sourceMessageRef);
+    if (Date.parse(prepared.offer.expiresAt) <= Date.now()) throw new Error("Game photo request expired.");
+    if (!input.photo.sourceMessageRef) {
+      const profile = await tx.gameProfile.findUnique({ where: { memberId: input.actor }, select: { chatPhotoOffer: true } });
+      const pending = offerSchema.safeParse(profile?.chatPhotoOffer);
+      if (!pending.success || !sameOfferSource(pending.data, prepared.offer) || pending.data.resolutionMessageRef !== null && pending.data.resolutionMessageRef !== input.messageRef) throw new Error("Game photo selection changed.");
+    }
+    await tx.gameProfile.update({ where: { memberId: input.actor }, data: {
+      chatPhotoIntroducedAt: new Date(), chatPhotoOffer: { ...prepared.offer, resolutionMessageRef: input.messageRef },
+    } });
+  };
+  const chat = { actorMemberId: input.actor, multiplayer: input.multiplayer, chatContainerMemberId: input.containerMemberId, chatPlayerMemberIds: input.playerMemberIds, beforeMutationTx };
+  const result = prepared.swapEntryId
+    ? await swapGameChatPhoto({ ...chat, gameId: input.photo.gameId, entryId: prepared.swapEntryId, dayIndex: prepared.offer.dayIndex, mediaKey: stored })
+    : await runGameCommand({ ...chat,
+      command: { type: "post", gameId: input.photo.gameId, entryId: photoEntryId(input, prepared.offer), kind: "photo", mediaKeys: [stored] },
+      postGuard: { dayIndex: prepared.offer.dayIndex, replaceEntryId: input.photo.replaceEntryId ?? null } });
   if (!result.ok) return rejected(`${result.error.code}: ${result.error.message}`.slice(0, 128));
   return { status: "ok", photoOutcome: "saved" };
 }
 
-async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promise<{ result: PhotoResult } | { offer: Offer; source: NonNullable<ReturnType<typeof gamePhotoAttachment>> }> {
+async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promise<{ result: PhotoResult } | { offer: Offer; source: NonNullable<ReturnType<typeof gamePhotoAttachment>>; swapEntryId?: string }> {
   await requireSourceActor(input, tx, input.messageRef);
   await tx.$queryRaw`SELECT member_id FROM game_profile WHERE member_id = ${input.actor} FOR UPDATE`;
   const profile = await tx.gameProfile.findUnique({ where: { memberId: input.actor }, select: { chatPhotoIntroducedAt: true, chatPhotoOffer: true } });
@@ -78,6 +78,9 @@ async function preparePhotoTx(input: Input, tx: Prisma.TransactionClient): Promi
   const selection = await selectGamePhoto(input, tx, profile.chatPhotoOffer, posting);
   if ("result" in selection) return selection;
   if (input.photo.operation === "offer") return recordPhotoIntroduction(input, tx, profile.chatPhotoIntroducedAt, posting, selection.offer);
+  // Fixing a photo Murph saved here swaps it in place and keeps the player's retake.
+  const replacing = input.photo.replaceEntryId;
+  if (replacing && replacing === posting.currentEntryId && replacing.startsWith(CHAT_PHOTO_ENTRY_PREFIX)) return { ...selection, swapEntryId: replacing };
   const entryId = photoEntryId(input, selection.offer);
   const already = await tx.gameEntry.findUnique({ where: { id: entryId }, select: { memberId: true, withdrawnAt: true, dayIndex: true } });
   if (already?.memberId === input.actor) return { result: already.withdrawnAt === null && already.dayIndex === posting.dayIndex ? { status: "ok", photoOutcome: "saved" } : rejected("photo_already_used_choose_another") };
@@ -122,8 +125,9 @@ async function recordPhotoIntroduction(input: Input, tx: Prisma.TransactionClien
   return { result: { status: "ok", photoOutcome: "offer" } };
 }
 
+const CHAT_PHOTO_ENTRY_PREFIX = "gce_";
 function photoEntryId(input: Input, offer: Offer): string {
-  return `gce_${createHash("sha256").update(JSON.stringify([input.photo.gameId, input.actor, offer.sourceMessageRef, offer.attachmentOrdinal])).digest("hex").slice(0, 48)}`;
+  return `${CHAT_PHOTO_ENTRY_PREFIX}${createHash("sha256").update(JSON.stringify([input.photo.gameId, input.actor, offer.sourceMessageRef, offer.attachmentOrdinal])).digest("hex").slice(0, 48)}`;
 }
 
 async function requireSourceActor(input: Input, tx: Prisma.TransactionClient, messageRef: string) {

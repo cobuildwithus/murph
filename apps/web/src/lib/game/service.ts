@@ -670,7 +670,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "invite_dismissed" | "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "photo_swapped" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -1612,6 +1612,39 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   });
   sendGamePostNotificationAfterResponse(notification);
   return gameId;
+}
+
+/**
+ * Murph fixes a photo it saved from chat by swapping the upload on that same
+ * entry: same day and attempt, so the player keeps their retake. Replies to the
+ * old photo go with it, and nobody else can read the old upload.
+ */
+export async function swapGameChatPhoto(input: {
+  actorMemberId: string; multiplayer?: boolean; chatContainerMemberId: string; chatPlayerMemberIds: readonly string[];
+  gameId: string; entryId: string; dayIndex: number; mediaKey: string;
+  beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
+}): Promise<GameCommandResult> {
+  const actor = input.actorMemberId;
+  try {
+    await requireUploadedMedia(actor, { type: "post", gameId: input.gameId, entryId: input.entryId, kind: "photo", mediaKeys: [input.mediaKey] });
+    // The same chat authority as a chat post (runGameCommand).
+    const chatAudience = input.multiplayer ? await readGameChatAudience(input.chatContainerMemberId) : undefined;
+    const context = { actor, chatAudience, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx };
+    await runLocked(input.gameId, context, async ({ loaded, now, tx }) => {
+      const player = playerFor(loaded.state, actor);
+      const live = loaded.state.game.status === "live" && player && !player.leftAt && !isGameDecided(loaded.state, now);
+      const entry = live && dayIndexAt(player, now) === input.dayIndex ? liveEntry(loaded.state.entries, actor, input.dayIndex) : null;
+      if (entry?.id !== input.entryId || entry.kind !== "photo") reject("INVALID_REQUEST", "The current check-in changed. Read the game before confirming a replacement.");
+      if (entry.mediaKeys.length === 1 && entry.mediaKeys[0] === input.mediaKey) return [];
+      await deleteEntryReplyTx(tx, entry.id);
+      await tx.gameEntry.update({ where: { id: entry.id }, data: { mediaKeys: [input.mediaKey], blurHash: null } });
+      return [{ payload: { dayIndex: input.dayIndex, entryId: entry.id }, type: "photo_swapped" }];
+    });
+    return { game: null, ok: true };
+  } catch (error) {
+    if (error instanceof GameRuleError) return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
+    throw error;
+  }
 }
 
 /** The ordinary entry masks plus the reply-only, cross-game report mask. No content reads. */
