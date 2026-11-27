@@ -213,6 +213,10 @@ describe("clinical records hosted execution contracts", () => {
       ...descriptor,
       sourceSystem: "unsupported-fhir",
     })).toThrow();
+    // Oracle Health runs reuse this contract unchanged; no runtime release is needed.
+    expect(parseHostedClinicalRecordsReadRunResponse({ status: "ready", run: {
+      ...descriptor, sourceSystem: "cerner-fhir", providerDirectoryEntryId: "oracle-0123456789abcdef0123",
+    } })).toMatchObject({ status: "ready", run: { sourceSystem: "cerner-fhir" } });
   });
 
   it("parses query-aware descriptors and requires page requests to name the slice", () => {

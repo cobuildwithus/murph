@@ -28,6 +28,7 @@ import {
   takeClinicalRecordsConnectIntentFromBrowser,
 } from "@/src/lib/clinical-records/browser-connect-intent";
 import {
+  CLINICAL_PROVIDER_SEARCH_HEADERS,
   CLINICAL_RECORD_CONNECT_START_PATH,
   parseClinicalProviderSearchResponse,
   parseClinicalRecordConnectIntentResponse,
@@ -283,7 +284,7 @@ export function ProviderSearch({
     try {
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
-        headers: { "X-Clinical-Directory-Version": "3" },
+        headers: CLINICAL_PROVIDER_SEARCH_HEADERS,
         payload: { query: normalizedQuery, near },
         signal: searchAbort.signal,
         url: PROVIDER_SEARCH_PATH,

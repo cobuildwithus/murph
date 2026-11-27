@@ -147,7 +147,8 @@ describe("Clinical Records connect page", () => {
     expect(locate).toHaveBeenCalledOnce();
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledExactlyOnceWith({
       method: "POST", url: "/api/clinical-records/providers/search", signal: expect.any(AbortSignal),
-      headers: { "X-Clinical-Directory-Version": "3" }, payload: { query: "", near: { lat: 44.2, lon: -70.3 } },
+      headers: { "X-Clinical-Directory-Version": "3", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" },
+      payload: { query: "", near: { lat: 44.2, lon: -70.3 } },
     });
     expect(rendered.container.textContent).toContain("about 3 mi");
     const input = rendered.container.querySelector<HTMLInputElement>('input[name="provider-search"]')!;
@@ -441,7 +442,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
         method: "POST",
-        headers: { "X-Clinical-Directory-Version": "3" },
+        headers: { "X-Clinical-Directory-Version": "3", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" },
         payload: { query: "Piedmont" },
         signal: expect.any(AbortSignal),
         url: "/api/clinical-records/providers/search",

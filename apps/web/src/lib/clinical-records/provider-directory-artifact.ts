@@ -3,6 +3,8 @@
 // without installing dependencies (scripts/check-clinical-provider-directory.mjs).
 import type { ClinicalMatchedFacility } from "./client-contracts";
 import type { DirectoryPoint } from "./directory-geography";
+import type { EPIC_ACQUISITION_POLICY } from "./epic-policy";
+import type { ORACLE_ACQUISITION_POLICY, ORACLE_INTEGRATION_ID } from "./oracle-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA =
   "murph.clinical-provider-directory.v2" as const;
@@ -12,7 +14,7 @@ const MAX_DIRECTORY_LOCATIONS_PER_ENTRY = 10_000;
 const MAX_DIRECTORY_LOCATIONS_TOTAL = 250_000;
 const NO_STRINGS: readonly string[] = Object.freeze([]);
 
-export type ClinicalProviderSourceSystem = "epic-fhir";
+export type ClinicalProviderSourceSystem = (typeof EPIC_ACQUISITION_POLICY | typeof ORACLE_ACQUISITION_POLICY)["sourceSystem"];
 export type ClinicalProviderClientIdEnvironmentKey =
   | "EPIC_SMART_CLIENT_ID"
   | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
@@ -22,18 +24,28 @@ export interface ClinicalProviderFacility extends ClinicalMatchedFacility {
   coordinate?: DirectoryPoint | null;
 }
 
-export interface ClinicalProviderDirectoryEntry {
+interface ClinicalProviderDirectoryEntryBase {
   aliases: readonly string[];
   brandName: string;
-  clientIdEnvironmentKey: ClinicalProviderClientIdEnvironmentKey;
   facilities: readonly ClinicalProviderFacility[];
   fhirBaseUrl: string;
   id: string;
   policyId: string;
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
-  sourceSystem: ClinicalProviderSourceSystem;
 }
+
+export interface EpicProviderDirectoryEntry extends ClinicalProviderDirectoryEntryBase {
+  clientIdEnvironmentKey: ClinicalProviderClientIdEnvironmentKey;
+  sourceSystem: "epic-fhir";
+}
+
+export interface OracleProviderDirectoryEntry extends ClinicalProviderDirectoryEntryBase {
+  integration: typeof ORACLE_INTEGRATION_ID;
+  sourceSystem: "cerner-fhir";
+}
+
+export type ClinicalProviderDirectoryEntry = EpicProviderDirectoryEntry | OracleProviderDirectoryEntry;
 
 export interface ClinicalProviderDirectory {
   entries: readonly ClinicalProviderDirectoryEntry[];
@@ -43,11 +55,13 @@ export interface ClinicalProviderDirectory {
   version: string;
 }
 
-/** The single acquisition policy a directory must embed, and what each entry inherits from it. */
+/** A server-owned acquisition policy a directory may embed, and what each of its entries inherits. */
 export interface OwnedDirectoryPolicy {
   policy: { id: string; sourceSystem: ClinicalProviderSourceSystem };
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
+  /** The integration an Oracle entry must name; Epic entries name a client key instead. */
+  integration?: typeof ORACLE_INTEGRATION_ID;
 }
 
 export interface EndpointOriginChange {
@@ -58,18 +72,18 @@ export interface EndpointOriginChange {
 
 export function parseProviderDirectoryArtifact(
   value: unknown,
-  owned: OwnedDirectoryPolicy,
+  owned: readonly OwnedDirectoryPolicy[],
 ): ClinicalProviderDirectory {
   const record = requireRecord(value, "Clinical provider directory");
   if (record.schema !== CLINICAL_PROVIDER_DIRECTORY_SCHEMA) {
     throw new TypeError("Clinical provider directory schema is unsupported.");
   }
-  assertExactOwnedDirectoryPolicy(record.policies, owned.policy);
+  const policies = parseOwnedDirectoryPolicies(record.policies, owned);
   const rawEntries = requireArray(record.entries, "Clinical provider directory entries");
   if (rawEntries.length === 0 || rawEntries.length > MAX_DIRECTORY_ENTRIES) {
     throw new RangeError("Clinical provider directory entry count is out of bounds.");
   }
-  const entries = rawEntries.map((entry, index) => parseDirectoryEntry(entry, index, owned));
+  const entries = rawEntries.map((entry, index) => parseDirectoryEntry(entry, index, policies));
   const locationCount = entries.reduce((sum, entry) => sum + entry.facilities.length, 0);
   if (locationCount > MAX_DIRECTORY_LOCATIONS_TOTAL) {
     throw new RangeError("Clinical provider directory location count is out of bounds.");
@@ -121,20 +135,29 @@ export function endpointOriginChanges(
   });
 }
 
-function assertExactOwnedDirectoryPolicy(value: unknown, owned: unknown): void {
+/** Each listed policy must equal an owned definition; unlisted owned policies are simply unused. */
+function parseOwnedDirectoryPolicies(
+  value: unknown,
+  owned: readonly OwnedDirectoryPolicy[],
+): ReadonlyMap<string, OwnedDirectoryPolicy> {
   const rawPolicies = requireArray(value, "Clinical provider directory policies");
-  if (rawPolicies.length !== 1) {
-    throw new RangeError("Clinical provider directory must contain exactly one owned policy.");
+  if (rawPolicies.length === 0 || rawPolicies.length > owned.length) {
+    throw new RangeError("Clinical provider directory policy count is out of bounds.");
   }
-  if (JSON.stringify(rawPolicies[0]) !== JSON.stringify(owned)) {
-    throw new TypeError("Clinical provider directory policy must exactly match the owned Epic policy.");
+  const listed = new Map<string, OwnedDirectoryPolicy>();
+  for (const policy of rawPolicies) {
+    const match = owned.find((candidate) => JSON.stringify(policy) === JSON.stringify(candidate.policy));
+    if (!match) throw new TypeError("Clinical provider directory policy must exactly match an owned policy.");
+    if (listed.has(match.policy.id)) throw new TypeError("Clinical provider directory policies contain duplicates.");
+    listed.set(match.policy.id, match);
   }
+  return listed;
 }
 
 function parseDirectoryEntry(
   value: unknown,
   index: number,
-  owned: OwnedDirectoryPolicy,
+  policies: ReadonlyMap<string, OwnedDirectoryPolicy>,
 ): ClinicalProviderDirectoryEntry {
   const record = requireRecord(value, `Clinical provider directory entry ${index}`);
   const fhirBaseUrl = requireCanonicalPublicHttpsUrl(
@@ -149,25 +172,18 @@ function parseDirectoryEntry(
     throw new RangeError(`Clinical provider directory entry ${index} has too many locations.`);
   }
 
-  if (
-    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
-    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
-  ) {
-    throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
-  }
-
   const policyId = requireIdentifier(
     record.policyId,
     `Clinical provider directory entry ${index} policy id`,
   );
-  if (policyId !== owned.policy.id) {
+  const owned = policies.get(policyId);
+  if (!owned) {
     throw new TypeError(`Clinical provider directory entry ${index} references an unknown policy.`);
   }
 
-  return {
+  const shared = {
     aliases: parseUniqueStrings(record.aliases, `Clinical provider directory entry ${index} aliases`, 20, 120),
     brandName: requireBoundedString(record.brandName, `Clinical provider directory entry ${index} brand`, 160),
-    clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     facilities: locations.map((location, locationIndex) =>
       parseLocationTuple(location, index, locationIndex)
     ),
@@ -176,8 +192,22 @@ function parseDirectoryEntry(
     policyId,
     requestedBaseScopes: owned.requestedBaseScopes,
     resourceTypes: owned.resourceTypes,
-    sourceSystem: owned.policy.sourceSystem,
   };
+  if (owned.policy.sourceSystem === "cerner-fhir") {
+    // Oracle registration is server-owned; an entry cannot name a client.
+    if (!owned.integration || record.integration !== owned.integration || record.clientIdEnvironmentKey !== undefined
+      || !shared.id.startsWith("oracle-")) {
+      throw new TypeError(`Clinical provider directory entry ${index} integration is unsupported.`);
+    }
+    return { ...shared, integration: owned.integration, sourceSystem: "cerner-fhir" };
+  }
+  if (
+    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
+    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
+  ) {
+    throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
+  }
+  return { ...shared, clientIdEnvironmentKey: record.clientIdEnvironmentKey, sourceSystem: "epic-fhir" };
 }
 
 // Four-field tuples predate street lines; seven-field tuples add street lines, aliases and a coordinate.

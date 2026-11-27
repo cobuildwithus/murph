@@ -16,12 +16,14 @@ import {
 export const DIRECTORY = "apps/web/src/lib/clinical-records/provider-directory.v2.json";
 
 // Required CI runs the production parser on every committed directory, so a
-// committed directory's one embedded policy is the policy its code owns.
+// committed directory's embedded policies are the policies its code owns. An
+// Oracle entry must repeat the integration a committed entry already names.
 function parseDirectory(value, policySource = value) {
-  const policy = policySource?.policies?.[0];
-  return parseProviderDirectoryArtifact(value, {
+  const owned = (policySource?.policies ?? []).map(policy => ({
+    integration: policySource.entries?.find(entry => entry?.policyId === policy?.id)?.integration,
     policy, requestedBaseScopes: policy?.requestedBaseScopes ?? [], resourceTypes: [],
-  });
+  }));
+  return parseProviderDirectoryArtifact(value, owned);
 }
 
 function describeMoves(moves) {

@@ -9,7 +9,14 @@ import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { clinicalRecordsError, isClinicalRecordsControlPlaneError } from "./errors";
-import { epicProfileSchema, resolveSavedEpicAuth, type EpicProfile } from "./epic-import-config";
+import { resolveSavedEpicAuth } from "./epic-import-config";
+import {
+  clinicalGrantProfileSchema,
+  isOracleProfile,
+  requireOracleSmartEndpoint,
+  resolveOracleClientAuth,
+  type ClinicalGrantProfile,
+} from "./oracle-integration";
 import { openClinicalConnectionFhirBaseUrl, openClinicalConnectionSecret, sealClinicalConnectionSecret } from "./secrets";
 import { requirePinnedEndpoint, refreshSmartAccessToken, type SmartTokenResponse } from "./smart";
 
@@ -18,7 +25,7 @@ export const CLEAR_CLINICAL_PERSISTENT_ACCESS = {
   refreshTokenEncrypted: null, refreshLeaseId: null, refreshLeaseExpiresAt: null, nextSyncAt: null,
 } as const;
 const refreshPayloadSchema = z.object({
-  profile: epicProfileSchema.optional(),
+  profile: clinicalGrantProfileSchema.optional(),
   schemaVersion: z.literal(1), clientId: z.string().min(1).max(512),
   tokenEndpoint: z.string().url().max(2048), refreshToken: z.string().min(1).max(65_536),
   grantedScopes: z.array(z.string().min(1).max(200)).max(50),
@@ -26,7 +33,7 @@ const refreshPayloadSchema = z.object({
 
 export async function prepareClinicalPersistentAccess(input: {
   connectionId: string; memberId: string; tokenVersion: number; clientId: string;
-  profile?: EpicProfile; tokenEndpoint: string; requestedScopes: readonly string[]; token: SmartTokenResponse; now: Date;
+  profile?: ClinicalGrantProfile; tokenEndpoint: string; requestedScopes: readonly string[]; token: SmartTokenResponse; now: Date;
 }) {
   if (!input.requestedScopes.includes("offline_access") || !input.token.grantedScopes.includes("offline_access") || !input.token.refreshToken) {
     return CLEAR_CLINICAL_PERSISTENT_ACCESS;
@@ -87,11 +94,8 @@ export async function renewClinicalAccess(input: {
     try {
       const value = await openClinicalConnectionSecret({ ...identity, field: "refreshToken", encrypted: current.refreshTokenEncrypted });
       const payload = refreshPayloadSchema.parse(JSON.parse(value ?? "null"));
-      if (current.sourceSystem !== "epic-fhir") throw authorizationRequired();
       const base = await openClinicalConnectionFhirBaseUrl({ ...identity, encrypted: current.fhirBaseUrlEncrypted });
-      requirePinnedEndpoint(payload.tokenEndpoint, new URL(base), "token endpoint");
-      const auth = resolveSavedEpicAuth(current.providerDirectoryEntryId,
-        { clientId: payload.clientId, grant: "refresh" }, payload.profile);
+      const auth = resolveRefreshAuth(current, payload, new URL(base));
       if (auth.method === "public") throw new Error("Refresh client unavailable.");
       const token = await refreshSmartAccessToken({ ...payload, auth,
         fetchImpl: (url, init) => {
@@ -138,6 +142,22 @@ export async function renewClinicalAccess(input: {
       throw authorizationRequired();
     }
   });
+}
+
+/** The row's vendor and the saved profile must agree; Oracle grants always carry a profile. */
+function resolveRefreshAuth(
+  current: { providerDirectoryEntryId: string; sourceSystem: string },
+  payload: z.infer<typeof refreshPayloadSchema>,
+  fhirBase: URL,
+) {
+  const stored = { clientId: payload.clientId, grant: "refresh" as const };
+  if (current.sourceSystem === "cerner-fhir" && isOracleProfile(payload.profile)) {
+    requireOracleSmartEndpoint("token", payload.tokenEndpoint, fhirBase);
+    return resolveOracleClientAuth(payload.profile, stored);
+  }
+  if (current.sourceSystem !== "epic-fhir" || isOracleProfile(payload.profile)) throw authorizationRequired();
+  requirePinnedEndpoint(payload.tokenEndpoint, fhirBase, "token endpoint");
+  return resolveSavedEpicAuth(current.providerDirectoryEntryId, stored, payload.profile);
 }
 
 function authorizationRequired() {

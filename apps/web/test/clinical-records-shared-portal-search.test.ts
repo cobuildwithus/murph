@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { POST as companionSearch } from "../app/api/clinical-records/companion/providers/search/route";
 import { POST } from "../app/api/clinical-records/providers/search/route";
@@ -18,14 +18,20 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
 afterEach(() => vi.unstubAllEnvs());
 vi.mock("@/src/lib/clinical-records/provider-directory.v2.json", async () => {
   const { EPIC_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY_ID } = await import("@/src/lib/clinical-records/epic-policy");
+  const { ORACLE_ACQUISITION_POLICY } = await import("@/src/lib/clinical-records/oracle-policy");
   return { default: {
     schema: "murph.clinical-provider-directory.v2", version: "sample", sourceBundleSha256: "0".repeat(64),
-    generatedAt: "2026-07-10T00:00:00.000Z", policies: [EPIC_ACQUISITION_POLICY],
-    entries: ["Alder", "Birch"].map(brandName => ({
+    generatedAt: "2026-07-10T00:00:00.000Z", policies: [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY],
+    entries: [...["Alder", "Birch"].map(brandName => ({
       aliases: [], brandName, id: "epic-" + brandName.toLowerCase(), policyId: EPIC_ACQUISITION_POLICY_ID,
       clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID", fhirBaseUrl: "https://portal.example.test/r4",
       locations: [[brandName + " Clinic", "Cove", "ME", null, ["12 Pine Road"], [], [44.1, -70.2]]],
     })),
+    // Twenty exact-name Oracle tenants outrank both Epic brands for "Clinic".
+    ...Array.from({ length: 20 }, (_, index) => ({
+      aliases: [], brandName: "Clinic", id: `oracle-${String(index).padStart(20, "0")}`, integration: "oracle-millennium-r4",
+      policyId: ORACLE_ACQUISITION_POLICY.id, fhirBaseUrl: `https://fhir-myrecord.cerner.com/r4/tenant-${index}`, locations: [],
+    }))],
   } };
 });
 
@@ -134,4 +140,48 @@ it("parses the ZIP table only when a search runs", async () => {
   } finally {
     vi.doUnmock("@/src/lib/clinical-records/zcta-centroids.2026.json");
   }
+});
+
+describe("vendor capability negotiation", () => {
+  const search = (headers: Record<string, string>) => POST(new Request("https://app.example.test/search", {
+    method: "POST", body: JSON.stringify({ query: "Clinic" }), headers,
+  })).then(response => response.json());
+  const legacyHeaders: Record<string, string>[] = [{}, { "X-Clinical-Directory-Version": "2" }];
+  const capable = { "X-Clinical-Directory-Version": "2", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" };
+
+  it("keeps Epic-only responses for already-loaded browsers after Oracle search turns on", async () => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_SEARCH", "1");
+    findMany.mockResolvedValue([]);
+    for (const headers of legacyHeaders) {
+      const body = await search(headers);
+      // The shipped browser parser rejects the whole list for any other vendor.
+      expect(body.providers.every((row: { sourceSystem: string }) => row.sourceSystem === "epic-fhir")).toBe(true);
+      // Higher-ranked Oracle tenants cannot displace Epic rows from the twenty-result window.
+      expect(body.providers).toHaveLength(Object.keys(headers).length ? 1 : 2);
+    }
+  });
+
+  it("returns Oracle rows only to readers that advertise them while the flag is on", async () => {
+    findMany.mockResolvedValue([]);
+    const sources = async () => parseClinicalProviderSearchResponse(await search(capable)).providers.map(row => row.sourceSystem);
+    expect(new Set(await sources())).toEqual(new Set(["epic-fhir"]));
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_SEARCH", "1");
+    const mixed = await sources();
+    expect(mixed).toHaveLength(20);
+    expect(new Set(mixed)).toEqual(new Set(["cerner-fhir"]));
+    expect(new Set(parseClinicalProviderSearchResponse(await search({ ...capable, "X-Clinical-Directory-Sources": "cerner-fhir, athena-fhir" }))
+      .providers.map(row => row.sourceSystem))).toEqual(new Set(["cerner-fhir"]));
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    expect(new Set(await sources())).toEqual(new Set(["epic-fhir"]));
+  });
+
+  it("lets the companion projection opt into every enabled vendor", async () => {
+    findMany.mockResolvedValue([]);
+    const companion = async () => (await (await companionSearch(new Request("https://app.example.test/search", {
+      method: "POST", body: JSON.stringify({ query: "Clinic" }),
+    }))).json()).providers.map((row: { id: string }) => row.id);
+    expect((await companion()).every((id: string) => id.startsWith("epic-"))).toBe(true);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_SEARCH", "1");
+    expect((await companion()).every((id: string) => id.startsWith("oracle-"))).toBe(true);
+  });
 });

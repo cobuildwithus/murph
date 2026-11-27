@@ -7,7 +7,7 @@ import sandboxSet from "../../../public/.well-known/epic/sandbox.jwks.json";
 import { epicAssertionSigner, type EpicClientAuth } from "./epic-client-auth";
 import { clinicalRecordsError } from "./errors";
 import { EPIC_AUTOMATIC_RESOURCE_TYPES, isEpicAutomaticQuery } from "./epic-policy";
-import type { ClinicalProviderDirectoryEntry } from "./provider-directory";
+import type { ClinicalProviderDirectoryEntry, EpicProviderDirectoryEntry } from "./provider-directory";
 
 /** Default-empty feature flag: only explicitly provisioned organizations may use the broad app. */
 export function epicHospitalApprovedImportsEnabled(providerId: string): boolean {
@@ -28,7 +28,7 @@ export const epicProfileSchema = z.object({
   basicCredentialSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
 }).strict();
 export type EpicProfile = z.infer<typeof epicProfileSchema>;
-type RegistrationOwner = Pick<ClinicalProviderDirectoryEntry, "id" | "clientIdEnvironmentKey">;
+type RegistrationOwner = Pick<EpicProviderDirectoryEntry, "id" | "clientIdEnvironmentKey">;
 
 function readRegistrations(provider: RegistrationOwner) {
   const production = provider.clientIdEnvironmentKey === "EPIC_SMART_CLIENT_ID";
@@ -82,6 +82,7 @@ function resolveAuth(ids: ReturnType<typeof readRegistrations>, stored?: StoredR
 
 /** Only per-brand registrations can improve access over another brand on the same portal. */
 export function epicPortalAccessRank(provider: ClinicalProviderDirectoryEntry): number {
+  if (provider.sourceSystem !== "epic-fhir") return 0;
   try {
     const ids = readRegistrations(provider);
     if (!ids.approved && !ids.basic) return 0;
@@ -97,7 +98,7 @@ function basicCredentialSha256(auth: Extract<EpicClientAuth, { method: "basic" }
   return createHash("sha256").update(JSON.stringify([auth.clientId, auth.clientSecret])).digest("hex");
 }
 
-export function resolveEpicClient(provider: ClinicalProviderDirectoryEntry, stored?: StoredRegistration) {
+export function resolveEpicClient(provider: EpicProviderDirectoryEntry, stored?: StoredRegistration) {
   const registrations = readRegistrations(provider);
   const auth = resolveAuth(registrations, stored);
   const hospitalApprovedImports = registrations.approved && auth.clientId === registrations.approvedId;

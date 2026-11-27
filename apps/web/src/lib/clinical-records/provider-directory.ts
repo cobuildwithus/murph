@@ -10,10 +10,17 @@ import {
   EPIC_BETA_RESOURCE_TYPES,
 } from "./epic-policy";
 import {
+  ORACLE_ACQUISITION_POLICY,
+  ORACLE_INTEGRATION_ID,
+  ORACLE_RESOURCE_TYPES,
+} from "./oracle-policy";
+import {
   parseProviderDirectoryArtifact,
   type ClinicalProviderDirectory,
   type ClinicalProviderDirectoryEntry,
   type ClinicalProviderFacility,
+  type ClinicalProviderSourceSystem,
+  type OwnedDirectoryPolicy,
 } from "./provider-directory-artifact";
 
 export {
@@ -23,6 +30,8 @@ export {
   type ClinicalProviderDirectoryEntry,
   type ClinicalProviderFacility,
   type ClinicalProviderSourceSystem,
+  type EpicProviderDirectoryEntry,
+  type OracleProviderDirectoryEntry,
 } from "./provider-directory-artifact";
 
 const MAX_PROVIDER_RESULTS = 20;
@@ -34,12 +43,17 @@ const STREET_TYPE_WORDS = new Set([
   "terrace", "trail", "trl",
 ]);
 
+// Server-owned policies an artifact may carry. An artifact lists only the ones it uses.
+const OWNED_DIRECTORY_POLICIES: readonly OwnedDirectoryPolicy[] = [
+  { policy: EPIC_ACQUISITION_POLICY, requestedBaseScopes: EPIC_BETA_REQUESTED_BASE_SCOPES, resourceTypes: EPIC_BETA_RESOURCE_TYPES },
+  {
+    integration: ORACLE_INTEGRATION_ID, policy: ORACLE_ACQUISITION_POLICY,
+    requestedBaseScopes: ORACLE_ACQUISITION_POLICY.requestedBaseScopes, resourceTypes: ORACLE_RESOURCE_TYPES,
+  },
+];
+
 export function parseClinicalProviderDirectory(value: unknown): ClinicalProviderDirectory {
-  return parseProviderDirectoryArtifact(value, {
-    policy: EPIC_ACQUISITION_POLICY,
-    requestedBaseScopes: EPIC_BETA_REQUESTED_BASE_SCOPES,
-    resourceTypes: EPIC_BETA_RESOURCE_TYPES,
-  });
+  return parseProviderDirectoryArtifact(value, OWNED_DIRECTORY_POLICIES);
 }
 
 export type ClinicalProviderSearchResult = ClinicalProviderSearchResultContract;
@@ -65,6 +79,8 @@ interface DirectorySearchInput {
   accessRank?: (entry: ClinicalProviderDirectoryEntry) => number;
   city?: string | null;
   query?: string | null;
+  /** Vendors this reader accepts. Filtering precedes ranking, grouping and the result cap. */
+  sourceSystems?: readonly ClinicalProviderSourceSystem[];
   state?: string | null;
 }
 
@@ -97,15 +113,17 @@ export function searchClinicalProviderDirectorySnapshot(
   providers: ClinicalProviderSearchResult[];
 } {
   const { city, query, state, origin, hasText } = searchSelectors(input);
+  const sourceSystems = new Set(input.sourceSystems ?? ["epic-fhir"]);
+  const entries = directory.entries.filter((entry) => sourceSystems.has(entry.sourceSystem));
   const portalSiblingsMatter = Boolean(input.grouped && input.accessRank);
   const scored: { entry: ClinicalProviderDirectoryEntry }[] = [];
   const results: ClinicalProviderSearchResult[] = [];
   const byBase = new Map<string, ClinicalProviderSearchResult>();
-  for (const [score, entries] of scoreTiers(directory.entries, { city, query, state })) {
+  for (const [score, tierEntries] of scoreTiers(entries, { city, query, state })) {
     // Distance orders brands within a relevance tier. After the results fill,
     // only a returned portal's later siblings still need it, for portal selection.
     const settled = results.length === MAX_PROVIDER_RESULTS;
-    const tier = entries.map(entry => {
+    const tier = tierEntries.map(entry => {
       const needed = origin && (!hasText || score > 0)
         && (!settled || (portalSiblingsMatter && byBase.has(entry.fhirBaseUrl)));
       const ranked = needed ? rankFacilities({ city, entry, query, state }, origin) : undefined;
@@ -130,7 +148,7 @@ export function searchClinicalProviderDirectorySnapshot(
   }
   if (input.grouped) {
     if (input.accessRank) selectPortalBrands(scored, byBase, input.accessRank);
-    addSharedPlaces(directory.entries, byBase);
+    addSharedPlaces(entries, byBase);
   }
   return { directoryVersion: directory.version, providers: results };
 }

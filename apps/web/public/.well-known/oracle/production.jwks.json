@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-oracle-production-4D9w9oKpPTN3",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "kKpiO3R_eAHmebU1EzM4goPldZBAqZhXJ4sxREAUktD3vWQF-Yd0B3_IMga4e02s03iteKCtquucVhkZKXTMXaAhXtubAln8TSHr2HSTdpFpjbLceHWpIJJRJdyVChU9ROcwpIxUq7enbu07HPA_aOkyC41ylmVKRDdM8kSkcF5GBr1aFxDp1PSD56H9ANOTk56YgNzBCNUO0dFz83g1O6vDKcKAld884QR7r5pT1GSrYYN_1UZNOkskdNnq789O9JKTVWucWSPz7mZtWpMswAlTpjG6P5uOZybJAtifUTM5elUs95qoWz7_re9WN2CPtBNM4JeP75fdSHy7NIjPwQ",
+      "e": "AQAB"
+    }
+  ]
+}

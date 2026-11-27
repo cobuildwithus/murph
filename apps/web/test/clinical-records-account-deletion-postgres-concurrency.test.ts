@@ -1110,6 +1110,7 @@ async function nativeAuthorizationStarter(observer: PrismaClient) {
   const auth = { kind: "better-auth" as const, credential, member: session.member, sessionId: session.sessionId,
     proof: { ...session.authProof, row, credentialDigest: createHash("sha256").update(credential).digest() } };
   return async (provider: ReturnType<typeof readClinicalProviderDirectory>["entries"][number]) => {
+    if (provider.sourceSystem !== "epic-fhir") throw new Error("Expected an Epic provider fixture.");
     vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
       authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
@@ -1189,7 +1190,7 @@ async function createClinicalFixture(): Promise<ClinicalFixture> {
   const deletionBaseClient = createPrismaClient({ databaseUrl, poolMax: 1 });
   const now = new Date();
   const provider = readClinicalProviderDirectory().entries[0];
-  if (!provider) {
+  if (provider?.sourceSystem !== "epic-fhir") {
     throw new Error("Expected a Clinical Records provider fixture.");
   }
   vi.stubEnv(provider.clientIdEnvironmentKey, CLINICAL_CLIENT_ID);
