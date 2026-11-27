@@ -114,7 +114,7 @@ describe("best_month", () => {
   it("compares six qualifying months within twelve calendar months and labels partial coverage", () => {
     const card = cards([...prior, ...current, ...monthOf("steps", "2031-02", 12000, 15),
       ...monthOf("steps", "2031-12", 11000, 14)]).find(card => card.kind === "best_month");
-    expect(card?.subtitle).toBe("February so far, best month in the past 12 months");
+    expect(card?.subtitle).toBe("a day in February so far, best month in the past 12 months");
     expect(card?.source_note).toContain("so far");
     expect(card?.chart.series.map(month => month.month)).toEqual([...full, "2032-02"]);
     expect(card?.chart.highlight).toBe("2032-02");
