@@ -380,6 +380,34 @@ function viewFactors(input: YouInputs, current: Score | null) {
     .sort((a, b) => Math.abs(b.years) - Math.abs(a.years) || a.key.localeCompare(b.key))
     .map((factor, index) => ({ ...factor, featured: index < 5 }));
 }
+function sleepProgress(input: YouInputs) {
+  const have = recentSleepNights(input.evidence, input.asOf);
+  const need = model.daily.minimum;
+  const left = need - have;
+  const text = have
+    ? `Wear your band for ${left} more ${left === 1 ? "night" : "nights"}.`
+    : `Add a lab report or wear your band for ${need} nights.`;
+  return { have, need, text };
+}
+function headlineState(input: YouInputs, current: Score | null): Pick<YouView, "state" | "building" | "paused"> {
+  const pause = !current && pauseReason(input.evidence, input.asOf, input.asOf);
+  if (pause && !(pause === "age" && ambiguousBirthYear(input, input.asOf))) {
+    const text = {
+      pregnant: "Paused while you're pregnant",
+      postpartum: "Paused for now after having a baby",
+      age: "Murph works out ages 20 to 80",
+      birthDate: "Add your date of birth in About you to see your age",
+      sex: "Add your sex in About you to see your age",
+      beforeJoining: "Your age history starts when you join Murph",
+    }[pause];
+    return { state: "paused", paused: { text } };
+  }
+  const reason = withheld(input, input.asOf, current);
+  if (reason) return { state: "building", building: reason };
+  if (!current || !Object.keys(current.parts).length)
+    return { state: "building", building: sleepProgress(input) };
+  return { state: "ready" };
+}
 export function buildViews(input: YouInputs): Bundle {
   // Pin an undated reported age to this refresh across every historical snapshot.
   const p = input.evidence.profile;
@@ -390,42 +418,14 @@ export function buildViews(input: YouInputs): Bundle {
   const current = score(evidence, asOf);
   const rows = current?.rows ?? {},
     factors = viewFactors(input, current);
-  const reason = withheld(input, asOf, current);
-  const ready = !!current && !reason && Object.keys(current.parts).length > 0;
-  const pause = !current && pauseReason(evidence, asOf, asOf);
-  // A birth year near a cutoff can only be resolved with a full birthday.
-  const ambiguousAge = pause === "age" && ambiguousBirthYear(input, asOf);
-  you.state = pause && !ambiguousAge ? "paused" : ready ? "ready" : "building";
-  if (you.state === "paused" && pause) {
-    you.paused = { text: {
-      pregnant: "Paused while you're pregnant",
-      postpartum: "Paused for now after having a baby",
-      age: "Murph works out ages 20 to 80",
-      birthDate: "Add your date of birth in About you to see your age",
-      sex: "Add your sex in About you to see your age",
-      beforeJoining: "Your age history starts when you join Murph",
-    }[pause] };
-  }
-  if (you.state === "building") {
-    if (reason) {
-      you.building = reason;
-    } else {
-      const have = recentSleepNights(evidence, asOf);
-      const need = model.daily.minimum;
-      const left = need - have;
-      const text = have
-        ? `Wear your band for ${left} more ${left === 1 ? "night" : "nights"}.`
-        : `Add a lab report or wear your band for ${need} nights.`;
-      you.building = { have, need, text };
-    }
-  }
+  Object.assign(you, headlineState(input, current));
   you.factors = factors;
   you.notCounted = current ? offerings(input, rows, current.age) : [];
   you.thisWeek = ownTargets(input);
   you.questions = nextQuestion(input, rows, false, you.state === "paused");
   let age: Bundle["age"] = null,
     week: Bundle["week"] = null;
-  if (ready && current) {
+  if (you.state === "ready" && current) {
     const { value, real, gap, low, high } = current;
     you.age = { value, real, gap, low, high };
     age = ageHistory(input, current, you.age);
@@ -521,29 +521,9 @@ function factorRank(key: string, r: Contribution, input: YouInputs, age: number)
   };
 }
 
-function ageHistory(
-  input: YouInputs,
-  current: NonNullable<ReturnType<typeof score>>,
-  headline: NonNullable<YouView["age"]>,
-): NonNullable<Bundle["age"]> {
-  const { asOf, evidence } = input;
-  const history: NonNullable<Bundle["age"]>["history"] = [],
-    weeks: NonNullable<Bundle["age"]>["weeks"] = [];
+function ageEvents(input: YouInputs) {
+  const { evidence, asOf } = input;
   const events: NonNullable<Bundle["age"]>["events"] = [];
-  const earliest = input.ageHistoryFrom ?? input.historyFrom;
-  for (let i = 0; i <= 52; i++) {
-    const date = offset(asOf, -7 * i);
-    if (date < earliest) break;
-    const past = i === 0 ? current : score(evidence, date);
-    if (!past || withheld(input, date, past) || !Object.keys(past.parts).length) continue;
-    history.unshift({ date, age: past.value, real: past.real });
-    if (i < 12 && past.days !== null && offset(date, -7) >= earliest)
-      weeks.unshift({
-        weekStart: offset(date, -6),
-        daysAged: past.days,
-        basis: Object.keys(past.changes).length ? "observed" : "referenceOnly",
-      });
-  }
   const datesOf = (records: Observation[] = []) =>
     [...new Set(records.filter(row => eligible(row, asOf)).map(rowDay))].sort();
   const pressureDates = datesOf([...(evidence.bp ?? []), ...(evidence.pressure_components ?? [])]);
@@ -562,12 +542,37 @@ function ageHistory(
       events.push({ date, kind, label });
     }
   }
+  return events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function ageHistory(
+  input: YouInputs,
+  current: NonNullable<ReturnType<typeof score>>,
+  headline: NonNullable<YouView["age"]>,
+): NonNullable<Bundle["age"]> {
+  const { asOf, evidence } = input;
+  const history: NonNullable<Bundle["age"]>["history"] = [],
+    weeks: NonNullable<Bundle["age"]>["weeks"] = [];
+  const earliest = input.ageHistoryFrom ?? input.historyFrom;
+  for (let i = 0; i <= 52; i++) {
+    const date = offset(asOf, -7 * i);
+    if (date < earliest) break;
+    const past = i === 0 ? current : score(evidence, date);
+    if (!past || withheld(input, date, past) || !Object.keys(past.parts).length) continue;
+    history.unshift({ date, age: past.value, real: past.real });
+    if (i < 12 && past.days !== null && offset(date, -7) >= earliest)
+      weeks.unshift({
+        weekStart: offset(date, -6),
+        daysAged: past.days,
+        basis: Object.keys(past.changes).length ? "observed" : "referenceOnly",
+      });
+  }
   return {
     ...headline,
     history,
     weeks,
     historyLabel: "Reconstructed using the current model and available dated measurements.",
-    events: events.sort((a, b) => a.date.localeCompare(b.date)),
+    events: ageEvents(input),
   };
 }
 
