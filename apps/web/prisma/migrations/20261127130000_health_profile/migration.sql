@@ -6,7 +6,7 @@ ALTER TABLE "game_profile"
     (cover_kind = 'none' AND cover_photo_key IS NULL AND cover_art IS NULL) OR
     (cover_kind = 'photo' AND cover_photo_key IS NOT NULL AND cover_art IS NULL) OR
     (cover_kind = 'art' AND cover_photo_key IS NULL AND cover_art IS NOT NULL AND cover_art IN ('leaf','cream','ink','gold'))
-  );
+  ) NOT VALID;
 
 CREATE TABLE "health_profile_pin" (
   member_id TEXT NOT NULL REFERENCES hosted_member(id) ON DELETE CASCADE ON UPDATE CASCADE,
