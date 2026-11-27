@@ -140,7 +140,8 @@ const HELD_CHANGE_PARSERS = new Map([
 
 function renderHeldReport(held) {
   if (!held.length) return "";
-  const code = text => (text ? `\`${String(text).replace(/[`|\r\n]/gu, "")}\`` : "");
+  // Drops cell breakers, line/paragraph separators and every format character (zero-width, bidi, tags) that could disguise a value.
+  const code = text => (text ? `\`${String(text).replace(/[`|\r\n\u2028\u2029\p{Cf}]/gu, "")}\`` : "");
   const labels = {
     clientIdEnvironmentKey: "Client key change", fhirBaseUrl: "Endpoint change", policyId: "Policy change", removal: "Removed upstream",
   };

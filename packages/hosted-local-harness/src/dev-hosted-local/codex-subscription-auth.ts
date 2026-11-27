@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -9,6 +9,7 @@ import {
   parseHostedLocalCodexSubscriptionHostAuth,
 } from "@murphai/hosted-execution/hosted-codex-subscription-auth";
 
+import { writePrivateTextFileAtomically } from "./private-text-file.ts";
 import { resolveHostedLocalProfile } from "../profiles.ts";
 
 export const MURPH_HOSTED_LOCAL_CODEX_HOME_ENV = "MURPH_HOSTED_LOCAL_CODEX_HOME";
@@ -171,11 +172,11 @@ async function maybeRefreshChatGptCodexAuth(input: {
     let refreshError: string | null = null;
     try {
       const refreshed = await refreshChatGptCodexAuth(auth);
-      await writeFile(input.authPath, `${JSON.stringify(refreshed, null, 2)}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
-      });
-      await chmod(input.authPath, 0o600);
+      // Readers outside the refresh lock must see a complete credential file.
+      await writePrivateTextFileAtomically(
+        await realpath(input.authPath),
+        `${JSON.stringify(refreshed, null, 2)}\n`,
+      );
       process.stderr.write(
         `[setup] Refreshed Codex subscription tokens in ${input.authPath} for hosted local dev.\n`,
       );

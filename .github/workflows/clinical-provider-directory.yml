@@ -60,16 +60,81 @@ jobs:
           test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
           cp "$DIRECTORY" "$candidate/provider-directory.v2.json"
           if ! git diff --quiet -- "$DIRECTORY"; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      # Uploaded on every run: held changes are reported even when nothing publishes.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: steps.build.outputs.changed == 'true'
         with:
           name: clinical-directory
           path: ${{ runner.temp }}/candidate
           if-no-files-found: error
           retention-days: 1
 
-  # No dependency install and no upstream data: Node and the committed
-  # checkout re-check the candidate before anything is reported or published.
+  # The report and publish jobs install no dependencies and never see the Epic
+  # download: Node and the committed checkout re-check the candidate before
+  # anything is reported or published.
+  report:
+    needs: refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: clinical-directory
+          path: ${{ runner.temp }}/validated
+      - name: Re-check the parser, count floor and hold rules
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch -- "$DIRECTORY"
+          node scripts/check-clinical-provider-directory.mjs publish "$RUNNER_TEMP/validated/provider-directory.v2.json" \
+            "$RUNNER_TEMP/validated/held-changes.json" "$RUNNER_TEMP/held-changes.md"
+      # The checker proves each listed row but not that the list is complete, so an
+      # empty report never closes the issue: it leaves a note and a person closes it.
+      - name: Report held directory changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: Clinical directory changes need review
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/held-changes.md"
+          note="reported no held changes. Check and close this issue by hand."
+          # Every open bot issue with this title, oldest first, as "<number> <comment count>".
+          issues=$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&sort=created&direction=asc&per_page=100" \
+            --jq '.[] | select(.pull_request == null and .title == env.TITLE) | "\(.number) \(.comments)"')
+          if [[ ! -s "$report" ]]; then
+            while read -r issue comments; do
+              [[ -n "$issue" ]] || continue
+              last=""
+              if (( comments > 0 )); then
+                last=$(gh api "repos/$GITHUB_REPOSITORY/issues/$issue/comments?per_page=1&page=$comments" --jq '.[0] | select(.user.login == "github-actions[bot]") | .body // ""')
+              fi
+              [[ "$last" == *"$note"* ]] || gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" \
+                --body "The latest refresh ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) $note"
+            done <<< "$issues"
+            exit 0
+          fi
+          read -r oldest _ <<< "$issues"
+          if [[ -z "$oldest" ]]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$report"
+          else
+            gh issue edit "$oldest" --repo "$GITHUB_REPOSITORY" --body-file "$report"
+            # Closing a duplicate is safe: the oldest stays open with the full report.
+            while read -r issue _; do
+              [[ "$issue" == "$oldest" ]] || gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason "not planned" \
+                --comment "Superseded by #$oldest, which lists the current held changes."
+            done <<< "$issues"
+          fi
+          echo "::warning::Held directory changes for review; see the open issue \"$TITLE\"."
+
   publish:
     needs: refresh
     if: needs.refresh.outputs.changed == 'true'
@@ -78,7 +143,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      issues: write
     environment:
       name: frog-reconciliation
       deployment: false
@@ -103,22 +167,6 @@ jobs:
           git ls-files --error-unmatch -- "$DIRECTORY"
           node scripts/check-clinical-provider-directory.mjs publish "$RUNNER_TEMP/validated/provider-directory.v2.json" \
             "$RUNNER_TEMP/validated/held-changes.json" "$RUNNER_TEMP/held-changes.md"
-      - name: Report held directory changes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TITLE: Clinical directory changes need review
-        run: |
-          set -euo pipefail
-          report="$RUNNER_TEMP/held-changes.md"
-          [[ -s "$report" ]] || exit 0
-          issue=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" \
-            --jq 'map(select(.pull_request == null and .title == env.TITLE))[0].number // empty')
-          if [[ -n "$issue" ]]; then
-            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$report"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$report"
-          fi
-          echo "::warning::Held directory changes for review; see the open issue \"$TITLE\"."
       - name: Copy validated snapshot to its tracked destination
         run: cp "$RUNNER_TEMP/validated/provider-directory.v2.json" "$DIRECTORY"
       - name: Mint directory publication token

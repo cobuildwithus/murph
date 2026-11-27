@@ -42,6 +42,12 @@ test("MinIO falls back to upstream when the mirror cannot be pulled", async () =
     await resolveHostedLocalMinioRunnableImage({}, puller.pull),
     HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE,
   );
+  assert.deepEqual(puller.attempted, [HOSTED_LOCAL_MINIO_MIRROR_IMAGE, HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE]);
+});
+
+test("two failed pulls report a registry failure before container startup", async () => {
+  const puller = recordingPull([HOSTED_LOCAL_MINIO_MIRROR_IMAGE, HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE]);
+  await assert.rejects(resolveHostedLocalMinioRunnableImage({}, puller.pull), /either registry/u);
 });
 
 test("an explicit image override is honored and never silently replaced", async () => {

@@ -90,7 +90,7 @@ export async function claimClinicalRecordConnectIntentForStart(input: {
 }): Promise<ClinicalRecordConnectIntent> {
   const now = input.now ?? new Date();
   const claimHash = normalizeClaimHash(input.claim);
-  const providerDirectoryEntryId = normalizeProviderEntryId(input.providerDirectoryEntryId);
+  const providerDirectoryEntryId = resolveClinicalProviderDirectoryEntry(input.providerDirectoryEntryId, input.memberId)?.id;
   if (!claimHash || !providerDirectoryEntryId) {
     throw invalidIntentError();
   }
@@ -182,12 +182,6 @@ export async function completeClinicalRecordConnectIntent(
 
 export function normalizeClinicalRecordConnectIntentClaim(claim: string): string | null {
   return normalizeClaimHash(claim);
-}
-
-function normalizeProviderEntryId(value: string | null | undefined): string | null {
-  if (value === null || value === undefined || !value.trim()) return null;
-  const entry = resolveClinicalProviderDirectoryEntry(value);
-  return entry?.id ?? null;
 }
 
 function normalizeClaimHash(claim: string): string | null {

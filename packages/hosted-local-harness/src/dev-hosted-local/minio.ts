@@ -16,6 +16,7 @@ import {
   buildHostedRunnerLocalBuildId,
 } from "./environment.ts";
 import {
+  runCommand,
   spawnChildProcess,
   terminateChildProcess,
   terminateChildProcessAndWait,
@@ -76,8 +77,8 @@ export function resolveHostedLocalMinioImage(env: Record<string, string | undefi
  */
 export async function resolveHostedLocalMinioRunnableImage(
   env: NodeJS.ProcessEnv,
-  pullImage: (image: string) => Promise<boolean> = (image) =>
-    pullHostedLocalMinioImage(env, image),
+  pullImage?: (image: string) => Promise<boolean>,
+  signal?: AbortSignal,
 ): Promise<string> {
   const requestedImage = resolveHostedLocalMinioImage(env);
 
@@ -85,29 +86,36 @@ export async function resolveHostedLocalMinioRunnableImage(
     return requestedImage;
   }
 
-  if (await pullImage(requestedImage)) {
+  const available = pullImage ?? ((image: string) => pullHostedLocalMinioImage(env, image, signal));
+  if (await available(requestedImage)) {
     return requestedImage;
   }
 
   console.warn(
     `[minio] could not pull ${HOSTED_LOCAL_MINIO_MIRROR_IMAGE}; falling back to ${HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE}.`,
   );
-  return HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE;
+  if (await available(HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE)) {
+    return HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE;
+  }
+  throw new Error("Could not pull the pinned MinIO image from either registry.");
 }
 
-/** True when the image is present locally after the pull attempt. */
 async function pullHostedLocalMinioImage(
   env: NodeJS.ProcessEnv,
   image: string,
+  signal?: AbortSignal,
 ): Promise<boolean> {
-  await runDockerBestEffort(env, ["pull", image]);
-  return (await runDockerCaptureBestEffort(env, [
-    "image",
-    "inspect",
-    "--format",
-    "{{.Id}}",
-    image,
-  ])).trim().length > 0;
+  throwIfAbortSignalAborted(signal);
+  const cached = await runDockerCaptureBestEffort(env, ["image", "inspect", "--format", "{{.Id}}", image]);
+  if (cached.trim()) return true;
+  try {
+    // A cold image transfer is setup work. It shares the caller's cancellation.
+    await runCommand("docker", ["pull", image], { cwd: repoRoot, env, name: "setup", signal });
+    return true;
+  } catch {
+    throwIfAbortSignalAborted(signal);
+    return false;
+  }
 }
 
 interface HostedLocalMinioPublishTarget {
@@ -172,9 +180,8 @@ export async function maybeStartHostedLocalMinio(input: {
   const credentials = resolveHostedLocalMinioCredentials(input.env);
 
   const processes: BufferedNamedChildProcess[] = [];
-  const startContainer = async (
-    image: string = resolveHostedLocalMinioImage(input.env),
-  ): Promise<BufferedNamedChildProcess> => {
+  const image = await resolveHostedLocalMinioRunnableImage(input.env, input.pullImage, input.abortSignal);
+  const startContainer = async (): Promise<BufferedNamedChildProcess> => {
     await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
       buildId: buildIdLabelValue,
     });
@@ -250,9 +257,7 @@ export async function maybeStartHostedLocalMinio(input: {
     return childProcess;
   };
 
-  let childProcess = await startContainer(
-    await resolveHostedLocalMinioRunnableImage(input.env, input.pullImage),
-  );
+  let childProcess = await startContainer();
   let restartPromise: Promise<BufferedNamedChildProcess | null> | null = null;
 
   const bridgeMarkerEnv: Record<string, string> = {};

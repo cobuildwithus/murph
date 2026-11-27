@@ -45,6 +45,8 @@ const AUTHORIZE = `https://authorization.cerner.com/tenants/${TENANT}/protocols/
 const TOKEN = `https://authorization.cerner.com/tenants/${TENANT}/hosts/fhir-myrecord.cerner.com/protocols/oauth2/profiles/smart-v1/token`;
 const PATIENT = "12724066";
 const PROFILE = { integration: "oracle-millennium-r4", environment: "production", method: "private_key_jwt" } as const;
+const productionEntry = { id: "oracle-0123456789abcdef0123", fhirBaseUrl: BASE };
+const productionCallback = { redirectUri: "https://www.withmurph.ai/api/clinical-records/oauth/callback" };
 const FAKE_CLIENT_ID = "synthetic-oracle-client";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -161,7 +163,7 @@ describe("Oracle client authentication", () => {
 
   it("signs an RS384 assertion with the published Oracle kid and the exact token URL as audience", async () => {
     configure();
-    const auth = resolveOracleClientAuth(PROFILE, { clientId: ORACLE_STORED_CLIENT_REFERENCE });
+    const auth = resolveOracleClientAuth(PROFILE, productionEntry, { ...productionCallback, clientId: ORACLE_STORED_CLIENT_REFERENCE });
     expect(auth).toMatchObject({ method: "private_key_jwt", clientId: FAKE_CLIENT_ID, kid: sandboxPublicKey.kid });
     const request = await epicTokenRequest(auth, TOKEN, { grant_type: "refresh_token", refresh_token: "synthetic-refresh" });
     const body = request.body as URLSearchParams;
@@ -186,18 +188,18 @@ describe("Oracle client authentication", () => {
   ])("fails before egress with %s", (_label, change) => {
     configure();
     change();
-    expect(() => resolveOracleClientAuth(PROFILE)).toThrow(expect.objectContaining({
+    expect(() => resolveOracleClientAuth(PROFILE, productionEntry, productionCallback)).toThrow(expect.objectContaining({
       code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED", retryable: true,
     }));
   });
 
-  it("has no sandbox registration and accepts only the fixed stored reference, never a raw client ID", () => {
+  it("binds the production registration to the environment and fixed stored reference", () => {
     configure();
-    expect(() => resolveOracleClientAuth({ ...PROFILE, environment: "sandbox" }))
+    expect(() => resolveOracleClientAuth({ ...PROFILE, environment: "sandbox" }, productionEntry, productionCallback))
       .toThrow(expect.objectContaining({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" }));
     expect(ORACLE_STORED_CLIENT_REFERENCE).not.toContain(FAKE_CLIENT_ID);
     for (const clientId of [FAKE_CLIENT_ID, "synthetic-previous-client", ""]) {
-      expect(() => resolveOracleClientAuth(PROFILE, { clientId }))
+      expect(() => resolveOracleClientAuth(PROFILE, productionEntry, { ...productionCallback, clientId }))
         .toThrow(expect.objectContaining({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED" }));
     }
   });
@@ -293,7 +295,10 @@ describe("Oracle query catalog", () => {
       "oracle-millennium-r4:Goal:search:patient:v1",
       "oracle-millennium-r4:CareTeam:search:patient:v1",
       "oracle-millennium-r4:CarePlan:search:patient:category=assess-plan:v1",
-      "oracle-millennium-r4:Encounter:search:patient:_count=100:daily=_lastUpdated(ge,lt):v1",
+      "oracle-millennium-r4:Encounter:search:patient:_count=100:status=planned:daily=_lastUpdated(ge,lt):v1",
+      "oracle-millennium-r4:Encounter:search:patient:_count=100:status=in-progress:daily=_lastUpdated(ge,lt):v1",
+      "oracle-millennium-r4:Encounter:search:patient:_count=100:status=finished:daily=_lastUpdated(ge,lt):v1",
+      "oracle-millennium-r4:Encounter:search:patient:_count=100:status=cancelled:daily=_lastUpdated(ge,lt):v1",
       "oracle-millennium-r4:Procedure:search:patient:daily=_lastUpdated(ge,lt):v1",
       "oracle-millennium-r4:Immunization:search:patient:v1",
       "oracle-millennium-r4:MedicationDispense:search:patient:_count=100:v1",
@@ -302,7 +307,7 @@ describe("Oracle query catalog", () => {
       "oracle-millennium-r4:ServiceRequest:search:patient:category=http://snomed.info/sct|386053000:_count=100:daily=_lastUpdated(ge,le):v1",
     ]);
     expect(ORACLE_RESOURCE_TYPES).toHaveLength(17);
-    expect(plan.slices).toHaveLength(18);
+    expect(plan.slices).toHaveLength(21);
   });
 
   it("builds exact lifetime requests for a new plan", () => {
@@ -319,7 +324,10 @@ describe("Oracle query catalog", () => {
       `${BASE}/Goal?patient=${PATIENT}`,
       `${BASE}/CareTeam?patient=${PATIENT}`,
       `${BASE}/CarePlan?patient=${PATIENT}&category=assess-plan`,
-      `${BASE}/Encounter?patient=${PATIENT}&_count=100`,
+      `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=planned`,
+      `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=in-progress`,
+      `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=finished`,
+      `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=cancelled`,
       `${BASE}/Procedure?patient=${PATIENT}`,
       `${BASE}/Immunization?patient=${PATIENT}`,
       `${BASE}/MedicationDispense?patient=${PATIENT}&_count=100`,
@@ -347,7 +355,10 @@ describe("Oracle query catalog", () => {
       ["goals", "whole-family", "whole", `${BASE}/Goal?patient=${PATIENT}`],
       ["care-teams", "whole-family", "whole", `${BASE}/CareTeam?patient=${PATIENT}`],
       ["care-plans", "whole-family", "whole", `${BASE}/CarePlan?patient=${PATIENT}&category=assess-plan`],
-      ["encounters", "bounded-window", "daily-2026-11-26", `${BASE}/Encounter?patient=${PATIENT}&_count=100${window(lt)}`],
+      ["encounters-planned", "bounded-window", "daily-2026-11-26", `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=planned${window(lt)}`],
+      ["encounters-in-progress", "bounded-window", "daily-2026-11-26", `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=in-progress${window(lt)}`],
+      ["encounters-finished", "bounded-window", "daily-2026-11-26", `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=finished${window(lt)}`],
+      ["encounters-cancelled", "bounded-window", "daily-2026-11-26", `${BASE}/Encounter?patient=${PATIENT}&_count=100&status=cancelled${window(lt)}`],
       ["procedures", "bounded-window", "daily-2026-11-26", `${BASE}/Procedure?patient=${PATIENT}${window(lt)}`],
       // Oracle accepts only one lower bound for these two families, which a bounded slice cannot describe.
       ["immunizations", "whole-family", "whole", `${BASE}/Immunization?patient=${PATIENT}`],

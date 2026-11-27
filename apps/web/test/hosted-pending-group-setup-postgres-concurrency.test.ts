@@ -144,7 +144,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             participantMemberIds: [ownerMemberId],
             recipientPhoneLookupKeys: [recipientPhoneLookupKey],
             senderMemberId: "member_first_speaker",
-          }, { consume: true });
+          }, { consume: true }).catch((error: unknown) => {
+            // The winner can consume the row after this client prepares its claim.
+            expect(error).toMatchObject({ code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED" });
+            return { kind: "stale_preparation" } as const;
+          });
         const results = await Promise.all([
           claim(firstClient),
           claim(secondClient),
