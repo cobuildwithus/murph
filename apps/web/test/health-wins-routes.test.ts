@@ -246,7 +246,7 @@ it("returns the set conflict unchanged on an otherwise valid card change", async
   expect(service.change).toHaveBeenCalledExactlyOnceWith(auth, { candidateId: "slot:forest", setRevision: revision, option: "original" });
 });
 
-it("requires a version for edits and a valid visibility on every comment", async () => {
+it("requires a version for edits and validates visibility on ordinary comments", async () => {
   expect((await patch(request("posts", "PATCH", { caption: null }), postContext)).status).toBe(400);
   expect((await patch(request("posts", "PATCH", { expectedVersion: 2 }), postContext)).status).toBe(400);
   expect(service.patch).not.toHaveBeenCalled();
@@ -256,6 +256,26 @@ it("requires a version for edits and a valid visibility on every comment", async
   expect(service.comment).toHaveBeenCalledExactlyOnceWith(auth, id, { ...body, visibility: "everyone" });
   expect((await comment(request("comments", "POST", { ...body, visibility: "global" }), postContext)).status).toBe(400);
 });
+
+it.each([{}, { visibility: "everyone" }, { visibility: { ignored: true } }])(
+  "accepts a reply target regardless of submitted visibility", async fields => {
+    service.comment.mockResolvedValue({ id });
+    const replyTo = "4bd94cef-6ac5-42d6-a80d-d089fb3d966b";
+    const body = "Synthetic reply text";
+    const response = await comment(request("comments", "POST", { id, body, replyTo: replyTo.toUpperCase(), ...fields }), postContext);
+    expect(await response.json()).toEqual({ id });
+    expect(service.comment).toHaveBeenCalledExactlyOnceWith(auth, id, { id, body, replyTo });
+  },
+);
+
+it.each([{ replyTo: "bad-id" }, { replyTo: null }, { replyTo: revision, recipientMemberId: "synthetic-peer" }])(
+  "rejects malformed reply targets and client-selected recipients", async fields => {
+    const response = await comment(request("comments", "POST", { id, body: "Synthetic reply text", ...fields }), postContext);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(service.comment).not.toHaveBeenCalled();
+  },
+);
 
 describe("timed recording requests", () => {
   const id = "6c01966b-b318-4cc7-96d3-c007a116b2c9";

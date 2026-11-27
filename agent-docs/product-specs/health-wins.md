@@ -144,15 +144,18 @@ delete their own posts and comments.
 A member can cheer once per post. Adding or removing a cheer requires the
 viewer's current health consent. Comments default to
 **Everyone**, meaning people who can open the post. **Just the poster** limits
-a comment to its writer and the poster. Hides and blocks apply to the comment
+a comment to its writer and the poster. The poster can reply privately to that
+writer. Deleting the original comment preserves the reply and its audience.
+Hides and blocks apply to the comment
 writer as well as the poster. A partner’s comment disappears for all readers
 if the writer and poster stop sharing a game, or either blocks or hides the other.
 Only authors on the rollout allowlist can share posts and comments. The feed
 shows neither interaction counts nor automatic comments from Murph.
 
 The poster can receive a push for a new comment or cheer. An hour of cheers
-on one post generates at most one push. A private comment can notify only
-the poster. Removing access before delivery suppresses the notification.
+on one post generates at most one push. A private comment from a partner can
+notify only the poster. The poster's private reply can notify only the partner
+who wrote the original. Removing access before delivery suppresses the notification.
 
 ## See yours
 
@@ -212,7 +215,7 @@ when recording is disabled.
 | `GET posts/{id}/see-yours?card={frozenCardId}` | Returns `{measure, card, reason, friend}` in the viewer’s client units. An inaccessible post or missing card returns 404. The viewer’s own post or a card without a measure returns 400. The limit is 10 reads per viewer per minute, then 429. |
 | `GET feed` | Returns `{posts, nextCursor}`. Pass `nextCursor` in `?cursor=` until it is null. An intervening removal can leave an empty page with a continuation. |
 | `PUT / DELETE posts/{id}/cheer` | Set or clear the viewer's cheer. Both return 204. |
-| `GET / POST posts/{id}/comments` | GET returns `{comments, nextCursor}`. POST takes a client UUID in `id`, `body` and optional `visibility` (`everyone` or `poster`). It returns `{id}`. |
+| `GET / POST posts/{id}/comments` | GET returns `{comments, nextCursor}`. POST takes a client UUID in `id`, `body`, optional `visibility` (`everyone` or `poster`) and optional UUID `replyTo`. Only the poster can use `replyTo`, targeting another writer's visible, original poster-only comment on this post. Web ignores submitted visibility for a reply. POST returns `{id}`. |
 | `DELETE comments/{id}` | Deletes the writer's comment and returns 204. |
 | `GET people/{memberId}/profile` | Returns `{memberId, firstName, avatarUrl, numbers, posts, nextCursor}`. Numbers come from the pair board and are null when unavailable. |
 | `GET hides` | Returns `{people: [{memberId, firstName, avatarUrl}]}` for the viewer’s outgoing hides, newest first. Name and avatar can be null when the profile is unavailable to the viewer. |
@@ -369,7 +372,11 @@ summary remains available in Settings export.
 Posts include `id`, `authorMemberId`, `firstName`, `avatarUrl`, `createdAt`,
 `version`, `caption`, `cards`, `attachmentId` and `cheered`. Each published
 card carries `{id, specRevision, spec}`. Comments include their `id`, `postId`,
-author ID, first name, avatar URL, creation time, visibility and body. Feed,
+author ID, first name, avatar URL, creation time, visibility and body. Each
+also includes nullable `recipientMemberId` and `recipientFirstName`. A private
+reply has `poster` visibility and identifies the partner who receives it.
+The name is null when the viewer lacks access to the partner's profile or
+no name is available. Ordinary comments return null for both fields. Feed,
 profile posts and comments page newest first, up to 20 per page.
 After consent withdrawal the author receives only `{id, createdAt, version}`
 for their own posts. A cumulative distance card’s map chart may contain

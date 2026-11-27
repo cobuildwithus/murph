@@ -162,7 +162,7 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.health_post_comment",
     label: "Health feed comments",
     deletion: "live-delete",
-    note: "Deleting the comment author or the parent post cascades the comment, including private replies and replay tombstones.",
+    note: "Deleting the author or the parent post cascades the comment and its replay tombstone. Deleting a private reply’s recipient also cascades the reply.",
   },
   {
     slug: "prisma.health_post_cheer",

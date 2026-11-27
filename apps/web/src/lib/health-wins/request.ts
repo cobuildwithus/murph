@@ -91,11 +91,16 @@ export const patchPostBody = z.strictObject({
   .refine(input => !input.cards?.length || input.setRevision !== undefined)
   .refine(input => !input.removeCardIds || (input.cards === undefined && input.setRevision === undefined))
   .refine(input => input.caption !== undefined || input.cards !== undefined || input.removeCardIds !== undefined);
-export const commentBody = z.strictObject({
+const ordinaryCommentBody = z.strictObject({
   id: uuid,
   body: z.string().trim().min(1).max(2000),
   visibility: z.enum(["everyone", "poster"]).default("everyone"),
 });
+export const commentBody = z.union([
+  ordinaryCommentBody,
+  ordinaryCommentBody.extend({ replyTo: uuid, visibility: z.unknown().optional() })
+    .transform(({ id, body, replyTo }) => ({ id, body, replyTo })),
+]);
 export const changeWinBody = z.strictObject({ setRevision: uuid, option });
 const winsQuery = z.strictObject({ refresh: z.enum(["0", "1"]).optional() });
 const pageQuery = z.strictObject({ cursor: z.string().min(1).max(2048).optional() });

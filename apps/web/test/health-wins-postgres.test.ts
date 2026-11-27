@@ -51,11 +51,11 @@ const members: string[] = [];
 const context = (id: string) => ({ params: Promise.resolve({ id }) });
 const memberContext = (memberId: string) => ({ params: Promise.resolve({ memberId }) });
 
-async function person() {
+async function person(firstName = "Finch") {
   const id = randomUUID();
   members.push(id);
   await db.hostedMember.create({ data: { id, billingStatus: "active" } });
-  const firstNameEncrypted = await gameCrypto.sealGameText({ table: "game_profile", memberId: id, rowId: id, field: "first_name" }, "Finch");
+  const firstNameEncrypted = await gameCrypto.sealGameText({ table: "game_profile", memberId: id, rowId: id, field: "first_name" }, firstName);
   await db.gameProfile.create({ data: { memberId: id, timeZone: "UTC", firstNameEncrypted: firstNameEncrypted! } });
   for (const scope of ["launch.legal", "launch.health-data"] as const) {
     await recordHostedLaunchRequiredConsent({ memberId: id, scope, prisma: db });
@@ -115,11 +115,29 @@ async function frozenLabPost(author: Person, option = "original") {
   } };
 }
 
-async function commentIds(who: Person, postId: string) {
+type CommentFields = { visibility?: "everyone" | "poster"; replyTo?: string };
+
+function submitComment(who: Person, postId: string, id: string, fields: CommentFields = {}) {
+  return comment(who.request(`posts/${postId}/comments`, "POST", { id, body: "The practice log is ready.", ...fields }), context(postId));
+}
+
+async function addComment(who: Person, postId: string, fields?: CommentFields) {
+  const id = randomUUID();
+  const response = await submitComment(who, postId, id, fields);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ id });
+  return id;
+}
+
+async function readComments(who: Person, postId: string) {
   const response = await comments(who.request(`posts/${postId}/comments`), context(postId));
   expect(response.status).toBe(200);
-  const result: { comments: { id: string }[] } = await response.json();
-  return result.comments.map(item => item.id);
+  const result: { comments: { id: string; recipientMemberId: string | null; recipientFirstName: string | null }[] } = await response.json();
+  return result.comments;
+}
+
+async function commentIds(who: Person, postId: string) {
+  return (await readComments(who, postId)).map(item => item.id);
 }
 
 describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", () => {
@@ -691,6 +709,112 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     await db.hostedMember.delete({ where: { id: commenter.id } });
     expect(await db.healthPostComment.count({ where: { postId } })).toBe(0);
     expect(await db.healthPost.count({ where: { id: postId } })).toBe(1);
+  });
+
+  it("keeps a poster's answer with its recipient after the original is removed", async () => {
+    const poster = await person("Velpin"), recipient = await person("Rulven"), peer = await person();
+    const sharedGame = await pair(poster, recipient);
+    await pair(poster, peer);
+    const postId = await share(poster);
+    const source = await addComment(recipient, postId, { visibility: "poster" });
+    const reply = await addComment(poster, postId, { replyTo: source, visibility: "everyone" });
+    const publicComment = await addComment(poster, postId);
+    const expectedReply = { id: reply, authorMemberId: poster.id, firstName: "Velpin", visibility: "poster",
+      recipientMemberId: recipient.id, recipientFirstName: "Rulven" };
+    for (const viewer of [poster, recipient]) {
+      const rows = await readComments(viewer, postId);
+      expect(rows).toHaveLength(3);
+      expect(rows).toEqual(expect.arrayContaining([
+        expect.objectContaining(expectedReply),
+        expect.objectContaining({ id: source, visibility: "poster", recipientMemberId: null, recipientFirstName: null }),
+        expect.objectContaining({ id: publicComment, visibility: "everyone", recipientMemberId: null, recipientFirstName: null }),
+      ]));
+    }
+    expect(await commentIds(peer, postId)).toEqual([publicComment]);
+
+    expect((await deleteComment(recipient.request("comments/" + source, "DELETE"), context(source))).status).toBe(204);
+    const replay = await submitComment(poster, postId, reply, { replyTo: source });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({ id: reply });
+    for (const viewer of [poster, recipient]) {
+      const rows = await readComments(viewer, postId);
+      expect(rows).toHaveLength(2);
+      expect(rows.find(row => row.id === reply)).toMatchObject(expectedReply);
+    }
+    expect(await commentIds(peer, postId)).toEqual([publicComment]);
+
+    await db.game.delete({ where: { id: sharedGame } });
+    await db.hostedMember.delete({ where: { id: recipient.id } });
+    expect(await db.healthPostComment.findUnique({ where: { id: reply } })).toBeNull();
+    expect(await commentIds(poster, postId)).toEqual([publicComment]);
+  });
+
+  it("rejects ineligible reply targets and refuses to replay a different audience", async () => {
+    const poster = await person(), recipient = await person(), peer = await person();
+    await pair(poster, recipient);
+    await pair(poster, peer);
+    const postId = await share(poster), otherPostId = await share(poster);
+    const source = await addComment(recipient, postId, { visibility: "poster" });
+    const otherRecipient = await addComment(peer, postId, { visibility: "poster" });
+    const foreign = await addComment(recipient, otherPostId, { visibility: "poster" });
+    const own = await addComment(poster, postId, { visibility: "poster" });
+    const publicComment = await addComment(recipient, postId);
+    const reply = await addComment(poster, postId, { replyTo: source });
+    const denied = async (who: Person, replyTo: string) => {
+      const id = randomUUID();
+      const response = await submitComment(who, postId, id, { replyTo });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: "HEALTH_NOT_FOUND" } });
+      expect(await db.healthPostComment.findUnique({ where: { id } })).toBeNull();
+    };
+    await denied(recipient, source);
+    await denied(peer, source);
+    for (const target of [foreign, own, publicComment, reply, randomUUID()]) await denied(poster, target);
+    for (const response of [
+      await submitComment(poster, postId, own, { replyTo: source }),
+      await submitComment(poster, postId, reply),
+      await submitComment(poster, postId, reply, { replyTo: otherRecipient }),
+    ]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: "HEALTH_WRITE_CONFLICT" } });
+    }
+    expect(await commentIds(peer, postId)).not.toContain(reply);
+    expect(await commentIds(recipient, postId)).not.toContain(own);
+
+    await db.healthFeedHide.create({ data: { memberId: recipient.id, hiddenMemberId: poster.id } });
+    await denied(poster, source);
+    await db.healthFeedHide.deleteMany({ where: { memberId: recipient.id } });
+    expect((await deleteComment(recipient.request("comments/" + source, "DELETE"), context(source))).status).toBe(204);
+    await denied(poster, source);
+  });
+
+  it("masks a recipient's name when access changes while the poster opens a private reply", async () => {
+    const poster = await person(), recipient = await person("Eldriq");
+    await pair(poster, recipient);
+    const postId = await share(poster);
+    const source = await addComment(recipient, postId, { visibility: "poster" });
+    const reply = await addComment(poster, postId, { replyTo: source });
+    expect((await deleteComment(recipient.request("comments/" + source, "DELETE"), context(source))).status).toBe(204);
+
+    const open = gameCrypto.openGameTexts;
+    const opening = vi.spyOn(gameCrypto, "openGameTexts").mockImplementation(async (...args) => {
+      const result = await open(...args);
+      if (args[0].some(entry => entry.memberId === recipient.id && entry.value)) {
+        await db.healthFeedHide.create({ data: { memberId: recipient.id, hiddenMemberId: poster.id } });
+      }
+      return result;
+    });
+    const expected = [expect.objectContaining({ id: reply, recipientMemberId: recipient.id, recipientFirstName: null })];
+    expect(await readComments(poster, postId)).toEqual(expected);
+    expect(opening.mock.calls.flatMap(([entries]) => entries)).toContainEqual(
+      expect.objectContaining({ memberId: recipient.id, field: "first_name", value: expect.any(String) }),
+    );
+    opening.mockClear();
+    expect(await readComments(poster, postId)).toEqual(expected);
+    expect(opening.mock.calls.flatMap(([entries]) => entries)).not.toContainEqual(
+      expect.objectContaining({ memberId: recipient.id, field: "first_name", value: expect.any(String) }),
+    );
+    expect((await comments(recipient.request(`posts/${postId}/comments`), context(postId))).status).toBe(404);
   });
 
   it("rechecks the commenter's relationship with the poster for a third reader", async () => {
