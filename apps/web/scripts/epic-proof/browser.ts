@@ -24,7 +24,7 @@ async function route(request: Request) {
 }
 
 async function consent(page: Page, patient: string, networkFailure: () => string | undefined) {
-  const acted = new Set<string>();
+  const signedIn = new Set<string>();
   const deadline = Date.now() + (process.env.PROOF_INTERACTIVE === "1" ? 180_000 : 60_000);
   while (Date.now() < deadline) {
     check(!networkFailure());
@@ -36,33 +36,38 @@ async function consent(page: Page, patient: string, networkFailure: () => string
     if (current.origin === vendor && process.env.PROOF_INTERACTIVE !== "1") {
       if (await page.getByText(/captcha|verification code|verify your identity|an error has occurred/i).first().isVisible())
         throw new SandboxFailure("auth-blocked");
-      const action = await consentAction(page, patient, acted);
-      if (action) acted.add(action);
+      // Act on a loaded page. Consent clicks repeat because MyChart ignores them until its scripts bind.
+      await page.waitForLoadState("load").catch(() => undefined);
+      if (await consentAction(page, patient, signedIn)) await page.waitForTimeout(2_000);
     }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   throw new SandboxFailure("auth-blocked");
 }
 
-async function consentAction(page: Page, patient: string, acted: Set<string>) {
+// Sign-in fields are submitted once each.
+async function consentAction(page: Page, patient: string, signedIn: Set<string>) {
   for (const [selector, value] of [["#Login", patient], ["#Password", "epicepic1"]] as const) {
-    if (!acted.has(selector) && await page.locator(selector).isVisible()) {
+    if (!signedIn.has(selector) && await page.locator(selector).isVisible()) {
+      signedIn.add(selector);
       await page.locator(selector).fill(value);
       if (selector === "#Login" && await page.locator("#Password").isVisible()) {
         await page.locator("#Password").fill("epicepic1");
-        acted.add("#Password");
+        signedIn.add("#Password");
       }
       await page.locator("#submit").click();
       return selector;
     }
   }
-  for (const selector of ["#nextButton", "#allowDataSharing"]) {
-    if (!acted.has(selector) && await page.locator(selector).isVisible()) {
+  for (const selector of ["#allowDataSharing", "#nextButton"]) {
+    if (await page.locator(selector).isVisible()) {
       if (selector === "#allowDataSharing") {
-        const day = page.getByLabel(/^1 day$/i);
-        if (await day.count()) await day.check({ force: true });
+        // The duration choices are styled radio inputs.
+        const day = page.getByLabel(/^1 day$/i).first();
+        if (await day.count()) await day.evaluate(radio => (radio as HTMLInputElement).click());
       }
-      await page.locator(selector).click();
+      // Allow returns through the callback, which exchanges the code before it responds.
+      await page.locator(selector).click(selector === "#allowDataSharing" ? { timeout: 30_000 } : {});
       return selector;
     }
   }
