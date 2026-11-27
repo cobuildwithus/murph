@@ -47,17 +47,18 @@ function pattern(r: Observation, profile: Observation) {
         : null,
   };
 }
-function inconsistentMealEnergy(r: Observation) {
+function inconsistentMealEnergy(r: Observation): boolean {
   const kcal = number(r.calories),
     protein = number(r.protein_g),
     carbs = number(r.carbs_g),
     fat = number(r.fat_g);
-  return;
-  between(kcal, 1, 8000) &&
+  return (
+    between(kcal, 1, 8000) &&
     between(protein, 0, 1000) &&
     between(carbs, 0, 1000) &&
     between(fat, 0, 1000) &&
-    Math.abs(4 * (protein + carbs) + 9 * fat - kcal) > Math.max(120, 0.45 * kcal);
+    Math.abs(4 * (protein + carbs) + 9 * fat - kcal) > Math.max(120, 0.45 * kcal)
+  );
 }
 function confirmedMealDays(ci: Observation[]) {
   const complete = new Map<string, Set<boolean>>();
