@@ -30,9 +30,21 @@ export function isOracleProfile(profile: ClinicalGrantProfile | undefined): prof
   return profile !== undefined && "integration" in profile;
 }
 
+/**
+ * The only stop for traffic on existing Oracle grants, so it reads broadly: any
+ * value except empty, "0" or "false" turns it on. Enabling flags stay exact.
+ */
 export function oracleEgressDisabled(): boolean {
-  return process.env.CLINICAL_RECORDS_ORACLE_DISABLED === "1";
+  const value = process.env.CLINICAL_RECORDS_ORACLE_DISABLED?.trim().toLowerCase() ?? "";
+  return value !== "" && value !== "0" && value !== "false";
 }
+
+/**
+ * Oracle treats the client ID as a credential, so sessions and refresh payloads
+ * save this fixed reference instead. The signer always uses the hosted secret;
+ * a grant issued to an earlier registration is rejected by Oracle at refresh.
+ */
+export const ORACLE_STORED_CLIENT_REFERENCE = ORACLE_INTEGRATION_ID;
 
 export function oracleSearchEnabled(): boolean {
   return process.env.CLINICAL_RECORDS_ORACLE_SEARCH === "1" && !oracleEgressDisabled();
@@ -45,9 +57,13 @@ export function oracleStartsEnabledFor(memberId: string): boolean {
       .filter(Boolean).includes(memberId);
 }
 
-/** Page and document gate: catalog membership plus the kill switch, including for frozen plans. */
-export function oracleImportQueryEnabled(queryScopeId: string): boolean {
-  return !oracleEgressDisabled() && isOracleQuery(queryScopeId);
+/**
+ * Page and document gate for frozen plans. The kill switch is a retryable pause,
+ * so a first import resumes from its checkpoint once traffic is allowed again.
+ */
+export function readOracleQueryGate(queryScopeId: string): { code: string; retryable: boolean } | null {
+  if (oracleEgressDisabled()) return { code: "integration-disabled", retryable: true };
+  return isOracleQuery(queryScopeId) ? null : { code: "query-unavailable", retryable: false };
 }
 
 /**
@@ -88,7 +104,7 @@ export function resolveOracleClientAuth(
   if (oracleEgressDisabled() || profile.environment !== "production") throw notConfigured();
   const clientId = process.env.ORACLE_SMART_CLIENT_ID?.trim();
   if (!clientId || clientId.length > 512) throw notConfigured();
-  if (stored && stored.clientId !== clientId) {
+  if (stored && stored.clientId !== ORACLE_STORED_CLIENT_REFERENCE) {
     throw clinicalRecordsError({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED", httpStatus: 409,
       message: "The provider configuration changed. Start the connection again." });
   }

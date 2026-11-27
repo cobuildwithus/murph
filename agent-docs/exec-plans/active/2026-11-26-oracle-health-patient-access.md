@@ -68,9 +68,19 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
   The daily cadence matches Epic: a seven-day overlapping window ending one day
   ahead, and lifetime every seventh check.
 - **Gates.** Page and document egress for `cerner-fhir` runs needs catalog
-  membership and no kill switch (refusal `integration-disabled`). Daily
-  admission backs off one day while the kill switch is on. Starts stay
-  Epic-only until O3; an Oracle entry fails with `PROVIDER_NOT_CONFIGURED`.
+  membership (otherwise permanent `query-unavailable`) and no kill switch. The
+  kill switch refusal `integration-disabled` is retryable: an open import keeps
+  its runtime checkpoint and resumes once traffic is allowed, instead of losing
+  slices until the seventh-check lifetime pass. Daily admission backs off one
+  day while it is on. Starts stay Epic-only until O3; an Oracle entry fails with
+  `PROVIDER_NOT_CONFIGURED`.
+- **Client ID storage.** Oracle treats the client ID as a credential, so the
+  OAuth session's `client_id` column and the sealed refresh payload hold the
+  fixed reference `ORACLE_STORED_CLIENT_REFERENCE`, never the raw ID. The signer
+  reads `ORACLE_SMART_CLIENT_ID` at use; any other stored value fails with
+  `PROVIDER_CONFIGURATION_CHANGED` before egress. A grant issued to an earlier
+  registration is not detected locally; Oracle rejects it at refresh and the
+  member reconnects. Epic sessions keep their stored client IDs.
 - **Refresh.** Oracle does not rotate; the existing no-successor path re-seals
   the original token. Lease, generation fencing and ambiguous-exchange reauth
   are unchanged.
@@ -94,7 +104,9 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
   a `sandbox` profile fails closed. Flags: `CLINICAL_RECORDS_ORACLE_STARTS`,
   `CLINICAL_RECORDS_ORACLE_MEMBER_IDS` (exact opaque IDs),
   `CLINICAL_RECORDS_ORACLE_SEARCH`, `CLINICAL_RECORDS_ORACLE_DISABLED`
-  (stops callbacks, refreshes, pages and documents; records stay).
+  (stops callbacks, refreshes, pages and documents; records stay). Enabling
+  flags need exactly `1`; the kill switch is on for any value except empty,
+  `0` or `false` (trimmed, case-insensitive).
 
 ## Review dispositions
 
@@ -120,13 +132,17 @@ straight to reauthorization today (plan §7 corrected; no renewal-on-401 path).
 ## O3 and O4 handoff
 
 - O3: call `oracleStartsEnabledFor(memberId)` and resolve the client with
-  `resolveOracleClientAuth`; discover with `ORACLE_SMART_ENDPOINT_TRUST`,
+  `resolveOracleClientAuth`; write `ORACLE_STORED_CLIENT_REFERENCE` as the
+  session `clientId`, never `auth.clientId`; discover with `ORACLE_SMART_ENDPOINT_TRUST`,
   `permissionVersion: "v1"`, `ORACLE_REQUESTED_BASE_SCOPES` and
   `ORACLE_RESOURCE_TYPES`; always write the typed binding; gate processor
   approvals at start; add the hidden sandbox entry and the offline proof.
-  Confirm in the secure sandbox whether Encounter needs `status`, whether
-  `_lastUpdated` works for the patient persona, and the token `aud` form. Any
-  catalog change before the first Oracle run is free; afterwards add a new
+  Confirm in the secure sandbox whether `_lastUpdated` works for the patient
+  persona and the token `aud` form. **Merge gate for O3:** Oracle's Encounter
+  docs say `_count` and `status` must accompany `patient`, while the open
+  sandbox accepted the v1 query without `status`. The secure-sandbox check must
+  settle this, and the catalog entry must change if needed, before O3 merges.
+  Any catalog change before the first Oracle run is free; afterwards add a new
   identity.
 - O4: emit `ORACLE_ACQUISITION_POLICY` in `policies`, entries with `oracle-` +
   20 hex of sha256 of the exact tenant, `integration`, no client key; add

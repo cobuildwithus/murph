@@ -14,10 +14,12 @@ import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-poli
 import {
   clinicalGrantProfileSchema,
   isOracleProfile,
-  oracleImportQueryEnabled,
+  oracleEgressDisabled,
   oracleSearchEnabled,
   oracleStartsEnabledFor,
   ORACLE_SMART_ENDPOINT_TRUST,
+  ORACLE_STORED_CLIENT_REFERENCE,
+  readOracleQueryGate,
   requireOracleSmartEndpoint,
   resolveOracleClientAuth,
 } from "@/src/lib/clinical-records/oracle-integration";
@@ -159,7 +161,7 @@ describe("Oracle client authentication", () => {
 
   it("signs an RS384 assertion with the published Oracle kid and the exact token URL as audience", async () => {
     configure();
-    const auth = resolveOracleClientAuth(PROFILE, { clientId: FAKE_CLIENT_ID });
+    const auth = resolveOracleClientAuth(PROFILE, { clientId: ORACLE_STORED_CLIENT_REFERENCE });
     expect(auth).toMatchObject({ method: "private_key_jwt", clientId: FAKE_CLIENT_ID, kid: sandboxPublicKey.kid });
     const request = await epicTokenRequest(auth, TOKEN, { grant_type: "refresh_token", refresh_token: "synthetic-refresh" });
     const body = request.body as URLSearchParams;
@@ -189,12 +191,15 @@ describe("Oracle client authentication", () => {
     }));
   });
 
-  it("has no sandbox registration and refuses a grant issued to another client", () => {
+  it("has no sandbox registration and accepts only the fixed stored reference, never a raw client ID", () => {
     configure();
     expect(() => resolveOracleClientAuth({ ...PROFILE, environment: "sandbox" }))
       .toThrow(expect.objectContaining({ code: "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED" }));
-    expect(() => resolveOracleClientAuth(PROFILE, { clientId: "synthetic-previous-client" }))
-      .toThrow(expect.objectContaining({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED" }));
+    expect(ORACLE_STORED_CLIENT_REFERENCE).not.toContain(FAKE_CLIENT_ID);
+    for (const clientId of [FAKE_CLIENT_ID, "synthetic-previous-client", ""]) {
+      expect(() => resolveOracleClientAuth(PROFILE, { clientId }))
+        .toThrow(expect.objectContaining({ code: "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED" }));
+    }
   });
 });
 
@@ -239,18 +244,28 @@ describe("Saved grant profiles", () => {
 
 describe("Oracle flags", () => {
   it("is off by default and the kill switch overrides every other flag", () => {
-    expect([oracleSearchEnabled(), oracleStartsEnabledFor("hm_synthetic"), oracleImportQueryEnabled("observations")])
-      .toEqual([false, false, true]);
+    expect([oracleSearchEnabled(), oracleStartsEnabledFor("hm_synthetic"), readOracleQueryGate("observations")])
+      .toEqual([false, false, null]);
     vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
     vi.stubEnv("CLINICAL_RECORDS_ORACLE_SEARCH", "1");
     vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", " hm_other , hm_synthetic ");
     expect(oracleStartsEnabledFor("hm_synthetic")).toBe(true);
     for (const memberId of ["hm_synth", "HM_SYNTHETIC", ""]) expect(oracleStartsEnabledFor(memberId)).toBe(false);
     expect(oracleSearchEnabled()).toBe(true);
-    expect(oracleImportQueryEnabled("unknown-query")).toBe(false);
+    expect(readOracleQueryGate("unknown-query")).toEqual({ code: "query-unavailable", retryable: false });
     vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
-    expect([oracleSearchEnabled(), oracleStartsEnabledFor("hm_synthetic"), oracleImportQueryEnabled("observations")])
-      .toEqual([false, false, false]);
+    expect([oracleSearchEnabled(), oracleStartsEnabledFor("hm_synthetic"), readOracleQueryGate("observations")])
+      .toEqual([false, false, { code: "integration-disabled", retryable: true }]);
+  });
+
+  it.each(["1", " 1 ", "true", "TRUE", "yes", "on", "disabled"])("treats kill switch value %j as on", (value) => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", value);
+    expect(oracleEgressDisabled()).toBe(true);
+  });
+
+  it.each(["", "  ", "0", " 0 ", "false", "False", "FALSE"])("treats kill switch value %j as off", (value) => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", value);
+    expect(oracleEgressDisabled()).toBe(false);
   });
 
   it("requires the allowlist even when starts are on", () => {

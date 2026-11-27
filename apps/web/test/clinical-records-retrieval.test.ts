@@ -1791,7 +1791,18 @@ describe("Oracle runs at the Web retrieval boundary", () => {
       }
     });
 
-  it("stops page and document egress, including issued tickets, with the kill switch", async () => {
+  it("refuses a query outside the Oracle catalog permanently", async () => {
+    const harness = oracleHarness(["Patient", "Observation"]);
+    const epicOnly = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-11-26T12:00:00Z"), pageCount: "100",
+      resourceTypes: ["Observation"] }).slices[0]!;
+    harness.state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [epicOnly] };
+    const fetchImpl = vi.fn();
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(epicOnly, "epic-only") }))
+      .resolves.toEqual({ status: "unavailable", errorCode: "query-unavailable", retryable: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("pauses page and document egress, including issued tickets, with the kill switch", async () => {
     const harness = oracleHarness(["Patient", "DocumentReference"]);
     const fetchImpl = vi.fn(async (url: URL | RequestInfo) => String(url).includes("/Binary/")
       ? fhirResponse({ resourceType: "Binary", id: "document-1", contentType: "text/plain", data: Buffer.from("Synthetic note").toString("base64") })
@@ -1804,13 +1815,18 @@ describe("Oracle runs at the Web retrieval boundary", () => {
     const ticket = { runId: RUN_ID, generation: 1, ticket: issued };
     expect(parseHostedClinicalRecordsFetchDocumentResponse(await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl, request: ticket })))
       .toMatchObject({ status: "document", mediaType: "text/plain" });
-    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "true");
     const calls = fetchImpl.mock.calls.length;
+    // Retryable, so the runtime keeps its checkpoint instead of recording the slices as lost.
     await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl, request: ticket }))
-      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: false });
+      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: true });
     await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(documents, "documents-again") }))
-      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: false });
+      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: true });
     expect(fetchImpl).toHaveBeenCalledTimes(calls);
+    expect(harness.state.run).toMatchObject({ completedAt: null, status: "retrieving" });
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "0");
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(documents, "documents-resumed") }))
+      .resolves.toMatchObject({ status: "page" });
   });
 
   it("carries a cerner-fhir run through read-run, fetch-page, the vault importer and record-outcome", async () => {

@@ -9,7 +9,7 @@ import { publishClinicalChangeTx } from "./notification";
 import { closeClinicalRunTx } from "./run-lifecycle";
 import { CLINICAL_RECORD_OPEN_RUN_STATUSES, CLINICAL_RECORD_TERMINAL_RUN_STATUSES } from "./client-contracts";
 import { epicImportQueryEnabled } from "./epic-import-config";
-import { oracleImportQueryEnabled } from "./oracle-integration";
+import { readOracleQueryGate } from "./oracle-integration";
 import { buildOracleInitialFhirPageUrl } from "./oracle-policy";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
@@ -209,7 +209,7 @@ export async function fetchClinicalRetrievalPage(input: {
     return unavailable("retrieval-identity-mismatch", false);
   }
   const gated = readClinicalQueryGate(run.connection, retrievalSlice.queryScopeId);
-  if (gated) return unavailable(gated, false);
+  if (gated) return unavailable(gated.code, gated.retryable);
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
   }
@@ -442,7 +442,7 @@ async function loadClinicalDocumentRequest(input: {
       && entry.resourceType === ticket.resourceType);
     if (!slice) return { unavailable: "document-ticket-invalid", retryable: false };
     const gated = readClinicalQueryGate(input.run.connection, slice.queryScopeId);
-    if (gated) return { unavailable: gated, retryable: false };
+    if (gated) return { unavailable: gated.code, retryable: gated.retryable };
     const sourceKind = ticket.sourceKind ?? "binary";
     if (sourceKind === "media" && !epicMediaReadIsGranted(input.grantedScopes)) return { unavailable: "media-scope-unavailable", retryable: false };
     return { ticket, url: resolveClinicalDocumentUrl(ticket.url, fhirBaseUrl, sourceKind), fhirBaseUrl, patientIdHash };
@@ -869,18 +869,19 @@ function parseRunnableClinicalConfiguration(record: {
   }
 }
 
-/** Each integration's gate covers frozen plans too; it returns the refusal code or null. */
+/** Each integration's gate covers frozen plans too; it returns the refusal or null. */
 function readClinicalQueryGate(
   connection: Pick<RunnableClinicalRun["connection"], "providerDirectoryEntryId" | "sourceSystem">,
   queryScopeId: string,
-): string | null {
+): { code: string; retryable: boolean } | null {
   switch (connection.sourceSystem) {
     case "epic-fhir":
-      return epicImportQueryEnabled(connection.providerDirectoryEntryId, queryScopeId) ? null : "hospital-approval-required";
+      return epicImportQueryEnabled(connection.providerDirectoryEntryId, queryScopeId)
+        ? null : { code: "hospital-approval-required", retryable: false };
     case "cerner-fhir":
-      return oracleImportQueryEnabled(queryScopeId) ? null : "integration-disabled";
+      return readOracleQueryGate(queryScopeId);
     default:
-      return "integration-disabled";
+      return { code: "integration-unavailable", retryable: false };
   }
 }
 

@@ -84,6 +84,7 @@ import { buildHostedDeviceSyncAppCompletionProof } from "@/src/lib/device-sync/b
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { EPIC_BETA_RESOURCE_TYPES } from "@/src/lib/clinical-records/epic-policy";
 import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
+import { ORACLE_STORED_CLIENT_REFERENCE } from "@/src/lib/clinical-records/oracle-integration";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import {
   finishClinicalRecordAuthorization,
@@ -1343,7 +1344,7 @@ describe("Oracle-bound callbacks", () => {
   function oracleCallback(sessionOverrides: Partial<ReturnType<typeof oauthSession>> = {}) {
     vi.stubEnv("ORACLE_SMART_CLIENT_ID", "synthetic-oracle-client");
     vi.stubEnv("ORACLE_SMART_PRIVATE_KEY_PEM", signerPem);
-    const harness = createHarness(null, { clientId: "synthetic-oracle-client", providerDirectoryEntryId: ORACLE_ID, tokenEndpoint: TOKEN,
+    const harness = createHarness(null, { clientId: ORACLE_STORED_CLIENT_REFERENCE, providerDirectoryEntryId: ORACLE_ID, tokenEndpoint: TOKEN,
       fhirBaseHash: createHash("sha256").update(BASE).digest("hex"), requestedScopesJson: SCOPES, ...sessionOverrides });
     mocks.getPrisma.mockReturnValue(harness.prisma);
     mocks.openClinicalOauthVerifier.mockResolvedValue(binding());
@@ -1379,13 +1380,18 @@ describe("Oracle-bound callbacks", () => {
     expect(harness.durableRetrievalRuns).toMatchObject([{ retrievalPlanJson: buildOracleRetrievalPlan({ resourceTypes: ["Patient", "Observation"] }) }]);
     expect(mocks.sealClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith(expect.objectContaining({ value: BASE }));
     const sealed = mocks.sealClinicalConnectionSecret.mock.calls.find(([input]) => input.field === "refreshToken")![0];
-    expect(JSON.parse(sealed.value)).toMatchObject({ profile: PROFILE, clientId: "synthetic-oracle-client", tokenEndpoint: TOKEN });
+    expect(JSON.parse(sealed.value)).toMatchObject({ profile: PROFILE, clientId: ORACLE_STORED_CLIENT_REFERENCE, tokenEndpoint: TOKEN });
+    // The credential-grade client ID reaches only the signed assertion, never a stored value.
+    expect(JSON.stringify([harness.durableConnections, harness.durableRetrievalRuns, mocks.sealClinicalConnectionSecret.mock.calls]))
+      .not.toContain("synthetic-oracle-client");
   });
 
   it.each([
     ["an untrusted token URL", () => oracleCallback({ tokenEndpoint: `${BASE}/token` }), "CLINICAL_RECORD_SMART_ENDPOINT_MISMATCH"],
     ["another tenant's token URL", () => oracleCallback({ tokenEndpoint: TOKEN.replace("0aB1cD2e-synthetic", "another-tenant") }),
       "CLINICAL_RECORD_SMART_ENDPOINT_MISMATCH"],
+    ["a raw client ID saved in the session", () => oracleCallback({ clientId: "synthetic-oracle-client" }),
+      "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED"],
     ["a moved base", () => { oracleCallback(); mocks.openClinicalOauthVerifier.mockResolvedValue(binding({ fhirBaseUrl: `${BASE}x` })); },
       "CLINICAL_RECORD_PROVIDER_CONFIGURATION_CHANGED"],
     ["the kill switch", () => { oracleCallback(); vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1"); }, "CLINICAL_RECORD_PROVIDER_NOT_CONFIGURED"],

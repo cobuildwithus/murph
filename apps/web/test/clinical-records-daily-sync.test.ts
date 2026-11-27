@@ -259,7 +259,7 @@ describe("Oracle grants", () => {
     f.row.retrievalRuns[0]!.grantedScopesJson = SCOPES;
     mocks.base.mockResolvedValue(BASE);
     mocks.open.mockImplementation(async ({ field }: { field: string }) => field === "refreshToken" ? JSON.stringify({ schemaVersion: 1,
-      profile: PROFILE, clientId: "synthetic-oracle-client", tokenEndpoint: TOKEN, refreshToken: "oracle-refresh", grantedScopes: SCOPES,
+      profile: PROFILE, clientId: "oracle-millennium-r4", tokenEndpoint: TOKEN, refreshToken: "oracle-refresh", grantedScopes: SCOPES,
       ...payload }) : "existing-access");
     vi.stubEnv("ORACLE_SMART_CLIENT_ID", "synthetic-oracle-client");
     vi.stubEnv("ORACLE_SMART_PRIVATE_KEY_PEM", signerPem);
@@ -280,7 +280,8 @@ describe("Oracle grants", () => {
     const assertion = new URLSearchParams(String(init?.body)).get("client_assertion")!;
     expect(decodeJwt(assertion)).toMatchObject({ aud: TOKEN, iss: "synthetic-oracle-client", sub: "synthetic-oracle-client" });
     const sealed = JSON.parse(f.row.refreshTokenEncrypted.slice("sealed:".length));
-    expect(sealed).toMatchObject({ profile: PROFILE, refreshToken: "oracle-refresh", tokenEndpoint: TOKEN });
+    expect(sealed).toMatchObject({ profile: PROFILE, clientId: "oracle-millennium-r4", refreshToken: "oracle-refresh", tokenEndpoint: TOKEN });
+    expect(f.row.refreshTokenEncrypted).not.toContain("synthetic-oracle-client");
     expect(f.row).toMatchObject({ accessTokenEncrypted: "sealed:oracle-access", refreshLeaseId: null });
     expect((f.row.accessTokenExpiresAt as Date).getTime()).toBeGreaterThanOrEqual(before + 570_000);
   });
@@ -289,12 +290,13 @@ describe("Oracle grants", () => {
     ["an Oracle row without its profile", { profile: undefined }, "cerner-fhir"],
     ["an Epic row with an Oracle profile", {}, "epic-fhir"],
     ["another tenant's token URL", { tokenEndpoint: TOKEN.replace("0aB1cD2e-synthetic", "another-tenant") }, "cerner-fhir"],
-    ["a grant issued to another client", { clientId: "synthetic-previous-client" }, "cerner-fhir"],
+    ["a raw client ID in the payload", { clientId: "synthetic-oracle-client" }, "cerner-fhir"],
     ["the kill switch", {}, "disabled"],
+    ["the kill switch spelled true", {}, "disabled-true"],
   ])("releases the lease without egress for %s", async (_label, payload, sourceSystem) => {
     const f = oracleFixture(payload);
     if (sourceSystem === "epic-fhir") f.row.sourceSystem = "epic-fhir";
-    if (sourceSystem === "disabled") vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    if (sourceSystem.startsWith("disabled")) vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", sourceSystem === "disabled" ? "1" : " true ");
     const fetchImpl = vi.fn<typeof fetch>();
     await expect(renew(f, fetchImpl)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", retryable: true });
     expect(fetchImpl).not.toHaveBeenCalled();
