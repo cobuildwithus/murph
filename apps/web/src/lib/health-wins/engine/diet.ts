@@ -58,7 +58,7 @@ function bestMonth(nutrient: Nutrient, current: Month, prior: readonly Month[], 
   const rank = compareMonthlyValues(current.value, Math.max(...values));
   if (rank < 0) return;
   const period = useCalendarYear ? "this year" : "in the past 12 months";
-  const superlative = rank === 0 ? "tied for most" : "your most";
+  const superlative = rank === 0 ? "tied for most" : "most";
   return {
     date: lastKnown, eventDate: today, effect: current.value - median(values), noise: Math.max(1, mad(values)),
     achievement: { kind: "best_month", subject: `${nutrient}_g`, period: current.month },

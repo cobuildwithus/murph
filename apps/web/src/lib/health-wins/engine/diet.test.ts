@@ -111,9 +111,9 @@ describe("Diet best_month", () => {
     const huge = days("2033-03", 25, 200);
     const current = days("2034-04", 12, 108);
     expect(best([...previousYear, ...feb, ...mar, ...current])).toBeUndefined();
-    expect(best([...previousYear, ...jan, ...feb, ...mar, ...current])?.subtitle).toBe("April so far, your most this year");
+    expect(best([...previousYear, ...jan, ...feb, ...mar, ...current])?.subtitle).toBe("April so far, most this year");
     expect(best([...huge, ...days("2033-04", 25, 30), ...feb, ...mar, ...current])?.subtitle)
-      .toBe("April so far, your most in the past 12 months");
+      .toBe("April so far, most in the past 12 months");
   });
 
   it("orders and labels ties before rounding, including sums of fractional grams", () => {
@@ -122,7 +122,7 @@ describe("Diet best_month", () => {
     expect(best([...flat, ...april].map(row => ({ ...row, proteinG: 0 })))).toBeUndefined();
     const prior = [...days("2034-01", 25, 47.999), ...feb, ...mar];
     expect(best([...prior, ...days("2034-04", 12, 99.999)])).toMatchObject({
-      title: { number: "1,200" }, subtitle: "April so far, your most this year",
+      title: { number: "1,200" }, subtitle: "April so far, most this year",
     });
     expect(best([...prior, ...days("2034-04", 12, 99.997)])).toBeUndefined();
   });
