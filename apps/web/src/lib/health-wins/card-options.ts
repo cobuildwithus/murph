@@ -180,12 +180,19 @@ function chooseVariant(candidate: CachedHealthCandidate, option: string) {
   return variant;
 }
 
+/** A card without its own tips. A recording just made is asked how it went, not how the member got there. */
+function defaultCaptionTips(kind: string): string[] {
+  if (kind === "activity_route" || kind === "activity_splits") return ["How did it feel?", "Where did you go?"];
+  if (kind.startsWith("activity_")) return ["How did it feel?"];
+  return ["What helped you get here?", "How did it feel?"];
+}
+
 export function previewHealthCandidate(candidate: CachedHealthCandidate, option = "original") {
   const { spec, specRevision } = chooseVariant(candidate, option);
   if (spec === null) throw invalidGameRequest("This option removes the card.");
   return { ...spec, specRevision,
     change_options: candidate.variants.map(item => ({ id: item.option, label: labels[item.option] })),
-    caption_tips: spec.share.caption_tips.length ? spec.share.caption_tips : ["What helped you get here?", "How did it feel?"] };
+    caption_tips: spec.share.caption_tips.length ? spec.share.caption_tips : defaultCaptionTips(spec.kind) };
 }
 
 /** A preview can contain caller-chosen paths. Only a published card discloses the shared art handle. */

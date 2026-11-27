@@ -64,6 +64,20 @@ it("removes every value-bearing field, including the engine id, raw arrays, sour
   expect(JSON.stringify(display)).not.toMatch(/153|2031|private date|fixture-private/u);
 });
 
+it("asks how a recording went when its card carries no caption tips of its own", () => {
+  const tips = (kind: string, option?: string) => {
+    const [candidate] = prepareHealthCandidates("member-fixture", [{ ...record, kind, share: { caption_tips: [] } } as CardSpec]);
+    return previewHealthCandidate(candidate, option).caption_tips;
+  };
+  expect(tips("activity_time")).toEqual(["How did it feel?"]);
+  expect(tips("activity_heart_rate", "hide_numbers")).toEqual(["How did it feel?"]);
+  expect(tips("activity_route")).toEqual(["How did it feel?", "Where did you go?"]);
+  expect(tips("activity_splits")).toEqual(["How did it feel?", "Where did you go?"]);
+  expect(tips("personal_record")).toEqual(["What helped you get here?", "How did it feel?"]);
+  const [own] = prepareHealthCandidates("member-fixture", [record]);
+  expect(previewHealthCandidate(own).caption_tips).toEqual(["Measured for 153 min."]);
+});
+
 it("binds each See yours revision to the member's displayed spec, including hours", () => {
   const measured: CardSpec = { ...record, measure: "sleep_deep_min" };
   const [set] = prepareHealthCandidates("fixture-owner", [measured]);
