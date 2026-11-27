@@ -177,6 +177,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "A hide cascades when either member leaves.",
   },
   {
+    slug: "prisma.health_you_cache",
+    label: "Private You view cache",
+    deletion: "live-delete",
+    note: "Deleting the member cascades their sealed derived views. Canonical measurements remain in the vault export.",
+  },
+  {
     slug: "prisma.health_win_set",
     label: "Health win suggestions",
     deletion: "live-delete",

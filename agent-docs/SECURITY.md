@@ -2,6 +2,10 @@
 
 Last verified: 2026-11-25
 
+## Private You reads
+
+Native You routes require game authentication, feed and You allowlists, and current browser-vault authority before and after serving a view, including cached reads. A sealed cache binds the entire derived view set to its member and revision. Lab responses use catalog names and normalized numeric observations. Route errors omit replica contents. The public profile has a separate audience boundary.
+
 ## Private weekly game images
 
 Weekly game media is the explicitly approved exception to application-encrypted

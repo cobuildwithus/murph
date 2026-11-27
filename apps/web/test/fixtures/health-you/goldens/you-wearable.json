@@ -1,0 +1,589 @@
+{
+  "version": "r3.0",
+  "asOf": "2025-03-29",
+  "state": "ready",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "age": {
+    "value": 51.1,
+    "real": 51.2,
+    "gap": -0.1,
+    "low": 34,
+    "high": 68.3
+  },
+  "week": {
+    "daysAged": 8.29,
+    "saved": -1.29,
+    "partial": false,
+    "basis": "observed"
+  },
+  "thisWeek": [
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [
+    {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "group": "habits",
+      "value": "73",
+      "unit": "bpm",
+      "target": {
+        "text": "Comparison value 62 bpm"
+      },
+      "years": 0.1,
+      "yearsText": "+0.1",
+      "whatItIs": "This is the heart rate recorded while resting.",
+      "whatLowersIt": "Compare resting readings from the same device across several days.",
+      "rank": {
+        "percentile": 59,
+        "label": "59th percentile",
+        "cohort": "Men near age 51"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "group": "sleep",
+      "value": "6h 37m",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 7"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This is the time spent asleep.",
+      "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
+      "rank": {
+        "percentile": 40,
+        "label": "40th percentile",
+        "cohort": "Men near age 51"
+      },
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "7,760",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 14,995.3 steps/day"
+      },
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
+      "rank": {
+        "percentile": 37,
+        "label": "37th percentile (lower bound)",
+        "cohort": "Men near age 51"
+      },
+      "grade": null,
+      "detail": "fitness",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [
+    {
+      "key": "acr",
+      "label": "Urine albumin-to-creatinine ratio",
+      "icon": "acr",
+      "action": "bloodWork",
+      "primary": true
+    },
+    {
+      "key": "activeMinutes",
+      "label": "Active minutes",
+      "icon": "activeMinutes",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "alcohol",
+      "label": "Alcohol",
+      "icon": "alcohol",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "alp",
+      "label": "Alp",
+      "icon": "alp",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "ast",
+      "label": "Ast",
+      "icon": "ast",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "balance",
+      "label": "Balance",
+      "icon": "balance",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "calcium",
+      "label": "Calcium",
+      "icon": "calcium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "chloride",
+      "label": "Chloride",
+      "icon": "chloride",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "diabetes",
+      "label": "Diabetes",
+      "icon": "diabetes",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "diet_pattern",
+      "label": "Diet pattern",
+      "icon": "diet_pattern",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "disease",
+      "label": "Health history",
+      "icon": "disease",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "fev1",
+      "label": "Lung function",
+      "icon": "fev1",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "fibre",
+      "label": "Dietary fibre",
+      "icon": "fibre",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "fish",
+      "label": "Fish",
+      "icon": "fish",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "sitRise",
+      "label": "Sit and rise",
+      "icon": "sitRise",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "fruit",
+      "label": "Fruit",
+      "icon": "fruit",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "gait",
+      "label": "Gait",
+      "icon": "gait",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "gait_speed",
+      "label": "Gait speed",
+      "icon": "gait_speed",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "ggt",
+      "label": "Ggt",
+      "icon": "ggt",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "globulin",
+      "label": "Globulin",
+      "icon": "globulin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "health",
+      "label": "Self-rated health",
+      "icon": "health",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hemoglobin",
+      "label": "Hemoglobin",
+      "icon": "hemoglobin",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "homocysteine",
+      "label": "Homocysteine",
+      "icon": "homocysteine",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "knee",
+      "label": "Knee",
+      "icon": "knee",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "l5_midpoint",
+      "label": "L5 midpoint",
+      "icon": "l5_midpoint",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "cholesterol",
+      "label": "LDL cholesterol",
+      "icon": "cholesterol",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "legumes",
+      "label": "Legumes",
+      "icon": "legumes",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "lifts",
+      "label": "Strength training",
+      "icon": "lifts",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "lpa",
+      "label": "Lipoprotein(a)",
+      "icon": "lpa",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "lymph",
+      "label": "Lymph",
+      "icon": "lymph",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "mcv",
+      "label": "Mcv",
+      "icon": "mcv",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "nuts",
+      "label": "Nuts",
+      "icon": "nuts",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "phosphate",
+      "label": "Phosphate",
+      "icon": "phosphate",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "phq9",
+      "label": "Mood questionnaire",
+      "icon": "phq9",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "platelets",
+      "label": "Platelets",
+      "icon": "platelets",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "potassium",
+      "label": "Potassium",
+      "icon": "potassium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "processed_meat",
+      "label": "Processed meat",
+      "icon": "processed_meat",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "red_meat",
+      "label": "Red meat",
+      "icon": "red_meat",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "sauna",
+      "label": "Sauna",
+      "icon": "sauna",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    },
+    {
+      "key": "sedentary",
+      "label": "Sedentary",
+      "icon": "sedentary",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "bedtime",
+      "label": "Sleep regularity",
+      "icon": "bedtime",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "smoking",
+      "label": "Smoking",
+      "icon": "smoking",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "sodium",
+      "label": "Sodium",
+      "icon": "sodium",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "sugary_drinks",
+      "label": "Sugary drinks",
+      "icon": "sugary_drinks",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "total_protein",
+      "label": "Total protein",
+      "icon": "total_protein",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "uric_acid",
+      "label": "Uric acid",
+      "icon": "uric_acid",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "vegetables",
+      "label": "Vegetables",
+      "icon": "vegetables",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "vilpa",
+      "label": "Vilpa",
+      "icon": "vilpa",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "vitamin_d_25oh",
+      "label": "Vitamin d 25oh",
+      "icon": "vitamin_d_25oh",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "cardioFitness",
+      "label": "Cardio fitness",
+      "icon": "cardioFitness",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "wbc",
+      "label": "White blood cell count",
+      "icon": "wbc",
+      "action": "bloodWork",
+      "primary": false
+    },
+    {
+      "key": "whole_grains",
+      "label": "Whole grains",
+      "icon": "whole_grains",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "workouts",
+      "label": "Workouts",
+      "icon": "workouts",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "meals",
+      "label": "Meals",
+      "icon": "meals",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "fitness_tests",
+      "label": "Fitness tests",
+      "icon": "fitness_tests",
+      "action": "combine",
+      "primary": false
+    },
+    {
+      "key": "family_history",
+      "label": "Family history",
+      "icon": "family_history",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "social_connection",
+      "label": "Social connection",
+      "icon": "social_connection",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "stress",
+      "label": "Stress",
+      "icon": "stress",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "medications",
+      "label": "Medications",
+      "icon": "medications",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hrv",
+      "label": "Hrv",
+      "icon": "hrv",
+      "action": "connectWearable",
+      "primary": false
+    },
+    {
+      "key": "other_fields",
+      "label": "Other fields",
+      "icon": "other_fields",
+      "action": "answer",
+      "primary": false
+    },
+    {
+      "key": "hrv-rmssd",
+      "label": "Hrv rmssd",
+      "icon": "hrv-rmssd",
+      "action": "connectWearable",
+      "primary": false
+    }
+  ],
+  "questions": [
+    {
+      "key": "whoopZones",
+      "text": "Are your WHOOP heart rate zones set to the standard ranges?",
+      "options": [
+        {
+          "value": "yes",
+          "label": "Yes"
+        },
+        {
+          "value": "no",
+          "label": "No"
+        },
+        {
+          "value": "notSure",
+          "label": "Not sure"
+        }
+      ]
+    }
+  ]
+}

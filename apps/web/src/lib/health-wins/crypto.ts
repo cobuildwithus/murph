@@ -11,7 +11,7 @@ const lane = "hosted-member-private-field";
 
 export interface HealthSealTarget {
   memberId: string;
-  table: "health_activity" | "health_post" | "health_post_comment" | "health_post_attachment" | "health_win_set";
+  table: "health_you_cache" | "health_activity" | "health_post" | "health_post_comment" | "health_post_attachment" | "health_win_set";
   rowId: string;
   field: string;
 }
