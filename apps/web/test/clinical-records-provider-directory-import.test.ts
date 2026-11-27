@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { parseClinicalProviderDirectory, searchClinicalProviderDirectorySnapshot } from "@/src/lib/clinical-records/provider-directory";
 import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
-import { assertDirectoryRefreshCounts, buildEpicProviderDirectoryArtifact } from "@/scripts/import-epic-clinical-provider-directory";
+import { assertDirectoryRefreshCounts } from "@/src/lib/clinical-records/provider-directory-artifact";
+import { buildEpicProviderDirectoryArtifact, refreshEpicProviderDirectory } from "@/scripts/import-epic-clinical-provider-directory";
 
 const generatedAt = "2026-07-20T08:00:05.631Z";
 
@@ -23,8 +24,8 @@ describe("Epic Clinical Records provider directory importer", () => {
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       id: "epic-brand-123",
       locations: expect.arrayContaining([
-        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], "urn:uuid:facility-1", [33.799851, -84.385837]],
-        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], "facility-north", [33.799851, -84.385837]],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], [33.8, -84.386]],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], [33.8, -84.386]],
       ]),
     });
   });
@@ -78,8 +79,32 @@ describe("Epic Clinical Records provider directory importer", () => {
         ...baseline, entries: [{ ...baseline.entries[0]!, facilities }, ...baseline.entries.slice(1)],
       })).toThrow(/10%/u);
     }
-    artifact.entries[0]!.locations[0]![7] = [94, -84];
+    artifact.entries[0]!.locations[0]![6] = [94, -84];
     expect(() => parseClinicalProviderDirectory(artifact)).toThrow(/coordinate/u);
+  });
+
+  it("keeps an existing entry on its FHIR host and publishes path changes and new entries", () => {
+    const previous = parseClinicalProviderDirectory(buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle())));
+    const refresh = (address: string, extraBrand = false) => {
+      const bundle = makeBundle();
+      bundle.entry[0]!.resource.address = address;
+      if (extraBrand) bundle.entry.push(...makeBrand("brand-456", "https://new.example.test/FHIR/R4"));
+      return refreshEpicProviderDirectory(JSON.stringify(bundle), previous);
+    };
+    const url = (artifact: ReturnType<typeof refresh>["artifact"], id: string) =>
+      artifact.entries.find(entry => entry.id === id)?.fhirBaseUrl;
+
+    const moved = refresh("https://moved.example.test/FHIR/R4");
+    expect(moved.held).toEqual([{
+      id: "epic-brand-123", current: "https://fhir.example.test/FHIR/R4", candidate: "https://moved.example.test/FHIR/R4",
+    }]);
+    expect(url(moved.artifact, "epic-brand-123")).toBe("https://fhir.example.test/FHIR/R4");
+    expect(refresh("https://fhir.example.test:8443/FHIR/R4").held).toHaveLength(1);
+
+    const pathOnly = refresh("https://fhir.example.test/v2/FHIR/R4", true);
+    expect(pathOnly.held).toEqual([]);
+    expect(url(pathOnly.artifact, "epic-brand-123")).toBe("https://fhir.example.test/v2/FHIR/R4");
+    expect(url(pathOnly.artifact, "epic-brand-456")).toBe("https://new.example.test/FHIR/R4");
   });
 
   it("rejects duplicate source identities", () => {
@@ -90,6 +115,19 @@ describe("Epic Clinical Records provider directory importer", () => {
     }))).toThrow(/duplicate entry fullUrls/u);
   });
 });
+
+function makeBrand(identifier: string, address: string) {
+  return [
+    { fullUrl: `urn:uuid:endpoint-${identifier}`, resource: {
+      address, extension: [{ url: "http://hl7.org/fhir/StructureDefinition/endpoint-fhir-version", valueCode: "4.0.1" }],
+      resourceType: "Endpoint", status: "active",
+    } },
+    { fullUrl: `urn:uuid:${identifier}`, resource: {
+      active: true, endpoint: [{ reference: `urn:uuid:endpoint-${identifier}` }], name: "Second Health",
+      identifier: [{ system: "https://open.epic.com/brand-identifier", value: identifier }], resourceType: "Organization",
+    } },
+  ];
+}
 
 function makeBundle() {
   return {
@@ -135,7 +173,7 @@ function makeBundle() {
         resource: {
           active: true,
           id: "facility-north",
-          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["32 Harbor Lane"] }],
+          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["Test Clinic", "32 Harbor Lane"] }],
           name: "Test Clinic",
           partOf: { reference: "urn:uuid:brand-1" },
           resourceType: "Organization",

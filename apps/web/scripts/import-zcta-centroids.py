@@ -13,5 +13,6 @@ if hashlib.sha256(archive).hexdigest() != "f1e9046b91f6e60686a99343cb2752834c02b
 with zipfile.ZipFile(io.BytesIO(archive)) as zipped:
     with zipped.open("2026_Gaz_zcta_national.txt") as table:
         rows = csv.DictReader(io.TextIOWrapper(table), delimiter="|")
-        points = {row["GEOID"]: [float(row["INTPTLAT"]), float(row["INTPTLONG"])] for row in rows}
+        # Three decimals is about 110 m, finer than a ZIP's representative point.
+        points = {row["GEOID"]: [round(float(row["INTPTLAT"]), 3), round(float(row["INTPTLONG"]), 3)] for row in rows}
 Path(sys.argv[2]).write_text(json.dumps(points, sort_keys=True, separators=(",", ":")) + "\n")

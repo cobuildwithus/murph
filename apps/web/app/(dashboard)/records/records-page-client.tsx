@@ -152,7 +152,8 @@ export function RecordsPageClient({
           description={connections.length === 0 ? "Bring records from your patient portal into Murph." : undefined}
         />
         {authenticated ? (
-          <Link
+          // A full page load applies the connect page's location permission.
+          <a
             aria-label="Import records"
             title="Import records"
             className={buttonVariants({ size: connections.length > 0 ? "icon-lg" : "lg", variant: connections.length > 0 ? "ghost" : "default" })}
@@ -160,7 +161,7 @@ export function RecordsPageClient({
           >
             <PlusIcon aria-hidden="true" />
             {connections.length === 0 ? "Import records" : null}
-          </Link>
+          </a>
         ) : null}
       </header>
 
@@ -320,12 +321,12 @@ function ImportAgainLink({ connection }: {
 }) {
   if (isImportInProgress(connection) || !connection.canImport) return null;
   return (
-    <Link
+    <a
       href="/records/connect?launch=clinical-records"
       className={buttonVariants({ size: "lg", variant: "default", className: "mt-5" })}
     >
       {connection.status === "disconnected" || connection.status === "needs_reauth" ? "Reconnect" : "Import again"}
-    </Link>
+    </a>
   );
 }
 

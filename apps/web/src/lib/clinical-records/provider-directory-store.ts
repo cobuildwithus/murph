@@ -37,7 +37,11 @@ export async function searchClinicalProviderDirectory(input: {
   state?: string | null;
 }, memberId?: string) {
   const directory = readClinicalProviderDirectory();
-  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined, accessRank: epicPortalAccessRank });
+  // Loaded on the first search, so routes that only resolve an entry never parse the ZIP table.
+  const { postalCentroid } = await import("./postal-centroids");
+  const result = searchClinicalProviderDirectorySnapshot(directory, {
+    ...input, postalCentroid, grouped: memberId !== undefined, accessRank: epicPortalAccessRank,
+  });
   if (memberId === undefined || !result.providers.length) return result;
   const hashes = result.providers.map(provider => {
     const entry = resolveClinicalProviderDirectoryEntry(provider.id)!;

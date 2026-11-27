@@ -2,6 +2,11 @@ name: Refresh clinical provider directory
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_count_drop:
+        description: Publish even though brands, facilities or mapped facilities fell by more than 10 percent. Use only after confirming the drop upstream.
+        type: boolean
+        default: false
   schedule:
     - cron: '17 9 * * 1'
 
@@ -14,6 +19,8 @@ concurrency:
 
 env:
   DIRECTORY: apps/web/src/lib/clinical-records/provider-directory.v2.json
+  # Scheduled runs have no inputs, so the count floor applies.
+  MURPH_DIRECTORY_ALLOW_COUNT_DROP: ${{ inputs.allow_count_drop == true }}
 
 jobs:
   refresh:
@@ -41,20 +48,28 @@ jobs:
           git ls-files --error-unmatch -- "$DIRECTORY"
           test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
           input="$RUNNER_TEMP/epic-brands.json"
+          candidate="$RUNNER_TEMP/candidate"
+          mkdir "$candidate"
           curl --proto '=https' --proto-redir '=https' --fail --location --silent --show-error \
             --max-time 300 --max-filesize 268435456 https://open.epic.com/Endpoints/Brands -o "$input"
           test -s "$input" || { echo "::error::Downloaded Epic source is missing or empty"; exit 1; }
-          pnpm --dir apps/web clinical-records:providers:import -- --input "$input" --output "$GITHUB_WORKSPACE/$DIRECTORY"
+          count_drop=()
+          if [[ "$MURPH_DIRECTORY_ALLOW_COUNT_DROP" == true ]]; then count_drop=(--allow-count-drop); fi
+          pnpm --dir apps/web clinical-records:providers:import -- --input "$input" --output "$GITHUB_WORKSPACE/$DIRECTORY" \
+            --held-output "$candidate/held-endpoints.json" "${count_drop[@]}"
           test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
+          cp "$DIRECTORY" "$candidate/provider-directory.v2.json"
           if ! git diff --quiet -- "$DIRECTORY"; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: steps.build.outputs.changed == 'true'
         with:
           name: clinical-directory
-          path: ${{ env.DIRECTORY }}
+          path: ${{ runner.temp }}/candidate
           if-no-files-found: error
           retention-days: 1
 
+  # No dependency install and no upstream data: Node and the committed
+  # checkout re-check the candidate before anything is reported or published.
   publish:
     needs: refresh
     if: needs.refresh.outputs.changed == 'true'
@@ -63,6 +78,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      issues: write
     environment:
       name: frog-reconciliation
       deployment: false
@@ -74,16 +90,37 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: clinical-directory
           path: ${{ runner.temp }}/validated
-      - name: Copy validated snapshot to its tracked destination
+      - name: Re-check the parser, count floor and endpoint hosts
         run: |
           set -euo pipefail
           git ls-files --error-unmatch -- "$DIRECTORY"
-          test -s "$RUNNER_TEMP/validated/provider-directory.v2.json" || { echo "::error::Validated directory artifact is missing"; exit 1; }
-          cp "$RUNNER_TEMP/validated/provider-directory.v2.json" "$DIRECTORY"
+          node scripts/check-clinical-provider-directory.mjs publish "$RUNNER_TEMP/validated/provider-directory.v2.json" \
+            "$RUNNER_TEMP/validated/held-endpoints.json" "$RUNNER_TEMP/held-endpoints.md"
+      - name: Report held endpoint host changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: Clinical directory endpoint host changes need review
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/held-endpoints.md"
+          [[ -s "$report" ]] || exit 0
+          issue=$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&creator=github-actions%5Bbot%5D&per_page=100" \
+            --jq 'map(select(.pull_request == null and .title == env.TITLE))[0].number // empty')
+          if [[ -n "$issue" ]]; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$report"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$report"
+          fi
+          echo "::warning::Kept current FHIR endpoints whose host changed upstream; see the open issue \"$TITLE\"."
+      - name: Copy validated snapshot to its tracked destination
+        run: cp "$RUNNER_TEMP/validated/provider-directory.v2.json" "$DIRECTORY"
       - name: Mint directory publication token
         id: app
         uses: ./.github/actions/github-app-token
@@ -117,7 +154,9 @@ jobs:
             head=$(git rev-parse HEAD)
             git push origin "HEAD:refs/heads/$branch"
           fi
-          pr=$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')
+          # Owner-qualified, so a fork's branch with the same name never matches.
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=main&head=$GITHUB_REPOSITORY_OWNER:$branch" \
+            --jq '.[0].number // empty')
           if [[ -z "$pr" ]]; then
             url=$(gh pr create --base main --head "$branch" --title 'Refresh the clinical provider directory' \
               --body-file .github/clinical-provider-refresh-pr.md)

@@ -756,7 +756,7 @@ test("next.config serves global security headers", async () => {
   const routes = await productionNextConfig.headers?.();
 
   assert.ok(routes);
-  assert.equal(routes.length, 2, "global security headers, then the noindex default");
+  assert.equal(routes.length, 3, "global security headers, the location page, then the noindex default");
   assert.equal(routes[0]?.source, "/(.*)");
   assert.deepEqual(
     routes[0]?.headers.map((header) => header.key),
@@ -827,6 +827,23 @@ function assertScriptDirectiveHasNoBroadSource(
     assert.ok(!sources.includes(broadSource), `${directive} must not include ${broadSource}.`);
   }
 }
+
+test("only the records connect document may ask for the browser's location", async () => {
+  const { buildCustomRoute } = require("next/dist/lib/build-custom-route") as {
+    buildCustomRoute: (type: "header", route: { source: string; headers: unknown[] }) => { regex: string };
+  };
+  const rules = await productionNextConfig.headers!();
+  // Next applies every matching rule in order, so the last value for a key wins.
+  const permissionsPolicy = (path: string) => rules
+    .filter((rule) => new RegExp(buildCustomRoute("header", { source: rule.source, headers: [] }).regex).test(path))
+    .flatMap((rule) => rule.headers)
+    .filter((header) => header.key === "Permissions-Policy")
+    .at(-1)?.value;
+  assert.equal(permissionsPolicy("/records/connect"), "camera=(), geolocation=(self), microphone=(self)");
+  for (const path of ["/", "/records", "/records/connect/other", "/settings", "/design", "/api/clinical-records/providers/search"]) {
+    assert.equal(permissionsPolicy(path), "camera=(), geolocation=(), microphone=(self)", path);
+  }
+});
 
 test("only public pages may be indexed; every private link answers noindex", async () => {
   const { buildCustomRoute } = require("next/dist/lib/build-custom-route") as {

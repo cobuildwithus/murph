@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/link", () => ({
   default: ({ children, href, className }: { children: ReactNode; className?: string; href: string }) =>
-    createElement("a", { className, href }, children),
+    createElement("a", { className, "data-client-navigation": "", href }, children),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -1008,6 +1008,8 @@ describe("Clinical Records status page", () => {
     const links = Array.from(rendered.container.querySelectorAll('a[href="/records/connect?launch=clinical-records"]'));
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toContain("Import records");
+    // Location permission belongs to the connect page's own document, so it needs a full page load.
+    expect(links[0]?.hasAttribute("data-client-navigation")).toBe(false);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain("No records imported yet");
   });
@@ -1299,7 +1301,9 @@ describe("Clinical Records status page", () => {
     expect(rendered.container.textContent).toContain("3 records added");
     expect(rendered.container.textContent).toContain("2 items saved for reference");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
-    expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
+    const reconnect = Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect");
+    expect(reconnect?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
+    expect(reconnect?.hasAttribute("data-client-navigation")).toBe(false);
     expect(rendered.container.textContent).toContain("Sign in again to import more records.");
     expect(rendered.container.textContent).not.toContain("Daily updates");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))

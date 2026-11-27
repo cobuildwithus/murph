@@ -65,7 +65,8 @@ export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResu
   const locality = facility && [facility.name === provider.brandName ? null : facility.name,
     ...(provider.matchedFacility?.street ?? []), facility.city, facility.state].filter(Boolean).join(", ");
   const miles = provider.matchedFacility?.approximateDistanceMiles;
-  return [locality, miles === undefined ? null : `about ${miles} mi`, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
+  const distance = miles === undefined ? null : miles < 1 ? "less than 1 mi" : `about ${miles} mi`;
+  return [locality, distance, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
     && `May already be included through ${provider.possiblyIncludedThrough}`].filter((label): label is string => Boolean(label));
 }
 

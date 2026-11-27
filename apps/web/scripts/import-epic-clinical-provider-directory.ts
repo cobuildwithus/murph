@@ -1,4 +1,5 @@
-import { postalCentroid, type DirectoryFacilityTuple } from "../src/lib/clinical-records/directory-geography";
+import type { DirectoryFacilityTuple } from "../src/lib/clinical-records/directory-geography";
+import { postalCentroid } from "../src/lib/clinical-records/postal-centroids";
 import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,8 +15,12 @@ import {
   buildEpicProviderDirectoryEntryId,
   parseClinicalProviderDirectory,
   type ClinicalProviderDirectory,
-  type ClinicalProviderSourceSystem,
 } from "../src/lib/clinical-records/provider-directory";
+import {
+  assertDirectoryRefreshCounts,
+  endpointOriginChanges,
+  type EndpointOriginChange,
+} from "../src/lib/clinical-records/provider-directory-artifact";
 
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
 const BRAND_IDENTIFIER_SYSTEM = "https://open.epic.com/brand-identifier";
@@ -61,7 +66,7 @@ if (entrypointPath && import.meta.url === pathToFileURL(path.resolve(entrypointP
 }
 
 async function main(): Promise<void> {
-  const { inputPath, outputPath } = parseArguments(process.argv.slice(2));
+  const { allowCountDrop, heldOutputPath, inputPath, outputPath } = parseArguments(process.argv.slice(2));
   if (inputPath !== "-") {
     const inputStats = await stat(inputPath);
     if (!inputStats.isFile() || inputStats.size <= 0 || inputStats.size > MAX_INPUT_BYTES) {
@@ -72,24 +77,27 @@ async function main(): Promise<void> {
     ? await readBoundedStdin()
     : await readFile(inputPath);
   const previous = parseClinicalProviderDirectory(JSON.parse(await readFile(outputPath, "utf8")));
-  const artifact = buildEpicProviderDirectoryArtifact(sourceBytes, previous);
+  const { artifact, held } = refreshEpicProviderDirectory(sourceBytes, previous, { allowCountDrop });
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
+  if (heldOutputPath) await writeFile(heldOutputPath, `${JSON.stringify(held)}\n`, { encoding: "utf8", mode: 0o644 });
   process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+  if (held.length) process.stdout.write(`Kept ${held.length} existing FHIR endpoints whose host changed upstream.\n`);
 }
 
-// Compare independently so a rise in brands cannot hide a loss of facilities.
-export function assertDirectoryRefreshCounts(previous: ClinicalProviderDirectory, next: ClinicalProviderDirectory) {
-  function counts(directory: ClinicalProviderDirectory, system: ClinicalProviderSourceSystem) {
-    const entries = directory.entries.filter(entry => entry.sourceSystem === system);
-    const facilities = entries.flatMap(entry => entry.facilities);
-    return [entries.length, facilities.length, facilities.filter(f => f.coordinate).length];
-  }
-  for (const system of new Set(previous.entries.map(entry => entry.sourceSystem))) {
-    const prior = counts(previous, system);
-    if (counts(next, system).some((count, index) => count < prior[index]! * 0.9)) {
-      throw new RangeError("Provider directory brands, facilities or mapped facilities decreased by more than 10%.");
-    }
-  }
+// Never move an existing entry to another FHIR server automatically: keep its
+// current endpoint and return the change for a person to review.
+export function refreshEpicProviderDirectory(
+  source: string | Uint8Array,
+  previous: ClinicalProviderDirectory,
+  options: { allowCountDrop?: boolean } = {},
+): { artifact: EpicProviderDirectoryArtifactV2; held: EndpointOriginChange[] } {
+  const artifact = buildEpicProviderDirectoryArtifact(source);
+  const held = endpointOriginChanges(previous, artifact);
+  const kept = new Map(held.map(change => [change.id, change.current]));
+  for (const entry of artifact.entries) entry.fhirBaseUrl = kept.get(entry.id) ?? entry.fhirBaseUrl;
+  const parsed = parseClinicalProviderDirectory(artifact);
+  if (!options.allowCountDrop) assertDirectoryRefreshCounts(previous, parsed);
+  return { artifact, held };
 }
 
 async function readBoundedStdin(): Promise<Buffer> {
@@ -111,7 +119,6 @@ async function readBoundedStdin(): Promise<Buffer> {
 
 export function buildEpicProviderDirectoryArtifact(
   source: string | Uint8Array,
-  previous?: ClinicalProviderDirectory,
 ): EpicProviderDirectoryArtifactV2 {
   const sourceBytes = typeof source === "string" ? Buffer.from(source, "utf8") : source;
   if (sourceBytes.byteLength <= 0 || sourceBytes.byteLength > MAX_INPUT_BYTES) {
@@ -202,8 +209,7 @@ export function buildEpicProviderDirectoryArtifact(
     sourceBundleSha256: createHash("sha256").update(sourceBytes).digest("hex"),
     version: `${generatedAt.slice(0, 10)}.epic-brands-r4-policy-v2`,
   };
-  const parsed = parseClinicalProviderDirectory(artifact);
-  if (previous) assertDirectoryRefreshCounts(previous, parsed);
+  parseClinicalProviderDirectory(artifact);
   return artifact;
 }
 
@@ -228,22 +234,27 @@ function attachFacilities(
   }
 }
 
-function parseArguments(args: string[]): { inputPath: string; outputPath: string } {
-  let input: string | null = null;
-  let output = DEFAULT_OUTPUT;
+function parseArguments(args: string[]) {
+  const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--input") input = args[index + 1] ?? null;
-    if (argument === "--output") {
-      output = args[index + 1] ?? "";
-      if (!output || output.startsWith("--")) throw new TypeError("Missing directory output path.");
-    }
-    if (argument === "--input" || argument === "--output") index += 1;
+    const argument = args[index]!;
+    if (!["--input", "--output", "--held-output"].includes(argument)) continue;
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new TypeError(`Missing ${argument} path.`);
+    values.set(argument, value);
+    index += 1;
   }
-  if (!input) throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>]");
+  const input = values.get("--input");
+  if (!input) {
+    throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>] "
+      + "[--held-output <held endpoint report>] [--allow-count-drop]");
+  }
+  const heldOutput = values.get("--held-output");
   return {
+    allowCountDrop: args.includes("--allow-count-drop"),
+    heldOutputPath: heldOutput ? path.resolve(heldOutput) : null,
     inputPath: input === "-" ? input : path.resolve(input),
-    outputPath: path.resolve(output),
+    outputPath: path.resolve(values.get("--output") ?? DEFAULT_OUTPUT),
   };
 }
 
@@ -275,7 +286,6 @@ function readReference(value: unknown): string | null {
 function readLocations(org: { resource: JsonRecord; fullUrl: string }): DirectoryFacilityTuple[] {
   const { resource } = org;
   const name = optionalString(resource.name, 180);
-  const upstreamId = optionalString(resource.id, 64) ?? org.fullUrl;
   const aliases = [...new Set(readStringArray(resource.alias, 20, 120))].sort();
   const addresses = Array.isArray(resource.address) && resource.address.length ? resource.address : [{}];
   return addresses.flatMap((address): DirectoryFacilityTuple[] => {
@@ -283,9 +293,11 @@ function readLocations(org: { resource: JsonRecord; fullUrl: string }): Director
     const city = optionalString(address.city, 120);
     const state = optionalString(address.state, 80);
     const postalCode = optionalString(address.postalCode, 24);
-    const street = readStringArray(address.line, 4, 180);
-    if (!city && !state && !postalCode && !street.length && (!resource.partOf || !name)) return [];
-    return [[name, city, state, postalCode, street, aliases, upstreamId, postalCentroid(postalCode)]];
+    const lines = readStringArray(address.line, 4, 180);
+    if (!city && !state && !postalCode && !lines.length && (!resource.partOf || !name)) return [];
+    // Epic's first address line usually repeats the facility name.
+    const street = lines.filter(line => line !== name);
+    return [[name, city, state, postalCode, street, aliases, postalCentroid(postalCode)]];
   });
 }
 

@@ -33,6 +33,8 @@ interface HostedWebWebpackContext {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
+/** Pages whose own document may ask for the browser's location. Every other page blocks it. */
+export const HOSTED_WEB_GEOLOCATION_PAGES = ["/records/connect"] as const;
 
 /**
  * Search engines may index only the public pages the sitemap lists, the home
@@ -198,11 +200,7 @@ export function buildHostedWebSecurityHeaders(
       key: "X-Frame-Options",
       value: "DENY",
     },
-    {
-      key: "Permissions-Policy",
-      // Browser voice calls require same-origin microphone permission.
-      value: "camera=(), geolocation=(), microphone=(self)",
-    },
+    buildHostedWebPermissionsPolicyHeader(),
   ];
 
   if (environment.NODE_ENV === "production") {
@@ -213,6 +211,14 @@ export function buildHostedWebSecurityHeaders(
   }
 
   return headers;
+}
+
+export function buildHostedWebPermissionsPolicyHeader({ geolocation = false } = {}): StaticHeader {
+  return {
+    key: "Permissions-Policy",
+    // Browser voice calls require same-origin microphone permission.
+    value: `camera=(), geolocation=${geolocation ? "(self)" : "()"}, microphone=(self)`,
+  };
 }
 
 function hasOptionalModule(specifier: string): boolean {
@@ -374,6 +380,11 @@ export function buildHostedWebNextConfig(
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(environment),
       },
+      // A later rule replaces the same header, so only these documents allow location.
+      ...HOSTED_WEB_GEOLOCATION_PAGES.map((source) => ({
+        source,
+        headers: [buildHostedWebPermissionsPolicyHeader({ geolocation: true })],
+      })),
       { source: HOSTED_WEB_NOINDEX_HEADER_SOURCE, headers: [HOSTED_WEB_NOINDEX_HEADER] },
     ],
   };

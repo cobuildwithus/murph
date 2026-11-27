@@ -15,5 +15,9 @@ The pinned 2026 source contains 33,791 public ZCTA points. The refreshed registr
 Seven focused Web suites passed 77 tests. The final ranking, client and importer rerun passed 53 tests. Web typecheck and lint, the complexity guard, actionlint, the 16 KMS owner tests, documentation checks and the source-artifact guard passed.
 
 Read-only policy inspection found no signer binding for the directory workflow. The intake spec gives the one-time main-ref grant. After provisioning, weekly changes open ready PRs and merge normally through branch protection. The implementation PR stays draft.
+
+## Review fixes
+
+The connect page now receives `geolocation=(self)` and every other page keeps it blocked; the records page opens it with a full page load so the permission applies. The refresh keeps an existing entry's FHIR host and reports the move in a GitHub issue. A dependency-free publish job and the required release plan recheck that rule. Regenerated against main, the directory keeps 30 current hosts and publishes 19 path-only changes and 75 new brands. It carries 1,316 brands and 98,140 facilities, 95,448 of them mapped, in 11.5 MB. Coordinates keep three decimals and the unused upstream facility id is gone, along with street lines that repeat the facility name. Only search loads the ZIP table. Facility ranking runs only for relevance tiers that reach the results and for portal siblings; 798 old and new searches matched exactly.
 Updated: 2026-11-26
 Completed: 2026-11-26

@@ -15,6 +15,8 @@ import {
   buildEpicBetaRetrievalPlan,
 } from "@/src/lib/clinical-records/epic-policy";
 import { selectSmartRequestedScopes } from "@/src/lib/clinical-records/smart";
+import { clinicalProviderPlaceLabels } from "@/src/lib/clinical-records/client-contracts";
+import { postalCentroid } from "@/src/lib/clinical-records/postal-centroids";
 
 const generatedAt = "2026-07-10T00:00:00.000Z";
 
@@ -359,9 +361,9 @@ describe("public facility proximity", () => {
     entry("unplaced", [facility("Unplaced", null, "00000")]),
   ] };
 
-  it("uses the ZIP anywhere in a query and matches the facility before grouping", () => {
+  it("uses a ZIP at either end of the query and matches the facility before grouping", () => {
     for (const query of ["30309 Reed", "Reed, 30309", "30309-1001 Reed"]) {
-      const { providers } = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true });
+      const { providers } = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true, postalCentroid });
       expect(providers).toHaveLength(1);
       expect(providers[0]).toMatchObject({ id: "second", matchedFacility: { name: "Reed", approximateDistanceMiles: expect.any(Number) } });
     }
@@ -379,16 +381,41 @@ describe("public facility proximity", () => {
     expect(providers.some(row => ["third", "unplaced"].includes(row.id))).toBe(false);
   });
 
+  it("reads a street number, or digits inside the query, as text rather than a ZIP", () => {
+    const valley = { ...facility("Valley Clinic", [33.85, -84.4]), street: ["12401 Hospital Drive"] };
+    const withStreet = { ...snapshot, entries: [...snapshot.entries, entry("valley", [valley])] };
+    for (const query of ["12401 Hospital Drive", "12401 Hospital Drive, Pond", "Hospital 12401 Drive"]) {
+      const { providers } = searchClinicalProviderDirectorySnapshot(withStreet, { query, grouped: true, includeDistance: true, postalCentroid });
+      expect(providers.map(row => row.id)).toEqual(["valley"]);
+      expect(providers[0]?.matchedFacility).not.toHaveProperty("approximateDistanceMiles");
+    }
+    // A leading "St" names a saint; the ZIP still locates the search.
+    const saint = { ...snapshot, entries: [entry("st-reed", [facility("St Reed", [33.8, -84.4])])] };
+    for (const query of ["St Reed 30309", "30309 St Reed", "30309"]) {
+      const { providers } = searchClinicalProviderDirectorySnapshot(saint, { query, grouped: true, includeDistance: true, postalCentroid });
+      expect(providers[0]?.matchedFacility).toMatchObject({ name: "St Reed", approximateDistanceMiles: expect.any(Number) });
+    }
+  });
+
+  it("shows sub-mile distances as less than a mile", () => {
+    const labels = (approximateDistanceMiles: number) => clinicalProviderPlaceLabels({
+      brandName: "Reed", id: "reed", sourceSystem: "epic-fhir", facilities: [],
+      matchedFacility: { name: "Reed", city: "Pond", state: "GA", postalCode: null, approximateDistanceMiles },
+    });
+    expect(labels(0)).toContain("less than 1 mi");
+    expect(labels(3)).toContain("about 3 mi");
+  });
+
   it("falls back to text for an unmapped ZIP and keeps unmapped clinics discoverable by name", () => {
     for (const query of ["00000", "Unplaced"]) {
-      const result = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true });
+      const result = searchClinicalProviderDirectorySnapshot(snapshot, { query, grouped: true, includeDistance: true, postalCentroid });
       expect(result.providers.map(p => p.id)).toEqual(["unplaced"]);
       expect(result.providers[0]?.matchedFacility).not.toHaveProperty("approximateDistanceMiles");
     }
     const directoryOnly = { ...snapshot, entries: [entry("westhaven", [])] };
-    const named = searchClinicalProviderDirectorySnapshot(directoryOnly, { query: "westhaven 30309", grouped: true });
+    const named = searchClinicalProviderDirectorySnapshot(directoryOnly, { query: "westhaven 30309", grouped: true, postalCentroid });
     expect(named.providers[0]).toMatchObject({ id: "westhaven", matchedFacility: null });
-    const old = searchClinicalProviderDirectorySnapshot(snapshot, { query: "30309", grouped: true });
+    const old = searchClinicalProviderDirectorySnapshot(snapshot, { query: "30309", grouped: true, postalCentroid });
     expect(old.providers[0]?.matchedFacility).not.toHaveProperty("approximateDistanceMiles");
     expect(old.providers[0]?.matchedFacility).not.toHaveProperty("coordinate");
   });

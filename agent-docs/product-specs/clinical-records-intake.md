@@ -273,11 +273,12 @@ are retained so city/facility matches beyond the first visible results remain
 discoverable.
 
 Search returns the highest-ranked facility with its name, city, state, postal
-code and any available street lines. Extended location tuples retain the
-upstream organization identity, local aliases and street lines. The reader
-also accepts the original four- and seven-field tuples. New tuples append a
-public coordinate pair in latitude/longitude order, or null for an unmapped ZIP.
-The tuple and search owner are shared by all directory sources. The companion projects the place into
+code and any available street lines. Seven-field location tuples add street
+lines, local aliases and a public coordinate pair in latitude/longitude order,
+or null for an unmapped ZIP. The importer drops a street line that repeats the
+facility name and exact duplicate tuples. The reader also accepts the original
+four-field tuples. The tuple and search owner are shared by all directory
+sources. The companion projects the place into
 its existing display string. Browsers request grouped results with the
 `X-Clinical-Directory-Version: 2` header. Older requests keep the original
 exact provider and facility shapes.
@@ -286,9 +287,11 @@ ZIP and location searches use the public-domain [2026 Census national ZCTA Gazet
 Its 33,791 representative internal points approximate ZIP locations. The source
 archive SHA-256 is `f1e9046b91f6e60686a99343cb2752834c02b0764939403b331c78c017e2c54c`.
 Run `python3 apps/web/scripts/import-zcta-centroids.py ARCHIVE apps/web/src/lib/clinical-records/zcta-centroids.2026.json`
-to reproduce the offline lookup. The directory builder uses the five-digit
-part of a ZIP or ZIP+4. Census omits some postal codes and some facilities
-publish no ZIP. These facilities remain available to text searches.
+to reproduce the offline lookup. Points keep three decimals, about 110 m.
+The directory builder uses the five-digit part of a ZIP or ZIP+4. Census
+omits some postal codes and some facilities publish no ZIP. These facilities
+remain available to text searches. Only a search loads the lookup, so routes
+that resolve one entry never parse it.
 
 Both search POST bodies accept `query` and optional `near: { lat, lon }`.
 An explicit location tap rounds one fix on the device to a 0.1-degree cell
@@ -297,13 +300,18 @@ finer precision and coordinates outside the supported US envelope. The input
 exists only for the request. URLs, logs, analytics, storage, the clinical
 runtime and the vault receive neither the ZIP selector nor the cell.
 
-A recognized five-digit ZIP anywhere in the query takes precedence over a cell.
-Without a centroid the ZIP remains ordinary search text. Origin-only searches
-include located facilities within 50 miles. With additional text, relevance
-ranks first and great-circle distance breaks ties. Facility filtering precedes
-portal grouping and result limits. The companion and browsers negotiating
-`X-Clinical-Directory-Version: 3` receive optional whole-mile
-`matchedFacility.approximateDistanceMiles`. Clients display “about 3 mi”.
+A five-digit ZIP takes precedence over a cell when it is the whole query or
+either end of an otherwise word-only query. A street-type word after the
+first remaining word, as in “12401 Hospital Drive”, marks a street number
+instead, while a leading “St” still reads as a saint. Without a centroid the
+ZIP remains ordinary search text. Origin-only searches include located
+facilities within 50 miles. With additional text, relevance ranks first and
+great-circle distance breaks ties. Distances are computed only for relevance
+tiers that reach the results and for a returned portal's siblings. Facility
+filtering precedes portal grouping and result limits. The companion and
+browsers negotiating `X-Clinical-Directory-Version: 3` receive optional whole-mile
+`matchedFacility.approximateDistanceMiles`. Clients display “about 3 mi”, or
+“less than 1 mi” for zero.
 Version 2 keeps its grouped place fields and the unversioned route keeps
 its four-field facilities. Each Web deployment bundles its directory and reader.
 
@@ -340,13 +348,30 @@ square set is produced offline and the refresh script does not rewrite it.
 
 The weekly refresh validates the prior and candidate directories and fails
 when any source system loses more than 10 percent of its brands, facilities
-or mapped facilities.
-It checks the tracked output and requires a nonempty source. After the build,
-the main-only `frog-reconciliation` environment mints a repository App token
-with contents and pull-request write access. The App opens a ready PR for
-normal CI. The workflow waits for GitHub's protected merge state, verifies
-the same head and requests a regular squash merge. Required status checks
-remain enforced. An unchanged candidate skips publication.
+or mapped facilities. After confirming a genuine large drop upstream, run the
+workflow manually with `allow_count_drop` checked; scheduled runs always keep
+the floor. It checks the tracked output and requires a nonempty source.
+
+The refresh never moves an existing entry to another FHIR server. When the
+upstream endpoint for a current entry changes scheme, host or port, the
+candidate keeps the current endpoint and the run opens or updates the GitHub
+issue “Clinical directory endpoint host changes need review”. A path change on
+the same origin and every new entry publish normally. To accept a move, a
+person changes the committed directory in their own pull request.
+
+The publish job installs no dependencies and never sees the Epic download.
+With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
+reruns the directory parser, the count floor and the endpoint-host rule on
+the candidate. It then reports held moves and, in the main-only
+`frog-reconciliation` environment, mints a repository App token with contents
+and pull-request write access. The App opens a ready PR for normal CI. The PR
+lookup is qualified by the repository owner, so a fork's branch of the same
+name is ignored. The workflow waits for GitHub's protected merge state,
+verifies the same head and requests a regular squash merge. Required status
+checks remain enforced: `Release verification plan (ubuntu)`, part of the
+required `Release checks (ubuntu)`, fails any bot-authored pull request that
+moves an existing endpoint to another host. An unchanged candidate skips
+publication.
 
 Before enabling publication, grant the existing App key signer to this
 main-branch workflow once. The build job has read-only checkout access.
@@ -364,8 +389,12 @@ To build the same artifact manually from the repository root:
 ```bash
 curl --fail --location --silent --show-error \
   https://open.epic.com/Endpoints/Brands |
-  pnpm --dir apps/web clinical-records:providers:import -- --input -
+  pnpm --dir apps/web clinical-records:providers:import -- --input - \
+  --held-output held-endpoints.json
 ```
+
+The manual import applies the same endpoint-host hold against the committed
+directory and lists held moves in the optional `--held-output` file.
 
 Review the official source provenance and generated diff, then rerun the
 provider-directory tests. The importer is byte-deterministic for fixed source

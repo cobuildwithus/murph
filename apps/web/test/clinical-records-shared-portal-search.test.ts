@@ -24,7 +24,7 @@ vi.mock("@/src/lib/clinical-records/provider-directory.v2.json", async () => {
     entries: ["Alder", "Birch"].map(brandName => ({
       aliases: [], brandName, id: "epic-" + brandName.toLowerCase(), policyId: EPIC_ACQUISITION_POLICY_ID,
       clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID", fhirBaseUrl: "https://portal.example.test/r4",
-      locations: [[brandName + " Clinic", "Cove", "ME", null, ["12 Pine Road"], [], "urn:sample:" + brandName, [44.1, -70.2]]],
+      locations: [[brandName + " Clinic", "Cove", "ME", null, ["12 Pine Road"], [], [44.1, -70.2]]],
     })),
   } };
 });
@@ -114,5 +114,24 @@ it("keeps origins out of storage, logs and public responses in both transports",
     }
   } finally {
     log.mockRestore(); warn.mockRestore(); error.mockRestore();
+  }
+});
+
+it("parses the ZIP table only when a search runs", async () => {
+  vi.resetModules();
+  const loaded = vi.fn();
+  vi.doMock("@/src/lib/clinical-records/zcta-centroids.2026.json", () => {
+    loaded();
+    return { default: { "04210": [44.085, -70.25] } };
+  });
+  try {
+    const store = await import("@/src/lib/clinical-records/provider-directory-store");
+    expect(store.resolveClinicalProviderDirectoryEntry("epic-alder")?.id).toBe("epic-alder");
+    expect(loaded).not.toHaveBeenCalled();
+    const { providers } = await store.searchClinicalProviderDirectory({ query: "04210", includeDistance: true }, "member-alder");
+    expect(loaded).toHaveBeenCalledOnce();
+    expect(providers[0]?.matchedFacility?.approximateDistanceMiles).toBe(3);
+  } finally {
+    vi.doUnmock("@/src/lib/clinical-records/zcta-centroids.2026.json");
   }
 });
