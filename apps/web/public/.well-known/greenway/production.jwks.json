@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "kid": "murph-greenway-production-YaMfDzlbOKFB",
+      "use": "sig",
+      "alg": "RS384",
+      "n": "1SRzAv8i_gLnYUKCT9rudqI-cWlPyJgOunFeYZ1NYrcdfG1nhoVvFZVQWKDa4_0rwh-xE35LILCIySNawScY3kbY0yYyBM7H-9rHinOlmqULizq-3d91cLpEy-3m4x5z9MBD8cNMS2i3j8CgXy1aI9P9GKD9sqLyEcH7_fClOGqWUCVbaVgso745ilM8P5vcxH42rivct0HUY-ozJ4_-98rJwlDiiqaI3Mch6qWv0v4g9QOlW8XhZhAc0zGTMIoPSIaso-o_UgpkQVijEMyL9o7rAAfgRHRznMeWbR4KJoDaVrACQ5nvwu_ljB1pKfpHErF7k_V6TrI-s2LJ5EJ_sQ",
+      "e": "AQAB"
+    }
+  ]
+}
