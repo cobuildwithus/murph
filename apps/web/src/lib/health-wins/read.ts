@@ -12,8 +12,7 @@ import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import { eligibleHealthAuthorsSql, findVisibleHealthPost, healthPostAudienceSql, visibleHealthCommentOnPostSql, visibleHealthCommentSql, visibleHealthPersonSql, visibleHealthPostSql } from "./audience";
 import { isHealthYouEnabled } from "./flag";
-import { assertProfileAccess } from "../health-profile/access";
-import { readExtendedProfile } from "../health-profile/profile";
+import { prepareExtendedProfile } from "../health-profile/profile";
 import { openHealthTexts } from "./crypto";
 import type { FrozenHealthCard } from "./card-options";
 import { openHealthCursor, sealHealthCursor, type HealthPagePosition } from "./cursor";
@@ -260,9 +259,14 @@ export async function readHealthProfile(auth: Auth, memberId: string, cursor?: s
   const [opened, prepared] = await together([names([identity]), preparePosts(db, viewer, { author: memberId, cursor: position })]);
   const [allowed] = isHealthYouEnabled(viewer) ? await db.$queryRaw<{ allowed: boolean }[]>`
     SELECT (${visibleHealthPersonSql(viewer, Prisma.sql`${memberId}::text`)}) AS allowed` : [];
-  const extended = allowed?.allowed ? await readExtendedProfile(auth, memberId, signal) : null;
-  const numbers = extended ? extended.numbers : await profileNumbers(viewer, memberId);
-  const [page] = await finishRead(auth, tx => Promise.all([finishPosts(tx, viewer, prepared),
-    extended ? assertProfileAccess(tx, auth, memberId) : profileIdentity(tx, viewer, memberId)]));
-  return { memberId, ...opened.get(memberId)!, numbers, ...page, ...extended?.extras };
+  const finishProfile = allowed?.allowed ? await prepareExtendedProfile(auth, memberId, signal) : null;
+  const fallback = finishProfile ? null : await profileNumbers(viewer, memberId);
+  const [page, extended] = await db.$transaction(async tx => {
+    const page = await finishPosts(tx, viewer, prepared);
+    if (finishProfile) return [page, await finishProfile(tx)] as const;
+    await assertGameMemberAuthCurrentForRead(auth, tx);
+    await profileIdentity(tx, viewer, memberId);
+    return [page, null] as const;
+  }, { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: "RepeatableRead" });
+  return { memberId, ...opened.get(memberId)!, numbers: extended ? extended.numbers : fallback, ...page, ...extended?.extras };
 }

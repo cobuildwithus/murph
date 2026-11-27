@@ -13,6 +13,9 @@ import { readExtendedProfile } from "../src/lib/health-profile/profile";
 import { profileAge } from "../src/lib/health-profile/age";
 import { addDays } from "../src/lib/game/time";
 import { authorizeMediaRead, runGameCommand } from "../src/lib/game/service";
+import * as board from "../src/lib/game/board";
+import { serveGameMedia } from "../src/lib/game/http/media-routes";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { putGameMedia } from "../src/lib/game/media";
 import { getPrisma } from "../src/lib/prisma";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
@@ -83,6 +86,11 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     expect((await readExtendedProfile(peer, owner, signal)).extras.cover).toMatchObject({ kind: "photo", url: expect.any(String) });
     expect(await authorizeMediaRead(peer.member.id, key)).toBe(true);
     expect(await authorizeMediaRead(other.member.id, key)).toBe(false);
+    await getPrisma().hostedMember.update({ where: { id: peer.member.id }, data: { billingStatus: "not_started" } });
+    for (const delivery of [false, true]) {
+      await expect(serveGameMedia({ memberId: peer.member.id, key, delivery })).rejects.toMatchObject({ httpStatus: 404 });
+    }
+    await getPrisma().hostedMember.update({ where: { id: peer.member.id }, data: { billingStatus: "active" } });
     vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", owner);
     expect(await authorizeMediaRead(peer.member.id, key)).toBe(false);
     await expect(save(peer.member.id, { cover: null })).rejects.toMatchObject({ httpStatus: 404 });
@@ -116,7 +124,8 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     const { extras } = await readExtendedProfile(peer, owner, signal);
     expect(extras.pins[0]).toMatchObject({ pinnedOn: day, card: { chart: { type: "hidden" } } });
     const [retained] = (await pinCandidates(auth, signal, "us")).candidates;
-    expect(extras.pins[0].revision).toBe(retained.revision);
+    expect(extras.pins[0]).not.toHaveProperty("revision");
+    expect((await readExtendedProfile(auth, owner, signal)).extras.pins[0]).toMatchObject({ revision: retained.revision });
     await setPins(auth, [{ key: retained.key, revision: retained.revision }], signal, "us");
     const records = await prepareHealthProfileExport(owner, async () => {});
     expect(JSON.parse((await records!().next()).value!).healthProfile.pins[0].card.chart.type).toBe("hidden");
@@ -173,13 +182,21 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     valid.mockResolvedValue(true);
     await setPins(auth, [pick], signal, "us");
     expect((await readExtendedProfile(peer, owner, signal)).extras.pins[0]).toMatchObject({
-      revision: pick.revision, card: { theme: "age", chart: { value: 43.2, gap: -0.8 } },
+      card: { theme: "age", chart: { value: 43.2, gap: -0.8 } },
     });
     expect((await readExtendedProfile(peer, owner, signal)).extras.compare?.rows).toEqual([]);
     await setPins(peer, [pick], signal, "us");
     const { extras } = await readExtendedProfile(peer, owner, signal);
     expect(extras.compare?.rows).toEqual([{ label: "Biological age", them: "43.2", you: "40.8" }]);
     expect(extras.pins[0].card.chart).toEqual({ type: "biological_age", value: 43.2, gap: -0.8 });
+    vi.mocked(profileAge.read).mockResolvedValue({ value: 43.2, gap: -0.8, timeZone: "UTC", revision: "republished" });
+    vi.spyOn(board, "readProfilePairBoard").mockRejectedValue(hostedOnboardingError({
+      code: "BOARD_PROJECTION_UNAVAILABLE", retryable: true, httpStatus: 503, message: "Unavailable",
+    }));
+    const after = await readExtendedProfile(peer, owner, signal);
+    expect(after.numbers).toBeNull();
+    expect(after.extras.pins).toEqual(extras.pins);
+    expect(after.extras.pins[0]).not.toHaveProperty("revision");
   });
 
   it("preserves since and cheers on reorder, withholds unshared readings, cascades removal and deletion", async () => {

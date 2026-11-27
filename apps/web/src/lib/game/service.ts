@@ -14,6 +14,7 @@ import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/reca
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { assertHealthYouEnabled, isHealthYouEnabled } from "../health-wins/flag";
+import { activeHostedPersonAccessSql } from "../hosted-onboarding/member-access-projections";
 import { hostedLaunchConsentGrantedSql } from "../legal/consent";
 import { visibleHealthPersonSql } from "../health-wins/audience";
 import { after } from "next/server";
@@ -3940,6 +3941,8 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
         SELECT 1 FROM game_profile profile
         WHERE profile.member_id = requested.owner AND (profile.photo_key = requested.key
           ${isHealthYouEnabled(memberId) ? Prisma.sql`OR (profile.cover_kind = 'photo' AND profile.cover_photo_key = requested.key
+            AND EXISTS (SELECT 1 FROM hosted_member cover_viewer WHERE cover_viewer.id = ${memberId}
+              AND ${activeHostedPersonAccessSql(Prisma.sql`cover_viewer`)})
             AND ${hostedLaunchConsentGrantedSql(Prisma.sql`${memberId}::text`)}
             AND ${visibleHealthPersonSql(memberId, Prisma.sql`profile.member_id`)})` : Prisma.empty})
           AND NOT EXISTS (SELECT 1 FROM game_report report

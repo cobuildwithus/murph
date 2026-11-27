@@ -29,6 +29,9 @@ vi.mock("@/src/lib/hosted-vault-share/projection-snapshot", async original => {
 import { getPrisma } from "@/src/lib/prisma";
 import { hostedAuthAdapter } from "@/src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
+import { prepareExtendedProfile } from "@/src/lib/health-profile/profile";
+import { requireGameMemberAuth } from "@/src/lib/game/http/auth";
+import { profileFactorLookupKeys } from "@/src/lib/hosted-onboarding/contact-privacy-core";
 import { readProfilePairBoard, readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
 import { addHostedGroupPairBoardSharingTx, readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
 import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
@@ -141,9 +144,30 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
       recordKey: date, occurredAt: date + "T00:00:00.000Z" }] });
     await db.hostedVaultShare.update({ where: { id }, data: { projectionSnapshotCiphertext: ciphertext } });
     expect(await read()).toMatchObject({ state: "available", records: [{ data: { date } }] });
+    const before = await readProfilePairBoard(f.a, f.b, true);
+    await db.hostedVaultShare.update({ where: { id }, data: { status: "revoked" } });
+    expect(await db.$transaction(tx => before!.atDisclosure(tx))).toMatchObject({ sleepTimes: { state: "not_granted", records: [] } });
+    await db.hostedVaultShare.update({ where: { id }, data: { status: "granted" } });
     mocks.afterDecrypt.mockImplementationOnce(() => db.hostedVaultShare.update({ where: { id }, data: { status: "revoked" } }));
     expect(await read()).toMatchObject({ state: "not_granted", records: [] });
     expect(await f.read()).not.toHaveProperty("sleepTimes");
+  });
+  it("removes a withdrawn steps grant from every field at final profile disclosure", async () => {
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "*");
+    const f = await fixture(true);
+    await db.game.update({ where: { id: f.gameId }, data: { status: "settled", settledAt: new Date() } });
+    const auth = await requireGameMemberAuth(f.request());
+    await db.healthWorkingOn.create({ data: { memberId: f.b, position: 0, factor: profileFactorLookupKeys(f.b, "steps").current, since: addDays(today(), -18) } });
+    const grant = await f.share(f.b, "steps-days.v0", true);
+    await f.share(f.a, "steps-days.v0", true);
+    const finish = await prepareExtendedProfile(auth, f.b, new AbortController().signal);
+    expect((await db.$transaction(finish)).numbers?.steps.state).toBe("available");
+    await db.hostedVaultShare.update({ where: { id: grant }, data: { status: "revoked" } });
+    const after = await db.$transaction(finish);
+    expect(after.numbers?.steps.state).toBe("not_shared");
+    expect(after.extras.workingOn[0]).toMatchObject({ state: "notShared" });
+    expect(after.extras.workingOn[0]).not.toHaveProperty("series");
+    expect(after.extras.compare?.rows.some(r => r.label === "Steps")).toBe(false);
   });
   it.each([false, true])("shows age group only for the other person on an exact granted ranking scope (viewer joined: %s)", async joined => {
     const f = await fixture(joined);

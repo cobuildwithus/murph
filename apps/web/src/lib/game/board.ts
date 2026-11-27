@@ -96,18 +96,29 @@ export async function readProfilePairBoard(viewerId: string, otherId: string, in
   const through = formatTimeZoneDateTimeParts(now, binding.timeZone).dayKey;
   const window = { from: addDays(through, -89), through };
   const stepsWindow = { ...window, through: lastSettledStepDay(now, binding.timeZone) };
-  const people: BoardPerson[] = shared.people.map(person => {
-    const number = (index: number) => boardNumber(BOARD_METRICS[index], person.projections[index],
-      BOARD_METRICS[index] === "steps" ? stepsWindow : window, facts.firstGameOn);
-    return { memberId: person.memberId, me: person.memberId === viewerId, member: person.member,
-      ...(person.memberId !== viewerId && person.demographics ? { demographics: person.demographics } : {}),
-      inARow: facts.streaks.get(person.memberId) ?? null,
-      numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };
-  });
-  const board: PairBoard = { groupId: binding.groupId, membershipId: shared.membershipId, sharingRevision: shared.sharingRevision, firstGameOn: facts.firstGameOn, window,
-    myShares: BOARD_METRICS.filter((_, index) => shared.myScopes.includes(buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index]))),
-    people, crowns: boardCrowns(people) };
-  return { board, sleepTimes: shared.people.find(p => p.memberId === otherId)?.sleepTimes };
+  const present = (data: NonNullable<Awaited<ReturnType<typeof shared.atDisclosure>>>) => {
+    const people: BoardPerson[] = data.people.map(person => {
+      const number = (index: number) => boardNumber(BOARD_METRICS[index], person.projections[index],
+        BOARD_METRICS[index] === "steps" ? stepsWindow : window, facts.firstGameOn);
+      return { memberId: person.memberId, me: person.memberId === viewerId, member: person.member,
+        ...(person.memberId !== viewerId && person.demographics ? { demographics: person.demographics } : {}),
+        inARow: facts.streaks.get(person.memberId) ?? null,
+        numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };
+    });
+    const board: PairBoard = { groupId: binding.groupId, membershipId: data.membershipId, sharingRevision: data.sharingRevision, firstGameOn: facts.firstGameOn, window,
+      myShares: BOARD_METRICS.filter((_, index) => data.myScopes.includes(buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index]))),
+      people, crowns: boardCrowns(people) };
+    return { board, sleepTimes: data.people.find(p => p.memberId === otherId)?.sleepTimes };
+  };
+  return { ...present(shared), atDisclosure: async (tx: Db) => {
+    const room = await resolvePairBoard(tx, viewerId, otherId).catch(error => {
+      if (isHostedOnboardingError(error) && error.code === "GAME_NOT_FOUND") return null;
+      throw error;
+    });
+    if (room?.groupId !== binding.groupId || room.runtimeMemberId !== binding.runtimeMemberId) return null;
+    const data = await shared.atDisclosure(tx);
+    return data && present(data);
+  } };
 }
 
 // Earlier versions of Friends granted Steps/Sleep in every eligible room for a person.

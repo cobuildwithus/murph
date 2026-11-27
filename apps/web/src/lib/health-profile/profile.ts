@@ -2,7 +2,7 @@ import "server-only";
 import { readProfilePairBoard } from "../game/board";
 import { gameMediaUrl } from "../game/views";
 import { getPrisma } from "../prisma";
-import { assertProfileAccess, type ProfileAuth } from "./access";
+import { assertProfileAccess, type ProfileAuth, type ProfileDb } from "./access";
 import { factorInfo, factors, formatReading } from "./factors";
 import type { PairBoard } from "../game/board-numbers";
 import { readWorkingSelections, storedPins } from "./storage";
@@ -41,7 +41,7 @@ async function viewerAge(viewer: string, compare: boolean) {
   return published && { row: rows[0].row, published };
 }
 
-export async function readExtendedProfile(auth: ProfileAuth, owner: string, signal: AbortSignal) {
+export async function prepareExtendedProfile(auth: ProfileAuth, owner: string, signal: AbortSignal) {
   const db = getPrisma(), viewer = auth.member.id, isMe = viewer === owner;
   await assertProfileAccess(db, auth, owner);
   const profile = await db.gameProfile.findUnique({ where: { memberId: owner },
@@ -54,12 +54,12 @@ export async function readExtendedProfile(auth: ProfileAuth, owner: string, sign
   const myAge = await viewerAge(viewer, !isMe && Boolean(theirAge));
   const pair = isMe ? null : await readProfilePairBoard(viewer, owner, items.some(i => i.factor === "bedtime")).catch(error => {
     // A game partner can have a group game and no pair board.
-    if (error?.code === "GAME_NOT_FOUND") return null;
+    if (error?.code === "GAME_NOT_FOUND" || error?.code === "BOARD_PROJECTION_UNAVAILABLE") return null;
     throw error;
   });
-  const board = pair?.board ?? null;
-  const working = await profileWorking(auth, owner, profile?.timeZone ?? "UTC", board, signal, items, pair?.sleepTimes);
-  const current = await db.$transaction(async tx => {
+  const zone = profile?.timeZone ?? "UTC";
+  const ownWorking = isMe ? await profileWorking(auth, owner, zone, null, signal, items) : null;
+  return async (tx: ProfileDb) => {
     await assertProfileAccess(tx, auth, owner);
     const published = await tx.healthProfilePin.findMany({ where: { memberId: owner }, select: { sourceKey: true, specEncrypted: true }, take: 3 });
     const working = await tx.healthWorkingOn.findMany({ where: { memberId: owner }, select: { factor: true, since: true }, take: 3 });
@@ -68,22 +68,29 @@ export async function readExtendedProfile(auth: ProfileAuth, owner: string, sign
     const revisions = await currentStreakRevisions(tx, owner, viewer, streaks.map(s => s.row.gameId));
     const partners = await currentPartners(tx, viewer, streaks.flatMap(s => s.row.partner ? [s.row.partner.memberId] : []));
     const cover = await tx.gameProfile.findUnique({ where: { memberId: owner }, select: { coverKind: true, coverPhotoKey: true, coverArt: true } });
-    return { published, working, revisions, cover, myAgeCurrent, partners };
-  });
-  const visiblePins = pins.filter(p => current.published.some(r => r.sourceKey === p.key
-    && pinRows.some(old => old.row.sourceKey === p.key && old.row.specEncrypted === r.specEncrypted)));
-  const currentStreaks = streaks.filter(s => current.revisions.get(s.row.gameId) === s.revision);
-  const theirs = board?.people.find(p => p.memberId === owner)?.numbers;
-  const mine = board?.people.find(p => p.memberId === viewer)?.numbers;
-  const compare = compareRows(theirs, mine, currentStreaks);
-  if (theirAge && myAge && current.myAgeCurrent && visiblePins.includes(theirAge)) {
-    compare.unshift({ label: "Biological age", them: theirAge.card.title.number, you: myAge.published.card.title.number });
-  }
-  return { numbers: theirs ?? null, extras: { isMe,
-    cover: profileCover(current.cover),
-    pins: visiblePins, workingOn: working.filter((_, index) => current.working.some(r => r.factor === items[index].lookup && r.since === items[index].since)),
-    streaks: currentStreaks.map(({ row }) => {
-      const fresh = current.partners.find(p => p.id === row.partner?.memberId);
-      return { ...row, partner: fresh && row.partner ? { ...row.partner, avatarUrl: fresh.photoKey ? gameMediaUrl(fresh.photoKey) : null } : null };
-    }), compare: isMe ? null : { rows: compare } } };
+    const shared = await pair?.atDisclosure(tx);
+    const board = shared?.board;
+    const workingRows = ownWorking ?? await profileWorking(auth, owner, zone, board ?? null, signal, items, shared?.sleepTimes);
+    const visiblePins = pins.filter(p => published.some(r => r.sourceKey === p.key
+      && pinRows.some(old => old.row.sourceKey === p.key && old.row.specEncrypted === r.specEncrypted)));
+    const currentStreaks = streaks.filter(s => revisions.get(s.row.gameId) === s.revision);
+    const theirs = board?.people.find(p => p.memberId === owner)?.numbers;
+    const mine = board?.people.find(p => p.memberId === viewer)?.numbers;
+    const compare = compareRows(theirs, mine, currentStreaks);
+    if (theirAge && myAge && myAgeCurrent && visiblePins.includes(theirAge)) {
+      compare.unshift({ label: "Biological age", them: theirAge.card.title.number, you: myAge.published.card.title.number });
+    }
+    return { numbers: theirs ?? null, extras: { isMe,
+      cover: profileCover(cover),
+      pins: visiblePins.map(pin => isMe ? pin : { key: pin.key, card: pin.card, ...(pin.pinnedOn && { pinnedOn: pin.pinnedOn }) }), workingOn: workingRows.filter((_, index) => working.some(r => r.factor === items[index].lookup && r.since === items[index].since)),
+      streaks: currentStreaks.map(({ row }) => {
+        const fresh = partners.find(p => p.id === row.partner?.memberId);
+        return { ...row, partner: fresh && row.partner ? { ...row.partner, avatarUrl: fresh.photoKey ? gameMediaUrl(fresh.photoKey) : null } : null };
+      }), compare: isMe ? null : { rows: compare } } };
+  };
+}
+
+export async function readExtendedProfile(auth: ProfileAuth, owner: string, signal: AbortSignal) {
+  const finish = await prepareExtendedProfile(auth, owner, signal);
+  return getPrisma().$transaction(finish, { isolationLevel: "RepeatableRead" });
 }
