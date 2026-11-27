@@ -369,9 +369,11 @@ policy keeps the published value; an existing entry missing upstream stays as
 published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
 on an endpoint origin a production entry already uses. The sandbox host does
 not count as a production host. A run that holds changes opens or updates the
-GitHub issue “Clinical directory changes need review” listing every held
-change, even when the directory itself is unchanged; a run that holds nothing
-closes that issue. The issue
+oldest open GitHub issue “Clinical directory changes need review” listing every
+held change, even when the directory itself is unchanged, and closes newer
+duplicates. The re-check proves each listed row but cannot prove the list is
+complete, so a run that holds nothing never closes the issue: it comments once
+that the run reported no held changes, and a person checks and closes it. The issue
 says its upstream values are unverified and must be re-checked against
 open.epic.com, and a report over the issue size limit ends with a count of
 unlisted rows. To accept one, a person changes the committed directory in
