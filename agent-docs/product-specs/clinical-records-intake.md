@@ -148,13 +148,13 @@ least one connected source reports `updates: "daily"`. With only one-time
 imports or disconnected sources, Web omits the field. The existing source
 fields, counts and completion outcomes keep their meanings for shipped apps.
 
-One member setting covers all sources. Its default is `notice`. A member can
-choose `off` at any time, including after billing lapses. Turning texts back on
-starts at `notice`. The app asks for confirmation before explicitly requesting
-`detail`. Web returns HTTP 409 for `off` to `detail`. Every change advances
-the setting revision once, including a reset to `off` when health consent is
-withdrawn. Regranting consent leaves the setting off. This API only stores the
-choice. Notification delivery ships separately.
+One member setting covers all sources. New members start with `detail`.
+With texts on, Murph reads the new records from its own eligible daily check
+and sends a private review. A member can choose `off` even after billing lapses
+and turn texts back on directly. Build 126 may submit either `notice` or
+`detail` to enable texts. Both writes return `detail`. Each change advances
+the revision once. Health-consent withdrawal resets it to off, and regranting
+consent leaves it off.
 
 Apply the schema expansion and historical withdrawal backfill first, then deploy
 the companion Web routes to all instances, then the app. Web resets the preference
@@ -639,7 +639,7 @@ on Web stops new pins while existing replies retain their readers.
 Under the member lock, a replacement connection needs a persistent grant,
 current OpenAI approval and a complete whole-history import in its current
 credential epoch. A successful full catch-up can establish a missing baseline.
-The baseline import itself stays silent. With notices or details enabled, Web
+The baseline import itself stays silent. With record texts enabled, Web
 freezes the credential epoch, message revision, verified participant, assigned
 line, direct home chat and approved notice versions on the new receipt-required
 run. Member starts, off, legacy grants and older runs remain silent through late
@@ -651,24 +651,23 @@ enrichment page can supply the first proof before or after that outcome.
 The run row retains publication through queue cleanup. Private scheduling leaves coverage open.
 Missing and empty evidence leave the member's conversation alone.
 
-In notice mode the private runtime writes one ordinary proactive outbox intent.
-It renders “New records came in. Want me to go through them?” locally. The
-ordered system mailbox checkpoints and drains that intent without an AI turn
-or allowance.
-Off suppresses publication. Detail uses one scheduled turn with the private
-run receipt reference and the member’s explicit detail setting. Web binds the first durably saved private
-reply to the originating run. Replays drain that reply under the original
-bubble keys. A restore missing the bound reply ends silently. Only the newest
+Off suppresses publication. When texts are on, the runtime stages one scheduled
+assistant job per eligible run. Its private receipt pointer tells the assistant
+which new records to review. A fresh review waits for restored model allowance.
+An unavailable model backs off and retries. Both holds stay silent and current
+authority and the 24-hour expiry apply before any retry. Web binds the first
+durably saved private reply to the originating run. Replays drain that reply under the original
+bubble keys even when model allowance is exhausted. A restore missing the bound reply ends silently. Only the newest
 eligible run for a connection can deliver. Its notification expires 24 hours
 after the import is accepted.
 
-The owner withdrew the iMessage-only requirement. Notices and details may use
+The review uses
 the exact verified private thread frozen at admission, including when Linq
 selects RCS or SMS. No second consent step is required. A signed delivery
 receipt may carry the text through Web memory. Web verifies it and drops
 the text before persistence, logging, tracing or Temporal. Web excludes
 clinical deliveries from terminal retry before reading provider message parts.
-A definite terminal failure consumes an attempted occurrence. Admissions require revision 3 at Web, runner and port.
+A definite terminal failure consumes an attempted occurrence. Admissions require revision 4 at Web, runner and port.
 
 ### Bounded repeat import
 

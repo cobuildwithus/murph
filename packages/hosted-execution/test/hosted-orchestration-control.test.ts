@@ -339,6 +339,12 @@ describe("hosted orchestration control contracts", () => {
     },
   );
 
+  it.each([false, true])("admits the records pointer independently of blocked execution (%s)", (assistantExecutionBlocked) => {
+    expect(classifyHostedSystemMailboxExecutionClass({
+      kind: "clinical-records.change-recorded", dedupeKey: "clinical-change:v1:synthetic", assistantExecutionBlocked,
+    })).toBe("model_free");
+  });
+
   it.each(["clinical-records.enrichment-requested", "meal-photo.captured", "assistant.ask.requested"])(
     "retains model-owned %s", (kind) => {
       expect(classifyHostedSystemMailboxExecutionClass({ kind, dedupeKey: `${kind}:synthetic`, assistantExecutionBlocked: true })).toBe("default_owned");

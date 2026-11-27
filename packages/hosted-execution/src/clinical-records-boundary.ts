@@ -255,8 +255,8 @@ function parseOutcomeStatus(
 // preferred_service guarantees that the provider will reject an SMS downgrade.
 export const CLINICAL_TEXT_TRANSPORT_BLOCK = "clinical_imessage_only_unavailable";
 
-export function clinicalChangeDeliveryKey(runId: string, mode: "notice" | "detail"): string {
-  return `clinical-change:v1:${runId}:${mode}`;
+export function clinicalChangeDeliveryKey(runId: string): string {
+  return `clinical-change:v1:${runId}:detail`;
 }
 
 export function clinicalReplyTurnKey(baseKey: string, turnId: string): string {
@@ -265,12 +265,12 @@ export function clinicalReplyTurnKey(baseKey: string, turnId: string): string {
 
 /** Only the final bubble has no suffix. Its presence certifies that staging reached the end. */
 export function parseClinicalDeliveryKey(key: string | null | undefined) {
-  const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):(notice|detail)(?::(turn_[a-f0-9]{32}))?((?::bubble:(?:0|[1-9][0-9]*))?(?::(?:voice|transcript|fallback|link))?)$/u.exec(key ?? "");
-  if (!match || (match[2] === "notice" && (match[3] || match[4]))) return null;
-  return { runId: match[1]!, mode: match[2]!, turnId: match[3] ?? null, suffix: match[4]! };
+  const match = /^clinical-change:v1:([A-Za-z0-9._-]{1,120}):detail(?::(turn_[a-f0-9]{32}))?((?::bubble:(?:0|[1-9][0-9]*))?(?::(?:voice|transcript|fallback|link))?)$/u.exec(key ?? "");
+  if (!match) return null;
+  return { runId: match[1]!, turnId: match[2] ?? null, suffix: match[3]! };
 }
 
-export const CLINICAL_DAILY_NOTICE_REVISION = 3;
+export const CLINICAL_DAILY_NOTICE_REVISION = 4;
 
 /** Only Web's durable wake can re-arm a clinical reply stopped before provider entry. */
 export const CLINICAL_REPLY_DEFERRED = "ASSISTANT_CLINICAL_REPLY_DEFERRED";

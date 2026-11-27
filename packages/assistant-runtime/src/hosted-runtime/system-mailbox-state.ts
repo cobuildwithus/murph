@@ -1259,10 +1259,7 @@ function excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
 
 export function isHostedSystemMailboxModelFreeExactNotificationItem(
   item: HostedSystemMailboxPendingItem,
-  hasNoticeIntent = true,
 ): boolean {
-  // A clinical pointer can stage only its fixed notice here. Detail remains a scheduled job.
-  if (item.routeAction === "consume-clinical-change" && item.wake.kind === "clinical-records.change-recorded") return hasNoticeIntent;
   if (
     item.routeAction !== "dispatch-assistant-notification"
     || item.wake.kind !== "assistant.notification.requested"

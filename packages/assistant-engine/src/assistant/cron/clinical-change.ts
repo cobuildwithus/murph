@@ -2,13 +2,13 @@ import { MAX_ASSISTANT_REPLY_BUBBLES } from '../reply-bubbles.js'
 import { clinicalChangeDeliveryKey, CLINICAL_REPLY_DEFERRED } from '@murphai/hosted-execution/clinical-records-boundary'
 import { clinicalChangeRunRef } from '@murphai/core'
 import type { ClinicalNotificationDecision } from '@murphai/hosted-execution/clinical-records'
-import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
-import { createAssistantOutboxIntent, readAssistantOutboxIntentByDeliveryIdempotencyKey, saveAssistantOutboxIntentIfUnchanged } from '../outbox.js'
+import { assistantCronJobSchema, type AssistantOutboxIntent } from '@murphai/operator-config/assistant-cli-contracts'
+import { readAssistantOutboxIntentByDeliveryIdempotencyKey, saveAssistantOutboxIntentIfUnchanged } from '../outbox.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import { readAssistantCronStore, sortAssistantCronJobs, writeAssistantCronStore } from './store.js'
 
-/** Stages one notice intent or detail job on the verified thread. Staging leaves Web coverage open. */
+/** Stages one records review job on the verified thread. Staging leaves Web coverage open. */
 export async function queueClinicalChange(input: {
   vault: string
   runId: string
@@ -18,25 +18,13 @@ export async function queueClinicalChange(input: {
   const { decision, vault } = input
   if (decision.mode === 'off') return null
   const receiptRef = clinicalChangeRunRef(input.runId)
-  const deliveryKey = clinicalChangeDeliveryKey(input.runId, decision.mode)
-  if (decision.mode === 'notice') {
-    const intent = await createAssistantOutboxIntent({
-      vault, createdAt: input.occurredAt, channel: 'linq', threadId: decision.threadId, threadIsDirect: true,
-      bindingDelivery: { kind: 'thread', target: decision.threadId },
-      deliveryIdempotencyKey: deliveryKey, dedupeToken: deliveryKey, turnTrigger: 'automation-cron',
-      turnId: `turn_clinical_${receiptRef}`, sessionId: `session_clinical_${receiptRef}`,
-      message: 'New records came in. Want me to go through them?',
-    })
-    const resumed = await resumeClinicalIntent(vault, intent, input.occurredAt)
-    return { intentId: resumed.intentId, deliveryIntentIds: [resumed.intentId] }
-  }
-
+  const deliveryKey = clinicalChangeDeliveryKey(input.runId)
   if (decision.savedTurnId) {
     const root = deliveryKey + ':' + decision.savedTurnId
     const lookup = (key: string) => readAssistantOutboxIntentByDeliveryIdempotencyKey({ vault, deliveryIdempotencyKey: key })
     const final = await lookup(root)
     if (!final || final.turnId !== decision.savedTurnId) {
-      return { intentId: null, savedReplyResult: { turnId: decision.savedTurnId, status: 'missing' as const } }
+      return { savedReplyResult: { turnId: decision.savedTurnId, status: 'missing' as const } }
     }
     const leading = await Promise.all(Array.from({ length: MAX_ASSISTANT_REPLY_BUBBLES - 1 }, (_, i) => lookup(root + ':bubble:' + i)))
     const deliveryIntentIds = []
@@ -45,8 +33,8 @@ export async function queueClinicalChange(input: {
       const current = await resumeClinicalIntent(vault, intent, input.occurredAt)
       if (['pending', 'retryable', 'sending', 'awaiting_approval'].includes(current.status)) deliveryIntentIds.push(current.intentId)
     }
-    return deliveryIntentIds.length ? { intentId: null, deliveryIntentIds }
-      : { intentId: null, savedReplyResult: { turnId: decision.savedTurnId, status: 'drained' as const } }
+    return deliveryIntentIds.length ? { deliveryIntentIds }
+      : { savedReplyResult: { turnId: decision.savedTurnId, status: 'drained' as const } }
   }
   const jobId = `cron_clinical_change_${receiptRef}`
   const paths = resolveAssistantStatePaths(vault)
@@ -72,10 +60,10 @@ export async function queueClinicalChange(input: {
     })
     await writeAssistantCronStore(paths, { ...store, jobs: sortAssistantCronJobs([...store.jobs, job]) })
   })
-  return { intentId: null }
+  return { deliveryIntentIds: [] }
 }
 
-async function resumeClinicalIntent(vault: string, intent: Awaited<ReturnType<typeof createAssistantOutboxIntent>>, now: string) {
+async function resumeClinicalIntent(vault: string, intent: AssistantOutboxIntent, now: string) {
   // A restored sending claim may predate provider entry. Web's per-bubble fence
   // either permits the original handoff or retires it without another provider call.
   const deferred = ['failed', 'retryable'].includes(intent.status) && intent.lastError?.code === CLINICAL_REPLY_DEFERRED
