@@ -20,12 +20,12 @@ interface LabRule { unit: string; rankMetric?: LabNormMetric; step?: number; fal
 const analytes: Record<Analyte, LabRule> = {
   hdl: { unit: "mg/dL", rankMetric: "hdlCholesterol", step: 5 },
   ldl: { unit: "mg/dL", rankMetric: "ldlCholesterol", step: 10, fallbackKey: "biomarker:ldl-c" },
-  triglycerides: { unit: "mg/dL", rankMetric: "triglycerides", step: 15, fallbackKey: "biomarker:triglycerides" },
+  triglycerides: { unit: "mg/dL", rankMetric: "triglycerides", step: 25, fallbackKey: "biomarker:triglycerides" },
   total_chol: { unit: "mg/dL", rankMetric: "totalCholesterol", fallbackKey: "biomarker:total-cholesterol" },
   hs_crp: { unit: "mg/L", rankMetric: "hsCrp", step: 0.3, fallbackKey: "biomarker:hs-crp" },
   insulin: { unit: "µIU/mL", rankMetric: "fastingInsulin", step: 2 },
   a1c: { unit: "%", rankMetric: "hba1c", step: 0.2 },
-  glucose: { unit: "mg/dL", step: 5 },
+  glucose: { unit: "mg/dL", step: 10 },
 };
 
 function sameDraw(a: LabDraw, b: LabDraw): boolean {

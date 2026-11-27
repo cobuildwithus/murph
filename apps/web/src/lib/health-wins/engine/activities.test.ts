@@ -360,7 +360,7 @@ describe("monthly sessions", () => {
     ];
     const result = cards({ sessions });
     expect(result).toEqual([expect.objectContaining({
-      kind: "sessions", title: { number: "3 runs", measure: "in April" },
+      kind: "sessions", title: { number: "3 runs", measure: "in April so far" },
       subtitle: "1h 6m of running, the longest 29 min",
       chart: { type: "sessions", sessionType: "run", totalMinutes: 65.5, series: [
         { date: "2025-04-01", minutes: 21.5 }, { date: "2025-04-01", minutes: 29 }, { date: "2025-04-19", minutes: 15 },
@@ -374,7 +374,7 @@ describe("monthly sessions", () => {
       type: "walk", date: `2025-04-0${i + 1}`, minutes,
     }));
     expect(cards({ sessions })[0]).toMatchObject({
-      title: { number: "3 walks", measure: "in April" },
+      title: { number: "3 walks", measure: "in April so far" },
       subtitle: "1h 43m of walking, the longest a full hour",
     });
   });
