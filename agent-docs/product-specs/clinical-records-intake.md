@@ -2,6 +2,8 @@
 
 Last verified: 2026-11-25
 
+See the [hospital connector expectation matrix](../references/clinical-connector-expectations.md) for test ownership and gaps.
+
 ## Product outcome
 
 Murph can send a member a short records-connect link, let them find a likely

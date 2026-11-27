@@ -11,6 +11,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./clinical-connector-testkit": "./test/clinical-connector-runtime.ts",
     "./hosted-vault-share-capture-worker": {
       "types": "./dist/hosted-vault-share-capture-worker.d.ts",
       "import": "./dist/hosted-vault-share-capture-worker.js",

@@ -95,7 +95,7 @@ import {
   startHostedWorkspaceRestorePreparation as startHostedWorkspaceRestorePreparationDirect,
 } from "../src/hosted-workspace-restore-preparation.ts";
 
-const expectedAssistantRuntimePublicExportKeys = [
+const builtAssistantRuntimeExportKeys = [
   ".",
   "./hosted-assistant-bootstrap",
   "./hosted-checkpoint-bridge",
@@ -320,15 +320,20 @@ test("package manifest public exports stay covered by entrypoint wiring tests", 
   assert.ok(manifest.exports);
   assert.deepEqual(
     Object.keys(manifest.exports).sort(),
-    [...expectedAssistantRuntimePublicExportKeys].sort(),
+    [...builtAssistantRuntimeExportKeys, "./clinical-connector-testkit"].sort(),
   );
 });
 
-test("package manifest public exports map to source and built entrypoint targets", () => {
+test("the workspace connector testkit resolves to its Vitest fixture", () => {
+  const fixture = import.meta.resolve("@murphai/assistant-runtime/clinical-connector-testkit");
+  assert.equal(fixture, new URL("./clinical-connector-runtime.ts", import.meta.url).href);
+});
+
+test("built package exports map to source and compiled entrypoint targets", () => {
   const manifest = readPackageManifest();
   assert.ok(manifest.exports);
 
-  for (const exportKey of expectedAssistantRuntimePublicExportKeys) {
+  for (const exportKey of builtAssistantRuntimeExportKeys) {
     const target: unknown = manifest.exports[exportKey];
     assert.ok(isObjectRecord(target));
     const sourceStem = exportKey === "." ? "index" : exportKey.slice(2);
