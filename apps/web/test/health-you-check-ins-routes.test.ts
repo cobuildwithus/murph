@@ -118,12 +118,14 @@ describe("private check-in routes", () => {
   });
   it("includes the model effect on acceptance and on readback from the published session", async () => {
     const date = new Intl.DateTimeFormat("sv-SE", { timeZone: replica.meals.timeZone }).format(new Date());
-    const tests = [{ key: "sitting_rising", value: 3.5 }];
+    const tests = [{ key: "sitting_rising", value: 3.5 }, { key: "pullups_max", value: 0 },
+      { key: "squats_max", value: 7 }, { key: "step_3min", skipped: true }];
     const core = { ...replica, source: { dataVersion: "fixture-version" } };
     mocks.load.mockResolvedValue(ready(core));
     mocks.inputs.mockResolvedValue({ asOf: date, sourceRevision: core.source.dataVersion,
       evidence: { profile: { age: 62, sex: "female" }, labs: [{ marker: "rdw", value: 13, unit: "%", date }] } });
     const preview = await (await session(req({ id, date, tests, safety: { answer: "clear" } }))).json();
+    expect(preview).toMatchObject({ completed: 3, skipped: 1 });
     expect(preview.years).toBeGreaterThan(0);
     const response = mocks.submit.mock.calls[0][0].request.action.response;
     mocks.load.mockResolvedValue(ready({ ...core, entities: [{ family: "assessment", attributes: { checkIn: { id, date, response } } }] }));

@@ -393,16 +393,14 @@
       "label": "Bedtime regularity",
       "icon": "bedtime",
       "group": "sleep",
-      "value": "0.4",
-      "unit": "h SD",
-      "target": {
-        "text": "Comparison value 0.8 h SD"
-      },
+      "value": "25",
+      "unit": "min of variation",
+      "target": null,
       "years": -0.6,
       "yearsText": "−0.6",
       "featured": true,
       "whatItIs": "How much your sleep start time varies across nights.",
-      "whatLowersIt": "Recording weekday and weekend nights gives a fuller picture.",
+      "whatLowersIt": "Try going to bed around the same time each night.",
       "rank": null,
       "grade": null,
       "detail": "sleep",
@@ -416,13 +414,13 @@
       "value": "6h 37m",
       "unit": null,
       "target": {
-        "text": "Comparison value 7.5"
+        "text": "Aim for 7h to 9h a night"
       },
       "years": 0.1,
       "yearsText": "+0.1",
       "featured": false,
       "whatItIs": "This is the time spent asleep.",
-      "whatLowersIt": "A regular sleep opportunity can make sleep duration more consistent.",
+      "whatLowersIt": "Set aside enough time for sleep at a regular bedtime.",
       "rank": null,
       "grade": null,
       "detail": "sleep",
@@ -433,7 +431,15 @@
   "tiles": [
     {
       "label": "Bedtime regularity",
-      "value": "0.4 h SD"
+      "value": "25 min of variation"
+    },
+    {
+      "label": "Overnight heart rate variability",
+      "value": "58 ms"
+    },
+    {
+      "label": "Resting heart rate",
+      "value": "61 bpm"
     }
   ]
 }

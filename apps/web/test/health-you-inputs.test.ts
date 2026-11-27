@@ -17,7 +17,7 @@ import { score } from "../src/lib/health-you/engine";
 import { combineAgeEffect } from "../src/lib/health-you/checkins";
 import { nextQuestion } from "../src/lib/health-you/questions";
 import { youLabel } from "../src/lib/health-you/labels";
-import { model, offset } from "../src/lib/health-you/engine/model";
+import { model, offset, YEAR } from "../src/lib/health-you/engine/model";
 
 const today = "2032-03-01",
   clock = new Date("2032-03-02T03:15:00Z");
@@ -308,8 +308,8 @@ describe("dated private replica projections", () => {
   });
   it.each([
     [39, null],
-    [40, "Average"],
-    [59, "Average"],
+    [40, null],
+    [59, null],
     [60, "Top 40%"],
   ] as const)("bands favorable percentiles at %i", (percentile, label) => {
     expect(favorableRank("grip", percentile)?.label ?? null).toBe(label);
@@ -326,17 +326,18 @@ describe("dated private replica projections", () => {
     expect(old.availability.sleep).toBe("stale");
     expect(buildViews(old).you).toMatchObject({ state: "building", building: { have: 0 } });
     const partial = read({ ...r, metricRows: r.metricRows.slice(0, 2) });
-    expect(buildViews(partial).you.building?.have).toBe(2);
+    expect(buildViews(partial).you.building).toEqual({ have: 2, need: 3, text: "Wear your band for 1 more night." });
   });
   it("withholds a precise headline for unsupported profiles", () => {
     const input = read(replica());
-    for (const profile of [
-      { birth_year: 2020, sex: "male" },
-      { age: 50, sex: "unknown" },
-      { age: 50, sex: "female", pregnant: true },
-    ]) {
+    for (const [profile, text] of [
+      [{ age: 18, sex: "male" }, "Murph works out ages 20 to 80"],
+      [{ age: 50, sex: "unknown" }, "Add your sex in About you to see your age"],
+      [{ age: 50, sex: "female", pregnant: true }, "Paused while you're pregnant"],
+      [{ age: 50, sex: "female", delivery_date: offset(today, -11) }, "Paused for now after having a baby"],
+    ] as const) {
       const view = buildViews({ ...input, evidence: { ...input.evidence, profile } }).you;
-      expect(view.state).toBe("paused");
+      expect(view).toMatchObject({ state: "paused", paused: { text } });
       expect(view.age).toBeUndefined();
     }
   });
@@ -533,7 +534,7 @@ describe("canonical check-in and sleep timing projections", () => {
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
-  it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
+  it("retains an unverified pressure pair without marking an age event or counting a factor", () => {
     const r = addPulse(replica());
     const upper = {
       ...r.metricRows[0]!,
@@ -549,11 +550,7 @@ describe("canonical check-in and sleep timing projections", () => {
     const input = read(r);
     expect(input.evidence.bp).toMatchObject([{ systolic: 124, diastolic: 76, validated: undefined }]);
     const bundle = buildViews(input);
-    expect(bundle.age?.events).toContainEqual({
-      date: today,
-      kind: "bloodPressure",
-      label: "Blood pressure",
-    });
+    expect(bundle.age?.events).toEqual([]);
     expect(bundle.you.factors.some((f) => f.key === "bloodPressure")).toBe(false);
     const split = r.metricRows.map((row) =>
       row.id === lower.id ? { ...row, recordIds: ["other-synthetic-event"] } : row,
@@ -635,16 +632,67 @@ describe("round 4 private views", () => {
     const sparse = buildViews(read(replica()));
     expect(sparse.you).toMatchObject({
       state: "building",
-      building: { text: expect.stringContaining("independent") },
+      building: { have: 1, need: 2, text: expect.stringContaining("one more type") },
     });
     const boundary = addPulse(replica());
     boundary.demographics = { ...boundary.demographics!, birthYear: 2012 };
     const views = buildViews(read(boundary));
     expect(views.you).toMatchObject({
       state: "building",
-      building: { text: expect.stringContaining("birth year") },
+      building: { text: expect.stringContaining("date of birth") },
     });
     expect(views.you.age).toBeUndefined();
+  });
+  it.each([-1, 1])("omits tiny observed weekly movements in direction %i", direction => {
+    const r = replica();
+    r.metricRows = r.metricRows.map(row => ({ ...row,
+      value: 390 + (row.date > offset(today, -7) ? direction * 0.01 : 0),
+    }));
+    const input = read(r);
+    const movement = Math.abs(score(input.evidence, today)!.changes.sleep * YEAR);
+    expect(movement).toBeGreaterThan(0);
+    expect(movement).toBeLessThan(0.05);
+    expect(buildViews(input).week).toMatchObject({ helped: [], cost: [] });
+  });
+  it("hides a marker's zero-year contribution and omits interpretation-only advice", () => {
+    const input = read(addPulse(replica()));
+    input.evidence.labs = [{ date: today, marker: "b12", value: 480, unit: "pg/mL" }];
+    input.markers = [{ date: today, key: "b12", modelKey: "b12", label: "Vitamin B12",
+      value: 480, unit: "pg/mL", flag: null, system: "Other markers" }];
+    const views = buildViews(input);
+    expect(views.you.factors.find(f => f.key === "b12")?.years).toBe(0);
+    expect(views.markers.b12.years).toBeNull();
+    expect(views.markers.b12.whatLowersIt).toBeUndefined();
+  });
+  it("marks each kind once a week and only the first qualifying blood pressure series", () => {
+    const input = read(addPulse(replica()));
+    const dates = [-7, -6, -5, 0].map(d => offset(today, d));
+    input.evidence.bp = dates.flatMap(date => ["09:00", "09:02"].map(time => ({
+      date, measured_at: date + "T" + time, setting: "clinic", systolic: 123, diastolic: 76,
+    })));
+    input.evidence.labs = dates.map(date => ({ date, marker: "rdw", unit: "%", value: 13 }));
+    input.evidence.checkins = dates.map(date => ({ date, diet_day_complete: true }));
+    const view = buildViews(input);
+    expect(view.age?.events).toEqual([
+      { date: dates[0], kind: "bloodWork", label: "Blood work" },
+      { date: dates[1], kind: "bloodPressure", label: "Blood pressure" },
+      { date: today, kind: "bloodWork", label: "Blood work" },
+    ]);
+    expect(view.age?.history.at(-1)?.age).toBe(view.you.age?.value);
+  });
+  it("uses the member's measured activity, cardio fitness and sleep numbers", () => {
+    const input = read(addPulse(replica()));
+    input.evidence.vo2 = [{ date: today, value: 44, method: "lab_cpet" }];
+    input.activeMinutes = [];
+    let view = buildViews(input);
+    expect(view.fitness.hero).toMatchObject({ value: "44", unit: "VO2 max" });
+    expect(view.sleep.hero.value).toBe("7h 45m");
+    expect(view.sleep.tiles).toContainEqual({ label: "Resting heart rate", value: "62 bpm" });
+    input.activeMinutes = [{ date: today, value: 37 }, { date: offset(today, -8), value: 80 }];
+    view = buildViews(input);
+    expect(view.fitness.hero).toMatchObject({ value: "37", unit: "active min in 7 days" });
+    expect(view.fitness.tiles).toContainEqual({ label: "Cardio fitness", value: "44 VO2 max" });
+    expect(buildViews(read({ ...replica(), metricRows: [] })).fitness.tiles).toEqual([]);
   });
   it("keeps relay-only steps, manual fitness estimates and switched acquisition methods out of wearable credit", () => {
     const r = replica();
@@ -726,13 +774,10 @@ describe("round 4 private views", () => {
     expect(result.you.factors.map((f) => f.key)).toEqual(expect.arrayContaining(["foodPattern", "sitRise"]));
     expect(result.you.factors.map((f) => f.key)).not.toContain("grip");
     expect(result.you.factors.map((f) => f.key)).not.toContain("balance");
-    expect(result.age?.events).toContainEqual(
-      expect.objectContaining({
-        kind: "evidenceChange",
-        date: today,
-        evidenceChangeYears: expect.any(Number),
-      }),
-    );
+    expect(result.age?.events).toEqual([
+      { date: today, kind: "combine", label: "Fitness Combine" },
+      { date: today, kind: "foodWeek", label: "Food week" },
+    ]);
     expect(JSON.stringify(result)).not.toContain("research_risk");
   });
 });

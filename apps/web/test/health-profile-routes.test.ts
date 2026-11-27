@@ -6,6 +6,13 @@ import { PUT as working } from "../app/api/game/v1/health/me/working-on/route";
 import { DELETE as remove, PUT as cheer } from "../app/api/game/v1/health/people/[memberId]/working-on/[factor]/cheer/route";
 import { parseGameCommand } from "../src/lib/game/command";
 
+import * as access from "../src/lib/health-profile/access";
+import { profileAge } from "../src/lib/health-profile/age";
+import * as streaks from "../src/lib/health-profile/streaks";
+import * as storage from "../src/lib/health-profile/storage";
+import * as wins from "../src/lib/health-wins/wins";
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
 const api = vi.hoisted(() => ({ pinCandidates: vi.fn(), setPins: vi.fn(), workingOptions: vi.fn(), setWorking: vi.fn(),
   setWorkingCheer: vi.fn(), readExtendedProfile: vi.fn() }));
 vi.mock("../src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: async () => ({ allowed: true }) }) }));
@@ -22,7 +29,7 @@ beforeEach(() => {
   vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "*");
   vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", auth.member.id);
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 it("gates every read and write before parsing, including retraction", async () => {
   vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", "");
@@ -54,6 +61,26 @@ it("returns bare profile extras and viewer-only cheer state", async () => {
   expect(await (await working(request({ factors: ["steps"] }))).json()).toEqual({ isMe: true, pins: [] });
   expect(await (await cheer(request(), ctx)).json()).toEqual({ cheered: true });
   expect(await (await remove(request(), ctx)).json()).toEqual({ cheered: false });
+});
+it("offers both live pin types even when the wins feed has no available set", async () => {
+  const pins = await vi.importActual<typeof import("../src/lib/health-profile/pins")>("../src/lib/health-profile/pins");
+  api.pinCandidates.mockImplementationOnce(pins.pinCandidates);
+  vi.spyOn(access, "assertProfileAccess").mockResolvedValue(undefined);
+  vi.spyOn(wins, "readHealthWins").mockRejectedValue(hostedOnboardingError({
+    code: "HEALTH_WINS_UNAVAILABLE", httpStatus: 503, message: "Fixture unavailable.",
+  }));
+  vi.spyOn(storage, "storedPins").mockResolvedValue([]);
+  vi.spyOn(profileAge, "read").mockResolvedValue({ value: 45.2, gap: -1.1, timeZone: "UTC", revision: "age-revision" });
+  vi.spyOn(streaks, "readProfileStreaks").mockResolvedValue([{
+    row: { gameId: "fixture-game", title: "Stretch after lunch", count: 2, days: ["done", "done"], partner: null },
+    monday: "2031-04-07", revision: "streak-revision", peerCount: undefined,
+  }]);
+  const response = await candidates(request());
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ pinned: [], candidates: [
+    { filter: "streaks", revision: "streak-revision", card: { kind: "game_streak", title: { number: "2" } } },
+    { filter: "age", revision: "age-revision", card: { kind: "biological_age", chart: { value: 45.2 } } },
+  ] });
 });
 it("parses one cover operation without changing other profile fields", () => {
   expect(parseGameCommand({ type: "setProfile", cover: null })).toEqual({ type: "setProfile", cover: null });

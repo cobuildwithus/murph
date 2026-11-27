@@ -29,7 +29,7 @@ import { buildViews, emptyYou } from "./views";
 import { readThisWeek } from "./this-week";
 
 const cacheSchema = z.object({ timeZone: z.string(), views: bundleSchema });
-export const YOU_SCHEMA_VERSION = 6;
+export const YOU_SCHEMA_VERSION = 7;
 type ReadKind = "you" | "age" | "week" | "sleep" | "fitness" | "blood" | "marker";
 function binding(memberId: string, revision: string) {
   return { memberId, table: "health_you_cache", rowId: revision, field: "views" } as const;

@@ -135,7 +135,8 @@ export async function readFoodWeek(request: Request, auth: HostedNativeMemberAut
 async function scoreSession(request: Request, auth: HostedNativeMemberAuth, replica: Replica, id: string,
   session: Extract<CheckInInstrument, { instrument: "combine" }>) {
   const today = toLocalDayKey(Date.now(), replica.meals!.timeZone);
-  const eligible = session.date >= addDaysToIsoDate(today, -49) && session.tests.some(test => !test.skipped &&
+  const completed = session.tests.filter(test => !test.skipped && test.value !== undefined);
+  const eligible = completed.length >= 3 && session.date >= addDaysToIsoDate(today, -49) && completed.some(test =>
     (test.key === "sitting_rising" || (test.key === "single_leg_10s" && test.value === 10)));
   if (!eligible) return combineResult(id, session, replica.demographics);
   return withInputAuthority(() => assertPrivateHealthAuthority(auth), async () => {
