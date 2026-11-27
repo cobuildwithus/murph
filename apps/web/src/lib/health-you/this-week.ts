@@ -18,13 +18,15 @@ import { getPrisma } from "../prisma";
 import type { ThisWeekRow } from "./contract";
 import { distance, offset } from "./engine/model";
 
+import { listWorkingOn } from "../health-profile/working-on";
+
 export type WorkingOnReader = (memberId: string) => Promise<Extract<ThisWeekRow, { kind: "workingOn" }>[]>;
 export async function readThisWeek(
   memberId: string,
   today: string,
   clock: Date,
   signal: AbortSignal,
-  workingOn: WorkingOnReader = async () => [],
+  workingOn: WorkingOnReader = listWorkingOn,
 ): Promise<ThisWeekRow[]> {
   const db = getPrisma();
   const games = await db.game.findMany({

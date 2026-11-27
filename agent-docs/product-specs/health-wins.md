@@ -410,7 +410,11 @@ the scoped readers on every rollback once any payoff has been posted.
 Private You check-ins require both the feed and `MURPH_HEALTH_YOU_MEMBER_IDS`.
 The allowlists accept member IDs or `*`. Blood pressure, food week, Combine and
 one-off answers submit one replayable member action per check-in. Acceptance
-precedes publication. A stopped Combine session returns 409 before submission.
+precedes publication. The next private read after replica publication checks the new input revision.
+The private view offers at most one new question per local day. It prioritizes unanswered
+model factors and offers a quit date to a former smoker. Date and number questions carry
+an optional `inputKind` and an empty options array. A scorable Combine session can show
+its modeled effect immediately. A stopped Combine session returns 409 before submission.
 Deploy generation 21 replica builders and runtime consumers with the flag off,
 then Web, the companion client and finally the allowlist.
 

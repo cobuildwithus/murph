@@ -10,7 +10,7 @@ import { assertGameMemberAuthCurrentTx } from "../game/http/auth";
 import { gameNotFound, invalidGameRequest } from "../game/http/errors";
 import { profileFactorLookupKeys } from "../hosted-onboarding/contact-privacy-core";
 import { readWorkingSelections } from "./storage";
-import { withInputAuthority } from "../health-wins/inputs";
+import { withInputAuthority } from "../health-wins/input-authority";
 import { retainedDailySamples, WIN_METRIC_KEYS } from "../health-wins/wearable-inputs";
 import { localToday } from "../health-wins/wins";
 import { getPrisma } from "../prisma";

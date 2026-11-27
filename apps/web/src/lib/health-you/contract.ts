@@ -36,7 +36,7 @@ const notCounted = z.object({
   action: z.enum(["combine", "foodWeek", "addBloodPressure", "connectWearable", "bloodWork", "answer"]),
   primary: z.boolean(),
 });
-const question = z.object({ key: s, text: s, options: z.array(z.object({ value: s, label: s })) });
+const question = z.object({ key: s, text: s, inputKind: z.enum(["date", "number"]).optional(), options: z.array(z.object({ value: s, label: s })) });
 const weekRow = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("challenge"),

@@ -575,5 +575,28 @@
       "primary": false
     }
   ],
-  "questions": []
+  "questions": [
+    {
+      "key": "smoking",
+      "text": "Have you smoked at least 100 cigarettes in your life? If so, do you smoke now?",
+      "options": [
+        {
+          "value": "never",
+          "label": "Fewer than 100"
+        },
+        {
+          "value": "former",
+          "label": "100 or more and stopped"
+        },
+        {
+          "value": "current",
+          "label": "100 or more and smoke now"
+        },
+        {
+          "value": "unsure",
+          "label": "Not sure"
+        }
+      ]
+    }
+  ]
 }

@@ -1,7 +1,9 @@
-import { toLocalDayKey } from "@murphai/contracts";
+import { oneOffAnswerSchema, toLocalDayKey, type CheckInInstrument } from "@murphai/contracts";
 import type { BrowserVaultEntity, BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import { isRecord } from "../primitives";
-import { day, lookup, type MemberEvidence, type Observation } from "./engine/model";
+import { day, lookup, type Observation } from "./engine/model";
+import type { YouInputs } from "./evidence";
+import { withheld } from "./views";
 import { score } from "./engine";
 
 function projectedAssessment(row: BrowserVaultEntity, from: string, asOf: string, timeZone: string) {
@@ -10,7 +12,7 @@ function projectedAssessment(row: BrowserVaultEntity, from: string, asOf: string
     !isRecord(entry) ||
     typeof entry.date !== "string" ||
     !day(entry.date) ||
-    entry.date < from ||
+    (entry.date < from && (!isRecord(entry.response) || entry.response.instrument !== "you-answer")) ||
     entry.date > asOf ||
     !isRecord(entry.response) ||
     entry.response.instrumentVersion !== 1 ||
@@ -21,25 +23,39 @@ function projectedAssessment(row: BrowserVaultEntity, from: string, asOf: string
   if (reported > asOf) return null;
   return {
     response: entry.response,
+    instant: Date.parse(row.occurredAt),
     value: { date: entry.date, source: "member-assessment", reported_at: reported },
   };
+}
+
+type Answer = Extract<CheckInInstrument, { instrument: "you-answer" }>["answer"];
+
+function modelAnswer(answer: Answer): Observation {
+  switch (answer.key) {
+    case "whoopZones": return { whoop_standard_zones: answer.value };
+    case "smoking": return { smoking: answer.value };
+    case "quitDate": return { quit_date: answer.value };
+    case "alcoholDrinksPerWeek": return { alcohol_drinks_per_week: answer.value };
+    case "diabetes":
+    case "seriousDisease":
+      return { [answer.key === "diabetes" ? "diabetes" : "serious_disease"]:
+        answer.value === "unsure" ? null : answer.value === "yes" };
+    case "selfRatedHealth": return { health: answer.value === "veryGood" ? "very good" : answer.value };
+  }
 }
 
 /** The canonical projector exposes only the checked response at attributes.checkIn. */
 export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf: string, timeZone: string) {
   const checkins: Observation[] = [],
     tests: Observation[] = [];
+  const answers: { answer: Answer; date: string; instant: number; id: string }[] = [];
   for (const row of rows) {
     const assessment = projectedAssessment(row, from, asOf, timeZone);
     if (!assessment) continue;
     const { response, value } = assessment;
-    if (
-      response.instrument === "you-answer" &&
-      isRecord(response.answer) &&
-      response.answer.key === "whoopZones" &&
-      ["yes", "no", "notSure"].includes(String(response.answer.value))
-    ) {
-      checkins.push({ ...value, whoop_standard_zones: response.answer.value });
+    if (response.instrument === "you-answer") {
+      const parsed = oneOffAnswerSchema.safeParse(response.answer);
+      if (parsed.success) answers.push({ answer: parsed.data, date: value.reported_at, instant: assessment.instant, id: row.id });
     }
     if (response.instrument === "food-week" && Array.isArray(response.answers)) {
       const aliases: Record<string, string> = {
@@ -59,8 +75,17 @@ export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf:
       checkins.push({ ...value, food_week: { complete: true, answers } });
     }
     if (response.instrument === "combine" && response.date === value.date && Array.isArray(response.tests)) {
-      tests.push(...submittedTests(response.tests, { ...value, session_id: row.id }));
+      tests.push(...submittedTests(response.tests, { ...value, session_id: isRecord(row.attributes.checkIn) ? row.attributes.checkIn.id : row.id }));
     }
+  }
+  // A revision replaces the old answer from its reporting day onwards, including an explicit unsure.
+  answers.sort((a, b) => b.instant - a.instant || b.id.localeCompare(a.id));
+  const latest = new Map<Answer["key"], string>();
+  for (const { answer, date } of answers) {
+    const until = latest.get(answer.key);
+    checkins.push({ date, reported_at: date, superseded_on: until, answerKey: answer.key,
+      source: "member-assessment", ...modelAnswer(answer) });
+    latest.set(answer.key, date);
   }
   return { checkins, tests };
 }
@@ -176,16 +201,15 @@ export function pressureInputs(rows: BrowserVaultMetricRow[], timeZone: string):
       validated: p.validated,
     }));
 }
-/** Preview of the contribution of validated, protocol-qualified results. Omit for self-counted tests. */
-export function combineAgeEffect(evidence: MemberEvidence, date: string, tests: Observation[]) {
-  const before = score(evidence, date),
-    after = score({ ...evidence, fitness_tests: [...(evidence.fitness_tests ?? []), ...tests] }, date);
-  if (
-    !before ||
-    !after ||
-    !["grip", "floor_rise", "balance"].some((k) => after.rows[k] && after.rows[k].years !== before.rows[k]?.years)
-  )
-    return undefined;
-  const total = (rows: typeof after.rows) => Object.values(rows).reduce((s, r) => s + r.years, 0);
-  return Math.round(10 * (total(after.rows) - total(before.rows))) / 10;
+/** Replays the current panel with and without this session, including after publication or retry. */
+export function combineAgeEffect(input: YouInputs, id: string, session: Extract<CheckInInstrument, { instrument: "combine" }>) {
+  const { evidence, asOf } = input;
+  const prior = (evidence.fitness_tests ?? []).filter(row => row.session_id !== id);
+  const tests = submittedTests(session.tests, { date: session.date, session_id: id });
+  const before = score({ ...evidence, fitness_tests: prior }, asOf);
+  const after = score({ ...evidence, fitness_tests: [...prior, ...tests] }, asOf);
+  if (!before || !after || withheld(input, asOf, before) || withheld(input, asOf, after)
+    || !tests.some(t => (t.test === "sit_and_rise" && after.rows.floor_rise) ||
+      (t.test === "one_leg_balance" && t.value === 10 && after.rows.balance))) return undefined;
+  return Math.round(10 * (after.unrounded - before.unrounded)) / 10;
 }

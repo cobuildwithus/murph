@@ -23,7 +23,9 @@ const instructions: Record<CombineStation, { steps: string; gear?: string }> = {
 };
 function station(key: CombineStation) {
   const metric = resolveMetricDefinition(key.replaceAll("_", "-"))!;
-  return { key, title: metric.displayName, unit: metric.canonicalUnit!, ...instructions[key] };
+  const group = ["grip_strength", "pullups_max", "pushups_max", "pushups_knees", "pushups_wall", "squats_max", "chair_stand_30s"].includes(key)
+    ? "strength" : "movement";
+  return { key, group, title: metric.displayName, unit: metric.canonicalUnit!, ...instructions[key] };
 }
 export const combineStations = (Object.keys(instructions) as CombineStation[])
   .filter(key => key !== "pushups_knees" && key !== "pushups_wall")

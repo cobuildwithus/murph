@@ -70,6 +70,7 @@ for (const [name, id] of [
       availability: {},
       markers,
       lifts: name === "complete" ? [asOf] : [],
+      hasAnswerProjection: true,
       needsWhoopAnswer: name === "wearable",
       activeMinutes: name === "complete" ? [{ date: asOf, value: 28 }] : undefined,
       bedtime: name === "complete" ? [{ date: asOf, inTarget: true }] : undefined,

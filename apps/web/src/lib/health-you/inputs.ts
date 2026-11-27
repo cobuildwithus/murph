@@ -98,7 +98,7 @@ export function projectYouInputs(
   }
   readLabs(client.labResults.list({ from, to: asOf }), from, asOf, labRows, markers);
   const assessments = assessmentInputs(
-    client.entities.list({ families: ["assessment"], from: offset(from, -1), to: offset(asOf, 1) }),
+    client.entities.list({ families: ["assessment"], to: offset(asOf, 1) }),
     from,
     asOf,
     timeZone,
@@ -153,6 +153,7 @@ export function projectYouInputs(
     timeZone,
     evidence,
     bedtime,
+    hasAnswerProjection: (replica.generation ?? 0) >= 21 && Array.isArray(timing),
     needsWhoopAnswer: Array.isArray(timing) && needsWhoopAnswer(evidence, asOf),
     availability,
     markers,

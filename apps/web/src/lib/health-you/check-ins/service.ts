@@ -1,7 +1,7 @@
 import "server-only";
 import {
   addDaysToIsoDate, bloodPressureFields, combineTestsSchema, foodWeekAnswersSchema, memberActionIdV1Schema,
-  oneOffAnswerSchema, projectedCheckInSchema, toLocalDayKey, type MemberActionV1,
+  oneOffAnswerSchema, projectedCheckInSchema, toLocalDayKey, type MemberActionV1, type CheckInInstrument,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
@@ -11,9 +11,11 @@ import { loadPublishedCompanionMetricReplica } from "../../device-sync/companion
 import { assertHealthYouEnabled } from "../../health-wins/flag";
 import { withHealthRoute } from "../../health-wins/http";
 import { assertPrivateHealthAuthority, withInputAuthority } from "../../health-wins/input-authority";
-import { hostedOnboardingError } from "../../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { readHostedOnboardingJsonObject } from "../../hosted-onboarding/http";
 import { getPrisma } from "../../prisma";
+import { combineAgeEffect } from "../checkins";
+import { readYouInputs } from "../inputs";
 import { combineResult, combineStations } from "./combine";
 import { foodWeekQuestions } from "./food-week";
 
@@ -78,10 +80,13 @@ export async function saveFoodWeek(request: Request, auth: HostedNativeMemberAut
   return submit(auth, id, { kind: "assessment.respond", version: 1,
     response: { instrument: "food-week", instrumentVersion: 1, answers: answers.sort((a, b) => a.key.localeCompare(b.key)) } });
 }
-const answerRequest = oneOffAnswerSchema.extend({ id });
+const answerRequest = z.strictObject({ id, key: z.string(), value: z.union([z.string(), z.number()]) });
 export async function saveAnswer(request: Request, auth: HostedNativeMemberAuth) {
-  const { id, ...answer } = validate(answerRequest, await body(request));
-  await checkInReplica(request, auth);
+  const { id, ...fields } = validate(answerRequest, await body(request));
+  const answer = validate(oneOffAnswerSchema, fields);
+  const { meals } = await checkInReplica(request, auth);
+  if (answer.key === "quitDate" && answer.value > toLocalDayKey(Date.now(), meals.timeZone))
+    throw error(400, "Choose a quit date through today.");
   return submit(auth, id, { kind: "assessment.respond", version: 1, response: { instrument: "you-answer", instrumentVersion: 1, answer } });
 }
 
@@ -102,11 +107,30 @@ export async function readFoodWeek(request: Request, auth: HostedNativeMemberAut
   return { state: last && addDaysToIsoDate(last.date, 42) > today ? "done" : "ready", daysLogged, questions: foodWeekQuestions,
     ...(last ? { last: { date: last.date } } : {}) };
 }
+async function scoreSession(request: Request, auth: HostedNativeMemberAuth, replica: Replica, id: string,
+  session: Extract<CheckInInstrument, { instrument: "combine" }>) {
+  const today = toLocalDayKey(Date.now(), replica.meals!.timeZone);
+  const eligible = session.date >= addDaysToIsoDate(today, -49) && session.tests.some(test => !test.skipped &&
+    (test.key === "sitting_rising" || (test.key === "single_leg_10s" && test.value === 10)));
+  if (!eligible) return combineResult(id, session, replica.demographics);
+  return withInputAuthority(() => assertPrivateHealthAuthority(auth), async () => {
+    try {
+      const inputs = await readYouInputs(auth.member.id, request.signal, new Date(), auth.member.createdAt, undefined);
+      if (inputs.sourceRevision === replica.source.dataVersion) {
+        return combineResult(id, session, replica.demographics, () => combineAgeEffect(inputs, id, session));
+      }
+    } catch (error) {
+      request.signal.throwIfAborted();
+      if (isHostedOnboardingError(error) && error.httpStatus < 500) throw error;
+    }
+    return combineResult(id, session, replica.demographics);
+  });
+}
 export async function readCombine(request: Request, auth: HostedNativeMemberAuth) {
   const { replica, meals } = await checkInReplica(request, auth);
   const last = latestCheckIn(replica, "combine", toLocalDayKey(Date.now(), meals.timeZone));
-  const latest = last?.response.instrument === "combine" ? combineResult(last.id, last.response, replica.demographics) : undefined;
-  return { tests: combineStations, ...(latest ? { latest, nextAt: latest.retestOn } : {}) };
+  const latest = last?.response.instrument === "combine" ? await scoreSession(request, auth, replica, last.id, last.response) : undefined;
+  return { minutes: 30, tests: combineStations, ...(latest ? { latest, nextAt: latest.retestOn } : {}) };
 }
 const sessionRequest = z.object({ id, date: z.iso.date(), tests: combineTestsSchema,
   safety: z.object({ answer: z.literal("clear") }).strict() }).strict();
@@ -119,7 +143,7 @@ export async function saveCombine(request: Request, auth: HostedNativeMemberAuth
   const { replica, meals } = await checkInReplica(request, auth);
   if (date > toLocalDayKey(Date.now(), meals.timeZone)) throw error(400, "Choose a session date through today.");
   const response = { instrument: "combine", instrumentVersion: 1, date, tests } as const;
-  const preview = combineResult(id, response, replica.demographics);
+  const preview = await scoreSession(request, auth, replica, id, response);
   const saved = await submit(auth, id, { kind: "assessment.respond", version: 1, response });
-  return { ...preview, saveState: saved.state };
+  return { ...preview, saveState: saved.state, countsBy: saved.countsBy };
 }

@@ -28,7 +28,7 @@ function streakCard(key: string, { row, monday }: Streak) {
         state: mark === "done" ? "posted" : mark === "missed" ? "missed" : "no_game" })) }, share: { caption_tips: [] } } as const;
 }
 function ageCard(value: number, gap: number) {
-  return { id: "age", kind: "biological_age", filter: "Fitness", theme: "fitness",
+  return { id: "age", kind: "biological_age", filter: "Fitness", theme: "age",
     title: { number: value.toFixed(1), measure: "years" }, subtitle: "Biological age", source_note: "",
     chart: { type: "biological_age", value, gap }, share: { caption_tips: [] } } as const;
 }
@@ -47,10 +47,10 @@ export async function publishedPins(memberId: string, pins: Awaited<ReturnType<t
   const age = pins.some(({ stored }) => stored.kind === "age") && await profileAge.read(memberId);
   return pins.map(({ row, stored }) => {
     const key = row.sourceKey;
-    if (stored.kind === "milestone") return { key, card: stored.card, pinnedOn: stored.pinnedOn };
-    if (stored.kind === "age") return age ? { key, card: ageCard(age.value, age.gap) } : null;
+    if (stored.kind === "milestone") return { key, revision: savedRevision(row), card: stored.card, pinnedOn: stored.pinnedOn };
+    if (stored.kind === "age") return age ? { key, revision: age.revision, card: ageCard(age.value, age.gap) } : null;
     const streak = streaks.find(s => s.row.gameId === stored.gameId);
-    return streak ? { key, card: streakCard(key, streak) } : null;
+    return streak ? { key, revision: streak.revision, card: streakCard(key, streak) } : null;
   }).filter(pin => pin !== null);
 }
 
@@ -124,7 +124,7 @@ export async function setPins(auth: ProfileAuth, picks: Pick[], signal: AbortSig
       const revisions = await currentStreakRevisions(tx, owner, owner, ids);
       if (newStreaks.some(s => revisions.get(s.row.gameId) !== s.revision)) throw changed();
     }
-    if (age && picks.some(p => p.key === "age") && !await profileAge.current(tx, owner, age.revision)) throw changed();
+    if (age && picks.some(p => p.key === "age") && !await profileAge.current(tx, owner, age)) throw changed();
     const current = await tx.healthProfilePin.findMany({ where: { memberId: owner }, take: 3 });
     if (picks.some(p => p.revision.startsWith("saved:") && !current.some(r => r.sourceKey === p.key && savedRevision(r) === p.revision))) throw changed();
     await tx.healthProfilePin.deleteMany({ where: { memberId: owner } });

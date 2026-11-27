@@ -116,6 +116,7 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     const { extras } = await readExtendedProfile(peer, owner, signal);
     expect(extras.pins[0]).toMatchObject({ pinnedOn: day, card: { chart: { type: "hidden" } } });
     const [retained] = (await pinCandidates(auth, signal, "us")).candidates;
+    expect(extras.pins[0].revision).toBe(retained.revision);
     await setPins(auth, [{ key: retained.key, revision: retained.revision }], signal, "us");
     const records = await prepareHealthProfileExport(owner, async () => {});
     expect(JSON.parse((await records!().next()).value!).healthProfile.pins[0].card.chart.type).toBe("hidden");
@@ -164,13 +165,16 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     for (const id of [owner, peer.member.id]) await winSet(id, day, true);
     expect((await pinCandidates(auth, signal, "us")).candidates).toEqual([]);
     vi.spyOn(profileAge, "read").mockImplementation(async id => ({
-      value: id === owner ? 43.2 : 40.8, gap: -0.8, revision: "model-day-generation",
+      value: id === owner ? 43.2 : 40.8, gap: -0.8, revision: "model-day-generation", timeZone: "UTC",
     }));
     const valid = vi.spyOn(profileAge, "current").mockResolvedValue(false);
     const pick = { key: "age", revision: "model-day-generation" };
     await expect(setPins(auth, [pick], signal, "us")).rejects.toMatchObject({ httpStatus: 409 });
     valid.mockResolvedValue(true);
     await setPins(auth, [pick], signal, "us");
+    expect((await readExtendedProfile(peer, owner, signal)).extras.pins[0]).toMatchObject({
+      revision: pick.revision, card: { theme: "age", chart: { value: 43.2, gap: -0.8 } },
+    });
     expect((await readExtendedProfile(peer, owner, signal)).extras.compare?.rows).toEqual([]);
     await setPins(peer, [pick], signal, "us");
     const { extras } = await readExtendedProfile(peer, owner, signal);

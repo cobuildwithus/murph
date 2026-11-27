@@ -142,6 +142,20 @@ describe("private view authority and dependency lifecycle", () => {
     await expect(readPrivateYou(auth, "age", signal)).resolves.toMatchObject({ real: 46 });
     expect(mocks.publish).toHaveBeenCalledOnce();
   });
+  it("recomputes after publication and suppresses a second new question on the same local day", async () => {
+    warm();
+    const old = buildViews({ ...snapshot, hasAnswerProjection: true });
+    expect(old.you.questions[0].key).toBe("smoking");
+    mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: old })]);
+    const next = { ...ref, dataVersion: "f".repeat(64) };
+    mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: next });
+    mocks.inputs.mockResolvedValue({ ...snapshot, sourceRevision: next.dataVersion, hasAnswerProjection: true,
+      evidence: { ...snapshot.evidence, checkins: [{ date: "2031-04-11", reported_at: "2031-04-11",
+        answerKey: "smoking", smoking: "former" }] } });
+    mocks.publish.mockResolvedValue(["replacement"]);
+    await expect(readPrivateYou(auth, "you", signal)).resolves.toMatchObject({ questions: [] });
+    expect(mocks.publish).toHaveBeenCalledOnce();
+  });
   it("rejects a cached view from another model or schema revision", async () => {
     warm();
     mocks.cache.mockResolvedValue({

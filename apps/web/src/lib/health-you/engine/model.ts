@@ -100,6 +100,9 @@ export function eligible(r: Observation, at: string) {
     !["sick", "acute_illness", "invalid", "retracted"].some((k) => r[k] === true)
   );
 }
+export function effectiveAnswer(r: Observation, at: string) {
+  return typeof r.superseded_on !== "string" || at < r.superseded_on;
+}
 export function dated(data: MemberEvidence, k: Family, at: string, days: number) {
   return (data[k] ?? []).filter((r) => eligible(r, at) && distance(at, rowDay(r)) <= days);
 }

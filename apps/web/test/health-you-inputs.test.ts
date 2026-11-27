@@ -6,6 +6,9 @@ import {
 } from "@murphai/query/browser";
 import { projectYouInputs } from "../src/lib/health-you/inputs";
 import { buildViews } from "../src/lib/health-you/views";
+import { score } from "../src/lib/health-you/engine";
+import { combineAgeEffect } from "../src/lib/health-you/checkins";
+import { nextQuestion } from "../src/lib/health-you/questions";
 import { offset } from "../src/lib/health-you/engine/model";
 
 const today = "2032-03-01",
@@ -187,6 +190,56 @@ describe("canonical check-in and sleep timing projections", () => {
     const input = read(r);
     expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_standard_zones: "notSure" });
     expect(buildViews(input).you.questions).toEqual([]);
+  });
+  it("replays corrections at their reporting day and remembers even an old or unsure answer", () => {
+    const r = replica();
+    Object.assign(r, { generation: 21, sleepTiming: [] });
+    const put = (key: string, value: string | number, date: string, hour: number) => {
+      r.entities.push({ id: "fixture-" + r.entities.length, family: "assessment", kind: "assessment",
+        recordClass: "ledger", date, occurredAt: date + "T" + hour + ":00:00Z", links: [], tags: [],
+        lookupIds: [], status: null, bodyPreview: null, experimentSlug: null, stream: null, title: null,
+        attributes: { checkIn: { date, response: { instrumentVersion: 1, instrument: "you-answer", answer: { key, value } } } } });
+    };
+    const yesterday = offset(today, -1);
+    expect(buildViews(read(structuredClone(r))).you.questions[0]?.key).toBe("smoking");
+    put("smoking", "former", offset(today, -400), 12);
+    expect(buildViews(read(structuredClone(r))).you.questions[0]?.key).toBe("quitDate");
+    put("quitDate", "2020-01-01", yesterday, 12);
+    put("diabetes", "yes", yesterday, 12);
+    put("seriousDisease", "no", yesterday, 12);
+    put("selfRatedHealth", "veryGood", yesterday, 12);
+    put("alcoholDrinksPerWeek", 3.5, yesterday, 12);
+    put("diabetes", "no", today, 13);
+    put("diabetes", "unsure", today, 14);
+    const input = read(r);
+    expect(score(input.evidence, yesterday)?.rows).toMatchObject({
+      diabetes: { value: 1 }, disease: { value: 0 }, health: { value: 2 }, alcohol: { value: 7 },
+    });
+    expect(score(input.evidence, today)?.rows.diabetes).toBeUndefined();
+    expect(nextQuestion(input, {})).toEqual([]);
+    const corrected = structuredClone(r);
+    const source = corrected.entities.find(e => e.attributes.checkIn && e.id === "fixture-0")!;
+    for (const [status, date] of [["current", yesterday], ["former", today]]) {
+      corrected.entities.push({ ...source, id: "smoking-" + status, date, occurredAt: date + "T16:00:00Z",
+        attributes: { checkIn: { date, response: { instrumentVersion: 1, instrument: "you-answer",
+          answer: { key: "smoking", value: status } } } } });
+    }
+    expect(score(read(corrected).evidence, today)?.rows.smoking).not.toHaveProperty("quit");
+  });
+  it("scores a submitted floor rise against the current panel and reproduces it after publication", () => {
+    const person = addPulse(replica());
+    person.demographics = { ...person.demographics!, birthYear: 1967 };
+    const input = read(person);
+    const session = { instrument: "combine", instrumentVersion: 1, date: today,
+      tests: [{ key: "sitting_rising", value: 4 }] } as const;
+    const submitted = { ...session, tests: [...session.tests] };
+    const years = combineAgeEffect(input, "session", submitted);
+    expect(years).toEqual(expect.any(Number));
+    expect(years).not.toBe(0);
+    input.evidence.fitness_tests = [{ session_id: "session", date: today, test: "sit_and_rise",
+      verified: "self", unit: "points", value: 4, protocol: "murph-combine-v1" }];
+    expect(combineAgeEffect(input, "session", submitted)).toBe(years);
+    expect(combineAgeEffect(input, "session", { ...submitted, tests: [{ key: "pullups_max", value: 6 }] })).toBeUndefined();
   });
   it("keeps an unverified canonical pressure pair in history without a pressure coefficient", () => {
     const r = addPulse(replica());

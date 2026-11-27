@@ -49,9 +49,16 @@ export const foodWeekAnswersSchema = z.array(foodAnswer).min(1).max(15).refine(r
     && (values.get("packaged_days") ?? 0) <= eatingDays
     && (values.get("max_occasion") ?? 0) <= (values.get("alcohol") ?? 100);
 });
-export const oneOffAnswerSchema = z.object({
-  key: z.literal("whoopZones"), value: z.enum(["yes", "no", "notSure"]),
-}).strict();
+const yesNoUnsure = z.enum(["yes", "no", "unsure"]);
+export const oneOffAnswerSchema = z.discriminatedUnion("key", [
+  z.strictObject({ key: z.literal("whoopZones"), value: z.enum(["yes", "no", "notSure"]) }),
+  z.strictObject({ key: z.literal("smoking"), value: z.enum(["never", "former", "current", "unsure"]) }),
+  z.strictObject({ key: z.literal("quitDate"), value: z.iso.date() }),
+  z.strictObject({ key: z.literal("alcoholDrinksPerWeek"), value: z.number().finite().min(0).max(150) }),
+  z.strictObject({ key: z.literal("diabetes"), value: yesNoUnsure }),
+  z.strictObject({ key: z.literal("seriousDisease"), value: yesNoUnsure }),
+  z.strictObject({ key: z.literal("selfRatedHealth"), value: z.enum(["excellent", "veryGood", "good", "fair", "poor"]) }),
+]);
 export const checkInInstrumentSchema = z.discriminatedUnion("instrument", [
   z.object({ instrument: z.literal("combine"), instrumentVersion: z.literal(1), date: z.iso.date(), tests: combineTestsSchema }).strict(),
   z.object({ instrument: z.literal("food-week"), instrumentVersion: z.literal(1), answers: foodWeekAnswersSchema }).strict(),

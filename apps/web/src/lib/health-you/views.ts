@@ -1,3 +1,4 @@
+import { nextQuestion } from "./questions";
 import type { Bundle, Factor, Person, ThisWeekRow, YouView } from "./contract";
 import { recentSleepNights } from "./engine/observations";
 import { finishFactors, missingEvidence } from "./engine/report";
@@ -319,7 +320,7 @@ function supportedWeek(input: YouInputs, current: Score) {
     !ambiguousBirthYear(input, input.asOf)
   );
 }
-function withheld(input: YouInputs, at: string, current: Score | null) {
+export function withheld(input: YouInputs, at: string, current: Score | null) {
   if (ambiguousBirthYear(input, at))
     return "Your birth year alone cannot confirm whether you are in the supported age range.";
   if (!current) return null;
@@ -364,18 +365,7 @@ export function buildViews(input: YouInputs): Bundle {
   you.factors = factors;
   you.notCounted = current ? offerings(input, rows) : [];
   you.thisWeek = ownTargets(input);
-  if (input.needsWhoopAnswer && you.state !== "paused")
-    you.questions = [
-      {
-        key: "whoopZones",
-        text: "Are your WHOOP heart rate zones set to the standard ranges?",
-        options: [
-          { value: "yes", label: "Yes" },
-          { value: "no", label: "No" },
-          { value: "notSure", label: "Not sure" },
-        ],
-      },
-    ];
+  if (you.state !== "paused") you.questions = nextQuestion(input, rows);
   let age: Bundle["age"] = null,
     week: Bundle["week"] = null;
   if (ready && current) {

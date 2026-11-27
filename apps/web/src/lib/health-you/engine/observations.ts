@@ -5,6 +5,7 @@ import {
   day,
   device,
   distance,
+  effectiveAnswer,
   eligible,
   fields,
   logTable,
@@ -391,14 +392,14 @@ function bodyFactors(data: MemberEvidence, at: string, add: AddClinical) {
     }
   }
 }
-function smokingFactor(ci: Observation[], at: string, add: AddClinical, result: Rows) {
+function smokingFactor(ci: Observation[], history: Observation[], at: string, add: AddClinical, result: Rows) {
   const smoking = pick(
     ci.filter((r) => ["never", "former", "current"].includes(String(r.smoking))),
     "smoking",
   );
   add("smoking", smoking === "never" ? 0 : smoking === "former" ? 0.4 : smoking === "current" ? 1 : null);
   if (smoking === "former") {
-    const prior = ci
+    const prior = history
       .filter((r) => r.smoking === "current")
       .map(rowDay)
       .sort()
@@ -470,9 +471,10 @@ function habitualFactors(
   }
 }
 export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex) {
-  const ci = dated(data, "checkins", at, 3650).map((r) =>
+  const history = dated(data, "checkins", at, 3650).map((r) =>
     typeof r.topic === "string" ? { ...r, [r.topic]: r.answer } : r,
   );
+  const ci = history.filter(r => effectiveAnswer(r, at));
   const recent = ci.filter((r) => distance(at, rowDay(r)) <= 90);
   const result: Rows = {},
     labs = labValues(data, at),
@@ -486,7 +488,7 @@ export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex
   bodyFactors(data, at, add);
   const bp = bpValue(data, at);
   if (bp) add("sbp", bp.value, bp.source === "home" ? 0.75 : 1);
-  smokingFactor(ci, at, add, result);
+  smokingFactor(ci, history, at, add, result);
   for (const [k, field] of Object.entries({
     disease: "serious_disease",
     diabetes: "diabetes",
