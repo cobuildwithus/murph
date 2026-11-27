@@ -75,8 +75,9 @@ beforeEach(() => {
   mocks.signal.mockResolvedValue(undefined);
   mocks.base.mockResolvedValue("https://portal.example.test/FHIR/R4");
   mocks.seal.mockImplementation(async ({ value }: { value: string }) => `sealed:${value}`);
-  mocks.open.mockImplementation(async ({ field }: { field: string }) => field === "refreshToken" ? JSON.stringify({ schemaVersion: 1,
-    clientId: "client", tokenEndpoint: "https://portal.example.test/token", refreshToken: "old-refresh", grantedScopes: ["patient/Patient.r", "patient/Observation.s"] }) : "existing-access");
+  mocks.open.mockImplementation(async ({ field }: { field: string }) => field === "refreshToken"
+    ? '{"schemaVersion":1,"clientId":"client","tokenEndpoint":"https://portal.example.test/token","refreshToken":"old-refresh","grantedScopes":["patient/Patient.r","patient/Observation.s"]}'
+    : "existing-access");
   vi.stubEnv("EPIC_SMART_PERSISTENT_CREDENTIALS", JSON.stringify({ "epic-synthetic": { clientId: "client", clientSecret: "secret" } }));
 });
 
@@ -160,6 +161,17 @@ describe("rotating clinical refresh lease", () => {
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(String(url)).toBe("https://portal.example.test/token");
     expect(new URLSearchParams(String(init?.body)).has("client_assertion")).toBe(true);
+  });
+
+  it("reads a historical signed Epic refresh payload with the writer off", async () => {
+    const f = fixture();
+    f.row.providerDirectoryEntryId = "epic-sandbox";
+    mocks.open.mockResolvedValue('{"schemaVersion":1,"profile":{"environment":"sandbox","method":"private_key_jwt","hospitalApproved":false},"clientId":"signed","tokenEndpoint":"https://portal.example.test/token","refreshToken":"saved","grantedScopes":["patient/Patient.r","patient/DocumentReference.s","offline_access"]}');
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_ASYMMETRIC_CLIENT_ID", "signed");
+    vi.stubEnv("EPIC_SMART_NON_PRODUCTION_PRIVATE_KEY_PEM", signerPem);
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "0");
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ access_token: "renewed", expires_in: 300, token_type: "Bearer" }));
+    await expect(renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now, fetchImpl })).resolves.toBe("renewed");
   });
 
   it("releases the lease without egress when the stored client is unknown", async () => {
@@ -270,6 +282,8 @@ describe("Oracle grants", () => {
 
   it("renews with the Oracle signer and exact token URL, and re-seals the non-rotating token", async () => {
     const f = oracleFixture();
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "0");
+    vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", "0");
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
       access_token: "oracle-access", token_type: "Bearer", expires_in: 570, scope: SCOPES.join(" "),
     }));
@@ -291,11 +305,16 @@ describe("Oracle grants", () => {
     ["an Epic row with an Oracle profile", {}, "epic-fhir"],
     ["another tenant's token URL", { tokenEndpoint: TOKEN.replace("0aB1cD2e-synthetic", "another-tenant") }, "cerner-fhir"],
     ["a raw client ID in the payload", { clientId: "synthetic-oracle-client" }, "cerner-fhir"],
+    ["a sandbox grant on a production entry", { profile: { ...PROFILE, environment: "sandbox" } }, "sandbox-credentials"],
     ["the kill switch", {}, "disabled"],
     ["the kill switch spelled true", {}, "disabled-true"],
   ])("releases the lease without egress for %s", async (_label, payload, sourceSystem) => {
     const f = oracleFixture(payload);
     if (sourceSystem === "epic-fhir") f.row.sourceSystem = "epic-fhir";
+    if (sourceSystem === "sandbox-credentials") {
+      vi.stubEnv("ORACLE_SANDBOX_SMART_CLIENT_ID", "synthetic-sandbox");
+      vi.stubEnv("ORACLE_SANDBOX_SMART_PRIVATE_KEY_PEM", signerPem);
+    }
     if (sourceSystem.startsWith("disabled")) vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", sourceSystem === "disabled" ? "1" : " true ");
     const fetchImpl = vi.fn<typeof fetch>();
     await expect(renew(f, fetchImpl)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", retryable: true });

@@ -1,8 +1,8 @@
 # Oracle Health patient access
 
-Status: active (O1 readers and O2 keys/config in review; O3 to O5 pending)
+Status: active (O1/O2 merged; O3 implemented for sandbox qualification; O4/O5 pending)
 Created: 2026-11-26
-Updated: 2026-11-26
+Updated: 2026-11-27
 
 ## Goal
 
@@ -20,9 +20,9 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
 
 | PR | Contents | Status |
 | --- | --- | --- |
-| O1 readers | Profile union, trust rule, SMART v1 pin, Oracle catalog and dispatch, refresh gate, search parser and negotiation, directory policy set, query gate, shared page bound | This PR |
-| O2 keys and config | Public JWKS, signer resolution, flags and allowlist (all off) | This PR |
-| O3 writer | Oracle start, hidden `oracle-sandbox` entry, `oracle:sandbox:offline` proof | Pending |
+| O1 readers | Profile union, trust rule, SMART v1 pin, Oracle catalog and dispatch, refresh gate, search parser and negotiation, directory policy set, query gate, shared page bound | Merged |
+| O2 keys and config | Public JWKS, signer resolution, flags and allowlist (all off) | Merged |
+| O3 writer | Oracle start, hidden `oracle-sandbox` entry, `oracle:sandbox:offline` proof | Draft |
 | O4 directory | Importer `--oracle-input`, Oracle entries and `sources`, weekly workflow step | Pending |
 | O5 copy and docs | Assistant wording, intake spec, `agent-docs/references/oracle-health-patient-access.md`, unbranded changelog | Pending |
 
@@ -57,7 +57,8 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
   | Patient (`patient-demographics`) | read | none |
   | Observation (`observations`) | `_count=200` | `_lastUpdated` ge/lt |
   | Condition, AllergyIntolerance, Procedure | none | `_lastUpdated` ge/lt |
-  | DiagnosticReport, DocumentReference, Encounter | `_count=100` | `_lastUpdated` ge/lt |
+  | DiagnosticReport, DocumentReference | `_count=100` | `_lastUpdated` ge/lt |
+  | Encounter (`encounters-{status}`, one query per status) | `_count=100`, `status` = `planned`, `in-progress`, `finished` or `cancelled` | `_lastUpdated` ge/lt |
   | MedicationRequest, ServiceRequest (`service-requests`) | `_count=100` | `_lastUpdated` ge/le |
   | ServiceRequest (`service-request-referrals`) | `category=http://snomed.info/sct\|386053000`, `_count=100` | `_lastUpdated` ge/le |
   | Immunization | none | whole-family (one lower bound only) |
@@ -131,19 +132,18 @@ straight to reauthorization today (plan §7 corrected; no renewal-on-401 path).
 
 ## O3 and O4 handoff
 
-- O3: call `oracleStartsEnabledFor(memberId)` and resolve the client with
-  `resolveOracleClientAuth`; write `ORACLE_STORED_CLIENT_REFERENCE` as the
-  session `clientId`, never `auth.clientId`; discover with `ORACLE_SMART_ENDPOINT_TRUST`,
-  `permissionVersion: "v1"`, `ORACLE_REQUESTED_BASE_SCOPES` and
-  `ORACLE_RESOURCE_TYPES`; always write the typed binding; gate processor
-  approvals at start; add the hidden sandbox entry and the offline proof.
-  Confirm in the secure sandbox whether `_lastUpdated` works for the patient
-  persona and the token `aud` form. **Merge gate for O3:** Oracle's Encounter
-  docs say `_count` and `status` must accompany `patient`, while the open
-  sandbox accepted the v1 query without `status`. The secure-sandbox check must
-  settle this, and the catalog entry must change if needed, before O3 merges.
-  Any catalog change before the first Oracle run is free; afterwards add a new
-  identity.
+- O3 requires the profile writer, starts flag and allowlist before discovery.
+  The sandbox uses its own client, matching published key, tenant and exact
+  loopback callback. Existing grants continue with writer flags off. The
+  clinical intake spec owns the proof command and registration steps.
+- Encounter `status`: Oracle's Encounter search docs and the secure patient
+  tenant's CapabilityStatement both require `status` with `patient`, and list
+  four values. A comma-separated list returned HTTP 500 on the open sandbox,
+  while each single value (with and without the `_lastUpdated` window)
+  returned a Bundle. The catalog therefore has one Encounter query per status.
+  **Merge gate for O3:** the `oracle:sandbox:offline` Encounter step must pass
+  on the secure sandbox; any catalog change before the first Oracle run is
+  free, afterwards add a new identity.
 - O4: emit `ORACLE_ACQUISITION_POLICY` in `policies`, entries with `oracle-` +
   20 hex of sha256 of the exact tenant, `integration`, no client key; add
   `sources`. The parser already accepts that shape.
@@ -156,9 +156,11 @@ straight to reauthorization today (plan §7 corrected; no renewal-on-401 path).
    sets both hosted secrets.
 3. O3 with starts on for the allowlisted test member only.
 
-Before any Oracle OAuth session or row exists, the floor is current main. After
-the first session, O1 is the floor; after the first row, also #5372. Keep the
-Oracle JWKS published and the signer configured while any Oracle grant exists.
+Before any Oracle OAuth session or row exists, the floor is current main.
+After the first production session, O1 is the floor; after the first sandbox
+session, O3 (older readers refuse sandbox profiles and ask to reconnect);
+after the first row, also #5372. Keep the Oracle JWKS published and the signer
+configured while any Oracle grant exists.
 
 ## Verification
 
