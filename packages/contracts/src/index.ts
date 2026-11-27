@@ -28,7 +28,6 @@ export * from "./telegram-rich-content-card.ts";
 export * from "./workout-session-card.ts";
 export * from "./memory.ts";
 export * from "./member-action.ts";
-export * from "./health-check-in.ts";
 export * from "./companion-meals.ts";
 export * from "./message-links.ts";
 export * from "./preferences.ts";
