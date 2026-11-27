@@ -468,3 +468,5 @@ export { archiveClosedAuditShards, listAuditShardPaths, listAuditShardSources, r
 export { runMealPhotoMaintenance, type MealPhotoMaintenanceInput, type MealPhotoMaintenanceResult } from "./domains/events/meal-photo-maintenance.ts";
 export { findMealHoldingUpload, linkUploadToMealWithSamePhoto, type LinkUploadToMealWithSamePhotoInput } from "./domains/events/meal-photo-already-logged.ts";
 export { materializeIntegrationIngestHistory, withIntegrationIngestMaterializer } from "./integration-ingest-cold-storage.ts";
+
+export { saveMemberCheckIn } from "./assessment/member-check-in.ts";

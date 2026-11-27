@@ -401,6 +401,13 @@ controls payoff eligibility and publication for feed members. Apply the
 disabled. Wait for every older reader to drain before enabling payoffs. Keep
 the scoped readers on every rollback once any payoff has been posted.
 
+Private You check-ins require both the feed and `MURPH_HEALTH_YOU_MEMBER_IDS`.
+The allowlists accept member IDs or `*`. Blood pressure, food week, Combine and
+one-off answers submit one replayable member action per check-in. Acceptance
+precedes publication. A stopped Combine session returns 409 before submission.
+Deploy generation 21 replica builders and runtime consumers with the flag off,
+then Web, the companion client and finally the allowlist.
+
 The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires

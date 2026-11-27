@@ -6763,6 +6763,13 @@ Web owns suggestions, posts, comments, cheers, hides and photo attachments under
 routes. Disabled routes return 404. Reading private suggestions also requires
 Browser Vault authority.
 
+Private You check-ins use the member-action mailbox. Paired pressures share
+one measurement event. Each Combine submission commits one assessment and
+its numeric measurements in a single vault batch. Food recall and one-off
+answers use the same versioned assessment path. The core replica carries the
+allowed assessment responses and dated main-sleep windows. Existing metric
+buckets carry the measurements. Check-ins create no hosted control table.
+
 ### Audience and disclosure
 
 A post is visible to its author and current game partners. Health and Progress

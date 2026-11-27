@@ -1,3 +1,4 @@
+import { assessmentCheckInSchema, bloodPressureActionSchema } from "./health-check-in.ts";
 import * as z from "./zod-runtime.ts";
 import { companionMealIdSchema } from "./companion-meals.ts";
 import { memoryDisplayNameSchema, memoryDemographicsPatchSchema } from "./memory.ts";
@@ -519,6 +520,8 @@ export const measurementAddMemberActionV1Schema = measurementFieldsSchema.safeEx
 
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   measurementAddMemberActionV1Schema,
+  assessmentCheckInSchema,
+  bloodPressureActionSchema,
   demographicsSetMemberActionV1Schema,
   displayNameSetMemberActionV1Schema,
   // Decode queued/restored legacy requests only; the runner consumes this as a
@@ -561,6 +564,7 @@ export type MemberActionRequestV1 = z.infer<
 
 export const memberActionRejectionReasonV1Schema = z.enum([
   "demographics_unresolved",
+  "check_in_changed",
   "meal_not_found",
   "meal_changed",
   "multiple_active_workouts",

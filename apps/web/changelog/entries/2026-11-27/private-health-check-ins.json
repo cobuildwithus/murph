@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 100,
+  "item": {
+    "id": "private-health-check-ins",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Add a private health check-in",
+    "summary": "During the You rollout, you can record a blood pressure reading, review a week of food, or log at-home fitness tests.",
+    "details": "The Combine shows your results as soon as you finish. Accepted check-ins can take a little longer to appear in your private health view.",
+    "relevanceTags": ["health"],
+    "sourcePullRequests": []
+  }
+}

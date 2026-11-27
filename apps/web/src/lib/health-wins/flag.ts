@@ -58,3 +58,11 @@ export function assertHealthRecordEnabled(memberId: string, capability: "timed" 
 export function assertHealthFeedEnabled(memberId: string): void {
   if (!isHealthFeedEnabled(memberId)) throw gameNotFound();
 }
+
+export function isHealthYouEnabled(memberId: string, env: FlagEnv = process.env): boolean {
+  return isHealthFeedEnabled(memberId, env) && lists(env.MURPH_HEALTH_YOU_MEMBER_IDS, memberId);
+}
+
+export function assertHealthYouEnabled(memberId: string): void {
+  if (!isHealthYouEnabled(memberId)) throw gameNotFound();
+}

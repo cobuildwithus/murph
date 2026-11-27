@@ -140,9 +140,27 @@ export async function importAssessmentResponse({
         : undefined,
   });
 
+  const { ledgerPath, auditPath, manifestPath } = await stageAssessmentResponse(batch, assessment, stagedRaw);
+  await batch.commit();
+
+  return {
+    assessment,
+    raw,
+    ledgerPath,
+    auditPath,
+    manifestPath,
+  };
+}
+
+/** Stage the raw-source manifest, canonical answer and audit in the caller's batch. */
+export async function stageAssessmentResponse(
+  batch: WriteBatch,
+  assessment: AssessmentResponseRecord,
+  stagedRaw: Awaited<ReturnType<WriteBatch["stageRawCopy"]>>,
+) {
   const ledgerPath = toMonthlyShardRelativePath(
     ASSESSMENT_LEDGER_DIRECTORY,
-    recordedTimestamp,
+    assessment.recordedAt,
     "recordedAt",
   );
 
@@ -155,7 +173,7 @@ export async function importAssessmentResponse({
       kind: "assessment",
       id: assessment.id,
     },
-    source: assessment.source ?? source ?? null,
+    source: assessment.source,
     artifacts: [
       {
         role: "source_assessment",
@@ -177,11 +195,11 @@ export async function importAssessmentResponse({
     action: "intake_import",
     commandName: "core.importAssessmentResponse",
     summary: `Imported assessment ${assessment.id}.`,
-    occurredAt: recordedTimestamp,
+    occurredAt: assessment.recordedAt,
     targetIds: [assessment.id],
     changes: [
       {
-        path: raw.relativePath,
+        path: assessment.rawPath,
         op: "copy",
       },
       {
@@ -196,15 +214,7 @@ export async function importAssessmentResponse({
   });
   const auditPath = resolveAuditShardPath(audit.occurredAt);
   await batch.stageJsonlAppend(auditPath, `${JSON.stringify(audit)}\n`);
-  await batch.commit();
-
-  return {
-    assessment,
-    raw,
-    ledgerPath,
-    auditPath,
-    manifestPath,
-  };
+  return { ledgerPath, auditPath, manifestPath };
 }
 
 export async function listAssessmentResponses({
