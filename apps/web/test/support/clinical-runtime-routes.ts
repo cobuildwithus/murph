@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { addHostedExecutionRuntimeAuthority, encodeHostedExecutionSignedRequestPayload } from "@murphai/hosted-execution/auth";
-import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsReadRunResponse } from "@murphai/hosted-execution/clinical-records";
+import { parseHostedClinicalRecordsFetchDocumentResponse, parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsReadRunResponse } from "@murphai/hosted-execution/clinical-records";
 import {
   HOSTED_EXECUTION_NONCE_HEADER, HOSTED_EXECUTION_SIGNATURE_HEADER, HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER, HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
-import { expect, vi } from "vitest";
+import { POST as fetchDocument } from "../../app/api/internal/clinical-records/runtime/fetch-document/route";
 import { POST as readRun } from "../../app/api/internal/clinical-records/runtime/read-run/route";
 import { POST as fetchPage } from "../../app/api/internal/clinical-records/runtime/fetch-page/route";
 import { POST as recordOutcome } from "../../app/api/internal/clinical-records/runtime/record-outcome/route";
@@ -13,12 +14,12 @@ import type { ClinicalCheckpointInput } from "@murphai/assistant-runtime/clinica
 
 export async function createClinicalRuntimeRoutePort(userId: string, authority: {
   attemptId: string; generation: string; workspaceVersion: string;
-}): Promise<ClinicalCheckpointInput["port"]> {
+}, setEnv: (key: string, value: string) => void): Promise<ClinicalCheckpointInput["port"]> {
   const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-  vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_KEY_ID", "fixture");
-  vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK", JSON.stringify(await crypto.subtle.exportKey("jwk", keys.publicKey)));
-  vi.stubEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON", "{}");
-  const routes = { "read-run": readRun, "fetch-page": fetchPage, "record-outcome": recordOutcome };
+  setEnv("HOSTED_WEB_CALLBACK_SIGNING_KEY_ID", "fixture");
+  setEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK", JSON.stringify(await crypto.subtle.exportKey("jwk", keys.publicKey)));
+  setEnv("HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON", "{}");
+  const routes = { "read-run": readRun, "fetch-page": fetchPage, "fetch-document": fetchDocument, "record-outcome": recordOutcome };
   async function post(route: keyof typeof routes, body: unknown): Promise<unknown> {
     const url = new URL(`/api/internal/clinical-records/runtime/${route}`, "https://app.example.test");
     addHostedExecutionRuntimeAuthority(url, authority);
@@ -38,12 +39,18 @@ export async function createClinicalRuntimeRoutePort(userId: string, authority: 
       [HOSTED_EXECUTION_TIMESTAMP_HEADER]: timestamp,
       [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
     } }));
-    expect(response.status, route).toBe(200);
+    // Plain errors, not Vitest assertions, because the Epic sandbox proof also drives these routes outside Vitest.
+    if (response.status !== 200) throw new Error(`Clinical runtime ${route} returned HTTP ${response.status}.`);
     return response.json();
   }
   return {
     readRun: async body => parseHostedClinicalRecordsReadRunResponse(await post("read-run", body)),
     fetchPage: async body => parseHostedClinicalRecordsFetchPageResponse(await post("fetch-page", body)),
-    recordOutcome: async body => { expect(await post("record-outcome", body)).toEqual({ ok: true }); },
+    fetchDocument: async body => parseHostedClinicalRecordsFetchDocumentResponse(await post("fetch-document", body)),
+    recordOutcome: async body => {
+      if (!isDeepStrictEqual(await post("record-outcome", body), { ok: true })) {
+        throw new Error("Clinical runtime record-outcome returned an unexpected body.");
+      }
+    },
   };
 }

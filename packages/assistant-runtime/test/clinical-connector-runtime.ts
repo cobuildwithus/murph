@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import type { HostedExecutionClinicalRecordsSyncRequestedWake } from "@murphai/hosted-execution";
 import type { HostedMailboxItem } from "@murphai/hosted-execution/runtime-control";
 import type {
+  HostedClinicalRecordsFetchDocumentRequest, HostedClinicalRecordsFetchDocumentResponse,
   HostedClinicalChangeProof, HostedClinicalRecordsFetchPageRequest, HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsReadRunRequest, HostedClinicalRecordsReadRunResponse, HostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records";
@@ -13,6 +14,7 @@ export type ClinicalCheckpointInput = {
   workspaceRoot: string;
   port: {
     readRun(request: HostedClinicalRecordsReadRunRequest): Promise<HostedClinicalRecordsReadRunResponse>;
+    fetchDocument(request: HostedClinicalRecordsFetchDocumentRequest): Promise<HostedClinicalRecordsFetchDocumentResponse>;
     fetchPage(request: HostedClinicalRecordsFetchPageRequest): Promise<HostedClinicalRecordsFetchPageResponse>;
     recordOutcome(request: HostedClinicalRecordsRecordOutcomeRequest | HostedClinicalChangeProof): Promise<void>;
   };

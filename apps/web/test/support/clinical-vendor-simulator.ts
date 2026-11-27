@@ -153,6 +153,7 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
     return fault ? fault(response, url) : response;
   };
   return { fetchImpl, requests, returnedIds,
+    setRead(resource: Resource) { reads.set(resource.resourceType + "/" + resource.id, resource); },
     setSearchResults(family: string, category: string | null, rows: DatedResource[]) {
       searches.set(searchKey(family, category), rows);
     },
