@@ -6,10 +6,14 @@ import type {
 } from "./client-contracts";
 import {
   EPIC_ACQUISITION_POLICY,
-  EPIC_ACQUISITION_POLICY_ID,
   EPIC_BETA_REQUESTED_BASE_SCOPES,
   EPIC_BETA_RESOURCE_TYPES,
 } from "./epic-policy";
+import {
+  ORACLE_ACQUISITION_POLICY,
+  ORACLE_INTEGRATION_ID,
+  ORACLE_RESOURCE_TYPES,
+} from "./oracle-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA =
   "murph.clinical-provider-directory.v2" as const;
@@ -19,8 +23,10 @@ const MAX_DIRECTORY_LOCATIONS_PER_ENTRY = 10_000;
 const MAX_DIRECTORY_LOCATIONS_TOTAL = 250_000;
 const MAX_PROVIDER_RESULTS = 20;
 const MAX_SEARCH_TEXT_LENGTH = 120;
+// Server-owned policies an artifact may carry. An artifact lists only the ones it uses.
+const OWNED_DIRECTORY_POLICIES = [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY] as const;
 
-export type ClinicalProviderSourceSystem = "epic-fhir";
+export type ClinicalProviderSourceSystem = (typeof OWNED_DIRECTORY_POLICIES)[number]["sourceSystem"];
 export type ClinicalProviderClientIdEnvironmentKey =
   | "EPIC_SMART_CLIENT_ID"
   | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
@@ -30,18 +36,28 @@ export interface ClinicalProviderFacility extends ClinicalMatchedFacility {
   upstreamId?: string;
 }
 
-export interface ClinicalProviderDirectoryEntry {
+interface ClinicalProviderDirectoryEntryBase {
   aliases: readonly string[];
   brandName: string;
-  clientIdEnvironmentKey: ClinicalProviderClientIdEnvironmentKey;
   facilities: readonly ClinicalProviderFacility[];
   fhirBaseUrl: string;
   id: string;
   policyId: string;
   requestedBaseScopes: readonly string[];
   resourceTypes: readonly string[];
-  sourceSystem: ClinicalProviderSourceSystem;
 }
+
+export interface EpicProviderDirectoryEntry extends ClinicalProviderDirectoryEntryBase {
+  clientIdEnvironmentKey: ClinicalProviderClientIdEnvironmentKey;
+  sourceSystem: "epic-fhir";
+}
+
+export interface OracleProviderDirectoryEntry extends ClinicalProviderDirectoryEntryBase {
+  integration: typeof ORACLE_INTEGRATION_ID;
+  sourceSystem: "cerner-fhir";
+}
+
+export type ClinicalProviderDirectoryEntry = EpicProviderDirectoryEntry | OracleProviderDirectoryEntry;
 
 export interface ClinicalProviderDirectory {
   entries: readonly ClinicalProviderDirectoryEntry[];
@@ -72,6 +88,8 @@ export function searchClinicalProviderDirectorySnapshot(
     accessRank?: (entry: ClinicalProviderDirectoryEntry) => number;
     city?: string | null;
     query?: string | null;
+    /** Vendors this reader accepts. Filtering precedes ranking, grouping and the result cap. */
+    sourceSystems?: readonly ClinicalProviderSourceSystem[];
     state?: string | null;
   },
 ): {
@@ -81,7 +99,9 @@ export function searchClinicalProviderDirectorySnapshot(
   const query = normalizeSearchText(input.query);
   const city = normalizeSearchText(input.city);
   const state = normalizeSearchText(input.state);
-  const scored = directory.entries
+  const sourceSystems = new Set(input.sourceSystems ?? ["epic-fhir"]);
+  const entries = directory.entries.filter((entry) => sourceSystems.has(entry.sourceSystem));
+  const scored = entries
     .map((entry) => ({ entry, score: scoreDirectoryEntry({ city, entry, query, state }) }))
     .sort((left, right) => right.score - left.score || left.entry.brandName.localeCompare(right.entry.brandName));
   const results: ClinicalProviderSearchResult[] = [];
@@ -103,7 +123,7 @@ export function searchClinicalProviderDirectorySnapshot(
   }
   if (input.grouped) {
     if (input.accessRank) selectPortalBrands(scored, byBase, input.accessRank);
-    addSharedPlaces(directory.entries, byBase);
+    addSharedPlaces(entries, byBase);
   }
   return { directoryVersion: directory.version, providers: results };
 }
@@ -178,12 +198,12 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
   if (record.schema !== CLINICAL_PROVIDER_DIRECTORY_SCHEMA) {
     throw new TypeError("Clinical provider directory schema is unsupported.");
   }
-  assertExactOwnedDirectoryPolicy(record.policies);
+  const policies = parseOwnedDirectoryPolicies(record.policies);
   const rawEntries = requireArray(record.entries, "Clinical provider directory entries");
   if (rawEntries.length === 0 || rawEntries.length > MAX_DIRECTORY_ENTRIES) {
     throw new RangeError("Clinical provider directory entry count is out of bounds.");
   }
-  const entries = rawEntries.map(parseDirectoryEntry);
+  const entries = rawEntries.map((entry, index) => parseDirectoryEntry(entry, index, policies));
   const locationCount = entries.reduce((sum, entry) => sum + entry.facilities.length, 0);
   if (locationCount > MAX_DIRECTORY_LOCATIONS_TOTAL) {
     throw new RangeError("Clinical provider directory location count is out of bounds.");
@@ -206,19 +226,25 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
   };
 }
 
-function assertExactOwnedDirectoryPolicy(value: unknown): void {
+/** Each listed policy must equal a server-owned definition; unlisted owned policies are simply unused. */
+function parseOwnedDirectoryPolicies(value: unknown): ReadonlySet<string> {
   const rawPolicies = requireArray(value, "Clinical provider directory policies");
-  if (rawPolicies.length !== 1) {
-    throw new RangeError("Clinical provider directory must contain exactly one owned policy.");
+  if (rawPolicies.length === 0 || rawPolicies.length > OWNED_DIRECTORY_POLICIES.length) {
+    throw new RangeError("Clinical provider directory policy count is out of bounds.");
   }
-  if (JSON.stringify(rawPolicies[0]) !== JSON.stringify(EPIC_ACQUISITION_POLICY)) {
-    throw new TypeError("Clinical provider directory policy must exactly match the owned Epic policy.");
-  }
+  const ids = rawPolicies.map((policy) => {
+    const owned = OWNED_DIRECTORY_POLICIES.find((candidate) => JSON.stringify(policy) === JSON.stringify(candidate));
+    if (!owned) throw new TypeError("Clinical provider directory policy must exactly match an owned policy.");
+    return owned.id;
+  });
+  if (new Set(ids).size !== ids.length) throw new TypeError("Clinical provider directory policies contain duplicates.");
+  return new Set(ids);
 }
 
 function parseDirectoryEntry(
   value: unknown,
   index: number,
+  policies: ReadonlySet<string>,
 ): ClinicalProviderDirectoryEntry {
   const record = requireRecord(value, `Clinical provider directory entry ${index}`);
   const fhirBaseUrl = requireCanonicalPublicHttpsUrl(
@@ -233,31 +259,42 @@ function parseDirectoryEntry(
     throw new RangeError(`Clinical provider directory entry ${index} has too many locations.`);
   }
 
-  if (
-    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
-    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
-  ) {
-    throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
-  }
-
   const policyId = requireIdentifier(
     record.policyId,
     `Clinical provider directory entry ${index} policy id`,
   );
-  if (policyId !== EPIC_ACQUISITION_POLICY_ID) {
+  if (!policies.has(policyId)) {
     throw new TypeError(`Clinical provider directory entry ${index} references an unknown policy.`);
   }
 
-  return {
+  const shared = {
     aliases: parseUniqueStrings(record.aliases, `Clinical provider directory entry ${index} aliases`, 20, 120),
     brandName: requireBoundedString(record.brandName, `Clinical provider directory entry ${index} brand`, 160),
-    clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     facilities: locations.map((location, locationIndex) =>
       parseLocationTuple(location, index, locationIndex)
     ),
     fhirBaseUrl,
     id: requireIdentifier(record.id, `Clinical provider directory entry ${index} id`),
     policyId,
+  };
+  if (policyId === ORACLE_ACQUISITION_POLICY.id) {
+    // Oracle registration is server-owned; an entry cannot name a client.
+    if (record.integration !== ORACLE_INTEGRATION_ID || record.clientIdEnvironmentKey !== undefined
+      || !shared.id.startsWith("oracle-")) {
+      throw new TypeError(`Clinical provider directory entry ${index} integration is unsupported.`);
+    }
+    return { ...shared, integration: ORACLE_INTEGRATION_ID, requestedBaseScopes: ORACLE_ACQUISITION_POLICY.requestedBaseScopes,
+      resourceTypes: ORACLE_RESOURCE_TYPES, sourceSystem: ORACLE_ACQUISITION_POLICY.sourceSystem };
+  }
+  if (
+    record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
+    && record.clientIdEnvironmentKey !== "EPIC_SMART_NON_PRODUCTION_CLIENT_ID"
+  ) {
+    throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
+  }
+  return {
+    ...shared,
+    clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     requestedBaseScopes: EPIC_BETA_REQUESTED_BASE_SCOPES,
     resourceTypes: EPIC_BETA_RESOURCE_TYPES,
     sourceSystem: EPIC_ACQUISITION_POLICY.sourceSystem,

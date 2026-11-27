@@ -59,7 +59,7 @@ describe("Clinical Records provider search route", () => {
     expect(await (await POST(request)).json()).toEqual({ providers: [{ id: "epic-example", name: query, place: "Sample City, ZZ" }] });
     expect(mocks.bearer).toHaveBeenCalledWith(request);
     expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
-    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledExactlyOnceWith({ query }, "member_clinical_1");
+    expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledExactlyOnceWith({ query }, "member_clinical_1", ["epic-fhir", "cerner-fhir"]);
     const urlOnly = new Request(request.url, { method: "POST", body: "{}" });
     expect((await POST(urlOnly)).status).toBe(400);
     expect(mocks.searchClinicalProviderDirectory).toHaveBeenCalledOnce();
@@ -95,7 +95,7 @@ describe("Clinical Records provider search route", () => {
       city: "Atlanta",
       query: "Piedmont",
       state: "GA",
-    }, undefined);
+    }, undefined, ["epic-fhir"]);
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(request);
   });
 

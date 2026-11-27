@@ -44,6 +44,18 @@ describe("Clinical Records client contracts", () => {
     }).connections[0]?.latestRun?.status).toBe("queued");
   });
 
+  it("reads Oracle search rows and still rejects unknown vendors", () => {
+    const response = (sourceSystem: string) => ({ directoryVersion: "sample", ok: true, providers: [
+      { brandName: "Example Health", facilities: [], id: "epic-example", sourceSystem: "epic-fhir" },
+      { brandName: "Synthetic Valley Hospital", facilities: [], id: "oracle-0123456789abcdef0123", sourceSystem },
+    ] });
+    expect(parseClinicalProviderSearchResponse(response("cerner-fhir")).providers.map((row) => row.sourceSystem))
+      .toEqual(["epic-fhir", "cerner-fhir"]);
+    for (const sourceSystem of ["athena-fhir", "generic-smart-fhir", "Cerner-FHIR"]) {
+      expect(() => parseClinicalProviderSearchResponse(response(sourceSystem))).toThrow(/client contract/u);
+    }
+  });
+
   it("parses intent and callback markers", () => {
     expect(parseClinicalRecordConnectIntentResponse({
       claim: `cr_${"a".repeat(32)}`,

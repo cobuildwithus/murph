@@ -38,6 +38,19 @@ export type ClinicalRecordCallbackMarker =
 export const CLINICAL_RECORD_CONNECT_START_PATH =
   "/api/clinical-records/connect-intents/start";
 
+/**
+ * Search capability negotiation. Version 2 selects the grouped projection; the
+ * sources header names every vendor this reader parses. Without it the server
+ * returns Epic rows only, so an already-loaded older browser keeps working.
+ */
+export const CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS = ["epic-fhir", "cerner-fhir"] as const;
+export type ClinicalProviderSearchSourceSystem = (typeof CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS)[number];
+export const CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER = "X-Clinical-Directory-Sources";
+export const CLINICAL_PROVIDER_SEARCH_HEADERS = {
+  "X-Clinical-Directory-Version": "2",
+  [CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER]: CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS.join(","),
+} as const;
+
 export interface ClinicalProviderFacilityContract {
   city: string | null;
   name: string | null;
@@ -56,7 +69,7 @@ export interface ClinicalProviderSearchResultContract {
   brandName: string;
   facilities: readonly ClinicalProviderFacilityContract[];
   id: string;
-  sourceSystem: "epic-fhir";
+  sourceSystem: ClinicalProviderSearchSourceSystem;
 }
 
 export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResultContract): string[] {
@@ -137,7 +150,8 @@ export function parseClinicalProviderSearchResponse(
     providers: requireArray(record.providers, 20).map((provider) => {
       const item = requireExactRecord(provider, ["brandName", "facilities", "id", "sourceSystem"],
         ["matchedFacility", "sharedPlaces", "possiblyIncludedThrough"]);
-      if (item.sourceSystem !== "epic-fhir") throw invalidContract();
+      if (!isStringMember(item.sourceSystem, CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS)) throw invalidContract();
+      const sourceSystem = item.sourceSystem;
       return {
         ...(item.matchedFacility === undefined ? {} : { matchedFacility: item.matchedFacility === null
           ? null : parseMatchedFacility(item.matchedFacility) }),
@@ -146,7 +160,7 @@ export function parseClinicalProviderSearchResponse(
         brandName: requireString(item.brandName, 160),
         facilities: requireArray(item.facilities, 8).map(parseFacility),
         id: requireIdentifier(item.id),
-        sourceSystem: "epic-fhir",
+        sourceSystem,
       };
     }),
   };

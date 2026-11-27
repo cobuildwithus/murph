@@ -278,7 +278,13 @@ upstream organization identity, local aliases and street lines. The reader
 also accepts the original four fields. The companion projects the place into
 its existing display string. Browsers request grouped results with the
 `X-Clinical-Directory-Version: 2` header. Older requests keep the original
-exact provider and facility shapes.
+exact provider and facility shapes. A reader that parses more than Epic rows
+also sends `X-Clinical-Directory-Sources` with the source systems it accepts;
+without it the server returns Epic rows only, so an already-loaded browser keeps
+working. Vendor filtering happens before ranking, grouping and the 20-result cap.
+The parser checks each listed policy against a server-owned definition (Epic,
+and the default-off Oracle Health profile); an artifact lists only the policies
+its entries use.
 
 Each grouped result keeps its best matching facility. Its selectable brand on
 the same canonical FHIR base prefers a usable hospital-approved registration,
@@ -415,7 +421,8 @@ and logical-page identity; URL parsing is used only for network policy and
 fetching, and randomized cursor ciphertext never defines page identity. Cursors
 remain valid only while their member-bound run and generation remain active.
 
-Limits are 5 MiB per FHIR page, 20 MiB per decoded document, 2,000 document
+Limits are 5 MiB and 1,000 Bundle entries per FHIR page (the shared raw-manifest
+bound), 20 MiB per decoded document, 2,000 document
 descriptors and 64 MiB of document bytes while a page is being processed. Each
 page and document request is streamed and claimed independently; the old
 500-request and 32 MiB cumulative run cutoffs are removed. A final database
@@ -906,7 +913,9 @@ client id fails closed before redirect.
 - TEFCA/QHIN participation, CLEAR-style identity proofing, record-locator
   services, and automatic nationwide provider discovery.
 - Email scanning for portal/provider inference.
-- Cerner/Oracle and provider-specific adapters beyond Epic SMART.
+- Provider-specific adapters beyond Epic SMART. Oracle Health readers, keys and
+  flags exist but stay off; starts, directory entries and member copy are
+  pending.
 - Provider-directory network refresh jobs and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

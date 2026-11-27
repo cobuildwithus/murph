@@ -6,21 +6,32 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { initializeVault } from "@murphai/core";
 import { importClinicalFhirSnapshot, type ClinicalFhirSnapshotPage } from "@murphai/vault-usecases/clinical-records";
-import { parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
+import {
+  parseHostedClinicalRecordsFetchDocumentResponse,
+  parseHostedClinicalRecordsFetchPageRequest,
+  parseHostedClinicalRecordsFetchPageResponse,
+  parseHostedClinicalRecordsReadRunResponse,
+  parseHostedClinicalRecordsRecordOutcomeRequest,
+} from "@murphai/hosted-execution/clinical-records";
 import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
+  clinicalFhirRetrievalSliceSchema,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
+  type ClinicalFhirRetrievalSlice,
 } from "@murphai/clinical-records";
+import baseline from "./fixtures/clinical-records-query-baseline.json";
 import type { HostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
 
 import {
   buildEpicBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
 } from "@/src/lib/clinical-records/epic-policy";
+import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
@@ -1666,6 +1677,198 @@ describe("Clinical Records retrieval control plane", () => {
       },
     })).rejects.toMatchObject({ code: "CLINICAL_RECORD_RUN_STALE" });
     expect(preempted.state.run.status).toBe("canceled");
+  });
+});
+
+describe("Oracle runs at the Web retrieval boundary", () => {
+  const ORACLE_BASE = "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic";
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readClinicalTransportAccess.mockResolvedValue(true);
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  function oracleHarness(resourceTypes: string[]) {
+    const harness = createHarness(["Patient"]);
+    Object.assign(harness.state.run.connection, { sourceSystem: "cerner-fhir", providerDirectoryEntryId: "oracle-0123456789abcdef0123",
+      fhirBaseHash: sha256Hex(ORACLE_BASE), requestedScopesJson: resourceTypes.map((type) => `patient/${type}.read`) });
+    harness.state.run.retrievalPlanJson = buildOracleRetrievalPlan({ resourceTypes });
+    harness.state.run.grantedScopesJson = [...resourceTypes.map((type) => `patient/${type}.read`), "patient/Binary.read"];
+    mocks.openClinicalConnectionFhirBaseUrl.mockResolvedValue(ORACLE_BASE);
+    return harness;
+  }
+  function slice(harness: ReturnType<typeof createHarness>, queryScopeId: string): ClinicalFhirRetrievalSlice {
+    return clinicalFhirRetrievalSliceSchema.parse(
+      (harness.state.run.retrievalPlanJson as { slices: ClinicalFhirRetrievalSlice[] }).slices.find((entry) => entry.queryScopeId === queryScopeId));
+  }
+  function request(retrievalSlice: ClinicalFhirRetrievalSlice, requestId: string, cursor: string | null = null) {
+    return { cursor, generation: 1, requestId, resourceType: retrievalSlice.resourceType, runId: RUN_ID,
+      retrievalProtocol: "query-slices-v2" as const, queryScopeId: retrievalSlice.queryScopeId,
+      queryFingerprint: retrievalSlice.queryFingerprint, sliceId: retrievalSlice.sliceId };
+  }
+  const resource = (resourceType: string, id: string, extra: Record<string, unknown> = {}) => ({
+    resourceType, id, status: resourceType === "ServiceRequest" ? "active" : "completed",
+    meta: { lastUpdated: "2026-11-01T12:00:00.000Z" }, subject: { reference: "Patient/patient-1" }, ...extra,
+  });
+
+  it("keeps every frozen Epic request byte-identical through the vendor dispatch", async () => {
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    for (const row of baseline) {
+      const harness = createHarness(["Patient"]);
+      const frozen = clinicalFhirRetrievalSliceSchema.parse(row.slice);
+      harness.state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [frozen] };
+      const fetchImpl = vi.fn(async () => fhirResponse(frozen.resourceType === "Patient"
+        ? { resourceType: "Patient", id: "patient-1" } : { resourceType: "Bundle", entry: [] }));
+      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(frozen, `epic-${frozen.queryScopeId}`) }))
+        .resolves.toMatchObject({ status: "page" });
+      expect(String((fetchImpl.mock.calls[0] as unknown[])[0])).toBe(row.url);
+    }
+  });
+
+  it("builds Oracle requests from its own catalog and refuses another vendor's frozen identity before egress", async () => {
+    const harness = oracleHarness(["Patient", "Observation", "ServiceRequest", "AllergyIntolerance"]);
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => fhirResponse(String(url).includes("/Patient/")
+      ? { resourceType: "Patient", id: "patient-1" } : { resourceType: "Bundle", entry: [] }));
+    for (const queryScopeId of ["patient-demographics", "observations", "service-request-referrals"]) {
+      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(slice(harness, queryScopeId), queryScopeId) }))
+        .resolves.toMatchObject({ status: "page" });
+    }
+    expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+      `${ORACLE_BASE}/Patient/patient-1`,
+      `${ORACLE_BASE}/Observation?patient=patient-1&_count=200`,
+      `${ORACLE_BASE}/ServiceRequest?patient=patient-1&category=http%3A%2F%2Fsnomed.info%2Fsct%7C386053000&_count=100`,
+    ]);
+    // Both catalogs use the id "allergies"; only the fingerprint inside the run's own catalog resolves.
+    const epicAllergies = buildEpicBetaRetrievalPlan({ frozenAt: new Date("2026-11-26T12:00:00Z"), pageCount: "100",
+      resourceTypes: ["AllergyIntolerance"] }).slices[0]!;
+    const oracleAllergies = slice(harness, "allergies");
+    harness.state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [epicAllergies] };
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(epicAllergies, "cross-epic") }))
+      .resolves.toEqual({ status: "unavailable", errorCode: "page-cursor-invalid", retryable: false });
+    const epic = createHarness(["Patient"]);
+    epic.state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [oracleAllergies] };
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(oracleAllergies, "cross-oracle") }))
+      .resolves.toEqual({ status: "unavailable", errorCode: "page-cursor-invalid", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("follows Oracle -pageContext links only on the same origin and family path", async () => {
+    const next = `${ORACLE_BASE}/ServiceRequest?patient=patient-1&_count=100&-pageContext=c3ludGhldGlj&-pageDirection=NEXT`;
+    for (const [link, expected] of [
+      [next, "page"],
+      [next.replace("https://fhir-myrecord.cerner.com", "https://authorization.cerner.com"), "provider-response-invalid"],
+      [next.replace("/ServiceRequest?", "/Patient?"), "provider-response-invalid"],
+      [next.replace("0aB1cD2e-synthetic", "another-tenant"), "provider-response-invalid"],
+    ] as const) {
+      const harness = oracleHarness(["Patient", "ServiceRequest"]);
+      const general = slice(harness, "service-requests");
+      const fetchImpl = vi.fn(async () => fhirResponse({ resourceType: "Bundle", entry: [], link: [{ relation: "next", url: link }] }));
+      const first = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(general, "first") });
+      if (expected !== "page") {
+        expect(first).toEqual({ status: "unavailable", errorCode: expected, retryable: false });
+        continue;
+      }
+      if (first.status !== "page" || !first.nextCursor) throw new Error("Expected an Oracle continuation cursor.");
+      await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(general, "second", first.nextCursor) });
+      expect(String((fetchImpl.mock.calls[1] as unknown[])[0])).toBe(next);
+    }
+  });
+
+  it.each([500, 587, CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE, CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE + 1])(
+    "admits an unpaged %i-entry Procedure page only within the shared resource bound", async (entries) => {
+      const harness = oracleHarness(["Patient", "Procedure"]);
+      const body = { resourceType: "Bundle", type: "searchset",
+        entry: Array.from({ length: entries }, (_, index) => ({ resource: resource("Procedure", `procedure-${index}`) })) };
+      const result = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl: vi.fn(async () => fhirResponse(body)),
+        request: request(slice(harness, "procedures"), `procedures-${entries}`) });
+      if (entries > CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE) {
+        expect(result).toEqual({ status: "unavailable", errorCode: "provider-response-invalid", retryable: false });
+      } else {
+        const page = parseHostedClinicalRecordsFetchPageResponse(JSON.parse(JSON.stringify(result)));
+        if (page.status !== "page") throw new Error("Expected an admitted page.");
+        expect(JSON.parse(page.body).entry).toHaveLength(entries);
+      }
+    });
+
+  it("stops page and document egress, including issued tickets, with the kill switch", async () => {
+    const harness = oracleHarness(["Patient", "DocumentReference"]);
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => String(url).includes("/Binary/")
+      ? fhirResponse({ resourceType: "Binary", id: "document-1", contentType: "text/plain", data: Buffer.from("Synthetic note").toString("base64") })
+      : fhirResponse({ resourceType: "Bundle", entry: [{ resource: resource("DocumentReference", "note-1", { status: "current",
+          content: [{ attachment: { url: `${ORACLE_BASE}/Binary/document-1`, contentType: "text/plain", size: 14 } }] }) }] }));
+    const documents = slice(harness, "document-references");
+    const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(documents, "documents") });
+    const issued = page.status === "page" ? page.documents?.[0]?.ticket : null;
+    if (!issued) throw new Error("Expected a document ticket.");
+    const ticket = { runId: RUN_ID, generation: 1, ticket: issued };
+    expect(parseHostedClinicalRecordsFetchDocumentResponse(await fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl, request: ticket })))
+      .toMatchObject({ status: "document", mediaType: "text/plain" });
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    const calls = fetchImpl.mock.calls.length;
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl, request: ticket }))
+      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: false });
+    await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(documents, "documents-again") }))
+      .resolves.toEqual({ status: "unavailable", errorCode: "integration-disabled", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(calls);
+  });
+
+  it("carries a cerner-fhir run through read-run, fetch-page, the vault importer and record-outcome", async () => {
+    const harness = oracleHarness(["Patient", "Procedure", "ServiceRequest"]);
+    const descriptor = parseHostedClinicalRecordsReadRunResponse(JSON.parse(JSON.stringify(
+      await readClinicalRetrievalRun({ memberId: MEMBER_ID, generation: 1, runId: RUN_ID }))));
+    if (descriptor.status !== "ready") throw new Error("Expected a runnable Oracle descriptor.");
+    expect(descriptor.run).toMatchObject({ sourceSystem: "cerner-fhir", providerDirectoryEntryId: "oracle-0123456789abcdef0123",
+      fhirBaseUrlHash: sha256Hex(ORACLE_BASE) });
+    const order = (id: string, extra: Record<string, unknown> = {}) => resource("ServiceRequest", id, {
+      intent: "order", code: { text: "Synthetic order" }, authoredOn: "2026-10-01T12:00:00.000Z", ...extra });
+    const next = `${ORACLE_BASE}/ServiceRequest?patient=patient-1&_count=100&-pageContext=c3ludGhldGlj`;
+    const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
+      const target = new URL(String(url));
+      if (target.pathname.includes("/Patient/")) return fhirResponse({ resourceType: "Patient", id: "patient-1" });
+      const bundle = (resources: unknown[], link?: string) => fhirResponse({ resourceType: "Bundle", type: "searchset",
+        entry: resources.map((entry) => ({ resource: entry })), ...(link ? { link: [{ relation: "next", url: link }] } : {}) });
+      if (target.pathname.endsWith("/Procedure")) {
+        return bundle(Array.from({ length: 587 }, (_, index) => resource("Procedure", `procedure-${index}`, {
+          code: { text: "Synthetic procedure" }, performedDateTime: "2026-10-01T12:00:00.000Z" })));
+      }
+      if (target.searchParams.has("category")) {
+        return bundle([order("referral-1", { code: { text: "Synthetic physical therapy referral" },
+          category: [{ coding: [{ system: "http://snomed.info/sct", code: "386053000" }] }] })]);
+      }
+      // Oracle can repeat an id on a later page; the same version must stay idempotent.
+      return target.searchParams.has("-pageContext") ? bundle([order("order-2"), order("order-3")]) : bundle([order("order-1"), order("order-2")], next);
+    });
+    const pages: ClinicalFhirSnapshotPage[] = [];
+    for (const retrievalSlice of descriptor.run.retrievalSlices) {
+      let cursor: string | null = null;
+      do {
+        const raw = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl,
+          request: parseHostedClinicalRecordsFetchPageRequest(request(retrievalSlice, `page-${pages.length}`, cursor)) });
+        const page = parseHostedClinicalRecordsFetchPageResponse(JSON.parse(JSON.stringify(raw)));
+        if (page.status !== "page") throw new Error(`Expected page: ${page.errorCode}`);
+        pages.push({ content: page.body, resourceType: retrievalSlice.resourceType, queryScopeId: retrievalSlice.queryScopeId,
+          sliceId: retrievalSlice.sliceId, ...(page.pageUrlHash ? { pageUrlHash: page.pageUrlHash } : {}) });
+        cursor = page.nextCursor;
+      } while (cursor);
+    }
+    expect(pages.map((page) => page.queryScopeId)).toEqual(["patient-demographics", "procedures", "service-requests",
+      "service-requests", "service-request-referrals"]);
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "clinical-web-oracle-"));
+    try {
+      await initializeVault({ vaultRoot, timezone: "UTC" });
+      const result = await importClinicalFhirSnapshot({ ...descriptor.run, pages, vaultRoot,
+        completedRetrievalSlices: descriptor.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) });
+      expect(result.rawFileCount).toBeGreaterThan(0);
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+    const outcome = parseHostedClinicalRecordsRecordOutcomeRequest({ generation: 1, runId: RUN_ID, status: "completed",
+      retrievalProtocol: "query-slices-v2", counts: { ...outcomeCounts(), fetchedPageCount: pages.length },
+      retrievalSlices: descriptor.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) });
+    await recordClinicalRetrievalOutcome({ memberId: MEMBER_ID, request: outcome });
+    expect(harness.state.run).toMatchObject({ status: "complete", pageCount: pages.length });
+    expect(harness.state.run.connection).toMatchObject({ status: "active", lastSyncCompletedAt: expect.any(Date) });
   });
 });
 

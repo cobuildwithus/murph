@@ -5,12 +5,17 @@ import { signerPem } from "./clinical-records-synthetic-signer";
 vi.mock("../public/.well-known/epic/sandbox.jwks.json", async () => ({
   default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
 }));
+vi.mock("../public/.well-known/oracle/production.jwks.json", async () => ({
+  default: { keys: [(await import("./clinical-records-synthetic-signer")).sandboxPublicKey] },
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { decodeJwt } from "jose";
 import { buildEpicBetaRetrievalPlan } from "@/src/lib/clinical-records/epic-policy";
+import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
 
 const mocks = vi.hoisted(() => ({
   prisma: vi.fn(), access: vi.fn(), consent: vi.fn(), suspension: vi.fn(),
-  append: vi.fn(), signal: vi.fn(), open: vi.fn(), seal: vi.fn(),
+  append: vi.fn(), signal: vi.fn(), open: vi.fn(), seal: vi.fn(), base: vi.fn(),
 }));
 vi.mock("@/src/lib/clinical-records/provider-directory-store", () => ({
   resolveClinicalProviderDirectoryEntry: () => null,
@@ -26,7 +31,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", () => ({ lockHostedMemberRow: vi.f
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({ runWithHostedDomainRootUnwrapCache: (fn: () => Promise<unknown>) => fn() }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({ unwrapHostedDomainRootForWeb: async () => ({ rootKey: Buffer.alloc(32) }) }));
 vi.mock("@/src/lib/clinical-records/retrieval", () => ({ appendClinicalRetrievalWakeTx: mocks.append, signalClinicalRetrievalWake: mocks.signal }));
-vi.mock("@/src/lib/clinical-records/secrets", () => ({ openClinicalConnectionFhirBaseUrl: async () => "https://portal.example.test/FHIR/R4", openClinicalConnectionSecret: mocks.open, sealClinicalConnectionSecret: mocks.seal }));
+vi.mock("@/src/lib/clinical-records/secrets", () => ({ openClinicalConnectionFhirBaseUrl: mocks.base, openClinicalConnectionSecret: mocks.open, sealClinicalConnectionSecret: mocks.seal }));
 
 import { admitClinicalDailySync, runClinicalDailySyncSweep } from "@/src/lib/clinical-records/daily-sync";
 import { resolveEpicClient } from "@/src/lib/clinical-records/epic-import-config";
@@ -68,6 +73,7 @@ beforeEach(() => {
   mocks.suspension.mockResolvedValue("active");
   mocks.append.mockResolvedValue({ wake: "synthetic" });
   mocks.signal.mockResolvedValue(undefined);
+  mocks.base.mockResolvedValue("https://portal.example.test/FHIR/R4");
   mocks.seal.mockImplementation(async ({ value }: { value: string }) => `sealed:${value}`);
   mocks.open.mockImplementation(async ({ field }: { field: string }) => field === "refreshToken" ? JSON.stringify({ schemaVersion: 1,
     clientId: "client", tokenEndpoint: "https://portal.example.test/token", refreshToken: "old-refresh", grantedScopes: ["patient/Patient.r", "patient/Observation.s"] }) : "existing-access");
@@ -238,5 +244,88 @@ describe("rotating clinical refresh lease", () => {
     await expect(renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1,
       now: new Date(now.getTime() + 60_001), fetchImpl: replay })).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
     expect(replay).not.toHaveBeenCalled();
+  });
+});
+
+describe("Oracle grants", () => {
+  const BASE = "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic";
+  const TOKEN = "https://authorization.cerner.com/tenants/0aB1cD2e-synthetic/hosts/fhir-myrecord.cerner.com/protocols/oauth2/profiles/smart-v1/token";
+  const PROFILE = { integration: "oracle-millennium-r4", environment: "production", method: "private_key_jwt" };
+  const SCOPES = ["patient/Patient.read", "patient/Immunization.read", "patient/MedicationRequest.read", "offline_access"];
+  function oracleFixture(payload: Record<string, unknown> = {}) {
+    const f = fixture();
+    Object.assign(f.row, { sourceSystem: "cerner-fhir", providerDirectoryEntryId: "oracle-0123456789abcdef0123" });
+    f.row.retrievalRuns[0]!.retrievalPlanJson = buildOracleRetrievalPlan({ resourceTypes: ["Patient", "Immunization", "MedicationRequest"] });
+    f.row.retrievalRuns[0]!.grantedScopesJson = SCOPES;
+    mocks.base.mockResolvedValue(BASE);
+    mocks.open.mockImplementation(async ({ field }: { field: string }) => field === "refreshToken" ? JSON.stringify({ schemaVersion: 1,
+      profile: PROFILE, clientId: "synthetic-oracle-client", tokenEndpoint: TOKEN, refreshToken: "oracle-refresh", grantedScopes: SCOPES,
+      ...payload }) : "existing-access");
+    vi.stubEnv("ORACLE_SMART_CLIENT_ID", "synthetic-oracle-client");
+    vi.stubEnv("ORACLE_SMART_PRIVATE_KEY_PEM", signerPem);
+    return f;
+  }
+  const renew = (f: ReturnType<typeof fixture>, fetchImpl: typeof fetch, at = now) =>
+    renewClinicalAccess({ connectionId: f.row.id, memberId: f.row.memberId, generation: 1, now: at, fetchImpl });
+
+  it("renews with the Oracle signer and exact token URL, and re-seals the non-rotating token", async () => {
+    const f = oracleFixture();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      access_token: "oracle-access", token_type: "Bearer", expires_in: 570, scope: SCOPES.join(" "),
+    }));
+    const before = Date.now();
+    await expect(renew(f, fetchImpl)).resolves.toBe("oracle-access");
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe(TOKEN);
+    const assertion = new URLSearchParams(String(init?.body)).get("client_assertion")!;
+    expect(decodeJwt(assertion)).toMatchObject({ aud: TOKEN, iss: "synthetic-oracle-client", sub: "synthetic-oracle-client" });
+    const sealed = JSON.parse(f.row.refreshTokenEncrypted.slice("sealed:".length));
+    expect(sealed).toMatchObject({ profile: PROFILE, refreshToken: "oracle-refresh", tokenEndpoint: TOKEN });
+    expect(f.row).toMatchObject({ accessTokenEncrypted: "sealed:oracle-access", refreshLeaseId: null });
+    expect((f.row.accessTokenExpiresAt as Date).getTime()).toBeGreaterThanOrEqual(before + 570_000);
+  });
+
+  it.each([
+    ["an Oracle row without its profile", { profile: undefined }, "cerner-fhir"],
+    ["an Epic row with an Oracle profile", {}, "epic-fhir"],
+    ["another tenant's token URL", { tokenEndpoint: TOKEN.replace("0aB1cD2e-synthetic", "another-tenant") }, "cerner-fhir"],
+    ["a grant issued to another client", { clientId: "synthetic-previous-client" }, "cerner-fhir"],
+    ["the kill switch", {}, "disabled"],
+  ])("releases the lease without egress for %s", async (_label, payload, sourceSystem) => {
+    const f = oracleFixture(payload);
+    if (sourceSystem === "epic-fhir") f.row.sourceSystem = "epic-fhir";
+    if (sourceSystem === "disabled") vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(renew(f, fetchImpl)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_PREPARATION_FAILED", retryable: true });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(f.row).toMatchObject({ refreshLeaseId: null, refreshTokenEncrypted: "refresh-sealed" });
+  });
+
+  it("keeps the shared lease and ambiguous-exchange fencing on cerner-fhir rows", async () => {
+    const leased = oracleFixture();
+    leased.row.refreshLeaseId = "other";
+    leased.row.refreshLeaseExpiresAt = new Date(now.getTime() + 60_000);
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(renew(leased, fetchImpl)).rejects.toMatchObject({ code: "CLINICAL_RECORD_REFRESH_IN_PROGRESS", retryable: true });
+    const ambiguous = oracleFixture();
+    await expect(renew(ambiguous, vi.fn<typeof fetch>().mockRejectedValue(new Error("connection reset"))))
+      .rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
+    expect(ambiguous.row.refreshLeaseId).toEqual(expect.any(String));
+    await expect(renew(ambiguous, fetchImpl, new Date(now.getTime() + 60_001))).rejects.toMatchObject({ code: "CLINICAL_RECORD_SMART_REAUTH_REQUIRED" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("admits an Oracle daily plan with its own windows and backs off while disabled", async () => {
+    const f = oracleFixture();
+    const input = { connectionId: f.row.id, memberId: f.row.memberId, now };
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    expect(await admitClinicalDailySync(input)).toBe(false);
+    expect(f.create).not.toHaveBeenCalled();
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "");
+    expect(await admitClinicalDailySync(input)).toBe(true);
+    expect(f.create.mock.calls[0]![0].data.retrievalPlanJson.slices.map((slice: { queryScopeId: string; coverage: string }) =>
+      [slice.queryScopeId, slice.coverage])).toEqual([
+      ["patient-demographics", "whole-family"], ["immunizations", "whole-family"], ["medication-requests", "bounded-window"],
+    ]);
   });
 });

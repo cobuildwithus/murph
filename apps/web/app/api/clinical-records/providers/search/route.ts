@@ -1,3 +1,7 @@
+import {
+  CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS,
+  CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER,
+} from "@/src/lib/clinical-records/client-contracts";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { clinicalJsonOk, withClinicalJsonError } from "@/src/lib/clinical-records/http";
 import { searchClinicalProviderDirectory } from "@/src/lib/clinical-records/provider-directory-store";
@@ -32,9 +36,16 @@ export const POST = withClinicalJsonError(async (request: Request) => {
       city: readOptionalSearchText(body.city),
       query: readOptionalSearchText(body.query),
       state: readOptionalSearchText(body.state),
-    }, request.headers.get("X-Clinical-Directory-Version") === "2" ? auth.member.id : undefined),
+    }, request.headers.get("X-Clinical-Directory-Version") === "2" ? auth.member.id : undefined,
+    readSearchSources(request.headers.get(CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER))),
   });
 });
+
+/** The vendors this reader parses. Absent or unknown values mean Epic only, as older browsers expect. */
+function readSearchSources(value: string | null) {
+  const advertised = new Set((value ?? "").split(",").map((source) => source.trim()));
+  return CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS.filter((source) => source === "epic-fhir" || advertised.has(source));
+}
 
 function readOptionalSearchText(value: unknown): string | null {
   if (value === undefined || value === null) return null;

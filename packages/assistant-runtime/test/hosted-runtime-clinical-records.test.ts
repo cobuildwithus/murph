@@ -11,6 +11,7 @@ import {
 import { findEventByExternalRef, importEventBatch, initializeVault } from "@murphai/core";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
+  parseHostedClinicalRecordsRecordOutcomeRequest,
   type HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import {
@@ -51,6 +52,61 @@ beforeEach(async () => { vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cl
 afterEach(async () => { vi.useRealTimers(); await rm(vaultRoot, { force: true, recursive: true }); });
 
 describe("hosted clinical records maintenance", () => {
+  it.each([false, true])("runs a synthetic cerner-fhir descriptor through read-run, fetch-page, fetch-document and record-outcome (referral gap=%s)", async (referralGap) => {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const referralFailure = referralGap ? { status: "unavailable" as const, errorCode: "provider-response-invalid", retryable: false } : null;
+    const base = "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic";
+    const slices = ([["procedures", "Procedure"], ["service-requests", "ServiceRequest"],
+      ["service-request-referrals", "ServiceRequest"], ["documents", "DocumentReference"]] as const)
+      .map(([queryScopeId, resourceType]) => ({ coverage: "whole-family" as const, queryFingerprint: hash(queryScopeId), queryScopeId, resourceType, sliceId: "whole" }));
+    const oracleRun: HostedClinicalRecordsRunDescriptor = { ...RUN, sourceSystem: "cerner-fhir", providerDirectoryEntryId: "oracle-0123456789abcdef0123",
+      fhirBaseUrlHash: hash(base), retrievalSlices: slices,
+      grantedScopes: ["patient/Procedure.read", "patient/ServiceRequest.read", "patient/DocumentReference.read", "patient/Binary.read"],
+      requestedScopes: ["patient/Procedure.read", "patient/ServiceRequest.read", "patient/DocumentReference.read", "patient/Binary.read"] };
+    const subject = { reference: "Patient/patient-1" };
+    const order = (id: string, extra: Record<string, unknown> = {}) => ({ resourceType: "ServiceRequest", id, status: "active", intent: "order",
+      meta: { lastUpdated: RUN.fetchedAt }, subject, code: { text: "Synthetic order" }, authoredOn: RUN.fetchedAt, ...extra });
+    const next = `${base}/ServiceRequest?patient=patient-1&_count=100&-pageContext=c3ludGhldGlj`;
+    const documents = documentPage();
+    const fetchPage = vi.fn<HostedRuntimeClinicalRecordsPort["fetchPage"]>(async (request) => {
+      switch (request.queryScopeId) {
+        case "procedures": // Oracle does not page Procedure; one large page stays within the shared bound.
+          return { status: "page", nextCursor: null, body: bundle(Array.from({ length: 587 }, (_, index) => ({ resourceType: "Procedure",
+            id: `procedure-${index}`, status: "completed", meta: { lastUpdated: RUN.fetchedAt }, subject, code: { text: "Synthetic procedure" },
+            performedDateTime: RUN.fetchedAt }))) };
+        case "service-requests": // The same id may recur on a later -pageContext page.
+          return request.cursor === null
+            ? { status: "page", body: bundle([order("order-1"), order("order-2")], next), nextCursor: "oracle-next" }
+            : { status: "page", body: bundle([order("order-2"), order("order-3")]), pageUrlHash: hash(next), nextCursor: null };
+        case "service-request-referrals": // Every referral arrives on the first page, beyond the requested _count=100.
+          return referralFailure ?? { status: "page", nextCursor: null, body: bundle(Array.from({ length: 150 }, (_, index) =>
+            order(`referral-${index}`, { code: { text: "Synthetic therapy referral" },
+              category: [{ coding: [{ system: "http://snomed.info/sct", code: "386053000" }] }] }))) };
+        default:
+          return documents.page;
+      }
+    });
+    const port = createPort({ readRun: async () => ({ status: "ready", run: oracleRun }), fetchPage,
+      fetchDocument: async () => documentResponse("downloaded clinical document") });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
+    const result = await run(port, importSnapshot);
+    expect(fetchPage.mock.calls.map(([request]) => [request.queryScopeId, request.cursor])).toEqual([
+      ["procedures", null], ["service-requests", null], ["service-requests", "oracle-next"], ["service-request-referrals", null], ["documents", null],
+    ]);
+    expect(port.fetchDocument).toHaveBeenCalledOnce();
+    expect(importSnapshot.mock.calls.every(([snapshot]) => snapshot.sourceSystem === "cerner-fhir")).toBe(true);
+    const imported = importSnapshot.mock.calls.flatMap(([snapshot]) => snapshot.pages.map((page) => page.queryScopeId));
+    expect(new Set(imported)).toEqual(new Set(["procedures", "service-requests", "documents",
+      ...(referralGap ? [] : ["service-request-referrals"])]));
+    const status = referralGap ? "partial" : "completed";
+    expect(result).toMatchObject({ status, counts: { fetchedPageCount: referralGap ? 4 : 5, fetchedResourceFamilyCount: 3 } });
+    // A failed referral query is an explicit coverage gap, never a silent omission.
+    expect(parseHostedClinicalRecordsRecordOutcomeRequest(result.outcome)).toMatchObject({ status, runId: RUN.runId,
+      ...(referralGap ? { errorCode: "provider-response-invalid" } : {}),
+      retrievalSlices: slices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })) });
+    expect(await checkpoint()).toBeNull();
+  });
+
   it("durably admits retained structured records for enrichment before finishing retrieval", async () => {
     await initializeVault({ vaultRoot, timezone: "UTC" });
     const retained = { resourceType: "Observation", id: "narrative-vital", status: "final",

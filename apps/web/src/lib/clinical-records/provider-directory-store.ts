@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
 import { epicPortalAccessRank } from "./epic-import-config";
+import { oracleSearchEnabled } from "./oracle-integration";
 import { countedSourceFilter } from "./source-state";
 import directoryArtifact from "./provider-directory.v2.json";
 import {
@@ -11,6 +12,7 @@ import {
   searchClinicalProviderDirectorySnapshot,
   type ClinicalProviderDirectory,
   type ClinicalProviderDirectoryEntry,
+  type ClinicalProviderSourceSystem,
 } from "./provider-directory";
 
 let clinicalProviderDirectory: ClinicalProviderDirectory | null = null;
@@ -32,9 +34,11 @@ export async function searchClinicalProviderDirectory(input: {
   city?: string | null;
   query?: string | null;
   state?: string | null;
-}, memberId?: string) {
+}, memberId?: string, readerSources: readonly ClinicalProviderSourceSystem[] = ["epic-fhir"]) {
   const directory = readClinicalProviderDirectory();
-  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined, accessRank: epicPortalAccessRank });
+  const sourceSystems = readerSources.filter((source) => source !== "cerner-fhir" || oracleSearchEnabled());
+  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined,
+    accessRank: epicPortalAccessRank, sourceSystems });
   if (memberId === undefined || !result.providers.length) return result;
   const hashes = result.providers.map(provider => {
     const entry = resolveClinicalProviderDirectoryEntry(provider.id)!;
