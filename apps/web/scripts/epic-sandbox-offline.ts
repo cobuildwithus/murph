@@ -13,7 +13,7 @@ try {
       key === join(keys, "loopback-key.pem") && kid === "murph-sandbox-sF88F1MiYZ5b" &&
       new URL(jwks!).pathname === "/.well-known/epic/sandbox.jwks.json" && redirect === callback);
   }
-  process.exitCode = spawnSync(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "scripts/epic-proof/run.mjs", "--vendor", "epic", "--interactive"], {
+  process.exitCode = spawnSync(process.execPath, ["--import", "tsx", "scripts/epic-proof/run.ts", "--vendor", "epic", "--interactive"], {
     stdio: "inherit", env: { ...process.env, EPIC_SMART_NON_PRODUCTION_CLIENT_ID: id ?? process.env.EPIC_SMART_NON_PRODUCTION_CLIENT_ID },
   }).status ?? 1;
 } catch { process.exitCode = 1; }

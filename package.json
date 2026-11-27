@@ -10,7 +10,7 @@
   },
   "scripts": {
     "prepare": "if [ -z \"${CI:-}\" ] && [ -z \"${VERCEL:-}\" ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then scripts/install-git-hooks --if-needed; fi",
-    "clinical:sandbox-proof": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON apps/web/scripts/epic-proof/run.mjs",
+    "clinical:sandbox-proof": "tsx apps/web/scripts/epic-proof/run.ts",
     "hosted-local": "pnpm exec tsx --tsconfig tsconfig.base.json scripts/hosted-local.ts",
     "dev": "pnpm hosted-local up",
     "dev:worktree": "pnpm hosted-local worktree up",
