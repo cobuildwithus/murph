@@ -1,4 +1,11 @@
 import { createHash } from "node:crypto";
+import { GET as completeCallback } from "../app/integrations/connect/complete/route";
+import { POST as startCompanion } from "../app/api/connected-apps/companion/apps/[appId]/start/route";
+
+vi.mock("@/src/lib/better-auth/config", () => ({ requireHostedBetterAuthConfig: () => ({}) }));
+vi.mock("@/src/lib/better-auth/session", () => ({
+  readHostedAuthSession: async () => ({ session: { member: { id: "hbm_member" } } }),
+}));
 
 import { APIConnectionTimeoutError, APIUserAbortError } from "@composio/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,6 +51,7 @@ interface MemberRow {
 }
 
 interface IntentRow {
+  createdAt: Date;
   alias: string | null;
   claimHash: string;
   completedAt: Date | null;
@@ -89,6 +97,7 @@ interface FakePrisma {
     options?: unknown,
   ) => Promise<T>;
   hostedConnectedAppConnectIntent: {
+    count: (input: { where: { memberId: string; createdAt: { gte: Date } }; take: number }) => Promise<number>;
     create: (input: {
       data: {
         alias: string | null;
@@ -165,8 +174,12 @@ class ConnectedAppsPrismaHarness {
       $queryRaw: vi.fn(async () => []),
       $transaction: vi.fn(async (callback) => callback(prisma)),
       hostedConnectedAppConnectIntent: {
+        count: vi.fn(async ({ where, take }) => [...this.intents.values()]
+          .filter(row => row.memberId === where.memberId && row.createdAt >= where.createdAt.gte)
+          .slice(0, take).length),
         create: vi.fn(async ({ data }) => {
           const row: IntentRow = {
+            createdAt: new Date(),
             alias: data.alias,
             claimHash: data.claimHash,
             completedAt: null,
@@ -290,6 +303,112 @@ describe("connected-app service", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  it("allows the 15th recent intent for a member and refuses the 16th companion start before provider egress", async () => {
+    const harness = installPrismaHarness();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-04T10:00:00Z"));
+    await createConnectClaim("hbm_member");
+    vi.setSystemTime(new Date("2026-05-04T10:45:01Z"));
+    await createConnectClaim("hbm_other");
+    for (let i = 0; i < 14; i++) await createConnectClaim("hbm_member");
+    const fetch = vi.fn(async (url: string) => new URL(url).pathname.endsWith("/link")
+      ? jsonResponse({ connected_account_id: "ca_crater", redirect_url: "https://provider.example.test/authorize" })
+      : jsonResponse({ session_id: "session_crater" }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      expect((await startCompanionGmail("ios")).status).toBe(200);
+      fetch.mockClear();
+      const size = harness.intents.size;
+      const refused = await startCompanionGmail("ios");
+      expect(refused.status).toBe(429);
+      expect((await refused.json()).error).toMatchObject({
+        code: "CONNECTED_APPS_START_LIMIT_REACHED", retryable: true,
+        message: "Too many sign-ins started. Try again in a little while.",
+      });
+      expect(harness.intents.size).toBe(size);
+      expect(fetch).not.toHaveBeenCalled();
+      await createConnectClaim("hbm_member");
+      expect(harness.intents.size).toBe(size + 1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([["ios", "ai.withmurph.app"], ["ios-dev", "ai.withmurph.app.dev"]])(
+    "starts a bearer connection and returns verified success or error to %s", async (appReturn, scheme) => {
+      const harness = installPrismaHarness();
+      let callbackUrl = "";
+      const verify = createVerificationFetch();
+      vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/v3.1/tool_router/session") {
+          expect(readJsonBody(init).user_id).toBe("hbm_member");
+          return jsonResponse({ session_id: "session_nebula" });
+        }
+        if (path === "/api/v3.1/tool_router/session/session_nebula/link") {
+          const body = readJsonBody(init);
+          expect(body.toolkit).toBe("gmail");
+          callbackUrl = readStringProperty(body, "callback_url");
+          return jsonResponse({ connected_account_id: "ca_work", redirect_url: "https://provider.example.test/authorize" });
+        }
+        return verify(url, init);
+      });
+      try {
+        const started = await startCompanionGmail(appReturn);
+        expect(started.status).toBe(200);
+        expect(await started.json()).toEqual({ authorizationUrl: "https://provider.example.test/authorize" });
+        const callback = new URL(callbackUrl);
+        expect(callback.origin + callback.pathname).toBe("https://hosted.example.test/integrations/connect/complete");
+        expect(callback.searchParams.get("appReturn")).toBe(appReturn);
+        const claim = callback.searchParams.get("claim")!;
+        expect(harness.intentForClaim(claim)).toMatchObject({ memberId: "hbm_member", toolkit: "gmail", completedAt: null });
+        const denied = await completeCallback(new Request(callback));
+        expect(denied.status).toBe(302);
+        expect(denied.headers.get("location")).toBe(`${scheme}://connect-return?status=error`);
+        expect(verify).not.toHaveBeenCalled();
+        callback.searchParams.set("status", "success");
+        callback.searchParams.set("connected_account_id", "ca_work");
+        const completed = await completeCallback(new Request(callback));
+        expect(completed.status).toBe(302);
+        expect(completed.headers.get("location")).toBe(`${scheme}://connect-return?app=gmail&status=success`);
+        expect(completed.headers.get("cache-control")).toBe("no-store");
+        expect(completed.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(verify).toHaveBeenCalledOnce();
+        expect(harness.intentForClaim(claim)?.completedAt).toBeInstanceOf(Date);
+        const replay = await completeCallback(new Request(callback));
+        expect(replay.headers.get("location")).toBe(`${scheme}://connect-return?status=error`);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it("returns browser callbacks to the existing Settings dialog on both outcomes", async () => {
+    installPrismaHarness();
+    const claim = await createConnectClaim("hbm_member");
+    await startHostedConnectedAppConnection({ claim, memberId: "hbm_member", fetchImpl: createStartFetch({
+      claim, remoteSessionId: "session_sky",
+    }) });
+    vi.stubGlobal("fetch", createVerificationFetch());
+    try {
+      const url = new URL("https://hosted.example.test/integrations/connect/complete");
+      url.searchParams.set("claim", claim);
+      url.searchParams.set("status", "success");
+      url.searchParams.set("connected_account_id", "ca_work");
+      const success = await completeCallback(new Request(url));
+      expect(success.status).toBe(303);
+      expect(success.headers.get("location")).toBe("/settings?connectedAppCompletion=1&connectedAppStatus=success&toolkit=gmail&alias=work");
+      for (const appReturn of [null, "https://unrelated.example.test"]) {
+        if (appReturn) url.searchParams.set("appReturn", appReturn);
+        const failure = await completeCallback(new Request(url));
+        expect(failure.status).toBe(303);
+        expect(failure.headers.get("location")).toBe("/settings?connectedAppCompletion=1&connectedAppStatus=error");
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   describe("private Composio transport diagnostics", () => {
@@ -2036,6 +2155,7 @@ describe("connected-app service", () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
     const harness = installPrismaHarness();
     harness.intents.set("completed-gmail", {
+      createdAt: new Date("2026-08-31T07:35:00.000Z"),
       alias: "work",
       claimHash: "completed-gmail",
       completedAt: new Date("2026-08-31T07:45:00.000Z"),
@@ -2326,6 +2446,13 @@ describe("connected-app service", () => {
   });
 });
 
+function startCompanionGmail(appReturn: string) {
+  return startCompanion(new Request("https://hosted.example.test/api/connected-apps/companion/apps/gmail/start", {
+    method: "POST", headers: { authorization: `Bearer murph_auth_v1.${"c".repeat(32)}` },
+    body: JSON.stringify({ appReturn }),
+  }), { params: Promise.resolve({ appId: "gmail" }) });
+}
+
 function installPrismaHarness(): ConnectedAppsPrismaHarness {
   const harness = new ConnectedAppsPrismaHarness();
   prismaMocks.getPrisma.mockReturnValue(harness.prisma);
@@ -2383,6 +2510,7 @@ function createStartFetch(input: {
       expect(callbackUrl.origin).toBe("https://hosted.example.test");
       expect(callbackUrl.pathname).toBe("/integrations/connect/complete");
       expect(callbackUrl.searchParams.get("claim")).toBe(input.claim);
+      expect(callbackUrl.searchParams.has("appReturn")).toBe(false);
 
       return jsonResponse(
         input.linkStatus && input.linkStatus >= 400
