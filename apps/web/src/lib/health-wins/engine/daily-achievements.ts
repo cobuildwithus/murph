@@ -1,5 +1,5 @@
 import { formatMetricValue, metricInfo } from "./metrics";
-import { cardDateKey, dayNumber, formatNumber, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
+import { cardDateKey, dayNumber, formatHealthWinDistance, formatWinDate, formatWinMonth, mad, median, milesFromKm } from "./shared";
 import { longestStreak, streakDateRange, thresholdBars, type ThresholdBars } from "./streak";
 import type { Candidate, DailySample, Metric } from "./types";
 
@@ -87,7 +87,7 @@ function personalRecord(metric: Metric, rows: readonly DailySample[], today: str
       kind: "personal_record",
       filter,
       title: distance
-        ? { number: formatNumber(milesFromKm(best.value), 0), measure: "miles on foot" }
+        ? { number: formatHealthWinDistance(milesFromKm(best.value), "whole"), measure: "miles on foot" }
         : { number: formatMetricValue(metric, best.value, "title"), measure: label },
       subtitle: `on ${dateLabel}, ${tied ? "tied for " : ""}${rank} ${period}`,
       source_note: `Recorded on ${dateLabel}. Based on ${year.length} tracked days.`,

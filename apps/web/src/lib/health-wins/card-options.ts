@@ -4,7 +4,9 @@ import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-priva
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { invalidGameRequest } from "../game/http/errors";
 import type { CardSpec, HealthWinAchievement } from "./engine";
-import { formatNumber, formatWinMonth, milesFromKm } from "./engine/shared";
+import { gameClimbMetricDisplay } from "./engine/activities";
+import { convertTrend, dailyDistanceAlternative } from "./engine/daily-distance";
+import { formatNumber, milesFromKm } from "./engine/shared";
 
 type Option = "original" | "hide_numbers" | "hide_map" | "hours";
 const labels: Record<Option, string> = {
@@ -26,23 +28,6 @@ function hidden(card: CardSpec, title = hiddenTitles[card.filter]) {
     id: card.id, kind: card.kind, filter: card.filter, theme: card.theme,
     title: { number: "", measure: title }, subtitle: "Shared without numbers.",
     source_note: "", chart: { type: "hidden" as const }, share: { caption_tips: [] },
-  };
-}
-
-type TrendCard = Extract<CardSpec, { kind: "trend_change" }>;
-
-function convertTrend(card: TrendCard, unit: "hr" | "mi", convert: (value: number) => number): TrendCard | null {
-  const chart = card.chart;
-  const series = chart.series.map(point => ({ ...point, value: convert(point.value) }));
-  const latest = series.at(-1);
-  if (!latest) return null;
-  const baseline = convert(chart.baseline);
-  const usualTenths = Math.round(baseline * 10), currentTenths = Math.round(latest.value * 10);
-  const deltaTenths = currentTenths - usualTenths;
-  return {
-    ...card, title: { ...card.title, number: `${deltaTenths < 0 ? "−" : "+"}${formatNumber(Math.abs(deltaTenths) / 10)} ${unit}` },
-    chart: { ...chart, unit, baseline, delta: convert(chart.delta), series,
-      pills: [`Usual ${formatNumber(usualTenths / 10)} ${unit}`, `${formatWinMonth(latest.month, "short")} ${formatNumber(currentTenths / 10)} ${unit}`] },
   };
 }
 
@@ -92,24 +77,42 @@ interface CandidateDisplay {
 }
 
 export interface CachedHealthCandidate extends CandidateDisplay {
+  /** Distance alternates for US/UK or metric. Height alternates serve both metric and UK. */
   miles?: CandidateDisplay;
+  kilometers?: CandidateDisplay;
+  meters?: CandidateDisplay;
   /** Private detector evidence on the sealed wrapper, independent of its units or variants. */
   achievement?: HealthWinAchievement;
   sourceComplete?: boolean;
+}
+
+export function healthCandidateDisplay(candidate: CachedHealthCandidate, units: ClientUnits = "us"): CandidateDisplay {
+  const distance = units === "metric" ? candidate.kilometers : candidate.miles;
+  const height = units === "us" ? undefined : candidate.meters;
+  return distance ?? height ?? candidate;
+}
+
+function alternateId(system: string, id: string) {
+  return createHash("sha256").update(`${system}:${id}`).digest("base64url");
 }
 
 /** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
 export function withDistanceTrendUnits(candidate: CachedHealthCandidate): CachedHealthCandidate {
   const original = candidate.variants[0].spec;
   if (candidate.miles || original.kind !== "trend_change" || original.chart.type !== "trend" || original.chart.unit !== "km") return candidate;
-  const id = createHash("sha256").update(`miles:${candidate.id}`).digest("base64url");
+  const id = alternateId("miles", candidate.id);
   const card = convertTrend({ ...original, id, kind: original.kind, chart: original.chart }, "mi", milesFromKm);
   if (!card) return candidate;
-  const safe = hidden(card);
-  return { ...candidate, miles: { id, variants: [
-    { option: "original", spec: card, specRevision: specDigest(card) },
-    { option: "hide_numbers", spec: safe, specRevision: specDigest(safe) },
-  ] } };
+  return { ...candidate, miles: prepareDisplay(card, specDigest) };
+}
+
+function prepareDisplay(card: ShareableCard, revision: (spec: Variant["spec"]) => string): CandidateDisplay {
+  const variant = (option: Variant["option"], spec: Variant["spec"]): Variant => ({ option, spec, specRevision: revision(spec) });
+  const variants: CachedHealthCandidate["variants"] = [variant("original", card)];
+  const converted = hoursCard(card);
+  if (converted) variants.push(variant("hours", converted));
+  variants.push(variant("hide_numbers", hidden(card)));
+  return { id: card.id, variants };
 }
 
 function prepareMemberCandidate(
@@ -119,12 +122,11 @@ function prepareMemberCandidate(
   const card = engineCard.kind === "cumulative" && distanceArtUrl
     ? { ...engineCard, id, chart: { ...engineCard.chart, art: { url: distanceArtUrl } } }
     : { ...engineCard, id };
-  const variant = (option: Variant["option"], spec: Variant["spec"]): Variant => ({ option, spec, specRevision: revision(spec) });
-  const variants: CachedHealthCandidate["variants"] = [variant("original", card)];
-  const converted = hoursCard(card);
-  if (converted) variants.push(variant("hours", converted));
-  variants.push(variant("hide_numbers", hidden(card)));
-  return withDistanceTrendUnits({ id, variants });
+  const candidate = prepareDisplay(card, revision);
+  const alternate = card.kind === "game_climb" ? gameClimbMetricDisplay(card) : dailyDistanceAlternative(card);
+  if (!alternate) return candidate;
+  const display = prepareDisplay({ ...alternate.card, id: alternateId(alternate.units, id) }, specDigest);
+  return { ...candidate, [alternate.units]: display };
 }
 
 /** Store each derived option in the authenticated set. Later deploys can replay exactly what the composer displayed. */
@@ -142,7 +144,7 @@ export function prepareHealthCandidates(
 export function prepareSeeYoursCandidate(memberId: string, card: CardSpec, units: ClientUnits): CachedHealthCandidate {
   if (!card.measure) throw invalidGameRequest("Choose a card with a measure.");
   const candidate = prepareMemberCandidate(memberId, card, specDigest);
-  const display = units === "metric" ? candidate : candidate.miles ?? candidate;
+  const display = healthCandidateDisplay(candidate, units);
   return { id: `mine:${card.measure}:${card.kind}`, variants: display.variants };
 }
 
@@ -203,9 +205,11 @@ export function previewRecordedCandidate(candidate: CachedHealthCandidate) {
 }
 
 export function findCandidate(candidates: CachedHealthCandidate[], candidateId: string) {
-  const candidate = candidates.find(item => item.id === candidateId || item.miles?.id === candidateId);
-  if (!candidate) throw invalidGameRequest("Choose a card from this set.");
-  return { claimId: candidate.id, display: candidate.miles?.id === candidateId ? candidate.miles : candidate };
+  for (const candidate of candidates) {
+    const display = [candidate, candidate.miles, candidate.kilometers, candidate.meters].find(item => item?.id === candidateId);
+    if (display) return { claimId: candidate.id, display };
+  }
+  throw invalidGameRequest("Choose a card from this set.");
 }
 
 export function freezeHealthSelections(candidates: CachedHealthCandidate[], selections: readonly HealthCardSelection[]): FrozenHealthCard[] {

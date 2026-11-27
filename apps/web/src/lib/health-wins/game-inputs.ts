@@ -86,7 +86,7 @@ export function gameWinInputs(memberId: string, today: string, { facts, states, 
     const [latest, total] = last;
     const prior = gamesByExercise.get(measure.name);
     if (prior && (prior.latest > latest || (prior.latest === latest && prior.unit <= measure.unit))) continue;
-    // Progress keeps route distance in meters. The engine's distance copy reads in miles, like its other distance cards.
+    // Progress stores meters. The engine uses miles as its base for sealed game card variants.
     const meters = measure.unit === "meters";
     gamesByExercise.set(measure.name, { latest, unit: measure.unit, game: {
       exercise: measure.name, unit: meters ? "miles" : measure.unit, total: meters ? total / 1609.344 : total,

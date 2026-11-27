@@ -68,7 +68,7 @@ describe("trend_change", () => {
 
   it.each([
     ["rhr_bpm", [60, 62.25, 64, 58.75], 3, "−3 bpm", "Usual 62 bpm", "Feb 59 bpm"],
-    ["distance_km", [2.1, 2.46, 2.7, 3.54], 0, "+1 km", "Usual 2.5 km", "Feb 3.5 km"],
+    ["distance_km", [2.1, 2.46, 2.7, 3.54], 0, "+1.08 km", "Usual 2.46 km", "Feb 3.54 km"],
   ] as const)("matches both pills at the displayed precision for %s", (metric, means, spread, title, usual, current) => {
     const trend = cards(fourMonths(metric, [...means], spread)).find(card => card.kind === "trend_change");
     expect(trend?.title.number).toBe(title);
@@ -102,7 +102,7 @@ describe("trend_change", () => {
 
   it("counts an exact decimal step after averaging differently sized months", () => {
     const series = fourMonths("distance_km", [1.01, 1.01, 1.01, 2.01], 0);
-    expect(cards(series).find(card => card.kind === "trend_change")?.title.number).toBe("+1 km");
+    expect(cards(series).find(card => card.kind === "trend_change")?.title.number).toBe("+1.00 km");
   });
 });
 

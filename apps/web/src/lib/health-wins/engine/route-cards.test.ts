@@ -32,10 +32,10 @@ describe("recorded route cards", () => {
     const [map, splits] = cards();
     expect(map).toMatchObject({
       kind: "activity_route", candidateId: `activity:${run.id}:activity_route`,
-      title: { number: "2.5 km", measure: "run" }, subtitle: "in 15:00, 6:00 a km",
+      title: { number: "2.50 km", measure: "run" }, subtitle: "in 15:00, 6:00 a km",
       source_note: "Recorded on Mar 12, morning",
-      chart: { type: "route_map", paths, chips: ["2.5 km", "6:00 /km"], stats: [
-        { label: "Distance", value: "2.5", unit: "km" },
+      chart: { type: "route_map", paths, chips: ["2.50 km", "6:00 /km"], stats: [
+        { label: "Distance", value: "2.50", unit: "km" },
         { label: "Pace", value: "6:00", unit: "/km" },
         { label: "Time", value: "15:00" },
         { label: "Climb", value: "18", unit: "m" },
@@ -47,7 +47,7 @@ describe("recorded route cards", () => {
         type: "splits", unit: "km", fastest: 1, splits: [
           { label: "Km 1", seconds: 375, text: "6:15" },
           { label: "Km 2", seconds: 350, text: "5:50" },
-          { label: "0.5 km", seconds: 175, text: "2:55", partial: true },
+          { label: "0.50 km", seconds: 175, text: "2:55", partial: true },
         ],
       },
     });
@@ -82,7 +82,7 @@ describe("recorded route cards", () => {
     for (const [name, measure] of [[undefined, "run"], ["Trail jog", "trail jog"]] as const) {
       const trimmed = cards({ ...run, name, route: { ...route, paths: [] } });
       expect(trimmed.map(card => card.kind)).toEqual(["activity_splits"]);
-      expect(trimmed[0]).toMatchObject({ subtitle: "fastest km 5:50", title: { number: "2.5 km", measure } });
+      expect(trimmed[0]).toMatchObject({ subtitle: "fastest km 5:50", title: { number: "2.50 km", measure } });
     }
   });
 
@@ -106,6 +106,25 @@ describe("recorded route cards", () => {
     expect(splits.subtitle).toBe(metricSplits.subtitle);
   });
 
+  it.each([
+    ["metric", "km", 1000],
+    ["us", "mi", 1609.344],
+  ] as const)("keeps one decimal at ten %s units and two on the partial split", (units, unit, meters) => {
+    const splits = [
+      ...Array.from({ length: 10 }, () => ({ distanceM: meters, seconds: 420 })),
+      { distanceM: meters * 0.03, seconds: 13 },
+    ];
+    const [map, splitCard] = cards({
+      ...run, elapsedSec: 4213, movingSec: 4213, route: { ...route, distanceM: meters * 10.03, splits },
+    }, units);
+    expect(map.title.number).toBe(`10.0 ${unit}`);
+    expect(map.chart).toMatchObject({ stats: expect.arrayContaining([{ label: "Distance", value: "10.0", unit }]) });
+    expect(splitCard.title).toEqual(map.title);
+    expect(splitCard.chart).toMatchObject({
+      splits: expect.arrayContaining([{ label: `0.03 ${unit}`, seconds: 13, text: "0:13", partial: true }]),
+    });
+  });
+
   it.each([0, 0.4])("omits a climb of %s metres and leaves heart rate to its own card", climbM => {
     const result = cards({ ...run, elapsedSec: 4000, movingSec: 3725,
       route: { ...route, climbM, distanceM: 5000, splits: Array.from({ length: 5 }, () => ({ distanceM: 1000, seconds: 745 })) },
@@ -113,7 +132,7 @@ describe("recorded route cards", () => {
     });
     expect(result.map(card => card.kind)).toEqual(["activity_route", "activity_splits"]);
     expect(result[0].chart).toMatchObject({ stats: [
-      { label: "Distance", value: "5", unit: "km" },
+      { label: "Distance", value: "5.00", unit: "km" },
       { label: "Pace", value: "12:25", unit: "/km" },
       { label: "Time", value: "1:02:05" },
     ] });
@@ -147,7 +166,7 @@ describe("recorded route cards", () => {
       ...route, distanceM: 500, splits: [{ distanceM: 500, seconds: 270 }],
     } };
     const [map, splits] = cards(activity);
-    expect(map.title).toEqual({ number: "0.5 km", measure: "walk" });
+    expect(map.title).toEqual({ number: "0.50 km", measure: "walk" });
     expect(splits.chart).toMatchObject({ fastest: null, splits: [{ seconds: 270, partial: true }] });
     expect(splits.subtitle).not.toContain("fastest");
     const morning = buildRecordedCards(activity, context);

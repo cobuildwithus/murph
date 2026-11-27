@@ -2,7 +2,7 @@ import type { ClientUnits } from "../../companion/client-info";
 import { areaFrame } from "../../game/progress/area-art";
 import { formatHeight } from "../../game/progress/format";
 import { splitUnit, splitUnitMeters } from "./recorded-route";
-import { formatNumber } from "./shared";
+import { formatHealthWinDistance } from "./shared";
 import type { CardSpec, RecordedActivity } from "./types";
 
 type DistanceUnit = keyof typeof splitUnitMeters;
@@ -24,8 +24,7 @@ function clock(seconds: number): string {
 }
 
 function distanceLabel(meters: number, unit: DistanceUnit): string {
-  const value = meters / splitUnitMeters[unit];
-  return `${value < 0.01 ? "<0.01" : formatNumber(value, 2)} ${unit}`;
+  return `${formatHealthWinDistance(meters / splitUnitMeters[unit])} ${unit}`;
 }
 
 export function routeCards(activity: RecordedActivity, recorded: string, units: ClientUnits, word: string): CardSpec[] {

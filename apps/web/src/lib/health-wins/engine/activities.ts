@@ -2,12 +2,12 @@ import { BANK, ladder } from "../../game/progress/bank";
 import type { EXERCISES } from "../../game/progress/registry";
 import { addDays, weekdayOf } from "../../game/time";
 import { isMetric, metricInfo } from "./metrics";
-import { cardDateKey, cardText, dayNumber, formatDuration, formatNumber, formatWinDate, formatWinMonth, isDate } from "./shared";
-import type { Candidate, Experiment, Game, GameStreakDay, HealthWinsInput, Metric, Session, SessionType } from "./types";
+import { cardDateKey, cardText, dayNumber, formatDuration, formatHealthWinDistance, formatNumber, formatWinDate, formatWinMonth, isDate, kmFromMiles } from "./shared";
+import type { Candidate, CardSpec, Experiment, Game, GameStreakDay, HealthWinsInput, Metric, Session, SessionType } from "./types";
 
 type ExperimentBar = { label: "Before" | "During"; start: string; end: string; mean: number };
 type TimeRung = { id: string; name: string; seconds: number };
-type SkylineLandmark = { id: string; name: string; height: number; heightUnit: "ft" };
+type SkylineLandmark = { id: string; name: string; height: number; heightUnit: "ft" | "m" };
 type GameStreak = NonNullable<Game["bestStreak"]>;
 
 export interface ActivityCharts {
@@ -166,12 +166,15 @@ function gameSeconds(total: number, unit: string): number | null {
   }
 }
 
+const mileUnits = new Set(["mi", "mile", "miles"]);
+
 function gameAmount(total: number, unit: string, exercise: string, name: string): string {
   const key = unit.trim().toLowerCase().replace(/[\s-]/g, "");
   if (key === exercise || key === name.replace(/[\s-]/g, "") || key === "rep" || key === "reps") {
     return formatNumber(total, 0);
   }
-  const precision = ["mi", "mile", "miles", "steps", "bpm"].includes(key) ? 0 : 1;
+  if (mileUnits.has(key)) return `${formatHealthWinDistance(total, "whole")} ${unit.trim()}`;
+  const precision = ["steps", "bpm"].includes(key) ? 0 : 1;
   return `${formatNumber(total, precision)} ${unit.trim()}`;
 }
 
@@ -183,6 +186,31 @@ const heightLandmarks = new Map(BANK.filter(entry => entry.kind === "height").ma
 
 function skylineLandmark({ id, height }: Game["landmarksPassed"][number]): SkylineLandmark {
   return { id, name: heightLandmarks.get(id)?.name ?? "Landmark", height, heightUnit: "ft" };
+}
+
+type GameClimbCard = Extract<CardSpec, { kind: "game_climb" }>;
+const metersPerFoot = 0.3048;
+
+function metricLandmark(landmark: SkylineLandmark): SkylineLandmark {
+  return { ...landmark, height: landmark.height * metersPerFoot, heightUnit: "m" };
+}
+
+export function gameClimbMetricDisplay(card: GameClimbCard): { units: "kilometers" | "meters"; card: GameClimbCard } | null {
+  const chart = card.chart;
+  if (chart.type !== "skyline") return null;
+  if (mileUnits.has(chart.unit.trim().toLowerCase())) {
+    const total = kmFromMiles(chart.total);
+    return { units: "kilometers", card: {
+      ...card, title: { ...card.title, number: `${formatHealthWinDistance(total, "whole")} km` },
+      chart: { ...chart, total, unit: "km" },
+    } };
+  }
+  if (!chart.next && !chart.landmarksPassed.length) return null;
+  // The companion places the member at next.height minus next.toGo on the skyline.
+  const next = chart.next ? { ...metricLandmark(chart.next), toGo: chart.next.toGo * metersPerFoot } : null;
+  return { units: "meters", card: { ...card, chart: {
+    ...chart, landmarksPassed: chart.landmarksPassed.map(metricLandmark), next,
+  } } };
 }
 
 function plankClimb(seconds: number): Climb {
@@ -260,14 +288,14 @@ function streakCalendar(start: string, end: string, days: readonly GameStreakDay
 function gameStreak(bestStreak: GameStreak, today: string): Candidate | null {
   if (!validWindow(bestStreak) || bestStreak.end > today) return null;
   const { days, start, end, missedOn, calendar } = bestStreak;
-  if (!Number.isSafeInteger(days) || days <= 0) return null;
+  if (!Number.isSafeInteger(days) || days < 2) return null;
   if (missedOn !== null && (!isDate(missedOn) || missedOn > today)) return null;
 
   return {
     date: end, effect: 0, noise: 1,
     card: {
       kind: "game_streak", id: "game_streak", filter: "Challenges",
-      title: { number: formatNumber(days, 0), measure: days === 1 ? "day" : "days" },
+      title: { number: formatNumber(days, 0), measure: "days" },
       subtitle: "posted in every game, best run yet",
       source_note: `Game streak log · ${formatWinDate(start, today)} through ${formatWinDate(end, today)}`,
       chart: {

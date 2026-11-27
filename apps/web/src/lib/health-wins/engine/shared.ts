@@ -66,8 +66,32 @@ export function formatNumber(value: number, digits = 1): string {
   return formatProgressNumber(value, "full", digits);
 }
 
+function decimalDistance(value: number): string {
+  const digits = Math.abs(value) < 10 ? 2 : 1;
+  return value.toLocaleString("en-US", {
+    useGrouping: false, minimumFractionDigits: digits, maximumFractionDigits: digits,
+  });
+}
+
+export function roundHealthWinDistance(value: number): number {
+  return Number(decimalDistance(value));
+}
+
+/** Standing totals and on-foot records have always used whole-unit headlines. */
+export function formatHealthWinDistance(value: number, style?: "whole"): string {
+  if (style === "whole") return formatNumber(value, 0);
+  if (value > 0 && value < 0.01) return "<0.01";
+  return decimalDistance(value);
+}
+
+const KM_PER_MILE = 1.609344;
+
 export function milesFromKm(km: number): number {
-  return km / 1.609344;
+  return km / KM_PER_MILE;
+}
+
+export function kmFromMiles(miles: number): number {
+  return miles * KM_PER_MILE;
 }
 
 export function formatDuration(minutes: number): string {

@@ -402,6 +402,38 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     expect(hidden.card.chart).toEqual({ type: "hidden" });
   });
 
+  it("serves game distances and heights in the requested units from one sealed set", async () => {
+    const auth = await fixture();
+    source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
+      const result = data(today);
+      result.input.games = [
+        { exercise: "run", unit: "miles", total: 7.75, landmarksPassed: [], next: null, bestStreak: null },
+        { exercise: "squats", unit: "reps", total: 83, landmarksPassed: [],
+          next: { id: "christ-the-redeemer", height: 125, toGo: 42 }, bestStreak: null },
+      ];
+      return result;
+    });
+    const metric = await readHealthWins(auth, { signal, units: "metric" });
+    const us = await readHealthWins(auth, { signal, units: "us" });
+    const uk = await readHealthWins(auth, { signal, units: "uk" });
+    const run = (set: typeof metric) => set.candidates.find(card => card.title.measure === "running")!;
+    const skyline = (set: typeof metric) => set.candidates.find(card => card.title.measure === "squats")!;
+    expect(source).toHaveBeenCalledTimes(1);
+    expect([us.setRevision, uk.setRevision]).toEqual([metric.setRevision, metric.setRevision]);
+    expect(run(us).title.number).toBe("8 miles");
+    expect(run(metric).title.number).toBe("12 km");
+    expect(run(uk)).toEqual(run(us));
+    expect(skyline(us).chart).toMatchObject({ next: { heightUnit: "ft", height: 125, toGo: 42 } });
+    expect(skyline(metric).chart).toMatchObject({ next: { heightUnit: "m", height: expect.closeTo(38.1), toGo: expect.closeTo(12.8016) } });
+    expect(skyline(uk)).toEqual(skyline(metric));
+    const selected = [run(metric), skyline(metric)];
+    const picks = selected.map(card => ({ candidateId: card.id, option: "original" }));
+    const { cards } = await resolveHealthCards(auth, metric.setRevision, picks);
+    expect(cards).toMatchObject(selected.map(card => ({
+      id: card.id, specRevision: card.specRevision, spec: { title: card.title, chart: card.chart },
+    })));
+  });
+
   it("serves one distance trend in the requested units and freezes the selected display", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2034-07-24T12:00:00Z"));
@@ -416,12 +448,12 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
     expect(us.candidates.map(card => card.kind)).toEqual(metric.candidates.map(card => card.kind));
     const km = metric.candidates.find(card => card.kind === "trend_change")!;
     const mi = us.candidates.find(card => card.kind === "trend_change")!;
-    expect(km.chart).toMatchObject({ unit: "km", pills: ["Usual 3.8 km", "Jul 5.3 km"] });
+    expect(km.chart).toMatchObject({ unit: "km", pills: ["Usual 3.77 km", "Jul 5.28 km"] });
     expect(mi.id).not.toBe(km.id);
     expect(mi.winRef).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(km.winRef).toBe(mi.winRef);
-    expect(mi).toMatchObject({ title: { number: "+1 mi" }, chart: { unit: "mi",
-      baseline: expect.closeTo(2.34), delta: expect.closeTo(0.94), pills: ["Usual 2.3 mi", "Jul 3.3 mi"],
+    expect(mi).toMatchObject({ title: { number: "+0.94 mi" }, chart: { unit: "mi",
+      baseline: expect.closeTo(2.34), delta: expect.closeTo(0.94), pills: ["Usual 2.34 mi", "Jul 3.28 mi"],
       series: [2.34, 2.34, 2.34, 3.28].map(value => ({ value: expect.closeTo(value) })),
     } });
     for (const card of [km, mi]) {

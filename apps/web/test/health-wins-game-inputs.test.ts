@@ -54,18 +54,24 @@ describe("game inputs for health wins", () => {
     expect(unclassified.games).toEqual([]);
     expect(unclassified.gameStreak).toMatchObject({ days: 1, start: "2026-11-02", end: "2026-11-02", missedOn: "2026-11-04" });
     expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
-      games: unclassified.games, gameStreak: unclassified.gameStreak })).toMatchObject([
-      { kind: "game_streak", chart: { days: 1, missedOn: "2026-11-04", calendar: [
-        { date: "2026-11-02", state: "posted" }, { date: "2026-11-03", state: "no_game" }, { date: "2026-11-04", state: "missed" },
-        { date: "2026-11-05", state: "no_game" }, { date: "2026-11-06", state: "no_game" }, { date: "2026-11-07", state: "no_game" },
-        { date: "2026-11-08", state: "no_game" },
-      ] } },
-    ]);
+      games: unclassified.games, gameStreak: unclassified.gameStreak })).toEqual([]);
 
     other.state.entries[0].incomplete = true;
     const corrected = gameWinInputs(memberId, today, snapshot, null);
     expect(corrected.gameStreak).toMatchObject({ days: 1, start: "2026-11-03", end: "2026-11-03", missedOn: "2026-11-04" });
     expect(corrected.sourceRevision).not.toBe(original.sourceRevision);
+
+    other.state.entries[0].incomplete = false;
+    post(other, 3, "photo", null);
+    const eligible = gameWinInputs(memberId, today, { ...snapshot, facts: [other] }, null);
+    expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null },
+      games: eligible.games, gameStreak: eligible.gameStreak })).toMatchObject([
+      { kind: "game_streak", chart: { days: 2, calendar: [
+        { date: "2026-11-02", state: "posted" }, { date: "2026-11-03", state: "no_game" }, { date: "2026-11-04", state: "posted" },
+        { date: "2026-11-05", state: "no_game" }, { date: "2026-11-06", state: "no_game" }, { date: "2026-11-07", state: "no_game" },
+        { date: "2026-11-08", state: "no_game" },
+      ] } },
+    ]);
   });
 
   it("revises the streak when a post outside the best run changes a dot, and leaves the open day unmarked", () => {
@@ -93,7 +99,7 @@ describe("game inputs for health wins", () => {
       vaultRuns: { savedAt: "2026-11-05T00:00:00Z", days: [["2026-11-03", 9000] as [string, number]] } }]]), awards: [] };
     const runs = { days: [{ date: "2026-11-01", km: 15 }, { date: "2026-11-02", km: 3 }, { date: "2026-11-03", km: 2.5 }] };
     const result = gameWinInputs(memberId, today, snapshot, runs);
-    // Progress counts meters; the card speaks miles, like the engine's other distance cards.
+    // Keep the unrounded distance that the picker uses to prepare both displays.
     expect(result.games[0]).toMatchObject({ exercise: "run", unit: "miles", total: 6100 / 1609.344, latestDay: "2026-11-03" });
     expect(generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, games: result.games })
       .find(card => card.kind === "game_climb")?.title).toEqual({ number: "4 miles", measure: "running" });
