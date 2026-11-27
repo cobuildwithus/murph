@@ -113,43 +113,37 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
   });
 
   it("persists all transitions for a lapsed member, incrementing only on change", async () => {
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 0 });
     for (const [mode, revision] of [
-      ["notice", 0], ["off", 1], ["off", 1], ["notice", 2], ["detail", 3], ["detail", 3],
-      ["notice", 4], ["detail", 5], ["off", 6],
+      ["notice", 0], ["off", 1], ["detail", 2], ["off", 3], ["notice", 4], ["detail", 4],
     ] as const) {
       const result = await postMode(mode);
       expect(result.status).toBe(200);
-      expect(await result.json()).toEqual({ messageMode: mode });
-      await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: mode, clinicalRecordMessageRevision: revision });
+      expect(await result.json()).toEqual({ messageMode: mode === "notice" ? "detail" : mode });
+      await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: mode === "notice" ? "detail" : mode, clinicalRecordMessageRevision: revision });
     }
-    const rejected = await postMode("detail");
-    expect(rejected.status).toBe(409);
-    expect((await rejected.json()).error.code).toBe("CLINICAL_RECORD_NOTICE_REQUIRED");
     expect((await postMode("unknown")).status).toBe(400);
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 6 });
-    const where = { memberId, scope: "feature.clinical-record-message-detail" };
-    await expect(getPrisma().hostedConsentEvent.findMany({ where, select: { metadataJson: true }, orderBy: { createdAt: "asc" } }))
-      .resolves.toEqual([{ metadataJson: { revision: 3 } }, { metadataJson: { revision: 5 } }]);
-    await expect(getPrisma().hostedConsentGrant.count({ where })).resolves.toBe(0);
+    expect(await getPrisma().hostedConsentEvent.count({
+      where: { memberId, scope: "feature.clinical-record-message-detail" },
+    })).toBe(0);
   });
 
   it("withdraws detail atomically and leaves it off across retries and reconsent", async () => {
     const prisma = getPrisma();
     expect((await postMode("detail")).status).toBe(200);
     await withdrawHostedHealthDataConsent({ memberId, prisma });
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
     expect((await postMode("notice")).status).toBe(403);
     expect((await postMode("off")).status).toBe(200);
     await withdrawHostedHealthDataConsent({ memberId, prisma });
     await recordHostedLaunchRequiredConsent({ memberId, prisma, scope: "launch.health-data" });
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 2 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
   });
 
   it("rejects extra keys before changing the preference", async () => {
     const response = await setPreference(request("message-preference", "POST", { mode: "off", extra: true }));
     expect(response.status).toBe(400);
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 0 });
   });
 
   it("allows opting out when product access blocks notice and detail", async () => {
@@ -159,7 +153,7 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
       expect(response.status).toBe(403);
       expect((await response.json()).error.code).toBe("HOSTED_ACCESS_REQUIRED");
     }
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 0 });
     expect((await postMode("off")).status).toBe(200);
     await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "off", clinicalRecordMessageRevision: 1 });
   });
@@ -169,7 +163,7 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     await getPrisma().hostedAuthRecord.delete({ where: { model_id: { model: "session", id: session.sessionId } } });
     await expect(setClinicalRecordMessageMode(auth, "off")).rejects.toMatchObject({ httpStatus: 401 });
     expect((await postMode("off")).status).toBe(401);
-    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+    await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "detail", clinicalRecordMessageRevision: 0 });
   });
 
   it("shares the daily-grant projection across list, complete and removal", async () => {

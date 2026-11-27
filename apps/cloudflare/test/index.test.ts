@@ -4835,7 +4835,7 @@ describe("deployment standby serving proof", () => {
         clinicalNoticeRevision: revision }, candidate: null, previous: null });
       const response = await attest();
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(await response.json()).toMatchObject({ nonce, runner: revision ?? 0, cloudflarePort: 3 });
+      expect(await response.json()).toMatchObject({ nonce, runner: revision ?? 0, cloudflarePort: 4 });
     }
   });
 

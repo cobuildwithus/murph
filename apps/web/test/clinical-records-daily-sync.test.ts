@@ -89,7 +89,7 @@ describe("daily clinical admission", () => {
     const fetchImpl = vi.fn(async (url: URL | RequestInfo) => {
       if (reason === "fetch_failed") throw new Error("synthetic transport failure");
       if (reason === "port_unavailable") return new Response("{}", { status: 503 });
-      return Response.json({ nonce: new URL(String(url)).searchParams.get("nonce"), version: "synthetic", runner: 3, cloudflarePort: 3 });
+      return Response.json({ nonce: new URL(String(url)).searchParams.get("nonce"), version: "synthetic", runner: 4, cloudflarePort: 4 });
     });
     const control = vi.spyOn(hostedControl, "readHostedExecutionControlClientIfConfigured").mockReturnValue(
       createCloudflareHostedControlClient({ baseUrl: "https://port.example.test", getBearerToken: async () => "synthetic", fetchImpl }));

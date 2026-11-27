@@ -173,8 +173,11 @@ The ledger's first body line contains only compact JSON controls; its source
 mappings follow under `## Sources` in the same document. History growth cannot
 exhaust the bounded control read. Compact legacy JSON remains readable and the
 normal capture pass separates legacy mappings without discarding them. A
-successful account disconnect updates this same ledger immediately using the
-returned exact account ID and the Knowledge writer's revision check.
+successful assistant-initiated disconnect updates this same ledger immediately
+using the returned exact account ID and the Knowledge writer's revision check.
+A removal from companion Settings revokes provider access. Saved plans for that
+account can still enter upcoming context until the next successful morning
+inventory reconciliation removes its ID from the ledger.
 
 The snapshot reader performs a bounded local read (128 KiB) and injects at most
 8 KiB of upcoming navigation and details. Projection work runs in the existing

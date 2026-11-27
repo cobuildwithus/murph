@@ -1,3 +1,4 @@
+import { personalConnectedAppsMemberRequired } from "@/src/lib/connected-apps/personal-member";
 import {
   hostedConnectedAppsRequestSchema,
   hostedConnectedAppsResponseSchema,
@@ -56,11 +57,7 @@ export const POST = withJsonError(async (request: Request) => {
   if (await isHostedThreadContainerMember({ memberId, prisma: getPrisma() })) {
     const groupSafeRequest = resolveGroupSafeConnectedAppsRequest(parsed.data);
     if (!groupSafeRequest) {
-      throw hostedOnboardingError({
-        code: "CONNECTED_APPS_PERSONAL_MEMBER_REQUIRED",
-        httpStatus: 403,
-        message: "Personal connected apps are unavailable in a group chat.",
-      });
+      throw personalConnectedAppsMemberRequired();
     }
     connectedAppsRequest = groupSafeRequest;
   }

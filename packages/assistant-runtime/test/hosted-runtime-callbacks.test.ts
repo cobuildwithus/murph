@@ -4940,7 +4940,7 @@ describe("hosted runtime callbacks", () => {
   });
 
   it.each(["revoked", "second recipient", "opted out", "line blocked"] as const)("refuses clinical outbox preflight for %s without sending text to Web", async reason => {
-    const idempotencyKey = "clinical-change:v1:synthetic-run:notice";
+    const idempotencyKey = "clinical-change:v1:synthetic-run:detail:turn_" + "b".repeat(32);
     const target = "synthetic-private-thread";
     const effect = createEffect({ channel: "linq", idempotencyKey, threadId: target, threadIsDirect: true,
       bindingDeliveryKind: "thread", bindingDeliveryTarget: reason === "second recipient" ? "synthetic-alternate-thread" : target, message: "Synthetic message." });

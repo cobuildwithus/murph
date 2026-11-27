@@ -39,8 +39,8 @@ describe('daily hospital notification integration', () => {
     } finally { await rm(vault, { recursive: true, force: true }) }
   })
 
-  it.each(['notice', 'detail', 'off'] as const)('daily clinical notification journey %s', async mode => {
-    const vault = await mkdtemp(path.join(tmpdir(), 'clinical-notice-journey-'))
+  it.each(['detail', 'off'] as const)('daily clinical notification journey %s', async mode => {
+    const vault = await mkdtemp(path.join(tmpdir(), 'clinical-review-journey-'))
     try {
       await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
       const threadId = 'synthetic-private-thread'
@@ -50,13 +50,8 @@ describe('daily hospital notification integration', () => {
       await queueClinicalChange(input)
       const intents = await listAssistantOutboxIntents(vault)
       const { jobs } = await readAssistantCronStore(resolveAssistantStatePaths(vault))
-      expect(intents).toHaveLength(mode === 'notice' ? 1 : 0)
+      expect(intents).toHaveLength(0)
       expect(jobs).toHaveLength(mode === 'detail' ? 1 : 0)
-      if (mode === 'notice') {
-        expect(intents[0]).toMatchObject({ message: 'New records came in. Want me to go through them?',
-          channel: 'linq', threadId, threadIsDirect: true, answeredMailboxItemIds: [],
-          deliveryIdempotencyKey: 'clinical-change:v1:synthetic-origin:notice' })
-      }
       if (mode === 'detail') {
         const job = jobs[0]!
         expect(job).toMatchObject({ keepAfterRun: false, schedule: { kind: 'at' }, clinicalChange: { runId: input.runId } })

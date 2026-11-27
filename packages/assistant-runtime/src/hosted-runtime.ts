@@ -1,4 +1,3 @@
-import { clinicalChangeDeliveryKey } from "@murphai/hosted-execution/clinical-records-boundary";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { getHostedSystemMailboxModelFreeRouteActions } from "./hosted-runtime/mailbox-routing.ts";
 import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
@@ -1400,7 +1399,6 @@ function readHostedSystemMailboxCheckpointPreparationRecordItem(
 
 function exactSystemMailboxDeliveryKey(item: HostedSystemMailboxCheckpointPreparationRecordItem): string {
   const wake = item.wake;
-  if (wake.kind === "clinical-records.change-recorded") return clinicalChangeDeliveryKey(wake.runId, "notice");
   return wake.kind === "assistant.notification.requested" ? wake.notification.deliveryIdempotencyKey ?? "" : "";
 }
 
@@ -4060,7 +4058,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const recordItem = exactDeliveryRecordItem
             ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
           const ownsExactModelFreeDelivery = recordItem !== null
-            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem, exactDeliveryIntentState !== null);
+            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
           const preemptBeforeExactDelivery =
             shouldPreemptHostedSystemMailboxExactDelivery({
               assistantCronDueNow: projectedWake.assistantCronDueNow,
@@ -7235,13 +7233,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
       };
       let pendingCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null = null;
-      const readBackgroundCheckpointWaitDeadline = (): number | null => {
-        if (options.shutdownSignal?.aborted) return null;
+      const readBackgroundCheckpointWait = () => {
+        const noWait = { deadline: null, clinicalApplyDrained: null };
+        if (options.shutdownSignal?.aborted) return noWait;
         const effects = readOutstandingDurableCheckpointEffects();
-        if (hostedDurableEffectsCheckpointIsDue(effects)) return null;
+        if (hostedDurableEffectsCheckpointIsDue(effects)) return noWait;
+        const clinicalApplies = workspaceSystemWork.readClinicalApplies();
+        const clinicalDeadline = clinicalEnrichmentController?.activeDeadline(clinicalApplies.pending) ?? null;
         const backgroundReadDeadline = resolveHostedBackgroundReadCheckpointDeadline({
           assistantAskDeadline: detachedAssistantAskController?.activeDeadline() ?? null,
-          clinicalDeadline: clinicalEnrichmentController?.activeDeadline() ?? null,
+          clinicalDeadline,
           pendingCheckpointWork: readClinicalPendingCheckpointWork(),
         });
         let workDeadline = !runtimeOwnerHandoffRequested
@@ -7250,7 +7251,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && backgroundReadDeadline > Date.now()
             ? backgroundReadDeadline
             : null;
-        if (imageGenerationController?.hasCompleted()) return Date.now();
+        if (imageGenerationController?.hasCompleted()) return { ...noWait, deadline: Date.now() };
         if (
           imageGenerationController?.hasWork()
           && effects.length === 0
@@ -7258,9 +7259,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         ) {
           workDeadline ??= Date.now() + runnerIdleTtlMs;
         }
-        return workDeadline === null
-          ? null
-          : Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects));
+        if (workDeadline === null) return noWait;
+        return {
+          deadline: Math.min(workDeadline, readHostedDurableEffectsCheckpointStartByMs(effects)),
+          clinicalApplyDrained: resolveClinicalApplyDrainSignal(
+            clinicalDeadline, backgroundReadDeadline, clinicalApplies.drained,
+          ),
+        };
       };
       const prepareDirtyRuntimeCheckpointAttempt = async (
         initialCheckpointWakeLatencySeed: HostedRuntimeWakeLatencySeed | null,
@@ -7306,8 +7311,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           setIdleCheckpointStartBy(Date.now());
         }
         // Projected wakes share the full wait deadline, including retained work.
-        const backgroundWorkDeadline = readBackgroundCheckpointWaitDeadline();
-        const waitDeadlineMs = Math.max(idleCheckpointStartByMs, backgroundWorkDeadline ?? 0);
+        const backgroundWait = readBackgroundCheckpointWait();
+        const waitDeadlineMs = Math.max(idleCheckpointStartByMs, backgroundWait.deadline ?? 0);
         const hotProjectedWake = resolveHotProjectedWake(waitDeadlineMs);
         if (
           hotProjectedWake !== null
@@ -7325,6 +7330,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         }
         // Share the existing wakeable wait without moving the batching window.
         const dirtyWaitResult = await waitForHostedRuntimeDirtyWindow({
+          clinicalApplyDrained: backgroundWait.clinicalApplyDrained,
           idleCheckpointStartByMs: waitDeadlineMs,
           projectedWakeAtMs: hotProjectedWake?.wakeAtMs ?? null,
           runtimeAbortSignal: runtimeAbortController.signal,
@@ -7356,11 +7362,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           pendingCheckpointWakeLatencySeed ??= latencySeed;
           return null;
         }
-        if (dirtyWaitResult.kind === "projected_wake") {
+        if (dirtyWaitResult.kind === "recheck") {
           pendingCheckpointWakeLatencySeed ??= checkpointWakeLatencySeed;
           return null;
         }
-        if (readBackgroundCheckpointWaitDeadline() !== null) {
+        if (readBackgroundCheckpointWait().deadline !== null) {
           // Recheck work that arrived during the wait and drain staged results.
           return null;
         }
@@ -8439,7 +8445,7 @@ async function runHostedInboxMediaRetentionOnlyCheckpoint(input: {
     if (waited.kind === "external_wake") {
       throw new HostedRuntimeCheckpointInterruptedByWakeError({ notification: waited.notification });
     }
-  } while (waited.kind === "projected_wake");
+  } while (waited.kind === "recheck");
   const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
     assertRuntimeNotAborted: input.assertRuntimeNotAborted,
     checkpointRequestBuilder: input.checkpointRequestBuilder,
@@ -8487,7 +8493,7 @@ const activeHostedRuntimeDeferredUsageCaptures =
 type HostedRuntimeDirtyWaitResult =
   | { kind: "external_wake"; notification: RuntimeWakeNotification }
   | { kind: "idle_checkpoint"; trigger: "idle_window" | "shutdown_signal" }
-  | { kind: "projected_wake" };
+  | { kind: "recheck" };
 
 type HostedRuntimeIdleCheckpointTrigger =
   | "idle_window"
@@ -9040,17 +9046,31 @@ function createHostedRuntimeCheckpointWakeInterruption(input: {
   };
 }
 
-async function waitForHostedRuntimeDirtyWindow(input: {
+function resolveClinicalApplyDrainSignal(
+  clinicalDeadline: number | null,
+  backgroundReadDeadline: number | null,
+  drained: AbortSignal,
+): AbortSignal | null {
+  return clinicalDeadline !== null && clinicalDeadline === backgroundReadDeadline ? drained : null;
+}
+
+interface HostedRuntimeDirtyWindowInput {
+  clinicalApplyDrained?: AbortSignal | null;
   idleCheckpointStartByMs: number;
   projectedWakeAtMs: number | null;
   runtimeAbortSignal: AbortSignal;
   runtimeWakeSignal: RuntimeWakeSignal | null;
   shutdownSignal: AbortSignal | null;
-}): Promise<HostedRuntimeDirtyWaitResult> {
-  const nowMs = Date.now();
+}
+
+function readImmediateHostedRuntimeDirtyWaitResult(
+  input: HostedRuntimeDirtyWindowInput,
+  nowMs: number,
+): HostedRuntimeDirtyWaitResult | null {
   if (input.shutdownSignal?.aborted === true) {
     return { kind: "idle_checkpoint", trigger: "shutdown_signal" };
   }
+  if (input.clinicalApplyDrained?.aborted) return { kind: "recheck" };
   if (input.idleCheckpointStartByMs <= nowMs) {
     return { kind: "idle_checkpoint", trigger: "idle_window" };
   }
@@ -9058,8 +9078,17 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     input.projectedWakeAtMs !== null
     && input.projectedWakeAtMs <= nowMs
   ) {
-    return { kind: "projected_wake" };
+    return { kind: "recheck" };
   }
+  return null;
+}
+
+async function waitForHostedRuntimeDirtyWindow(
+  input: HostedRuntimeDirtyWindowInput,
+): Promise<HostedRuntimeDirtyWaitResult> {
+  const nowMs = Date.now();
+  const immediateResult = readImmediateHostedRuntimeDirtyWaitResult(input, nowMs);
+  if (immediateResult) return immediateResult;
 
   const waitUntilMs = input.projectedWakeAtMs === null
     ? input.idleCheckpointStartByMs
@@ -9086,7 +9115,7 @@ async function waitForHostedRuntimeDirtyWindow(input: {
         && input.projectedWakeAtMs < input.idleCheckpointStartByMs;
       settle(() => resolve(
         projectedWakeIsFirst
-          ? { kind: "projected_wake" }
+          ? { kind: "recheck" }
           : { kind: "idle_checkpoint", trigger: "idle_window" },
       ));
     }, timeoutDelayMs);
@@ -9096,8 +9125,14 @@ async function waitForHostedRuntimeDirtyWindow(input: {
     const shutdown = () => {
       settle(() => resolve({ kind: "idle_checkpoint", trigger: "shutdown_signal" }));
     };
+    const clinicalApplyDrained = () => {
+      // Cancel the outstanding wait. If it already consumed a wake, deliver that notification intact.
+      if (input.runtimeWakeSignal) wakeAbortController.abort();
+      else settle(() => resolve({ kind: "recheck" }));
+    };
     const cleanup = () => {
       clearTimeout(timer);
+      input.clinicalApplyDrained?.removeEventListener("abort", clinicalApplyDrained);
       input.runtimeAbortSignal.removeEventListener("abort", abort);
       input.shutdownSignal?.removeEventListener("abort", shutdown);
       if (!wakeAbortController.signal.aborted) {
@@ -9117,10 +9152,12 @@ async function waitForHostedRuntimeDirtyWindow(input: {
 
     input.runtimeAbortSignal.addEventListener("abort", abort, { once: true });
     input.shutdownSignal?.addEventListener("abort", shutdown, { once: true });
+    input.clinicalApplyDrained?.addEventListener("abort", clinicalApplyDrained, { once: true });
     input.runtimeWakeSignal?.wait(wakeAbortController.signal).then(
       (notification) => settle(() => resolve({ kind: "external_wake", notification })),
       (error) => {
-        if (settled && wakeAbortController.signal.aborted) {
+        if (wakeAbortController.signal.aborted) {
+          settle(() => resolve({ kind: "recheck" }));
           return;
         }
         settle(() => reject(error));

@@ -301,8 +301,9 @@ export function getHostedConnectedAppsWritePolicy(
 }
 
 export function formatHostedConnectedAppToolkitLabel(toolkit: string): string {
-  return CONNECTED_APP_TOOLKIT_LABELS[toolkit]
-    ?? toolkit
+  return Object.hasOwn(CONNECTED_APP_TOOLKIT_LABELS, toolkit)
+    ? CONNECTED_APP_TOOLKIT_LABELS[toolkit]!
+    : toolkit
       .split(/[-_]+/u)
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

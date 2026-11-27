@@ -1,3 +1,4 @@
+import { APP_CONNECT_RETURN_URLS } from "@/src/lib/companion/connect-return";
 import { clinicalReturnQuery, CLINICAL_RETURN_QUERY_LIMIT, isClinicalReturnState } from "@/src/lib/clinical-records/return-query";
 import { isDeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 
@@ -7,10 +8,6 @@ import { isDeviceSyncAppConnectReturn } from "@murphai/device-syncd/types";
 // the sign-in sheet the app opened is waiting. Finishing the connection takes
 // the app's bearer credential and the proof its start returned; this URL alone
 // finishes nothing.
-const APP_CONNECT_RETURN_URLS = {
-  ios: "ai.withmurph.app://connect-return",
-  "ios-dev": "ai.withmurph.app.dev://connect-return",
-} as const;
 const APP_CONNECT_RETURN_QUERY_MAX_LENGTH = 2_048;
 
 export async function GET(

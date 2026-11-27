@@ -106,7 +106,7 @@ async function seed(bubble?: number | "final") {
   const messageId = `retry-original-${nonce}`;
   const retryId = `retry-replacement-${nonce}`;
   const turnId = "turn_" + nonce.replaceAll("-", "");
-  const finalKey = clinicalReplyTurnKey(clinicalChangeDeliveryKey(nonce, "detail"), turnId);
+  const finalKey = clinicalReplyTurnKey(clinicalChangeDeliveryKey(nonce), turnId);
   const idempotencyKey = bubble === undefined ? `retry-intent-${nonce}`
     : bubble === "final" ? finalKey
     : buildAssistantReplyBubbleDeliveryIdempotencyKey({ deliveryIdempotencyKey: finalKey, turnId, index: bubble });

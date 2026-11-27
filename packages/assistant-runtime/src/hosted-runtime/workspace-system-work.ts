@@ -50,6 +50,8 @@ export function createHostedWorkspaceSystemWork(input: {
 }) {
   let paused = true;
   let cancellation = new AbortController();
+  let pendingClinicalApplies = 0;
+  let clinicalApplyDrained = new AbortController();
   const completed = async (
     preparation: HostedSystemMailboxCheckpointPreparation,
   ): Promise<void> => {
@@ -120,6 +122,8 @@ export function createHostedWorkspaceSystemWork(input: {
     for (const routeAction of HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS) {
       const shouldYieldBackgroundMaintenance = yieldsFor(routeAction);
       if (!allowedRouteActions.includes(routeAction) || shouldYieldBackgroundMaintenance?.()) continue;
+      const isClinicalApply = routeAction === "apply-clinical-enrichment";
+      if (isClinicalApply) pendingClinicalApplies++;
       const completion = (async () => {
         try {
           const { result: preparation } = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -130,7 +134,7 @@ export function createHostedWorkspaceSystemWork(input: {
               allowedRouteActions: [routeAction],
               pendingOnly: true,
               runtimeLogContext: input.runnerInput.runtimeLogContext,
-              retainProcessedItemUntilRecorded: routeAction !== "apply-clinical-enrichment",
+              retainProcessedItemUntilRecorded: !isClinicalApply,
               shouldYieldDeviceImportPreparation: input.runnerInput.shouldYieldDeviceImportPreparation,
               shouldYieldBackgroundMaintenance,
               backgroundMaintenanceYieldReason: input.runnerInput.backgroundMaintenanceYieldReason,
@@ -140,9 +144,16 @@ export function createHostedWorkspaceSystemWork(input: {
           if (!preparation) return;
           await completed(preparation);
           // Several jobs' cached units can be due at once; apply them back to back.
-          if (routeAction === "apply-clinical-enrichment") kick([routeAction]);
+          if (isClinicalApply) kick([routeAction]);
         } catch (error) {
           input.onFailure(error, !paused);
+        } finally {
+          // A chained apply takes ownership above before its predecessor settles.
+          if (isClinicalApply && --pendingClinicalApplies === 0) {
+            const drained = clinicalApplyDrained;
+            clinicalApplyDrained = new AbortController();
+            drained.abort();
+          }
         }
       })();
       input.runnerInput.trackLocalWorkspaceMutationCompletion?.(completion);
@@ -191,6 +202,8 @@ export function createHostedWorkspaceSystemWork(input: {
   };
   return {
     kick,
+    // A checkpoint can start waiting while the provider is still preparing its first apply.
+    readClinicalApplies: () => ({ pending: pendingClinicalApplies > 0, drained: clinicalApplyDrained.signal }),
     recoverProjectedWake,
     async waitForCompletion(
       wakeSignal: RuntimeWakeSignal | null,

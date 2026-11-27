@@ -261,7 +261,7 @@ async function renderJoinResumePage(searchParams: {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
-    clinicalRecordMessageMode: "notice",
+    clinicalRecordMessageMode: "detail",
     runtimeDormantAt: null,
     runtimeLastInteractionAt: null,
     clinicalRecordMessageRevision: 0,

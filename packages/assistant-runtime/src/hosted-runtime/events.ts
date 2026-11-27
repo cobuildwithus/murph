@@ -37,6 +37,7 @@ import type {
 } from "./models.ts";
 import {
   HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -172,7 +173,10 @@ async function executeClinicalChange(input: Parameters<typeof executeHostedMailb
     ...createNoopMailboxEffect({ conversationMetrics: null, mailboxLane: "clinical-records" }) };
   return { bootstrapResult: null, ...createNoopMailboxEffect({
     conversationMetrics: null, mailboxLane: "clinical-records", nextWakeAt: occurredAt,
-    ...(queued.deliveryIntentIds?.length ? { deliveryIntentIds: queued.deliveryIntentIds } : {}),
+    // A replayed saved reply is outbox work. Its delivery wake can run while model allowance is exhausted.
+    ...(queued.deliveryIntentIds.length
+      ? { deliveryIntentIds: queued.deliveryIntentIds, nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON }
+      : {}),
   }) };
 }
 

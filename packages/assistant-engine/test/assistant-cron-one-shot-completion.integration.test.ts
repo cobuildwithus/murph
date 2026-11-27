@@ -137,7 +137,7 @@ async function expectTomorrow(context: Awaited<ReturnType<typeof fixture>>) {
 }
 
 describe('one-shot completion against real registries', () => {
-  it.each(['complete', 'withdraw during generation', 'pause before save'] as const)('clinical detail reply and restored wake: %s', async scenario => {
+  it.each(['complete', 'withdraw during generation', 'pause before save', 'model unavailable'] as const)('clinical detail reply and restored wake: %s', async scenario => {
     const { parentRoot, vaultRoot: vault } = await createTempVaultContext('clinical-detail-')
     roots.push(parentRoot)
     await initializeVault({ vaultRoot: vault })
@@ -151,6 +151,7 @@ describe('one-shot completion against real registries', () => {
     }) } }
     const generate = boundary.provider.getMockImplementation()!
     boundary.provider.mockImplementationOnce(async args => {
+      if (scenario === 'model unavailable') throw new Error('Synthetic model unavailable')
       const result = await generate(args)
       if (scenario !== 'complete') authorized = false
       return result
@@ -161,6 +162,14 @@ describe('one-shot completion against real registries', () => {
     const result = await runAssistantCronJobNow({ vault, job: job!.jobId, trigger: 'scheduled', executionContext: context })
     expect(boundary.provider).toHaveBeenCalledOnce()
     expect(boundary.provider.mock.calls[0]![0].input.prompt).toContain(job!.clinicalChange!.receiptRef)
+    if (scenario === 'model unavailable') {
+      expect(result.run.outcome).toBe('failed')
+      expect(boundary.deliver).not.toHaveBeenCalled()
+      const { jobs } = await cronStore.readAssistantCronStore(resolveAssistantStatePaths(vault))
+      expect(jobs).toHaveLength(1)
+      expect(jobs[0]?.state.nextRunAt).toBeTruthy()
+      return
+    }
     if (scenario !== 'complete') {
       expect(boundary.deliver).not.toHaveBeenCalled()
       expect(result.run.outcome).toBe('skipped_gate')
