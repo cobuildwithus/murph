@@ -372,12 +372,19 @@ Official patient-app request contracts: [radiology](https://fhir.epic.com/Specif
 Companion sources derives optional `forwardTo` from the current verified sender and signed
 personal reply alias used by Settings. Suspension, missing verified-email fields, a missing
 routing key or unavailable signing configuration suppress the address.
+Connect Web to Vercel Global Config (`GLOBAL_CONFIG`) before deploying Web.
+Leave the boolean `clinicalPortalForwarding` absent or false until the minimizing
+Worker, compatible runner and native reader are live. Then enable it. Setting
+it false withdraws the address on subsequent sources reads without redeploying.
+An unavailable config also suppresses advertising.
 
 On the personal alias, ingress checks the authenticated outer sender and current route first.
 It recognizes inline and attached forwards, treats the inner From as evidence and matches it
 locally against the same committed public directory as Web. Exact names include brand,
-facility and aliases. An organization domain or exact name must identify a single FHIR
-base across the whole directory. Shared mail services identify a place only by name.
+facility and aliases. Forwarded headers and known portal domains identify notices. Member prose and quoted
+history supply no matching evidence. On an organization domain, a name can choose
+among distinct FHIR bases. Exact public names alone or generic facility names open
+Find with that name typed. Shared services cannot identify a specific provider.
 The public bootstrap discards bodies and a recognized forward to a group is rejected.
 
 For a recognized forward, private email storage holds a replacement message containing

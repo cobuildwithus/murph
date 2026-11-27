@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 const workflow = (name) => readFile(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
 
-function runStep(source, name, env) {
+function runStep(source, name, env, cwd) {
   const start = source.indexOf(`      - name: ${name}\n`);
   assert.ok(start >= 0, `Missing workflow step: ${name}`);
   const rest = source.slice(start);
@@ -20,11 +20,31 @@ function runStep(source, name, env) {
   const end = lines.findIndex((line) => line !== "" && !line.startsWith("          "));
   const script = lines.slice(0, end < 0 ? lines.length : end).join("\n");
   return spawnSync("bash", ["-c", script.replace(/^ {10}/gmu, "")], {
+    cwd,
     env: { PATH: process.env.PATH, ...env },
     encoding: "utf8",
     timeout: 5_000,
   });
 }
+
+test("directory refresh checks the tracked artifact and fails when it is missing", async () => {
+  const source = await workflow("clinical-provider-directory.yml");
+  const step = "Publish changed data for directory review";
+  const cwd = await mkdtemp(path.join(tmpdir(), "directory-refresh-"));
+  try {
+    const missing = runStep(source, step, {}, cwd);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stdout, /Missing directory artifact: packages\/clinical-records\/provider-directory\.v2\.json/u);
+    const file = "packages/clinical-records/provider-directory.v2.json";
+    await mkdir(path.join(cwd, path.dirname(file)), { recursive: true });
+    await writeFile(path.join(cwd, file), "{}");
+    assert.equal(spawnSync("git", ["init", "--quiet"], { cwd }).status, 0);
+    assert.equal(spawnSync("git", ["add", "--", file], { cwd }).status, 0);
+    assert.equal(runStep(source, step, {}, cwd).status, 0);
+  } finally {
+    await rm(cwd, { recursive: true });
+  }
+});
 
 test("release admission requires every actual shard to succeed", async () => {
   const source = await workflow("host-support.yml");

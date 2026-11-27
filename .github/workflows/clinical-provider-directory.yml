@@ -41,7 +41,9 @@ jobs:
           GIT_CONFIG_KEY_0: core.hooksPath
           GIT_CONFIG_VALUE_0: /dev/null
         run: |
-          file=apps/web/src/lib/clinical-records/provider-directory.v2.json
+          file=packages/clinical-records/provider-directory.v2.json
+          [[ -s "$file" ]] || { echo "::error::Missing directory artifact: $file"; exit 1; }
+          git ls-files --error-unmatch -- "$file" >/dev/null
           git diff --quiet -- "$file" && exit 0
           branch="records/epic-directory-$(git hash-object "$file")"
           gh auth setup-git --hostname github.com

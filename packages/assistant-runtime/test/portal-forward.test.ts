@@ -17,6 +17,9 @@ it("hydrates the private Find suggestion only for a direct portal wake and falls
   expect(readRawEmailMessage).not.toHaveBeenCalled();
   expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(summary));
   expect(readRawEmailMessage).toHaveBeenCalledExactlyOnceWith("opaque");
+  const search = portalDiscoverySummary({ brandName: "Crescent Pavilion" });
+  readRawEmailMessage.mockResolvedValueOnce(new TextEncoder().encode(`Content-Type: text/plain\r\n\r\n${search}`));
+  expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(search));
   readRawEmailMessage.mockResolvedValueOnce(null);
   expect(await readPortalForwardForAssistant(wake, port)).toBe(portalDiscoveryAssistantInput(forwardedPortalFallback));
   readRawEmailMessage.mockResolvedValueOnce(new TextEncoder().encode(`Content-Type: text/plain\r\n\r\n${summary} https://untrusted.test`));

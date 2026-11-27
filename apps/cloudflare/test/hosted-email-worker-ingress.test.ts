@@ -596,7 +596,36 @@ describe("hosted email worker ingress", () => {
     })));
   });
 
-  it.each(["inline", "apple", "attached", "group"] as const)("minimizes an authorized %s portal forward before storage and callbacks", async style => {
+  it.each(["reply", "group-reply", "reminder", "nested", "reference", "in-reply-to", "over-budget"] as const)("retains ordinary %s mail and the member's text", async kind => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const config = { domain: "mail.example.test", localPart: "assistant", signingSecret: "super-secret-signing-key" };
+    const alias = kind === "group-reply"
+      ? await createHostedEmailGroupReplyAliasRoute({ ...config, groupId: "hgrp_AAAAAAAAAAAAAAAA" })
+      : await createHostedEmailUserReplyAliasRoute({ ...config, userId: "sample-forwarder" });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(Response.json({ userId: "sample-forwarder" }));
+    const from = "forwarder@example.test";
+    const words = "Please move the training session.";
+    const reply = kind === "reply" || kind === "group-reply";
+    const quoted = reply ? "Assistant <assistant@mail.example.test>" : "Scheduling <desk@calendar.test>";
+    const body = kind === "nested"
+      ? `${words}\r\n\r\nFrom: Scheduling <desk@calendar.test>\r\nSubject: Agenda\r\n\r\n-----Original Message-----\r\nFrom: MyChart <alerts@basin.test>\r\nSubject: Notice`
+      : `${words}\r\n\r\n-----Original Message-----\r\nFrom: ${quoted}\r\nSubject: ${kind === "reminder" ? "Calendar update" : "Patient portal"}\r\n\r\nVisit MyChart for details.`;
+    const parts = Array.from({ length: 65 }, () => "--unit\r\nContent-Disposition: attachment; filename=file.txt\r\n\r\nitem");
+    const inner = ["From: MyChart <alerts@basin.test>", "Content-Type: multipart/mixed; boundary=unit", "", ...parts, "--unit--"].join("\r\n");
+    const raw = kind === "over-budget"
+      ? buildRawEmailWithAttachment({ from, to: alias.address, body: words, attachmentContentType: "message/rfc822",
+        attachmentFileName: "forward.eml", attachmentBase64: Buffer.from(inner).toString("base64") })
+      : buildRawEmail({ from, to: alias.address, body, subject: reply ? "Re: Patient portal" : "Fwd: Schedule",
+        extraHeaders: kind === "reference" || kind === "in-reply-to"
+          ? [`${kind === "reference" ? "References" : "In-Reply-To"}: <hosted.previous@mail.example.test>`] : [] });
+    await handleHostedEmailIngressProduction({ from, raw, to: alias.address }, createWorkerEnv(bucket));
+    const [{ body: wake }] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0]!;
+    expect(wake.textPreview).toContain(words);
+    const stored = await readHostedEmailRawMessage({ bucket, key: TEST_KEY, keyId: "v1", rawMessageKey: wake.rawMessageKey, userId: "sample-forwarder" });
+    expect(new TextDecoder().decode(stored!)).toBe(raw);
+  });
+
+  it.each(["inline", "apple", "attached", "branded", "quoted", "group"] as const)("minimizes an authorized %s portal forward before storage and callbacks", async style => {
     const bucket = new MemoryEncryptedR2Bucket();
     const config = { domain: "mail.example.test", localPart: "assistant", signingSecret: "super-secret-signing-key" };
     const alias = style === "group"
@@ -604,11 +633,13 @@ describe("hosted email worker ingress", () => {
       : await createHostedEmailUserReplyAliasRoute({ ...config, userId: "sample-forwarder" });
     mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(Response.json({ userId: "sample-forwarder" }));
     const from = "forwarder@example.test";
-    const inner = "From: private-sender-marker MyChart <notice@mail.copper-basin.test>\r\nSubject: Portal notice\r\n\r\nprivate-body-marker https://private-link.test/secret";
+    const label = style === "branded" ? "Crescent Gateway" : "private-sender-marker MyChart";
+    const inner = `From: ${label} <notice@mail.copper-basin.test>\r\nSubject: Portal notice\r\n\r\nprivate-body-marker https://private-link.test/secret`;
+    const inline = (style === "apple" ? "Begin forwarded message:" : "---------- Forwarded message ----------") + "\r\n" + inner;
     const raw = style === "attached"
       ? buildRawEmailWithAttachment({ from, to: alias.address, body: "", attachmentBase64: Buffer.from(inner).toString("base64"),
           attachmentContentType: "message/rfc822", attachmentFileName: "private-sender-marker.eml" })
-      : buildRawEmail({ from, to: alias.address, subject: "Fwd: patient portal", body: (style === "apple" ? "Begin forwarded message:" : "---------- Forwarded message ----------") + "\r\n" + inner });
+      : buildRawEmail({ from, to: alias.address, subject: "Fwd: Notification", body: style === "quoted" ? inline.split("\r\n").map(line => "> " + line).join("\r\n") : inline });
     const reject = vi.fn();
     await handleHostedEmailIngressProduction({ from, raw, to: alias.address, setReject: reject }, createWorkerEnv(bucket));
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);

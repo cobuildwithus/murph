@@ -1,4 +1,5 @@
 import "server-only";
+import { get as readGlobalConfig } from "@vercel/global-config";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
 import { hostedMemberPersonalEmailAddress } from "../hosted-onboarding/hosted-email-reply-alias";
 import { getPrisma } from "../prisma";
@@ -19,6 +20,15 @@ export function clinicalLogoPath(id: string) {
     if (typeof value === "string" && companionLogoPath.test(value)) return value;
   }
   return undefined;
+}
+
+async function portalForwardingAdvertised() {
+  if (!process.env.GLOBAL_CONFIG) return false;
+  try {
+    return await readGlobalConfig("clinicalPortalForwarding") === true;
+  } catch {
+    return false;
+  }
 }
 
 export async function readCompanionSources(auth: HostedNativeMemberAuth) {
@@ -63,7 +73,7 @@ export async function readCompanionSources(auth: HostedNativeMemberAuth) {
       emailAuthorization: { select: { verifiedEmailAddressEncrypted: true, verifiedEmailLookupKey: true, verifiedEmailVerifiedAt: true } },
     },
   });
-  const forwardTo = await hostedMemberPersonalEmailAddress(member);
+  const forwardTo = await portalForwardingAdvertised() ? await hostedMemberPersonalEmailAddress(member) : null;
   return { sources, canAdd, ...(forwardTo ? { forwardTo } : {}),
     ...(sources.some(source => source.updates === "daily") ? { messageMode: member.clinicalRecordMessageMode } : {}) };
 }

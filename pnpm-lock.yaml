@@ -328,6 +328,9 @@ importers:
       '@vercel/functions':
         specifier: 3.11.2
         version: 3.11.2(@aws-sdk/credential-provider-web-identity@3.972.88)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      '@vercel/global-config':
+        specifier: 1.5.1
+        version: 1.5.1(@opentelemetry/api@1.9.1)(next@16.4.6(@babel/core@7.29.13)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))
       '@vercel/oidc':
         specifier: ^3.4.1
         version: 3.4.1
@@ -4172,6 +4175,21 @@ packages:
       '@aws-sdk/credential-provider-web-identity':
         optional: true
       ws:
+        optional: true
+
+  '@vercel/global-config-fs@0.1.0':
+    resolution: {integrity: sha512-xxMUwf96H/qKTA4Az+uh3xlVWkwnN3z400P5gex0uUsU8pe99njopYVyKVoUTfu8gN9xbHqaigWaIBr1+lufMg==}
+
+  '@vercel/global-config@1.5.1':
+    resolution: {integrity: sha512-PUJaoyMGuSLdKnBgYIqeH1i6U3G+5noLvvJLqI8IPP5+P0b2Q5EcBBraFRh6ctNY/yTpb40klyLYyE3X0OPmKQ==}
+    engines: {node: '>=14.6'}
+    peerDependencies:
+      '@opentelemetry/api': ^1.7.0
+      next: '>=1'
+    peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
+      next:
         optional: true
 
   '@vercel/oidc@3.2.0':
@@ -11447,6 +11465,15 @@ snapshots:
     optionalDependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.88
       ws: 8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+
+  '@vercel/global-config-fs@0.1.0': {}
+
+  '@vercel/global-config@1.5.1(@opentelemetry/api@1.9.1)(next@16.4.6(@babel/core@7.29.13)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))':
+    dependencies:
+      '@vercel/global-config-fs': 0.1.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      next: 16.4.6(@babel/core@7.29.13)(@opentelemetry/api@1.9.1)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
 
   '@vercel/oidc@3.2.0': {}
 

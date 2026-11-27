@@ -504,25 +504,63 @@ const sharedPortalDomains = new Set([
   "followmyhealth.com", "eclinicalmail.com", "athenahealth.com", "healow.com",
 ]);
 
+const domainIndex = new WeakMap<ClinicalProviderDirectory, Map<string, ClinicalProviderDirectoryEntry[]>>();
+
+function organizationalDomain(host: string) {
+  if (host.length > 253 || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu.test(host)) return null;
+  return getDomain(host, { allowPrivateDomains: true });
+}
+
+function domainEntries(directory: ClinicalProviderDirectory, domain: string) {
+  let index = domainIndex.get(directory);
+  if (!index) {
+    index = new Map();
+    for (const entry of directory.entries) {
+      const host = organizationalDomain(new URL(entry.fhirBaseUrl).hostname);
+      if (!host) continue;
+      const entries = index.get(host) ?? [];
+      entries.push(entry);
+      index.set(host, entries);
+    }
+    domainIndex.set(directory, index);
+  }
+  return index.get(domain) ?? [];
+}
+
+export function isClinicalPortalDomain(directory: ClinicalProviderDirectory, host: string) {
+  const domain = organizationalDomain(host);
+  return !!domain && domainEntries(directory, domain).length > 0;
+}
+
+function publicSenderName(entry: ClinicalProviderDirectoryEntry, name: string) {
+  const matches = (value: string | null) => normalizeDirectoryText(value) === name;
+  for (const value of [entry.brandName, ...entry.aliases]) if (matches(value)) return value;
+  for (const facility of entry.facilities) {
+    for (const value of [facility.name, ...facility.aliases ?? []]) if (matches(value)) return value;
+  }
+  return null;
+}
+
 export function matchClinicalPortalSender(directory: ClinicalProviderDirectory, sender: {
   domain: string;
   displayName: string;
-}): Pick<ClinicalProviderDirectoryEntry, "id" | "brandName"> | null {
-  if (sender.domain.length > 253 || sender.displayName.length > 320
-    || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/iu.test(sender.domain)) return null;
-  const domain = getDomain(sender.domain, { allowPrivateDomains: true });
+}): { id?: string; brandName: string } | null {
+  const domain = organizationalDomain(sender.domain);
+  if (!domain || sender.displayName.length > 320) return null;
   const name = normalizeDirectoryText(sender.displayName.replace(/\b(?:my\s?chart|patient\s+portal|no[- ]?reply)\b/giu, ""));
-  const portals = new Map<string, ClinicalProviderDirectoryEntry>();
-  for (const entry of directory.entries) {
-    const matchesDomain = domain && !sharedPortalDomains.has(domain)
-      && getDomain(new URL(entry.fhirBaseUrl).hostname, { allowPrivateDomains: true }) === domain;
-    const matchesName = name && ([entry.brandName, ...entry.aliases].some(value => normalizeDirectoryText(value) === name)
-      || entry.facilities.some(facility => [facility.name, ...facility.aliases ?? []].some(value => normalizeDirectoryText(value) === name)));
-    if ((matchesDomain || matchesName) && (!portals.has(entry.fhirBaseUrl) || matchesName)) {
-      portals.set(entry.fhirBaseUrl, entry);
+  const candidates = sharedPortalDomains.has(domain) ? [] : domainEntries(directory, domain);
+  const named = name ? candidates.filter(entry => publicSenderName(entry, name)) : [];
+  const portals = named.length ? named : candidates;
+  const first = portals[0];
+  const generic = /^(?:urgent care|family medicine|main campus|primary care|hospital|clinic|medical center|emergency department)$/u.test(name);
+  if (!generic && first && portals.every(entry => entry.fhirBaseUrl === first.fhirBaseUrl)) {
+    return { id: first.id, brandName: first.brandName };
+  }
+  if (name) {
+    for (const entry of directory.entries) {
+      const publicName = publicSenderName(entry, name);
+      if (publicName) return { brandName: publicName };
     }
   }
-  if (portals.size !== 1) return null;
-  const [entry] = portals.values();
-  return { id: entry.id, brandName: entry.brandName };
+  return null;
 }

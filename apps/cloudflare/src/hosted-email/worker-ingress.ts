@@ -269,7 +269,7 @@ async function acceptAuthorizedHostedEmail(input: {
 }) {
   const { env, environment, route, message } = input;
   let { rawBytes, parsedMessage } = input;
-  const portalSender = forwardedPortalSender(parsedMessage);
+  const portalSender = await forwardedPortalSender(parsedMessage, route.routeAddress.split("@")[1]!);
   if (portalSender !== undefined) {
     if (route.authorization !== "signed-reply-alias" || route.groupId !== null) {
       message.setReject?.("Hosted email message was not accepted.");

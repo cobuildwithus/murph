@@ -19,14 +19,30 @@ describe("portal discovery", () => {
     const siblings = Array.from({ length: 23 }, (_, i) => place(`epic-${i}`, shared));
     expect(searchClinicalProviderDirectorySnapshot(directory(siblings), { query: "Copper Basin" }).providers).toHaveLength(20);
     expect(matchClinicalPortalSender(directory(siblings), sender)?.brandName).toBe("Copper Basin");
-    expect(matchClinicalPortalSender(directory([...siblings, place("epic-other", shared + "/other")]), sender)).toBeNull();
+    expect(matchClinicalPortalSender(directory([...siblings, place("epic-other", shared + "/other")]), sender)).toEqual({ brandName: "Copper Basin" });
     expect(matchClinicalPortalSender(directory([]), sender)).toBeNull();
   });
   it("inspects facility aliases beyond the displayed eight", () => {
     const entry = place("epic-one", shared);
     entry.facilities = Array.from({ length: 10 }, (_, n) => ({ city: null, state: null, postalCode: null,
       name: "Department", aliases: n === 9 ? ["Tidal Annex"] : [] }));
-    expect(matchClinicalPortalSender(directory([entry]), { ...sender, displayName: "Tidal Annex MyChart" })?.id).toBe(entry.id);
+    expect(matchClinicalPortalSender(directory([entry]), { ...sender, displayName: "Tidal Annex MyChart" })).toEqual({ brandName: "Tidal Annex" });
+  });
+  it("uses an exact name to choose among portals on one organizational domain", () => {
+    const first = place("epic-east", "https://east.basin.test/r4");
+    const west = { ...place("epic-west", "https://west.basin.test/r4"), brandName: "Basin West" };
+    expect(matchClinicalPortalSender(directory([first, west]), { domain: "mail.basin.test", displayName: "Basin West" }))
+      .toEqual({ id: west.id, brandName: west.brandName });
+  });
+  it.each(["Main Campus", "Urgent Care", "Family Medicine"])("keeps %s as a search on either domain", name => {
+    const entry = { ...place("epic-one", "https://fhir.basin.test/r4"), aliases: [name] };
+    for (const domain of ["basin.test", "another.test"]) {
+      const result = matchClinicalPortalSender(directory([entry]), { domain, displayName: name });
+      expect(result).toEqual({ brandName: name });
+      const hash = portalDiscoveryFragment(result!);
+      expect(normalizePortalDiscoveryFragment(hash)).toBe(hash);
+      expect(hash).not.toContain("provider=");
+    }
   });
   it("uses organizational domains and excludes shared services, URL-shaped and lookalike senders", () => {
     const entry = place("epic-one", "https://fhir.copper-basin.co.uk/r4");
@@ -39,7 +55,7 @@ describe("portal discovery", () => {
     const hash = portalDiscoveryFragment({ id: "epic-one", brandName: "Copper & Basin" });
     expect(normalizePortalDiscoveryFragment(hash)).toBe(hash);
     expect(new URLSearchParams(hash.slice(1)).get("find")).toBe("Copper & Basin");
-    for (const bad of ["#provider=bad/id&find=A", hash + "&find=B", "#find=A", "#find=%0A&provider=a", "#find=" + "x".repeat(121) + "&provider=a"]) {
+    for (const bad of ["#provider=bad/id&find=A", hash + "&find=B", "#find=A&extra=B", "#find=%0A&provider=a", "#find=" + "x".repeat(121) + "&provider=a"]) {
       expect(normalizePortalDiscoveryFragment(bad)).toBe("");
     }
   });

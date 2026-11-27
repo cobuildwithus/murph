@@ -73,8 +73,8 @@ describe("the connect link page", () => {
     expect(code(await render("coros"))).not.toBe(code(html));
   });
 
-  it("carries the public Find fragment into Safari Open it and the desktop QR after hydration", async () => {
-    const fragment = "#find=Copper+Basin&provider=epic-sample";
+  it.each(["#find=Copper+Basin&provider=epic-sample", "#find=Crescent+Pavilion"])(
+    "carries %s into Safari Open it and the desktop QR after hydration", async fragment => {
     const path = "https://www.withmurph.ai/connect/medical-records";
     const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
     vi.stubGlobal("window", window);

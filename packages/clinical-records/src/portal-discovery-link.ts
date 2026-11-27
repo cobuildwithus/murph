@@ -1,9 +1,10 @@
 export const medicalRecordsFindUrl = "https://www.withmurph.ai/connect/medical-records";
 export const forwardedPortalFallback = `Possible portal account. Search for your hospital or clinic in Medical records: ${medicalRecordsFindUrl}`;
 
-export function portalDiscoveryFragment(place: { id: string; brandName: string }): string {
+export function portalDiscoveryFragment(place: { id?: string; brandName: string }): string {
   // Find accepts 120 characters. Both values come from the public directory.
-  const params = new URLSearchParams({ find: place.brandName.slice(0, 120).replace(/[\uD800-\uDBFF]$/u, ""), provider: place.id });
+  const params = new URLSearchParams({ find: place.brandName.slice(0, 120).replace(/[\uD800-\uDBFF]$/u, "") });
+  if (place.id) params.set("provider", place.id);
   return `#${params}`;
 }
 
@@ -12,14 +13,15 @@ export function normalizePortalDiscoveryFragment(hash: string): string {
   const params = new URLSearchParams(hash.slice(1));
   const id = params.get("provider") ?? "";
   const brandName = params.get("find") ?? "";
-  if (params.size !== 2 || id.length > 100 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id)
+  if (params.size !== (params.has("provider") ? 2 : 1) || (params.has("provider") && (id.length > 100 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id)))
     || !brandName.trim() || brandName.length > 120 || /[\u0000-\u001f\u007f]/u.test(brandName)) return "";
   return portalDiscoveryFragment({ id, brandName });
 }
 
-export function portalDiscoverySummary(place: { id: string; brandName: string }) {
+export function portalDiscoverySummary(place: { id?: string; brandName: string }) {
   const fragment = portalDiscoveryFragment(place);
   const name = new URLSearchParams(fragment.slice(1)).get("find");
+  if (!place.id) return `Search Medical records for ${name}: ${medicalRecordsFindUrl}${fragment}`;
   return `Possible portal account at ${name}. Open Medical records to choose whether to connect: ${medicalRecordsFindUrl}${fragment}`;
 }
 
@@ -37,6 +39,6 @@ export function readPortalDiscoverySuggestion(bytes: Uint8Array | null): string 
   const fragment = normalizePortalDiscoveryFragment(suggestion.split(medicalRecordsFindUrl)[1] ?? "");
   if (!fragment) return forwardedPortalFallback;
   const params = new URLSearchParams(fragment.slice(1));
-  const canonical = portalDiscoverySummary({ id: params.get("provider")!, brandName: params.get("find")! });
+  const canonical = portalDiscoverySummary({ id: params.get("provider") ?? undefined, brandName: params.get("find")! });
   return canonical === suggestion ? canonical : forwardedPortalFallback;
 }

@@ -1,3 +1,4 @@
+import { get as readGlobalConfig } from "@vercel/global-config";
 import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,8 @@ import { withdrawHostedHealthDataConsent } from "@/src/lib/hosted-privacy/health
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
+
+vi.mock("@vercel/global-config", () => ({ get: vi.fn() }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -188,7 +191,15 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     expect(await read()).not.toHaveProperty("forwardTo");
     await prisma.hostedMemberEmailAuthorization.create({ data: { memberId, verifiedEmailLookupKey: randomUUID(),
       verifiedEmailAddressEncrypted: "synthetic-sealed", verifiedEmailVerifiedAt: new Date() } });
+    vi.stubEnv("GLOBAL_CONFIG", "");
+    expect(await read()).not.toHaveProperty("forwardTo");
+    vi.stubEnv("GLOBAL_CONFIG", "synthetic-config");
+    vi.mocked(readGlobalConfig).mockResolvedValue(false);
+    expect(await read()).not.toHaveProperty("forwardTo");
+    vi.mocked(readGlobalConfig).mockResolvedValue(true);
     expect((await read()).forwardTo).toBe(first.address);
+    vi.mocked(readGlobalConfig).mockRejectedValueOnce(new Error("unavailable"));
+    expect(await read()).not.toHaveProperty("forwardTo");
     await prisma.hostedMemberRouting.update({ where: { memberId }, data: { replyAliasLookupKey: null } });
     expect(await read()).not.toHaveProperty("forwardTo");
     await prisma.hostedMemberRouting.update({ where: { memberId }, data: { replyAliasLookupKey: next.replyAliasLookupKey } });
