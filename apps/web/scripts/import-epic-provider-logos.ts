@@ -33,7 +33,7 @@ async function readBoundedBody(response: Response, maximum: number): Promise<Buf
 
 const root = path.resolve(import.meta.dirname, "..");
 const output = path.join(root, "public/clinical-provider-logos");
-const directory = JSON.parse(await readFile(path.join(root, "src/lib/clinical-records/provider-directory.v2.json"), "utf8")) as {
+const directory = JSON.parse(await readFile(path.join(root, "../../packages/clinical-records/provider-directory.v2.json"), "utf8")) as {
   entries: Array<{ id: string; brandName: string }>;
 };
 const response = await fetch(sourceUrl, { signal: AbortSignal.timeout(30_000) });

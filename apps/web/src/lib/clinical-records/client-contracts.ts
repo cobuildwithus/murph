@@ -38,26 +38,8 @@ export type ClinicalRecordCallbackMarker =
 export const CLINICAL_RECORD_CONNECT_START_PATH =
   "/api/clinical-records/connect-intents/start";
 
-export interface ClinicalProviderFacilityContract {
-  city: string | null;
-  name: string | null;
-  postalCode: string | null;
-  state: string | null;
-}
-
-export interface ClinicalMatchedFacility extends ClinicalProviderFacilityContract {
-  street?: readonly string[];
-}
-
-export interface ClinicalProviderSearchResultContract {
-  matchedFacility?: ClinicalMatchedFacility | null;
-  sharedPlaces?: readonly string[];
-  possiblyIncludedThrough?: string;
-  brandName: string;
-  facilities: readonly ClinicalProviderFacilityContract[];
-  id: string;
-  sourceSystem: "epic-fhir";
-}
+import type { ClinicalProviderSearchResultContract, ClinicalProviderFacilityContract, ClinicalMatchedFacility } from "@murphai/clinical-records/provider-directory";
+export type { ClinicalProviderSearchResultContract, ClinicalProviderFacilityContract, ClinicalMatchedFacility } from "@murphai/clinical-records/provider-directory";
 
 export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResultContract): string[] {
   const facility = provider.matchedFacility ?? provider.facilities[0];

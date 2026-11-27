@@ -17,7 +17,7 @@ import {
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
 const BRAND_IDENTIFIER_SYSTEM = "https://open.epic.com/brand-identifier";
 const FHIR_VERSION_EXTENSION = "http://hl7.org/fhir/StructureDefinition/endpoint-fhir-version";
-const DEFAULT_OUTPUT = "apps/web/src/lib/clinical-records/provider-directory.v2.json";
+const DEFAULT_OUTPUT = "packages/clinical-records/provider-directory.v2.json";
 const EPIC_SANDBOX_ENTRY = {
   aliases: ["Epic on FHIR Sandbox"],
   brandName: "Epic Sandbox (test data only)",

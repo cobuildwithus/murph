@@ -6,6 +6,7 @@ assistant behavior, raw-file writes, or canonical vault mutation.
 
 The package boundary is intentionally small:
 
+- the generated public provider directory, its parser, grouped search and exact portal matching
 - source-system and FHIR resource constants
 - clinical raw FHIR retrieval manifest and bounded attachment-batch contracts
 - deterministic FHIR external-reference helpers namespaced by FHIR base and patient hashes

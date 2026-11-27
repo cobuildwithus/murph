@@ -21,7 +21,7 @@ const generatedAt = "2026-07-10T00:00:00.000Z";
 describe("Clinical Records provider directory", () => {
   it("loads the current self-hosted Epic brand registry with stable unique ids", () => {
     const directory = parseClinicalProviderDirectory(JSON.parse(readFileSync(
-      new URL("../src/lib/clinical-records/provider-directory.v2.json", import.meta.url),
+      new URL("../../../packages/clinical-records/provider-directory.v2.json", import.meta.url),
       "utf8",
     )));
 
@@ -313,7 +313,7 @@ describe("Clinical Records provider directory", () => {
 
 function readCommittedDirectory() {
   return parseClinicalProviderDirectory(JSON.parse(readFileSync(
-    new URL("../src/lib/clinical-records/provider-directory.v2.json", import.meta.url),
+    new URL("../../../packages/clinical-records/provider-directory.v2.json", import.meta.url),
     "utf8",
   )));
 }

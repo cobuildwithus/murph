@@ -16,7 +16,7 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActiveHostedMemberAuthFromBearerToken: async () => ({ member: { id: "member-alder" } }),
 }));
 afterEach(() => vi.unstubAllEnvs());
-vi.mock("@/src/lib/clinical-records/provider-directory.v2.json", async () => {
+vi.mock("@murphai/clinical-records/provider-directory.v2.json", async () => {
   const { EPIC_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY_ID } = await import("@/src/lib/clinical-records/epic-policy");
   return { default: {
     schema: "murph.clinical-provider-directory.v2", version: "sample", sourceBundleSha256: "0".repeat(64),

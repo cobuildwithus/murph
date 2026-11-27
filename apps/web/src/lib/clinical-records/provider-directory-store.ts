@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
 import { epicPortalAccessRank } from "./epic-import-config";
 import { countedSourceFilter } from "./source-state";
-import directoryArtifact from "./provider-directory.v2.json";
+import directoryArtifact from "@murphai/clinical-records/provider-directory.v2.json";
 import {
   normalizeClinicalProviderDirectoryEntryId,
   parseClinicalProviderDirectory,

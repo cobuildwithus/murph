@@ -20,11 +20,23 @@
       "types": "./dist/retrieval-limits.d.ts",
       "import": "./dist/retrieval-limits.js",
       "default": "./dist/retrieval-limits.js"
+    },
+    "./provider-directory": {
+      "types": "./dist/provider-directory.d.ts",
+      "import": "./dist/provider-directory.js",
+      "default": "./dist/provider-directory.js"
+    },
+    "./provider-directory.v2.json": "./provider-directory.v2.json",
+    "./portal-discovery-link": {
+      "types": "./dist/portal-discovery-link.d.ts",
+      "import": "./dist/portal-discovery-link.js",
+      "default": "./dist/portal-discovery-link.js"
     }
   },
   "files": [
     "README.md",
-    "dist"
+    "dist",
+    "provider-directory.v2.json"
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false",
@@ -33,7 +45,8 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@murphai/contracts": "workspace:*"
+    "@murphai/contracts": "workspace:*",
+    "tldts": "7.0.30"
   },
   "devDependencies": {
     "zod": "^4.5.4"
