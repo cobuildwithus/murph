@@ -12,7 +12,7 @@ import { createHostedOpaqueIdentifier } from "../hosted-onboarding/contact-priva
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import {
-  findCandidate, freezeHealthSelections, prepareHealthCandidates, previewHealthCandidate, withDistanceTrendUnits,
+  findCandidate, freezeHealthSelections, healthCandidateDisplay, prepareHealthCandidates, previewHealthCandidate, withDistanceTrendUnits,
   type CachedHealthCandidate, type HealthCardSelection,
 } from "./card-options";
 import { readHealthWinIdentities } from "./achievement";
@@ -80,7 +80,7 @@ async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal
     : null;
   const refs = new Map(observations?.items.map((item, i) => [eligible[i].id, item.winRef]));
   const candidates = cached.map(candidate => {
-    const display = units === "metric" ? candidate : candidate.miles ?? candidate;
+    const display = healthCandidateDisplay(candidate, units);
     const winRef = refs.get(candidate.id);
     return { ...previewHealthCandidate(display), ...(winRef && { winRef }) };
   });

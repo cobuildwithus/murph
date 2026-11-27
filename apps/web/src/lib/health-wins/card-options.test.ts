@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type { CardSpec } from "./engine";
 import {
-  freezeHealthSelections, prepareHealthCandidates, prepareSeeYoursCandidate,
-  previewHealthCandidate, previewRecordedCandidate, resolveRecordedSelection, specDigest,
+  freezeHealthSelections, healthCandidateDisplay, prepareHealthCandidates, prepareSeeYoursCandidate,
+  previewHealthCandidate, previewRecordedCandidate, resolveRecordedSelection, specDigest, withDistanceTrendUnits,
 } from "./card-options";
 import { rankHealthCards } from "./decisions";
 
@@ -127,6 +127,11 @@ it("uses the matching set display and opaque identity for distance trends in bot
   const [set] = prepareHealthCandidates("fixture-owner", [distance]);
   expect(set.miles?.id).toBeTruthy();
   expect(set.miles?.id).not.toBe(set.id);
+  const legacy = withDistanceTrendUnits({ id: set.id, variants: set.variants });
+  expect(legacy.miles?.id).toBe(set.miles?.id);
+  expect(previewHealthCandidate(healthCandidateDisplay(legacy, "us")).title.number).toBe("+1.2 mi");
+  expect(withDistanceTrendUnits(legacy)).toBe(legacy);
+  expect(previewHealthCandidate(healthCandidateDisplay(set, "us")).title.number).toBe("+1.25 mi");
   for (const units of ["metric", "us", "uk"] as const) {
     const candidate = prepareSeeYoursCandidate("fixture-owner", distance, units);
     const expected = units === "metric" ? set : set.miles!;

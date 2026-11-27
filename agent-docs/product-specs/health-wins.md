@@ -17,8 +17,8 @@ eligible draws. An experiment card’s `two_bars` chart names the measured outco
 once in `label` and uses `unit` for both the Before and During means in `series`.
 `adherence.done` and `adherence.target` give the logged and planned counts.
 The subtitle still describes the observed outcome, adherence and any overlap
-for older apps. A game streak counts a scheduled day when the member posted
-in every game due that day.
+for older apps. A game streak needs at least two scheduled days. Each day counts
+when the member posted in every game due that day.
 Medication, genetic, condition, weight and flagged lab results are excluded
 from suggested cards. An unavailable source can leave the picker partly or
 entirely empty.
@@ -37,6 +37,9 @@ The picker shows up to 24 eligible cards, newest achievement first. Category
 filters keep this order. The engine balances categories when choosing the cards.
 A cumulative distance card includes the existing
 Progress route painting when available.
+New suggestions use the phone's units for distances and skyline heights.
+US members see miles and feet, UK members see miles and metres, and metric
+members see kilometres and metres. Published cards keep the units from their preview.
 If a client encounters an unfamiliar chart, it shows the title, subtitle and
 a prompt to update Murph.
 

@@ -1,6 +1,7 @@
 import { dailyAchievements, type DailyAchievementCharts } from "./daily-achievements";
+import { displayedTrendDelta } from "./daily-distance";
 import { formatMetricValue, metricInfo, roundMetricValue } from "./metrics";
-import { compareMonthlyValues, formatNumber, formatWinMonth, mad, mean, median, milesFromKm, monthIndex } from "./shared";
+import { compareMonthlyValues, formatHealthWinDistance, formatWinMonth, mad, mean, median, milesFromKm, monthIndex } from "./shared";
 import type { Candidate, DailySample, Metric } from "./types";
 
 interface MonthlyPoint {
@@ -79,7 +80,7 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     const delta = current.value - baseline;
     const effect = delta * direction;
     if (anyDelta || (trendStep !== undefined && direction * compareMonthlyValues(current.value, baseline + direction * trendStep) >= 0)) {
-      const displayedDelta = roundMetricValue(metric, current.value) - roundMetricValue(metric, baseline);
+      const displayedDelta = displayedTrendDelta(roundMetricValue(metric, current.value), roundMetricValue(metric, baseline));
       candidates.push({
         date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(values)),
         achievement: { kind: "trend_change", subject: metric, period: currentMonth },
@@ -131,7 +132,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
     date: series[series.length - 1].date, effect: 0, noise: 1,
     card: {
       id: `cumulative:distance_km:${year}`, kind: "cumulative", filter: "Fitness",
-      title: { number: formatNumber(totalMiles, 0), measure: "miles on foot" },
+      title: { number: formatHealthWinDistance(totalMiles, "whole"), measure: "miles on foot" },
       subtitle: "walking and running, this year",
       source_note: `Daily distance across ${series.length} tracked days, using one provider per day.`,
       chart: { type: "map", totalMiles, days: series.length, series },
@@ -161,7 +162,7 @@ function distanceThisYear(rows: readonly DailySample[], today: string): Candidat
       effect: best.value - median(others), noise: Math.max(1, mad(others)),
       card: {
         id: `best_month:distance_km:${best.month}`, kind: "best_month", filter: "Fitness", measure: "distance_km",
-        title: { number: formatNumber(best.value, 0), measure: "miles on foot" },
+        title: { number: formatHealthWinDistance(best.value, "whole"), measure: "miles on foot" },
         subtitle: `in ${formatWinMonth(best.month)}, ${comparison === 0 ? "tied for " : ""}most this year`,
         source_note: `Walking and running distance across ${best.days} tracked days. Compared with every recorded monthly total this year.`,
         chart: { type: "monthly_bars", unit: "miles", series: totals, highlight: best.month },

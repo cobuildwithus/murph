@@ -13,9 +13,11 @@ The function runs in memory and leaves the supplied arrays untouched.
 Chart data uses `YYYY-MM-DD` for days and `YYYY-MM` for months. Copy displays
 dates as `Nov 6`, or `Nov 6, 2035` when the year differs from `member.today`.
 A record's `highlight.label` and pill use that display format. Render trend pills verbatim in their supplied order.
-The engine calculates distance trends in kilometres. The wins route presents them in
-miles for US and UK requests and kilometres for metric requests. Selecting a trend
-preserves its displayed units on the post.
+The wins route uses the companion's requested units for new card displays. Distances use
+miles for US and UK requests and kilometres for metric requests. Heights use feet for
+US requests and metres for UK and metric requests. Fractional distances use two decimal
+places below ten display units and one from ten. Game totals and on-foot total and record
+headlines use whole units. Posting keeps the selected display.
 Where an opaque card ID includes a full day, that component uses `YYYYMMDD`.
 
 ## Suggestion order
@@ -47,7 +49,7 @@ that order. The sort date stays on the server.
 - For a range card, pass the reporting lab's inclusive `referenceRange` in the draw's unit, or an eligible `specimen` for a reviewed comparator. A `normal` flag alone supplies no numeric bounds. When fasting status is known for any comparable triglyceride or glucose draw, the latest and at least two prior draws must be explicitly fasting for a change card.
 - Mark private interventions with `experiment.sensitiveCategory`, including experiments that measure an allowed outcome such as sleep. The caller owns this classification for free-text titles. A private overlapping intervention also withholds the concurrent readout.
 - The game adapter supplies `gameStreak.calendar` with the member's per-date outcomes across all scheduled games, including unclassified exercises. The engine fills dates without an outcome with `no_game` and orders `chart.calendar` in whole Monday–Sunday weeks. Callers that omit `gameStreak` can still supply per-exercise `bestStreak` summaries. Summaries without daily evidence show the streak length and dates.
-- Skyline entries in `landmarksPassed` and `next` carry a display `name` from the Progress height bank and `heightUnit: "ft"`. An unknown ID gets the display name `Landmark`.
+- Skyline entries in `landmarksPassed` and `next` carry a display `name` from the Progress height bank and a `heightUnit` of `ft` or `m`. The companion draws the member's height by subtracting `next.toGo` from `next.height`. An unknown ID gets the display name `Landmark`.
 
 ## Drawing one member’s card for See yours
 
@@ -89,7 +91,7 @@ See the [single-measure regression tests](see-yours.test.ts).
 | 12 | Offer a percentile card when the member outperforms at least 70% of their age/sex band. Label the top share as a whole percent, rounding a fraction up. A 74% better share reads “Top 26%.” | [percentiles.test.ts](percentiles.test.ts) · offer boundary and exact labels, [default-rank.test.ts](default-rank.test.ts) · wearable and lab comparisons, [labs.test.ts](labs.test.ts) · range fallback |
 | 13 | Compare like draws to the median of at least two eligible prior dates. Require an analyte-specific favorable step. Withhold flagged latest results. A single in-range draw can supply a gauge. | [labs.test.ts](labs.test.ts) · lab draws |
 | 14 | Headline the completed intervention. Running blocks use the logged run count and the inclusive intervention length. The bars show the original means. Changes below the metric step read “about the same.” RHR and sleep score use a step of two, and sleep efficiency uses one percentage point. Withhold unfavorable changes that reach the step. Report adherence and overlapping interventions. | [activities.test.ts](activities.test.ts) · finished experiments |
-| 15 | Name the highest passed skyline landmark from the Progress bank. Timed planks use the Progress plank ladder with passed rungs, the next rung and seconds to go. A best streak covers posting in every game and appears once. | [activities.test.ts](activities.test.ts) · game achievements |
+| 15 | Name the highest passed skyline landmark from the Progress bank. Timed planks use the Progress plank ladder with passed rungs, the next rung and seconds to go. A best streak covers posting in every game due on at least two scheduled days and appears once. | [activities.test.ts](activities.test.ts) · game achievements |
 | 16 | Once three sessions of one type qualify in the current month, show their count, total time and longest session. | [activities.test.ts](activities.test.ts) · monthly sessions |
 | 17 | Exclude medications, genetics, conditions and weight, including private experiment overlaps. | [engine.test.ts](engine.test.ts) · admits only supported measures, [activities.test.ts](activities.test.ts) · withholds sensitive experiment topics |
 | 18 | Fill the first 12 places with up to three cards per filter, prioritizing daily trends, threshold counts, streaks, monthly bests and personal records in that order within a filter. A trend supersedes a best-month claim about the same monthly mean. Distance's best month uses the monthly total. Fill the remaining places by score, reserving one place in the 24 for the best card from each unrepresented filter. Score uses effect divided by noise, plus recency decreasing from 1 to 0 over a year, plus 1 for a personal record. Card ID breaks ties. | [engine.test.ts](engine.test.ts) · prioritizes distinct daily claims, ranks by effect, balances twelve cards, caps a crowded filter, keeps the best Challenges card, withholds conflicting snapshots |

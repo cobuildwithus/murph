@@ -1,4 +1,4 @@
-import { formatDuration, formatNumber } from "./shared";
+import { formatDuration, formatHealthWinDistance, formatNumber, roundHealthWinDistance } from "./shared";
 import type { Filter, Metric } from "./types";
 
 interface MetricInfo {
@@ -68,7 +68,8 @@ export function metricInfo(metric: Metric): MetricInfo {
 
 export function roundMetricValue(metric: Metric, value: number): number {
   const { unit } = metricInfo(metric);
-  const scale = unit === "km" || unit === "%" ? 10 : 1;
+  if (unit === "km") return roundHealthWinDistance(value);
+  const scale = unit === "%" ? 10 : 1;
   return Math.round(value * scale) / scale;
 }
 
@@ -76,6 +77,7 @@ export function formatMetricValue(metric: Metric, value: number, style: "full" |
   const { label, unit } = metricInfo(metric);
   if (unit === "min" && style !== "delta") return formatDuration(value);
   const sign = style === "delta" ? (value < 0 ? "−" : "+") : "";
+  if (unit === "km") return `${sign}${formatHealthWinDistance(Math.abs(value))} km`;
   const number = sign + formatNumber(roundMetricValue(metric, Math.abs(value)));
   if (style !== "full" && (unit === label || metric === "sleep_score")) return number;
   return unit === "%" ? `${number}%` : `${number} ${unit}`;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activityCandidates } from "./activities";
+import { activityCandidates, gameClimbMetricDisplay } from "./activities";
 import { generateHealthWins } from "./index";
 import type { Experiment, Game, HealthWinsInput, Session } from "./types";
 
@@ -168,6 +168,52 @@ describe("game achievements", () => {
     next: { id: "empire-state-building", height: 1250, toGo: 28 },
     bestStreak: { days: 9, start: "2025-01-01", end: "2025-01-09", missedOn: "2025-01-10" },
   };
+
+  function climbCard(game: Game) {
+    const card = generateHealthWins({ member, games: [game] }).find(card => card.kind === "game_climb");
+    if (!card) throw new Error("Expected a game total card");
+    return card;
+  }
+
+  it.each(["run", "walk"])("preserves the whole-mile %s headline and converts the unrounded total for metric cards", exercise => {
+    const card = climbCard({ ...game, exercise, unit: "miles", total: 17.49, landmarksPassed: [], next: null });
+    expect(card.title.number).toBe("17 miles");
+    expect(card.chart).toMatchObject({ total: 17.49, unit: "miles" });
+    const display = gameClimbMetricDisplay(card);
+    expect(display).toMatchObject({ units: "kilometers", card: {
+      title: { number: "28 km", measure: card.title.measure },
+      chart: { total: 17.49 * 1.609344, unit: "km" },
+    } });
+  });
+
+  it("gives the member and each landmark the same height units, with reps in the headline and chart total", () => {
+    const card = climbCard({
+      ...game, exercise: "pushups", total: 76, landmarksPassed: [{ id: "first-rung", height: 40 }],
+      next: { id: "next-rung", height: 100, toGo: 24 },
+    });
+    expect(card).toMatchObject({ title: { number: "76" }, chart: {
+      unit: "reps", total: 76, landmarksPassed: [{ height: 40, heightUnit: "ft" }], next: { height: 100, heightUnit: "ft", toGo: 24 },
+    } });
+    const display = gameClimbMetricDisplay(card);
+    expect(display).toMatchObject({ units: "meters", card: { title: card.title, chart: {
+      unit: "reps", total: 76, landmarksPassed: [{ height: 40 * 0.3048, heightUnit: "m" }],
+      next: { height: 100 * 0.3048, heightUnit: "m", toGo: 24 * 0.3048 },
+    } } });
+    const chart = display?.card.chart;
+    if (chart?.type !== "skyline" || !chart.next) throw new Error("Expected a skyline with a next landmark");
+    expect(chart.next.height - chart.next.toGo).toBeCloseTo(76 * 0.3048);
+  });
+
+  it("offers a game streak from the second scheduled day in both current and older game inputs", () => {
+    const firstDay = { days: 1, start: "2025-03-10", end: "2025-03-10", missedOn: null };
+    const secondDay = { ...firstDay, days: 2, end: "2025-03-12" };
+    for (const value of [firstDay, secondDay]) {
+      for (const data of [{ gameStreak: value }, { games: [{ ...game, bestStreak: value }] }]) {
+        const streaks = cards(data).filter(card => card.kind === "game_streak");
+        expect(streaks.map(card => card.title)).toEqual(value.days === 1 ? [] : [{ number: "2", measure: "days" }]);
+      }
+    }
+  });
 
   it.each([
     ["2025-03-22", "2025-03-22"],
