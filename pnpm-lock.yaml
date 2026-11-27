@@ -422,6 +422,9 @@ importers:
       '@murphai/hosted-local-harness':
         specifier: workspace:*
         version: link:../../packages/hosted-local-harness
+      '@murphai/importers':
+        specifier: workspace:*
+        version: link:../../packages/importers
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../../packages/vault-usecases
@@ -11555,7 +11558,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.12)(msw@2.14.6(@types/node@25.6.2)(typescript@5.9.3))(vite@8.3.8(@types/node@25.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.12)(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.8(@types/node@25.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1))
 
   '@vitest/expect@4.1.12':
     dependencies:
@@ -11583,6 +11586,7 @@ snapshots:
     optionalDependencies:
       msw: 2.14.6(@types/node@25.6.2)(typescript@5.9.3)
       vite: 8.3.8(@types/node@25.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1)
+    optional: true
 
   '@vitest/mocker@4.1.12(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.8(@types/node@25.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
@@ -16392,6 +16396,7 @@ snapshots:
       '@vitest/coverage-v8': 4.1.12(vitest@4.1.12)
     transitivePeerDependencies:
       - msw
+    optional: true
 
   vitest@4.1.12(@opentelemetry/api@1.9.1)(@types/node@25.6.2)(@vitest/coverage-v8@4.1.12)(msw@2.14.6(@types/node@25.6.2)(typescript@7.0.2))(vite@8.3.8(@types/node@25.6.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.47.1)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:
