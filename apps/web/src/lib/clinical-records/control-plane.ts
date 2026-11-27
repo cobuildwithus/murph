@@ -119,10 +119,17 @@ export async function startNativeAuthorization(input: {
   }) };
 }
 
-async function startAuthorization(input: {
+type AuthorizationStart = {
   auth: HostedAppSession | HostedNativeMemberAuth; origin: string; appReturn: DeviceSyncAppConnectReturn | null;
   claim: string | null; providerDirectoryEntryId: string; fetchImpl?: typeof fetch;
-}) {
+};
+
+/** A source's pinned-base open and the verifier seal share one domain-root unwrap. */
+function startAuthorization(input: AuthorizationStart) {
+  return runWithHostedDomainRootUnwrapCache(() => startAuthorizationInScope(input));
+}
+
+async function startAuthorizationInScope(input: AuthorizationStart) {
   const { auth } = input;
   const prisma = getPrisma();
   await assertHostedLaunchRequiredConsentGranted({ memberId: auth.member.id, prisma });
@@ -292,33 +299,37 @@ async function finishAuthorization(input: {
     });
   }
 
-  const opened = await openClinicalOauthVerifier({
-    encrypted: session.codeVerifierEncrypted, memberId: auth.member.id, stateHash: session.stateHash,
+  // The verifier and a source's pinned base open under one domain-root unwrap.
+  const { saved, verifier, configuration } = await runWithHostedDomainRootUnwrapCache(async () => {
+    const opened = await openClinicalOauthVerifier({
+      encrypted: session.codeVerifierEncrypted, memberId: auth.member.id, stateHash: session.stateHash,
+    });
+    const saved = opened.startsWith("{") ? authorizationBinding.parse(JSON.parse(opened)) : null;
+    const stored = { clientId: session.clientId, grant: "callback" as const };
+    const configuration = await (async () => {
+      if (!saved) {
+        const entry = requireProviderEntry(session.providerDirectoryEntryId);
+        if (entry.sourceSystem !== "epic-fhir") throw providerConfigurationChangedError();
+        // An unbound session started at the source's pinned base whenever the source already existed.
+        const provider = await withPinnedEndpoint(entry, auth.member.id, await getPrisma().clinicalRecordConnection.findUnique({
+          where: { memberId_providerDirectoryEntryId: { memberId: auth.member.id, providerDirectoryEntryId: entry.id } },
+          select: PINNED_ENDPOINT_SELECT,
+        }));
+        return { ...resolveEpicClient(provider, stored), provider };
+      }
+      const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
+      // The saved profile, not the current directory, selects the integration.
+      if (isOracleProfile(saved.profile)) {
+        return { auth: resolveOracleClientAuth(saved.profile, provider, { ...stored, redirectUri: session.redirectUri }), resourceTypes: saved.resourceTypes,
+          hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
+      }
+      if (provider.id.startsWith("oracle-")) throw providerConfigurationChangedError();
+      return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
+        resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
+        provider: { ...provider, sourceSystem: "epic-fhir" as const } };
+    })();
+    return { saved, verifier: saved?.verifier ?? opened, configuration };
   });
-  const saved = opened.startsWith("{") ? authorizationBinding.parse(JSON.parse(opened)) : null;
-  const stored = { clientId: session.clientId, grant: "callback" as const };
-  const configuration = await (async () => {
-    if (!saved) {
-      const entry = requireProviderEntry(session.providerDirectoryEntryId);
-      if (entry.sourceSystem !== "epic-fhir") throw providerConfigurationChangedError();
-      // An unbound session started at the source's pinned base whenever the source already existed.
-      const provider = await withPinnedEndpoint(entry, auth.member.id, await getPrisma().clinicalRecordConnection.findUnique({
-        where: { memberId_providerDirectoryEntryId: { memberId: auth.member.id, providerDirectoryEntryId: entry.id } },
-        select: PINNED_ENDPOINT_SELECT,
-      }));
-      return { ...resolveEpicClient(provider, stored), provider };
-    }
-    const provider = { id: session.providerDirectoryEntryId, brandName: saved.brandName, fhirBaseUrl: saved.fhirBaseUrl };
-    // The saved profile, not the current directory, selects the integration.
-    if (isOracleProfile(saved.profile)) {
-      return { auth: resolveOracleClientAuth(saved.profile, provider, { ...stored, redirectUri: session.redirectUri }), resourceTypes: saved.resourceTypes,
-        hospitalApprovedImports: false, provider: { ...provider, sourceSystem: "cerner-fhir" as const } };
-    }
-    if (provider.id.startsWith("oracle-")) throw providerConfigurationChangedError();
-    return { auth: resolveSavedEpicAuth(session.providerDirectoryEntryId, stored, saved.profile),
-      resourceTypes: saved.resourceTypes, hospitalApprovedImports: saved.profile.hospitalApproved,
-      provider: { ...provider, sourceSystem: "epic-fhir" as const } };
-  })();
   const { provider } = configuration;
   if (hashClinicalFhirBaseUrl(provider.fhirBaseUrl) !== session.fhirBaseHash) throw providerConfigurationChangedError();
   const fhirBase = new URL(provider.fhirBaseUrl);
@@ -326,7 +337,6 @@ async function finishAuthorization(input: {
   else requirePinnedEndpoint(session.tokenEndpoint, fhirBase, "token endpoint");
   if (configuration.auth.method === "private_key_jwt") await assertClinicalProcessorAdmission(auth.member.id, getPrisma());
   const requestedScopes = parseStoredStringArray(session.requestedScopesJson, "requested SMART scopes");
-  const verifier = saved?.verifier ?? opened;
   const token = await exchangeSmartAuthorizationCode({
     auth: configuration.auth,
     code: normalizeAuthorizationCode(input.code),

@@ -6,6 +6,7 @@ import { requireHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboard
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "@/src/lib/hosted-crypto/domain-root-store";
 import * as signal from "@/src/lib/hosted-orchestration/signal-runtime";
+import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import { recordHostedLaunchRequiredConsent } from "@/src/lib/legal/consent";
 import { EPIC_ACQUISITION_POLICY, EPIC_ACQUISITION_POLICY_ID } from "@/src/lib/clinical-records/epic-policy";
 import { parseClinicalProviderDirectory } from "@/src/lib/clinical-records/provider-directory";
@@ -72,9 +73,14 @@ describe.skipIf(!enabled)("Clinical Records reconnect keeps the pinned FHIR base
   const members: string[] = [];
   let published = baseArtifact;
   let portals = syntheticPortals();
+  let kmsUnwraps = () => 0;
 
   beforeEach(() => {
     localRosterCrypto();
+    const crypto = cryptoEnv.getHostedWebCryptoConfig();
+    vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(crypto);
+    const decrypt = vi.spyOn(crypto.gcpKms, "decrypt");
+    kmsUnwraps = () => decrypt.mock.calls.length;
     setHostedSecureBoxStringTestCodecForTests(null);
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", ORIGIN);
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 41).toString("base64url"));
@@ -149,9 +155,11 @@ describe.skipIf(!enabled)("Clinical Records reconnect keeps the pinned FHIR base
   async function connect(subject: Awaited<ReturnType<typeof member>>, patient: string) {
     portals.signIn(patient);
     const egressBefore = portals.egress.length;
+    const unwrapsBefore = kmsUnwraps();
     const { authorizationUrl, finish } = await subject.start();
+    const startUnwraps = kmsUnwraps() - unwrapsBefore;
     const outcome = await finish();
-    return { authorizationUrl, outcome, egress: [...new Set(portals.egress.slice(egressBefore))] };
+    return { authorizationUrl, outcome, egress: [...new Set(portals.egress.slice(egressBefore))], startUnwraps };
   }
 
   const pathsAndBindings = [["browser", false], ["browser", true], ["native", false], ["native", true]] as const;
@@ -160,31 +168,34 @@ describe.skipIf(!enabled)("Clinical Records reconnect keeps the pinned FHIR base
   async function connectedBeforeMove(path: Path, bound: boolean) {
     vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", bound ? "1" : "");
     const subject = await member(path);
-    expect((await connect(subject, "synthetic-patient-one")).outcome).toBe("connected");
+    const first = await connect(subject, "synthetic-patient-one");
+    expect(first.outcome).toBe("connected");
     const original = await subject.source();
     expect(original).toMatchObject({ fhirBaseUrl: OLD_BASE, fhirBaseHash: hash(OLD_BASE), tokenVersion: 1 });
     published = headArtifact;
-    return { subject, original };
+    return { subject, original, first };
   }
 
-  function expectPinnedAuthorization(attempt: Awaited<ReturnType<typeof connect>>) {
-    expect(attempt).toEqual({ outcome: "connected", egress: [new URL(OLD_BASE).origin], authorizationUrl: expect.any(URL) });
+  function expectPinnedAuthorization(attempt: Awaited<ReturnType<typeof connect>>, first: Awaited<ReturnType<typeof connect>>) {
+    expect(attempt).toMatchObject({ outcome: "connected", egress: [new URL(OLD_BASE).origin] });
     expect(attempt.authorizationUrl.origin).toBe(new URL(OLD_BASE).origin);
     expect(attempt.authorizationUrl.searchParams.get("aud")).toBe(OLD_BASE);
+    // Opening the pinned base shares the verifier seal's domain-root unwrap, so the start costs no extra KMS call.
+    expect(attempt.startUnwraps).toBe(first.startUnwraps);
   }
 
   it.each(pathsAndBindings)("reconnects the same patient at the pinned base after the directory moves (%s, bound=%s)", async (path, bound) => {
-    const { subject, original } = await connectedBeforeMove(path, bound);
-    expectPinnedAuthorization(await connect(subject, "synthetic-patient-one"));
+    const { subject, original, first } = await connectedBeforeMove(path, bound);
+    expectPinnedAuthorization(await connect(subject, "synthetic-patient-one"), first);
     expect(await subject.source()).toMatchObject({ id: original.id, status: "active", tokenVersion: 2, retrievalGeneration: 2,
       fhirBaseUrl: OLD_BASE, fhirBaseHash: hash(OLD_BASE) });
   });
 
   it.each(pathsAndBindings)("re-adds a disconnected source at the pinned base after the directory moves (%s, bound=%s)", async (path, bound) => {
-    const { subject, original } = await connectedBeforeMove(path, bound);
+    const { subject, original, first } = await connectedBeforeMove(path, bound);
     await subject.disconnect(original.id);
     expect(await subject.source()).toMatchObject({ status: "disconnected", fhirBaseUrl: OLD_BASE, fhirBaseHash: hash(OLD_BASE) });
-    expectPinnedAuthorization(await connect(subject, "synthetic-patient-one"));
+    expectPinnedAuthorization(await connect(subject, "synthetic-patient-one"), first);
     expect(await subject.source()).toMatchObject({ id: original.id, status: "active", tokenVersion: 2, fhirBaseUrl: OLD_BASE });
     expect(await prisma.clinicalRecordConnection.count({ where: { memberId: subject.memberId } })).toBe(1);
   });

@@ -1361,13 +1361,18 @@ describe("Clinical Records authorization persistence", () => {
         ? await (await nativeStart(post({ providerId: PROVIDER_ID, appReturn: "ios-dev" }))).json()
         : await startClinicalRecordConnection({ claim: CONNECT_CLAIM, providerDirectoryEntryId: PROVIDER_ID,
           request: new Request("https://app.example.test/start", { method: "POST" }) }).catch((error: { code: string }) => ({ error }));
+      const verifierOpenScopes: unknown[] = [];
       const finish = async () => {
         h.oauthSessionFindUnique.mockResolvedValueOnce({ ...oauthSession(), ...h.oauthSessionCreate.mock.lastCall![0].data });
-        mocks.openClinicalOauthVerifier.mockResolvedValue(mocks.sealClinicalOauthVerifier.mock.lastCall![0].value);
+        const sealedVerifier = mocks.sealClinicalOauthVerifier.mock.lastCall![0].value;
+        mocks.openClinicalOauthVerifier.mockImplementation(async () => {
+          verifierOpenScopes.push(getHostedDomainRootUnwrapCache());
+          return sealedVerifier;
+        });
         if (path === "browser") return finishAuthorization().then(() => "connected");
         return (await (await nativeComplete(post({ query: `state=${nativeState}&code=code`, completionProof: started.completionProof }))).json()).outcome;
       };
-      return { h, started, finish };
+      return { h, started, finish, verifierOpenScopes };
     }
 
     it.each([
@@ -1376,7 +1381,15 @@ describe("Clinical Records authorization persistence", () => {
     ] as const)("reauthorizes the same source at its pinned base (%s, bound=%s, %s)", async (path, bound, status) => {
       vi.stubEnv("CLINICAL_RECORDS_WRITE_GRANT_PROFILES", bound ? "1" : "");
       const existing = finalizedSource(status);
-      const { h, finish } = await startAfterMove(path, existing);
+      // Each crypto step records the domain-root unwrap scope it ran in.
+      const scopes: Record<string, unknown[]> = { pinnedOpen: [], verifierSeal: [], verifierOpen: [] };
+      const record = (step: string) => scopes[step]!.push(getHostedDomainRootUnwrapCache());
+      mocks.openClinicalConnectionFhirBaseUrl.mockImplementation(async () => { record("pinnedOpen"); return PINNED; });
+      mocks.sealClinicalOauthVerifier.mockImplementation(async () => { record("verifierSeal"); return "sealed-verifier"; });
+      const { h, finish, verifierOpenScopes } = await startAfterMove(path, existing);
+      const [startScope] = scopes.pinnedOpen;
+      expect(startScope).toBeDefined();
+      expect(scopes.verifierSeal).toEqual([startScope]);
       expect(mocks.openClinicalConnectionFhirBaseUrl).toHaveBeenCalledWith({
         connectionId: existing.id, encrypted: existing.fhirBaseUrlEncrypted, memberId: MEMBER_ID,
       });
@@ -1384,6 +1397,11 @@ describe("Clinical Records authorization persistence", () => {
       expect(mocks.buildSmartAuthorizationUrl).toHaveBeenCalledWith(expect.objectContaining({ audience: PINNED }));
       expect(h.oauthSessionCreate.mock.lastCall![0].data).toMatchObject({ fhirBaseHash: digest(PINNED), clientId: "epic-client-id" });
       expect(await finish()).toBe("connected");
+      // An unbound callback reopens the pinned base in the same unwrap scope as its verifier; a bound one uses its saved base.
+      const [callbackScope] = verifierOpenScopes;
+      expect(callbackScope).toBeDefined();
+      expect(callbackScope).not.toBe(startScope);
+      expect(scopes.pinnedOpen).toEqual(bound ? [startScope] : [startScope, callbackScope]);
       expect(mocks.exchangeSmartAuthorizationCode).toHaveBeenCalledWith(expect.objectContaining({
         tokenEndpoint: "https://fhir.example.test/oauth2/token", auth: { method: "public", clientId: "epic-client-id" },
       }));
