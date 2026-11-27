@@ -2369,6 +2369,7 @@ describe('assistant codex runtime', () => {
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
     const turnId = 'turn-compact-provider-usage'
+    const itemCompleted = createDeferred<void>()
     const spawnedChildren: MockChildProcess[] = []
 
     codexMocks.spawn.mockImplementation(() => {
@@ -2488,6 +2489,7 @@ describe('assistant codex runtime', () => {
               threadId,
             },
           }))
+          itemCompleted.resolve()
         })()
       })
 
@@ -2512,13 +2514,22 @@ describe('assistant codex runtime', () => {
       turnId,
     })
 
-    await expect(
-      compactWarmCodexThread({
-        groupMinThreadTokens: 50_000,
-        minThreadTokens: 90_000,
-        timeoutMs: 5_000,
-      }),
-    ).resolves.toMatchObject({
+    const compaction = compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 5_000,
+    })
+    await itemCompleted.promise
+    const settled = await Promise.race([
+      compaction.then(() => true),
+      new Promise<boolean>(resolve => setImmediate(() => resolve(false))),
+    ])
+    expect(settled).toBe(false)
+    spawnedChildren[0]!.stdout.write(jsonLine({
+      method: 'turn/completed',
+      params: { threadId, turn: { id: 'turn_idle_compact', status: 'completed' } },
+    }))
+    await expect(compaction).resolves.toMatchObject({
       kind: 'compacted',
       threadContextTokensBefore: 50_000,
       threadId,
