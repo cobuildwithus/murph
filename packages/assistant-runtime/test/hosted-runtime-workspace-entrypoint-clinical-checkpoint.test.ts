@@ -6,6 +6,7 @@ import { initializeVault } from "@murphai/core";
 import type { ClinicalDocumentExtractionOutput } from "@murphai/clinical-records";
 import type { HostedWorkspaceCheckpointRequest } from "@murphai/hosted-execution/runtime-control";
 import { listMetricPoints } from "@murphai/query";
+import * as clinicalState from "@murphai/vault-usecases/clinical-enrichment";
 import { readClinicalEnrichmentStatus, type ClinicalExtractionUnit } from "@murphai/vault-usecases/clinical-enrichment";
 import { OCCURRED_AT } from "./clinical-enrichment-source.fixture.ts";
 import { expect, test, vi } from "vitest";
@@ -16,8 +17,7 @@ import { importClinicalEnrichmentSource, importClinicalStructuredSources } from 
 import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import { isHostedClinicalEnrichmentWakeItem } from "../src/hosted-runtime/clinical-enrichment-wake.ts";
 import {
-  createWorkspaceRunRequest,
-  TEST_NOW, TEST_USER_ID, createDeferred, createMailboxItem, createMailboxPort, createPlatform,
+  TEST_NOW, createDeferred, createMailboxItem, createMailboxPort, createPlatform,
   createSnapshotFixtureRef, createVaultSnapshotBundle, createWorkspacePort, createWorkspaceRuntimeJobInput,
   createWorkspaceState, removeTempRoot, runHostedWorkspaceRuntimeJobInProcess,
   withRealTimeout,
@@ -638,13 +638,24 @@ test("resumes an import after a graceful rollout stop without losing, duplicatin
   const glucose = [111, 112, 113, 114];
   const shutdown = new AbortController();
   const extractedPages: number[] = [];
+  const laterPageInFlight = createDeferred<void>();
+  const apply = clinicalState.applyClinicalEnrichmentProposals;
+  const applied = vi.spyOn(clinicalState, "applyClinicalEnrichmentProposals").mockImplementation(async (input) => {
+    const result = await apply(input);
+    if (result.counts.pages === 2) {
+      void laterPageInFlight.promise.then(() => {
+        shutdown.abort(new DOMException("Synthetic rollout SIGTERM.", "AbortError"));
+      });
+    }
+    return result;
+  });
   let invocation = 1;
   const executeExtraction = vi.fn<NonNullable<clinicalEnrichment.HostedClinicalEnrichmentInput["executeExtraction"]>>(async (request) => {
     await request.beforeProviderEntry?.();
     const page = request.textWindow?.index ?? 1;
     if (invocation === 1 && page > 2) {
-      // The rollout stops the container while these calls are in flight.
-      shutdown.abort(new DOMException("Synthetic rollout SIGTERM.", "AbortError"));
+      // Keep the remaining provider work in flight until the cursor commits page two.
+      laterPageInFlight.resolve();
       await untilAborted(request.abortSignal!);
       throw request.abortSignal!.reason;
     }
@@ -666,6 +677,7 @@ test("resumes an import after a graceful rollout stop without losing, duplicatin
     await runDurableClinicalInvocation({ attemptId: "attempt_synthetic_clinical_rollout_old", events, vaultRoot: first, state,
       shutdownSignal: shutdown.signal, usageRecordPort: recordingUsage(events, usageIds) });
     expect(shutdown.signal.aborted).toBe(true);
+    expect(applied).toHaveBeenCalledTimes(2);
     // The stopped container published a final snapshot inside its grace period.
     expect(state.snapshots, events.join(",")).toBeGreaterThanOrEqual(1);
     invocation = 2;
@@ -677,12 +689,14 @@ test("resumes an import after a graceful rollout stop without losing, duplicatin
       .toMatchObject({ status: "complete", counts: { pages: 4, held: 0 } });
     const points = await listMetricPoints(second, { limit: 20 });
     expect(points.map((point) => point.value).sort()).toEqual(glucose);
-    // Pages finished before the stop are never extracted again; only aborted calls are.
+    expect(applied).toHaveBeenCalledTimes(4);
+    // The successor extracts only the pages left unfinished by the rollout.
     expect(extractedPages.filter((page) => page <= 2).sort()).toEqual([1, 2]);
     expect(extractedPages.filter((page) => page > 2).sort()).toEqual([3, 4]);
     expect(new Set(usageIds).size).toBe(usageIds.length);
     expect(usageIds).toHaveLength(4);
   } finally {
+    applied.mockRestore();
     runner.mockRestore();
     for (const root of roots) await removeTempRoot(root);
   }
