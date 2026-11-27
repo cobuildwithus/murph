@@ -84,6 +84,12 @@ function incompleteInputs(_memberId: string, _checkAuthority: () => Promise<void
   return { input: { member: data(today).input.member }, complete: false, sourceRevision: "fixture-incomplete" };
 }
 
+/** A month of tracked distance ending today: a year-to-date total needs 28 tracked days. */
+function trackedDistance(today: string, km: number) {
+  return Array.from({ length: 28 }, (_, i) => ({ metric: "distance_km" as const, provider: "apple", value: km,
+    date: new Date(Date.parse(`${today}T00:00:00Z`) - i * 86_400_000).toISOString().slice(0, 10) }));
+}
+
 function distanceHistory(today: string) {
   const result = data(today);
   result.input.daily = ["04", "05", "06", "07"].flatMap(month => Array.from({ length: 16 }, (_, i) => ({
@@ -269,10 +275,12 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
   });
 
   it("offers only cards absent from live posts as a member posts, edits, and deletes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2034-08-02T12:00:00Z"));
     const auth = await fixture();
     source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
       const result = data(today);
-      result.input.daily = [{ metric: "distance_km", provider: "apple", value: 9, date: today }];
+      result.input.daily = trackedDistance(today, 9);
       return result;
     });
     const read = () => readHealthWins(auth, { signal });
@@ -385,16 +393,18 @@ describe.skipIf(!enabled)("member-local health win sets", () => {
   });
 
   it.each([null, "/api/game/v1/progress/art/map%3Av1%3Acard%3Afixture"])("freezes only available map art (%s)", async distanceArtUrl => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2034-08-02T12:00:00Z"));
     const auth = await fixture();
     source.mockImplementation(async (_memberId, _checkAuthority, today: string) => {
       const result = data(today);
-      result.input.daily = [{ metric: "distance_km", provider: "apple", value: 7, date: today }];
+      result.input.daily = trackedDistance(today, 7);
       return { ...result, distanceArtUrl };
     });
     const { candidates, setRevision } = await readHealthWins(auth, { signal });
     const card = candidates.find(item => item.kind === "cumulative")!;
     const expectedArt = distanceArtUrl ? { art: { url: distanceArtUrl } } : {};
-    expect(card.chart).toEqual({ type: "map", days: 1, series: expect.any(Array), totalMiles: expect.any(Number), ...expectedArt });
+    expect(card.chart).toEqual({ type: "map", days: 28, series: expect.any(Array), totalMiles: expect.any(Number), ...expectedArt });
     const selection = { candidateId: card.id, option: "original" };
     const { cards } = await resolveHealthCards(auth, setRevision, [selection]);
     expect(cards[0]).toMatchObject({ specRevision: card.specRevision, spec: { chart: card.chart } });

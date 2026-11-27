@@ -44,6 +44,8 @@ function syntheticInput(): HealthWinsInput {
       const date = `2036-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       daily.push({ metric: "floors", date, provider: "garmin", value: month + 3 });
       if (month <= 7 && day <= 13) daily.push({ metric: "steps", date, provider: "garmin", value: 6300 });
+      // A month of tracked distance before the year-to-date total; the same every day, so no record.
+      if (month <= 10 && day <= 6) daily.push({ metric: "distance_km", date, provider: "garmin", value: 5.4 });
       if (month === 11) daily.push({ metric: "rhr_bpm", date, provider: "garmin", value: 54 });
       if (month >= 8) {
         const usualNight = day % 2 === 0 ? 441 : 425;
