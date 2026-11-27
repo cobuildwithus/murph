@@ -1,0 +1,72 @@
+name: Epic sandbox qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      patient:
+        type: choice
+        description: Published synthetic MyChart account
+        options:
+          - fhircamila
+          - fhirderrick
+          - fhirdesiree
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clinical-epic-sandbox
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: github.ref == 'refs/heads/main' && github.ref_protected
+    environment: clinical-epic-sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 50
+    steps:
+      - name: Check qualification window
+        run: test "$(date -u +%Y%m%d)" -ge 20261127 && test "$(date -u +%Y%m%d)" -lt 20261205
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir apps/web prisma:generate
+        env:
+          MURPH_PRISMA_SKIP_ENV_FILES: "1"
+      - name: Install Playwright Chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
+      - name: Create disposable loopback certificate
+        run: |
+          umask 077
+          mkdir -p "$HOME/.config/murph/epic"
+          cd "$HOME/.config/murph/epic"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
+            -addext subjectAltName=IP:127.0.0.1 -keyout loopback-key.pem -out loopback-cert.pem 2>/dev/null
+      - name: Qualify one published patient
+        env:
+          PATIENT: ${{ inputs.patient }}
+          EPIC_SMART_NON_PRODUCTION_CLIENT_ID: ${{ secrets.EPIC_SMART_NON_PRODUCTION_CLIENT_ID }}
+          EPIC_PROOF_SANDBOX_PEM: ${{ secrets.EPIC_PROOF_SANDBOX_PEM }}
+        run: pnpm -s clinical:sandbox-proof --vendor epic --patient "$PATIENT"
+      - name: Remove private scratch data
+        if: always()
+        run: rm -rf -- .tmp/clinical-sandbox "$HOME/.config/murph/epic"

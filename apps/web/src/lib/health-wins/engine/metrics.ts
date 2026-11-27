@@ -7,6 +7,8 @@ interface MetricInfo {
   filter: Filter;
   direction: 1 | -1;
   trendStep?: number;
+  /** A daily count: its monthly average is per day (or night), not the month's total. */
+  per?: "day" | "night";
   record?: true;
   physiological?: true;
   min: number;
@@ -19,11 +21,11 @@ const activitySources = ["apple", "apple watch", "google", "garmin"];
 
 const metrics: Record<Metric, MetricInfo> = {
   sleep_total_min: {
-    label: "sleep", unit: "min", filter: "Sleep", direction: 1, trendStep: 15,
+    label: "sleep", unit: "min", filter: "Sleep", direction: 1, trendStep: 15, per: "night",
     min: 180, max: 840, physiological: true, priority: sleepDevices,
   },
   sleep_deep_min: {
-    label: "deep sleep", unit: "min", filter: "Sleep", direction: 1, trendStep: 15, record: true,
+    label: "deep sleep", unit: "min", filter: "Sleep", direction: 1, trendStep: 15, per: "night", record: true,
     min: 0, max: 300, physiological: true, priority: sleepDevices,
   },
   sleep_score: {
@@ -43,7 +45,7 @@ const metrics: Record<Metric, MetricInfo> = {
     min: 5, max: 250, physiological: true, priority: sleepDevices,
   },
   steps: {
-    label: "steps", unit: "steps", filter: "Fitness", direction: 1, trendStep: 1000, record: true,
+    label: "steps", unit: "steps", filter: "Fitness", direction: 1, trendStep: 1000, per: "day", record: true,
     min: 0, max: 60_000, priority: ["whoop", "garmin", "google", "apple", "apple watch"],
   },
   distance_km: {
@@ -51,7 +53,7 @@ const metrics: Record<Metric, MetricInfo> = {
     min: 0, max: 60, priority: activitySources,
   },
   floors: {
-    label: "floors", unit: "floors", filter: "Fitness", direction: 1,
+    label: "floors", unit: "floors", filter: "Fitness", direction: 1, per: "day",
     min: 0, max: 400, priority: activitySources,
   },
   vo2max: {
