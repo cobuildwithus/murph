@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/link", () => ({
   default: ({ children, href, className }: { children: ReactNode; className?: string; href: string }) =>
-    createElement("a", { className, href }, children),
+    createElement("a", { className, "data-client-navigation": "", href }, children),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -128,6 +128,39 @@ afterEach(async () => {
 });
 
 describe("Clinical Records connect page", () => {
+  it("requests one coarse fix only after a tap and displays the matched distance", async () => {
+    const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
+    const rendered = await renderClientComponent(createElement(ProviderSearch, {
+      intentClaim: "synthetic", onConsentRequired: () => {},
+    }));
+    cleanup = rendered.cleanup;
+    const locate = vi.fn((success: (position: unknown) => void) => success({
+      coords: { latitude: 44.18492, longitude: -70.27341 },
+    }));
+    vi.stubGlobal("navigator", { geolocation: { getCurrentPosition: locate } });
+    mocks.requestHostedOnboardingJson.mockResolvedValue({ ok: true, directoryVersion: "demo", providers: [{
+      id: "epic-hollow", brandName: "Hollow", sourceSystem: "epic-fhir", facilities: [],
+      matchedFacility: { name: "Clinic", city: null, state: null, postalCode: null, approximateDistanceMiles: 3 },
+    }] });
+    expect(locate).not.toHaveBeenCalled();
+    await clickButton(rendered, "Use my location");
+    expect(locate).toHaveBeenCalledOnce();
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledExactlyOnceWith({
+      method: "POST", url: "/api/clinical-records/providers/search", signal: expect.any(AbortSignal),
+      headers: { "X-Clinical-Directory-Version": "3", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" },
+      payload: { query: "", near: { lat: 44.2, lon: -70.3 } },
+    });
+    expect(rendered.container.textContent).toContain("about 3 mi");
+    const input = rendered.container.querySelector<HTMLInputElement>('input[name="provider-search"]')!;
+    await act(async () => { setInputValue(rendered.window, input, "04210"); });
+    await submitProviderSearch(rendered);
+    expect(mocks.requestHostedOnboardingJson.mock.lastCall?.[0]).toMatchObject({
+      method: "POST", url: "/api/clinical-records/providers/search", payload: { query: "04210" },
+    });
+    expect(JSON.stringify([rendered.window.location.href, rendered.replaceState.mock.calls,
+      rendered.window.localStorage, rendered.window.sessionStorage])).not.toMatch(/04210|44\.18|44\.2|-70\.3/u);
+  });
+
   it("debounces typing, aborts superseded searches, and never restores an older result", async () => {
     vi.useFakeTimers();
     const { ProviderSearch } = await import("../app/records/connect/records-connect-client");
@@ -409,7 +442,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
         method: "POST",
-        headers: { "X-Clinical-Directory-Version": "2", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" },
+        headers: { "X-Clinical-Directory-Version": "3", "X-Clinical-Directory-Sources": "epic-fhir,cerner-fhir" },
         payload: { query: "Piedmont" },
         signal: expect.any(AbortSignal),
         url: "/api/clinical-records/providers/search",
@@ -976,6 +1009,8 @@ describe("Clinical Records status page", () => {
     const links = Array.from(rendered.container.querySelectorAll('a[href="/records/connect?launch=clinical-records"]'));
     expect(links).toHaveLength(1);
     expect(links[0]?.textContent).toContain("Import records");
+    // Location permission belongs to the connect page's own document, so it needs a full page load.
+    expect(links[0]?.hasAttribute("data-client-navigation")).toBe(false);
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(rendered.container.textContent).toContain("No records imported yet");
   });
@@ -1267,7 +1302,9 @@ describe("Clinical Records status page", () => {
     expect(rendered.container.textContent).toContain("3 records added");
     expect(rendered.container.textContent).toContain("2 items saved for reference");
     expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
-    expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
+    const reconnect = Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect");
+    expect(reconnect?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
+    expect(reconnect?.hasAttribute("data-client-navigation")).toBe(false);
     expect(rendered.container.textContent).toContain("Sign in again to import more records.");
     expect(rendered.container.textContent).not.toContain("Daily updates");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))

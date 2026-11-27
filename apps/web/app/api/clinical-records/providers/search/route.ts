@@ -1,3 +1,4 @@
+import { readLocationCell } from "@/src/lib/clinical-records/provider-search-input";
 import {
   CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS,
   CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER,
@@ -10,7 +11,7 @@ import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboa
 import { readJsonObject } from "@/src/lib/http";
 
 const MAX_BODY_BYTES = 4 * 1_024;
-const SEARCH_REQUEST_KEYS = new Set(["city", "query", "state"]);
+const SEARCH_REQUEST_KEYS = new Set(["city", "query", "state", "near"]);
 
 export async function GET(): Promise<Response> {
   return Response.json({ error: { code: "METHOD_NOT_ALLOWED", message: "Provider search only allows POST." } }, {
@@ -30,13 +31,16 @@ export const POST = withClinicalJsonError(async (request: Request) => {
       message: "Clinical Records provider search is invalid.",
     });
   }
+  const version = request.headers.get("X-Clinical-Directory-Version");
   return clinicalJsonOk({
     ok: true,
     ...await searchClinicalProviderDirectory({
+      includeDistance: version === "3",
+      near: readLocationCell(body.near),
       city: readOptionalSearchText(body.city),
       query: readOptionalSearchText(body.query),
       state: readOptionalSearchText(body.state),
-    }, request.headers.get("X-Clinical-Directory-Version") === "2" ? auth.member.id : undefined,
+    }, version === "2" || version === "3" ? auth.member.id : undefined,
     readSearchSources(request.headers.get(CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER))),
   });
 });

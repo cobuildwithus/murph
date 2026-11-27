@@ -147,20 +147,21 @@ test("revocation uses the installation token, has a deadline, and handles expire
 
 test("OIDC permission is confined to each trusted minting job", async () => {
   const jobs = {
-    "friction-log": "friction-log",
-    "temporal-compatibility": "compatibility",
-    "temporal-web-deployment-admission": "admission",
-    "junction-wearable-canary": "connect",
-    "native-android-hosted-e2e": "production-canary",
-    "native-ios-hosted-e2e": "production-canary",
+    "clinical-provider-directory": ["publish", "merge"],
+    "friction-log": ["friction-log"],
+    "temporal-compatibility": ["compatibility"],
+    "temporal-web-deployment-admission": ["admission"],
+    "junction-wearable-canary": ["connect"],
+    "native-android-hosted-e2e": ["production-canary"],
+    "native-ios-hosted-e2e": ["production-canary"],
   };
-  for (const [workflow, mintingJob] of Object.entries(jobs)) {
+  for (const [workflow, mintingJobs] of Object.entries(jobs)) {
     const source = await readFile(new URL(`../.github/workflows/${workflow}.yml`, import.meta.url), "utf8");
     const [beforeJobs, jobSource] = source.split("\njobs:\n");
     assert.doesNotMatch(beforeJobs, /id-token:/u);
     const blocks = jobSource.split(/^  ([a-z][a-z-]+):\n/gmu);
     for (let index = 1; index < blocks.length; index += 2) {
-      assert.equal(blocks[index + 1].includes("      id-token: write"), blocks[index] === mintingJob, workflow);
+      assert.equal(blocks[index + 1].includes("      id-token: write"), mintingJobs.includes(blocks[index]), workflow);
     }
     assert.doesNotMatch(source, /APP_PRIVATE_KEY|create-github-app-token@|pull_request_target:|pull_request:/u);
     assert.match(source, /persist-credentials: false/u);

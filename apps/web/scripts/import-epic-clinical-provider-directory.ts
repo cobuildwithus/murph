@@ -1,3 +1,5 @@
+import type { DirectoryFacilityTuple } from "../src/lib/clinical-records/directory-geography";
+import { postalCentroid } from "../src/lib/clinical-records/postal-centroids";
 import { createHash } from "node:crypto";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -13,6 +15,11 @@ import {
   buildEpicProviderDirectoryEntryId,
   parseClinicalProviderDirectory,
 } from "../src/lib/clinical-records/provider-directory";
+import {
+  assertDirectoryRefreshCounts,
+  holdDirectoryChangesForReview,
+  type HeldDirectoryChange,
+} from "../src/lib/clinical-records/provider-directory-artifact";
 
 const MAX_INPUT_BYTES = 256 * 1_024 * 1_024;
 const BRAND_IDENTIFIER_SYSTEM = "https://open.epic.com/brand-identifier";
@@ -30,8 +37,6 @@ const EPIC_SANDBOX_ENTRY = {
 
 type JsonRecord = Record<string, unknown>;
 
-type LocationTuple = [string | null, string | null, string | null, string | null, string[], string[], string];
-
 interface EpicProviderDirectoryArtifactV2 {
   entries: Array<{
     aliases: string[];
@@ -41,7 +46,7 @@ interface EpicProviderDirectoryArtifactV2 {
       | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
     fhirBaseUrl: string;
     id: string;
-    locations: LocationTuple[];
+    locations: DirectoryFacilityTuple[];
     policyId: string;
   }>;
   generatedAt: string;
@@ -60,7 +65,7 @@ if (entrypointPath && import.meta.url === pathToFileURL(path.resolve(entrypointP
 }
 
 async function main(): Promise<void> {
-  const { inputPath, outputPath } = parseArguments(process.argv.slice(2));
+  const { allowCountDrop, heldOutputPath, inputPath, outputPath } = parseArguments(process.argv.slice(2));
   if (inputPath !== "-") {
     const inputStats = await stat(inputPath);
     if (!inputStats.isFile() || inputStats.size <= 0 || inputStats.size > MAX_INPUT_BYTES) {
@@ -70,9 +75,31 @@ async function main(): Promise<void> {
   const sourceBytes = inputPath === "-"
     ? await readBoundedStdin()
     : await readFile(inputPath);
-  const artifact = buildEpicProviderDirectoryArtifact(sourceBytes);
+  const previous = await readFile(outputPath, "utf8");
+  const { artifact, held } = refreshEpicProviderDirectory(sourceBytes, previous, { allowCountDrop });
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
+  if (heldOutputPath) await writeFile(heldOutputPath, `${JSON.stringify(held)}\n`, { encoding: "utf8", mode: 0o644 });
   process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+  if (held.length) process.stdout.write(`Held ${held.length} directory changes for review.\n`);
+}
+
+// Applies the shared refresh hold against the committed directory text: existing
+// entries keep their published connection fields, entries missing upstream stay
+// as published, held new entries are left out, and the held changes go to a person.
+export function refreshEpicProviderDirectory(
+  source: string | Uint8Array,
+  previousText: string,
+  options: { allowCountDrop?: boolean } = {},
+): { artifact: EpicProviderDirectoryArtifactV2; held: HeldDirectoryChange[] } {
+  // The production parser proves the committed shape before its raw entries are reused.
+  const previous: EpicProviderDirectoryArtifactV2 = JSON.parse(previousText);
+  const prior = parseClinicalProviderDirectory(previous);
+  const upstream = buildEpicProviderDirectoryArtifact(source);
+  const { entries, held } = holdDirectoryChangesForReview(previous, upstream);
+  const artifact = { ...upstream, entries };
+  const parsed = parseClinicalProviderDirectory(artifact);
+  if (!options.allowCountDrop) assertDirectoryRefreshCounts(prior, parsed);
+  return { artifact, held };
 }
 
 async function readBoundedStdin(): Promise<Buffer> {
@@ -138,7 +165,7 @@ export function buildEpicProviderDirectoryArtifact(
     brandIdentifier: string;
     brandName: string;
     endpoint: string;
-    facilities: LocationTuple[];
+    facilities: DirectoryFacilityTuple[];
   }>();
 
   for (const organization of organizations) {
@@ -190,7 +217,7 @@ export function buildEpicProviderDirectoryArtifact(
 
 function attachFacilities(
   organizations: readonly { resource: JsonRecord; fullUrl: string }[],
-  primaryBrands: ReadonlyMap<string, { facilities: LocationTuple[] }>,
+  primaryBrands: ReadonlyMap<string, { facilities: DirectoryFacilityTuple[] }>,
 ) {
   const byReference = new Map(organizations.map(org => [org.fullUrl, org]));
   const owners = new Map([...primaryBrands.keys()].map(ref => [ref, ref]));
@@ -209,19 +236,27 @@ function attachFacilities(
   }
 }
 
-function parseArguments(args: string[]): { inputPath: string; outputPath: string } {
-  let input: string | null = null;
-  let output = DEFAULT_OUTPUT;
+function parseArguments(args: string[]) {
+  const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (argument === "--input") input = args[index + 1] ?? null;
-    if (argument === "--output") output = args[index + 1] ?? output;
-    if (argument === "--input" || argument === "--output") index += 1;
+    const argument = args[index]!;
+    if (!["--input", "--output", "--held-output"].includes(argument)) continue;
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) throw new TypeError(`Missing ${argument} path.`);
+    values.set(argument, value);
+    index += 1;
   }
-  if (!input) throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>]");
+  const input = values.get("--input");
+  if (!input) {
+    throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>] "
+      + "[--held-output <held change report>] [--allow-count-drop]");
+  }
+  const heldOutput = values.get("--held-output");
   return {
+    allowCountDrop: args.includes("--allow-count-drop"),
+    heldOutputPath: heldOutput ? path.resolve(heldOutput) : null,
     inputPath: input === "-" ? input : path.resolve(input),
-    outputPath: path.resolve(output),
+    outputPath: path.resolve(values.get("--output") ?? DEFAULT_OUTPUT),
   };
 }
 
@@ -250,20 +285,21 @@ function readReference(value: unknown): string | null {
   return optionalString((value as JsonRecord).reference, 240);
 }
 
-function readLocations(org: { resource: JsonRecord; fullUrl: string }): LocationTuple[] {
+function readLocations(org: { resource: JsonRecord; fullUrl: string }): DirectoryFacilityTuple[] {
   const { resource } = org;
   const name = optionalString(resource.name, 180);
-  const upstreamId = optionalString(resource.id, 64) ?? org.fullUrl;
   const aliases = [...new Set(readStringArray(resource.alias, 20, 120))].sort();
   const addresses = Array.isArray(resource.address) && resource.address.length ? resource.address : [{}];
-  return addresses.flatMap((address): LocationTuple[] => {
+  return addresses.flatMap((address): DirectoryFacilityTuple[] => {
     if (!address || typeof address !== "object" || Array.isArray(address)) return [];
     const city = optionalString(address.city, 120);
     const state = optionalString(address.state, 80);
     const postalCode = optionalString(address.postalCode, 24);
-    const street = readStringArray(address.line, 4, 180);
-    if (!city && !state && !postalCode && !street.length && (!resource.partOf || !name)) return [];
-    return [[name, city, state, postalCode, street, aliases, upstreamId]];
+    const lines = readStringArray(address.line, 4, 180);
+    if (!city && !state && !postalCode && !lines.length && (!resource.partOf || !name)) return [];
+    // Epic's first address line usually repeats the facility name.
+    const street = lines.filter(line => line !== name);
+    return [[name, city, state, postalCode, street, aliases, postalCentroid(postalCode)]];
   });
 }
 

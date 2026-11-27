@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { parseClinicalProviderDirectory, searchClinicalProviderDirectorySnapshot } from "@/src/lib/clinical-records/provider-directory";
 import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
-import { buildEpicProviderDirectoryArtifact } from "@/scripts/import-epic-clinical-provider-directory";
+import { assertDirectoryRefreshCounts } from "@/src/lib/clinical-records/provider-directory-artifact";
+import { buildEpicProviderDirectoryArtifact, refreshEpicProviderDirectory } from "@/scripts/import-epic-clinical-provider-directory";
 
 const generatedAt = "2026-07-20T08:00:05.631Z";
 
@@ -23,8 +24,8 @@ describe("Epic Clinical Records provider directory importer", () => {
       fhirBaseUrl: "https://fhir.example.test/FHIR/R4",
       id: "epic-brand-123",
       locations: expect.arrayContaining([
-        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], "urn:uuid:facility-1"],
-        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], "facility-north"],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["18 Lantern Way"], ["Lantern"], [33.8, -84.386]],
+        ["Test Clinic", "Atlanta", "GA", "30309", ["32 Harbor Lane"], [], [33.8, -84.386]],
       ]),
     });
   });
@@ -68,6 +69,74 @@ describe("Epic Clinical Records provider directory importer", () => {
     );
   });
 
+  it("rejects a refresh losing more than ten percent of brands, facilities or located facilities", () => {
+    const artifact = buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle()));
+    const baseline = parseClinicalProviderDirectory(artifact);
+    expect(() => assertDirectoryRefreshCounts(baseline, baseline)).not.toThrow();
+    expect(() => assertDirectoryRefreshCounts(baseline, { ...baseline, entries: baseline.entries.slice(0, 1) })).toThrow(/10%/u);
+    for (const facilities of [[], baseline.entries[0]!.facilities.map(f => ({ ...f, coordinate: null }))]) {
+      expect(() => assertDirectoryRefreshCounts(baseline, {
+        ...baseline, entries: [{ ...baseline.entries[0]!, facilities }, ...baseline.entries.slice(1)],
+      })).toThrow(/10%/u);
+    }
+    artifact.entries[0]!.locations[0]![6] = [94, -84];
+    expect(() => parseClinicalProviderDirectory(artifact)).toThrow(/coordinate/u);
+  });
+
+  it("holds connection changes, removals and new entries off known production hosts", () => {
+    const current = "https://fhir.example.test/FHIR/R4";
+    const previousArtifact = buildEpicProviderDirectoryArtifact(JSON.stringify(makeBundle()));
+    const previous = JSON.stringify(previousArtifact);
+    const refresh = (change: (bundle: ReturnType<typeof makeBundle>) => void, prior = previous) => {
+      const bundle = makeBundle();
+      change(bundle);
+      return refreshEpicProviderDirectory(JSON.stringify(bundle), prior);
+    };
+    const entry = (artifact: ReturnType<typeof refresh>["artifact"], id: string) =>
+      artifact.entries.find(candidate => candidate.id === id);
+
+    for (const address of [
+      "https://fhir.example.test/v2/FHIR/R4", "https://moved.example.test/FHIR/R4", "https://fhir.example.test:8443/FHIR/R4",
+    ]) {
+      const moved = refresh(bundle => { bundle.entry[0]!.resource.address = address; });
+      expect(moved.held).toEqual([
+        { kind: "connection", id: "epic-brand-123", field: "fhirBaseUrl", current, candidate: address },
+      ]);
+      expect(entry(moved.artifact, "epic-brand-123")?.fhirBaseUrl).toBe(current);
+    }
+
+    // A published client key is never replaced, in either direction.
+    const sandboxKeyed = JSON.parse(previous);
+    sandboxKeyed.entries[0].clientIdEnvironmentKey = "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
+    const keyed = refresh(() => {}, JSON.stringify(sandboxKeyed));
+    expect(keyed.held).toEqual([{
+      kind: "connection", id: "epic-brand-123", field: "clientIdEnvironmentKey",
+      current: "EPIC_SMART_NON_PRODUCTION_CLIENT_ID", candidate: "EPIC_SMART_CLIENT_ID",
+    }]);
+    expect(entry(keyed.artifact, "epic-brand-123")?.clientIdEnvironmentKey).toBe("EPIC_SMART_NON_PRODUCTION_CLIENT_ID");
+    expect(entry(keyed.artifact, "epic-sandbox")).toEqual(previousArtifact.entries.find(item => item.id === "epic-sandbox"));
+
+    const removed = refresh(bundle => { bundle.entry[1]!.resource.active = false; });
+    expect(removed.held).toEqual([{ kind: "removal", id: "epic-brand-123", current }]);
+    expect(entry(removed.artifact, "epic-brand-123")).toEqual(previousArtifact.entries.find(item => item.id === "epic-brand-123"));
+
+    const added = refresh(bundle => {
+      bundle.entry.push(...makeBrand("brand-456", "https://new.example.test/FHIR/R4"));
+      bundle.entry.push(...makeBrand("brand-789", "https://fhir.example.test/FHIR/R4/other"));
+      // The sandbox host is not a production host.
+      bundle.entry.push(...makeBrand("brand-999", "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4"));
+    });
+    expect(added.held).toEqual([
+      { kind: "addition", id: "epic-brand-456", brandName: "Second Health", candidate: "https://new.example.test/FHIR/R4",
+        clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" },
+      { kind: "addition", id: "epic-brand-999", brandName: "Second Health",
+        candidate: "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4", clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" },
+    ]);
+    expect(entry(added.artifact, "epic-brand-456")).toBeUndefined();
+    expect(entry(added.artifact, "epic-brand-789")?.fhirBaseUrl).toBe("https://fhir.example.test/FHIR/R4/other");
+    expect(added.artifact.entries.map(item => item.id)).toEqual(["epic-brand-123", "epic-brand-789", "epic-sandbox"]);
+  });
+
   it("rejects duplicate source identities", () => {
     const bundle = makeBundle();
     expect(() => buildEpicProviderDirectoryArtifact(JSON.stringify({
@@ -76,6 +145,19 @@ describe("Epic Clinical Records provider directory importer", () => {
     }))).toThrow(/duplicate entry fullUrls/u);
   });
 });
+
+function makeBrand(identifier: string, address: string) {
+  return [
+    { fullUrl: `urn:uuid:endpoint-${identifier}`, resource: {
+      address, extension: [{ url: "http://hl7.org/fhir/StructureDefinition/endpoint-fhir-version", valueCode: "4.0.1" }],
+      resourceType: "Endpoint", status: "active",
+    } },
+    { fullUrl: `urn:uuid:${identifier}`, resource: {
+      active: true, endpoint: [{ reference: `urn:uuid:endpoint-${identifier}` }], name: "Second Health",
+      identifier: [{ system: "https://open.epic.com/brand-identifier", value: identifier }], resourceType: "Organization",
+    } },
+  ];
+}
 
 function makeBundle() {
   return {
@@ -121,7 +203,7 @@ function makeBundle() {
         resource: {
           active: true,
           id: "facility-north",
-          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["32 Harbor Lane"] }],
+          address: [{ city: "Atlanta", postalCode: "30309", state: "GA", line: ["Test Clinic", "32 Harbor Lane"] }],
           name: "Test Clinic",
           partOf: { reference: "urn:uuid:brand-1" },
           resourceType: "Organization",

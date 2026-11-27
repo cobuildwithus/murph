@@ -273,9 +273,12 @@ are retained so city/facility matches beyond the first visible results remain
 discoverable.
 
 Search returns the highest-ranked facility with its name, city, state, postal
-code and any available street lines. Extended location tuples retain the
-upstream organization identity, local aliases and street lines. The reader
-also accepts the original four fields. The companion projects the place into
+code and any available street lines. Seven-field location tuples add street
+lines, local aliases and a public coordinate pair in latitude/longitude order,
+or null for an unmapped ZIP. The importer drops a street line that repeats the
+facility name and exact duplicate tuples. The reader also accepts the original
+four-field tuples. The tuple and search owner are shared by all directory
+sources. The companion projects the place into
 its existing display string. Browsers request grouped results with the
 `X-Clinical-Directory-Version: 2` header. Older requests keep the original
 exact provider and facility shapes. A reader that parses more than Epic rows
@@ -285,6 +288,38 @@ working. Vendor filtering happens before ranking, grouping and the 20-result cap
 The parser checks each listed policy against a server-owned definition (Epic,
 and the default-off Oracle Health profile); an artifact lists only the policies
 its entries use.
+
+ZIP and location searches use the public-domain [2026 Census national ZCTA Gazetteer](https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2026_Gazetteer/2026_Gaz_zcta_national.zip).
+Its 33,791 representative internal points approximate ZIP locations. The source
+archive SHA-256 is `f1e9046b91f6e60686a99343cb2752834c02b0764939403b331c78c017e2c54c`.
+Run `python3 apps/web/scripts/import-zcta-centroids.py ARCHIVE apps/web/src/lib/clinical-records/zcta-centroids.2026.json`
+to reproduce the offline lookup. Points keep three decimals, about 110 m.
+The directory builder uses the five-digit part of a ZIP or ZIP+4. Census
+omits some postal codes and some facilities publish no ZIP. These facilities
+remain available to text searches. Only a search loads the lookup, so routes
+that resolve one entry never parse it.
+
+Both search POST bodies accept `query` and optional `near: { lat, lon }`.
+An explicit location tap rounds one fix on the device to a 0.1-degree cell
+(about 11 km north/south, narrower east/west). Web rejects extra cell fields,
+finer precision and coordinates outside the supported US envelope. The input
+exists only for the request. URLs, logs, analytics, storage, the clinical
+runtime and the vault receive neither the ZIP selector nor the cell.
+
+A five-digit ZIP takes precedence over a cell when it is the whole query or
+either end of an otherwise word-only query. A street-type word after the
+first remaining word, as in “12401 Hospital Drive”, marks a street number
+instead, while a leading “St” still reads as a saint. Without a centroid the
+ZIP remains ordinary search text. Origin-only searches include located
+facilities within 50 miles. With additional text, relevance ranks first and
+great-circle distance breaks ties. Distances are computed only for relevance
+tiers that reach the results and for a returned portal's siblings. Facility
+filtering precedes portal grouping and result limits. The companion and
+browsers negotiating `X-Clinical-Directory-Version: 3` receive optional whole-mile
+`matchedFacility.approximateDistanceMiles`. Clients display “about 3 mi”, or
+“less than 1 mi” for zero.
+Version 2 keeps its grouped place fields and the unversioned route keeps
+its four-field facilities. Each Web deployment bundles its directory and reader.
 
 Each grouped result keeps its best matching facility. Its selectable brand on
 the same canonical FHIR base prefers a usable hospital-approved registration,
@@ -315,15 +350,69 @@ folder, with provenance in `sources-square.json`. The companion routes prefer
 it and fall back to the wide PNG; the web pages keep the wide wordmarks. The
 square set is produced offline and the refresh script does not rewrite it.
 
-A weekly GitHub Actions build publishes changed directory data to a content-addressed branch.
-Open its comparison link from the job summary to review endpoint changes, removals and the source hash before merging it.
+### Weekly refresh and one-time signer grant
+
+The weekly refresh validates the prior and candidate directories and fails
+when any source system loses more than 10 percent of its brands, facilities
+or mapped facilities. After confirming a genuine large drop upstream, run the
+workflow manually with `allow_count_drop` checked; scheduled runs always keep
+the floor. It checks the tracked output and requires a nonempty source.
+
+A member's connection is bound to its entry id and a hash of that entry's
+exact FHIR base URL, and connects with the OAuth client and policy the entry
+names, so the parser rejects any URL not already in canonical form and the
+refresh never changes those connection fields automatically.
+`holdDirectoryChangesForReview` in `provider-directory-artifact.ts` is the one
+refresh rule. Upstream names, aliases and facilities publish. Three changes are
+held: any change to an existing entry's URL (path included), client key or
+policy keeps the published value; an existing entry missing upstream stays as
+published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
+on an endpoint origin a production entry already uses. The sandbox host does
+not count as a production host. The run opens or updates the GitHub issue
+“Clinical directory changes need review” listing every held change. The issue
+says its upstream values are unverified and must be re-checked against
+open.epic.com, and a report over the issue size limit ends with a count of
+unlisted rows. To accept one, a person changes the committed directory in
+their own pull request.
+
+The publish job installs no dependencies and never sees the Epic download.
+With Node and the committed checkout, `scripts/check-clinical-provider-directory.mjs`
+reruns the directory parser, the count floor and the hold rule on the
+candidate, which must hold nothing against the committed directory. It then
+reports held changes and, in the main-only
+`frog-reconciliation` environment, mints a repository App token with contents
+and pull-request write access. The App opens a ready PR for normal CI. The PR
+lookup is qualified by the repository owner, so a fork's branch of the same
+name is ignored. The workflow waits for GitHub's protected merge state,
+verifies the same head and requests a regular squash merge. Required status
+checks remain enforced: `Release verification plan (ubuntu)`, part of the
+required `Release checks (ubuntu)`, applies the same rule and fails any
+bot-authored pull request that makes a held change. The count floor compares
+each candidate with the committed directory. An unchanged candidate skips
+publication.
+
+Before enabling publication, grant the existing App key signer to this
+main-branch workflow once. The build job has read-only checkout access.
+The publish and merge jobs use the repository's OIDC/KMS token action.
+
+```sh
+gcloud kms keys add-iam-policy-binding frog-app --project=murph-495013 \
+  --location=global --keyring=github-apps --role=roles/cloudkms.signer \
+  --member='principalSet://iam.googleapis.com/projects/662258957089/locations/global/workloadIdentityPools/github-actions/attribute.workflow_ref/cobuildwithus/murph/.github/workflows/clinical-provider-directory.yml@refs/heads/main'
+```
+
+
 To build the same artifact manually from the repository root:
 
 ```bash
 curl --fail --location --silent --show-error \
   https://open.epic.com/Endpoints/Brands |
-  pnpm --dir apps/web clinical-records:providers:import -- --input -
+  pnpm --dir apps/web clinical-records:providers:import -- --input - \
+  --held-output held-changes.json
 ```
+
+The manual import applies the same hold rule against the committed directory
+and lists held changes in the optional `--held-output` file.
 
 Review the official source provenance and generated diff, then rerun the
 provider-directory tests. The importer is byte-deterministic for fixed source
@@ -915,6 +1004,6 @@ client id fails closed before redirect.
 - Provider-specific adapters beyond Epic SMART. Oracle Health readers, keys and
   flags exist but stay off; starts, directory entries and member copy are
   pending.
-- Provider-directory network refresh jobs and provider-specific data erasure.
+- Runtime requests to refresh public directories and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal
   medical record.

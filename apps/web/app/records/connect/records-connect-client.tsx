@@ -235,10 +235,32 @@ export function ProviderSearch({
     if (shouldSearch) searchTimerRef.current = setTimeout(() => { void searchProviders(); }, 300);
   }
 
-  async function searchProviders() {
+  function useLocation() {
+    if (searchInFlightRef.current || startInFlightRef.current) return;
+    const generation = ++operationGenerationRef.current;
+    setProviders([]);
+    setHasSearched(false);
+    setSearchError(null);
+    setSearchPending(true);
+    const unavailable = () => {
+      if (generation !== operationGenerationRef.current) return;
+      setSearchPending(false);
+      setSearchError("Location is unavailable. Type your ZIP instead.");
+    };
+    if (!navigator.geolocation) return unavailable();
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      if (generation !== operationGenerationRef.current) return;
+      void searchProviders({
+        lat: Math.round(coords.latitude * 10) / 10,
+        lon: Math.round(coords.longitude * 10) / 10,
+      });
+    }, unavailable, { enableHighAccuracy: false, maximumAge: 0, timeout: 10000 });
+  }
+
+  async function searchProviders(near?: { lat: number; lon: number }) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     const normalizedQuery = searchInputRef.current?.value.trim() ?? "";
-    if (!normalizedQuery) {
+    if (!normalizedQuery && !near) {
       if (searchInputRef.current) {
         searchInputRef.current.value = "";
         searchInputRef.current.reportValidity();
@@ -263,7 +285,7 @@ export function ProviderSearch({
       const response = await requestHostedOnboardingJson<unknown>({
         method: "POST",
         headers: CLINICAL_PROVIDER_SEARCH_HEADERS,
-        payload: { query: normalizedQuery },
+        payload: { query: normalizedQuery, near },
         signal: searchAbort.signal,
         url: PROVIDER_SEARCH_PATH,
       });
@@ -279,7 +301,8 @@ export function ProviderSearch({
       }
       setProviders([]);
       setHasSearched(false);
-      setSearchError("Hospitals and clinics could not be searched right now. Try again.");
+      setSearchError(near ? "Nearby search is unavailable. Type your ZIP instead."
+        : "Hospitals and clinics could not be searched right now. Try again.");
     } finally {
       if (operationGenerationRef.current === operationGeneration) {
         searchInFlightRef.current = false;
@@ -380,6 +403,7 @@ export function ProviderSearch({
       selectedProviderId={selectedProviderId}
       inputRef={attachSearchInput}
       onQueryChange={changeQuery}
+      onUseLocation={useLocation}
       onSearch={() => { void searchProviders(); }}
       onSelect={(provider) => { void startConnection(provider); }}
       onRestart={clearClinicalRecordsConnectIntentFromBrowser}

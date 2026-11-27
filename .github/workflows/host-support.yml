@@ -124,6 +124,18 @@ jobs:
         id: reach
         run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
 
+      # The weekly refresh merges itself, so a bot may update facilities and add
+      # production entries on known production hosts, but only a person may
+      # change an existing entry's endpoint, client key or policy, remove an
+      # entry, or add any other entry.
+      - name: Hold automated clinical directory changes for a person
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          MURPH_PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
+        run: |
+          node --test scripts/check-clinical-provider-directory.test.mjs
+          node scripts/check-clinical-provider-directory.mjs pull-request
+
       - name: Validate and publish release verification plan
         id: verification_plan
         env:

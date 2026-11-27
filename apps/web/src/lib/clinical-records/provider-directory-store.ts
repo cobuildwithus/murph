@@ -1,4 +1,5 @@
 import "server-only";
+import type { LocationCell } from "./directory-geography";
 
 import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
@@ -32,13 +33,18 @@ export function resolveClinicalProviderDirectoryEntry(
 
 export async function searchClinicalProviderDirectory(input: {
   city?: string | null;
+  includeDistance?: boolean;
+  near?: LocationCell;
   query?: string | null;
   state?: string | null;
 }, memberId?: string, readerSources: readonly ClinicalProviderSourceSystem[] = ["epic-fhir"]) {
   const directory = readClinicalProviderDirectory();
   const sourceSystems = readerSources.filter((source) => source !== "cerner-fhir" || oracleSearchEnabled());
-  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined,
-    accessRank: epicPortalAccessRank, sourceSystems });
+  // Loaded on the first search, so routes that only resolve an entry never parse the ZIP table.
+  const { postalCentroid } = await import("./postal-centroids");
+  const result = searchClinicalProviderDirectorySnapshot(directory, {
+    ...input, postalCentroid, grouped: memberId !== undefined, accessRank: epicPortalAccessRank, sourceSystems,
+  });
   if (memberId === undefined || !result.providers.length) return result;
   const hashes = result.providers.map(provider => {
     const entry = resolveClinicalProviderDirectoryEntry(provider.id)!;

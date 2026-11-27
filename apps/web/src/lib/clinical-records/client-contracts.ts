@@ -47,7 +47,7 @@ export const CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS = ["epic-fhir", "cerner-fhi
 export type ClinicalProviderSearchSourceSystem = (typeof CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS)[number];
 export const CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER = "X-Clinical-Directory-Sources";
 export const CLINICAL_PROVIDER_SEARCH_HEADERS = {
-  "X-Clinical-Directory-Version": "2",
+  "X-Clinical-Directory-Version": "3",
   [CLINICAL_PROVIDER_SEARCH_SOURCES_HEADER]: CLINICAL_PROVIDER_SEARCH_SOURCE_SYSTEMS.join(","),
 } as const;
 
@@ -60,6 +60,7 @@ export interface ClinicalProviderFacilityContract {
 
 export interface ClinicalMatchedFacility extends ClinicalProviderFacilityContract {
   street?: readonly string[];
+  approximateDistanceMiles?: number;
 }
 
 export interface ClinicalProviderSearchResultContract {
@@ -76,7 +77,9 @@ export function clinicalProviderPlaceLabels(provider: ClinicalProviderSearchResu
   const facility = provider.matchedFacility ?? provider.facilities[0];
   const locality = facility && [facility.name === provider.brandName ? null : facility.name,
     ...(provider.matchedFacility?.street ?? []), facility.city, facility.state].filter(Boolean).join(", ");
-  return [locality, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
+  const miles = provider.matchedFacility?.approximateDistanceMiles;
+  const distance = miles === undefined ? null : miles < 1 ? "less than 1 mi" : `about ${miles} mi`;
+  return [locality, distance, ...provider.sharedPlaces ?? [], provider.possiblyIncludedThrough
     && `May already be included through ${provider.possiblyIncludedThrough}`].filter((label): label is string => Boolean(label));
 }
 
@@ -235,9 +238,10 @@ export function parseClinicalRecordCallbackMarker(
 }
 
 function parseMatchedFacility(value: unknown): ClinicalMatchedFacility {
-  const record = requireExactRecord(value, ["city", "name", "postalCode", "state"], ["street"]);
-  const { street, ...facility } = record;
-  return { ...parseFacility(facility), ...(street === undefined ? {} : { street: requireArray(street, 4).map(line => requireString(line, 180)) }) };
+  const record = requireExactRecord(value, ["city", "name", "postalCode", "state"], ["street", "approximateDistanceMiles"]);
+  const { street, approximateDistanceMiles, ...facility } = record;
+  return { ...parseFacility(facility),
+    ...(approximateDistanceMiles === undefined ? {} : { approximateDistanceMiles: requireCount(approximateDistanceMiles) }), ...(street === undefined ? {} : { street: requireArray(street, 4).map(line => requireString(line, 180)) }) };
 }
 
 function parseFacility(value: unknown): ClinicalProviderFacilityContract {

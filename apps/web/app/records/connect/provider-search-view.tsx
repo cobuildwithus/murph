@@ -34,6 +34,7 @@ export interface ProviderSearchViewProps {
   inputRef?: RefCallback<HTMLInputElement>;
   onQueryChange: (value: string, composing?: boolean) => void;
   onSearch: () => void;
+  onUseLocation: () => void;
   onSelect: (provider: ClinicalProviderSearchResultContract) => void;
   onRestart: () => void;
 }
@@ -54,6 +55,7 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
         <div className="flex flex-col pt-[18px]" style={LINK_PAGE_NIGHT_TOKENS}>
           <form
             role="search"
+            method="post"
             onSubmit={(event) => { event.preventDefault(); props.onSearch(); }}
           >
             <label htmlFor={inputId} className="sr-only">Hospital or clinic</label>
@@ -101,6 +103,11 @@ export function ProviderSearchView({ inputRef, ...props }: ProviderSearchViewPro
               Search
             </button>
           </form>
+          {!props.query && !locked ? (
+            <Button type="button" variant="ghost" disabled={props.searchPending} onClick={props.onUseLocation}>
+              Use my location
+            </Button>
+          ) : null}
 
           {props.startError ? (
             <div className="flex flex-col items-center pt-3">
@@ -161,7 +168,7 @@ function ProviderSearchResults({ atRest, noMatches, resultsId, statusId, view: p
       {props.searchError ? (
         <div className="flex flex-col items-center">
           <LinkPageError>{props.searchError}</LinkPageError>
-          <LinkPageLink onClick={props.onSearch}>Try again</LinkPageLink>
+          {props.query && <LinkPageLink onClick={props.onSearch}>Try again</LinkPageLink>}
         </div>
       ) : null}
       <ul

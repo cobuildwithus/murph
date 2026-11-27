@@ -38,6 +38,7 @@ update that resource explicitly if an import creates a different version.
 | Key | Workflow on `refs/heads/main` | Minting job |
 | --- | --- | --- |
 | `frog-app` | `friction-log.yml` | `friction-log` |
+| `frog-app` | `clinical-provider-directory.yml` | `publish`, `merge` |
 | `temporal-compatibility-app` | `temporal-compatibility.yml` | `compatibility` |
 | `temporal-compatibility-app` | `temporal-web-deployment-admission.yml` | `admission` |
 | `temporal-compatibility-app` | `junction-wearable-canary.yml` | `connect` |
