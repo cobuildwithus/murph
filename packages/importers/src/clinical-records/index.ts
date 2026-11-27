@@ -385,6 +385,7 @@ export function clinicalPlanToEventImportDecisions(
         reason: decision.reason,
         evidence: decision.evidence,
         ...(isEnrichmentSourceRef(decision.externalRef) ? { retractFacetPrefixes: ["document-extraction"] } : {}),
+        ...(decision.retrievalRevision ? { retrievalRevision: true } : {}),
       }),
     ];
   });
@@ -451,6 +452,7 @@ function buildAllergySnapshotDecision(input: {
         evidence,
         externalRef,
       },
+      retrievalRevision: true,
     });
   }
 
@@ -461,6 +463,7 @@ function buildAllergySnapshotDecision(input: {
       ? "FHIR allergy snapshot conflicts with no-known-allergies"
       : "FHIR allergy snapshot has no explicit no-known-allergies assertion",
     evidence,
+    retrievalRevision: true,
   });
 }
 
@@ -763,7 +766,7 @@ function reviewOnly(context: FhirResourceContext, reason: string, disposition?: 
     disposition: disposition ?? (externalRef && REVIEW_HOLD_RESOURCE_TYPES.has(context.resource.resourceType) ? "hold" : "raw-only"),
     resourceType: context.resource.resourceType,
     resourceId,
-    ...(externalRef ? { externalRef } : {}),
+    ...(externalRef ? { externalRef, ...retrievalRevision(context) } : {}),
     reason,
     evidence: [evidenceForResource(context, resourceId)],
   });
@@ -774,7 +777,7 @@ function upsertOrReview(
   payload: Record<string, unknown>,
   reviewReason: string,
 ): MappedFhirResource {
-  const parsedDecision = clinicalImportUpsertDecisionSchema.safeParse({ action: "upsert", payload });
+  const parsedDecision = clinicalImportUpsertDecisionSchema.safeParse({ action: "upsert", payload, ...retrievalRevision(context) });
   if (!parsedDecision.success) {
     return reviewOnly(context, reviewReason);
   }
@@ -792,7 +795,20 @@ function retractionDecision(
     externalRef: externalRefForResource(context, context.resource.resourceType, resourceId),
     reason,
     evidence: [evidenceForResource(context, resourceId)],
+    ...retrievalRevision(context),
   });
+}
+
+// A revision taken from the retrieval says when Murph read the resource, not
+// that it changed, so core keeps the active record when a later read matches
+// it. Downloaded attachment bytes are not part of that record: their parents
+// take a revision per retrieval so derived document facts stay bound to the
+// bytes they came from.
+function retrievalRevision(context: FhirResourceContext): { retrievalRevision?: true } {
+  const { resource } = context;
+  const downloaded = context.documents.metadata.some((attachment) => attachment.status === "downloaded"
+    && attachment.resourceType === resource.resourceType && attachment.resourceId === resource.id);
+  return classifyResourceRevision(resource).source === "batch" && !downloaded ? { retrievalRevision: true } : {};
 }
 
 function authoritativeRetractionReason(resource: Resource): string | null {
@@ -1961,9 +1977,11 @@ function classifyResourceRevision(resource: Resource): ClinicalFhirSourceRevisio
 // `meta.lastUpdated` is optional in FHIR R4 and some servers omit it on every
 // resource. The manifest `fetchedAt` is already the ordered revision for the
 // aggregate allergy snapshot, so it doubles as the resource revision when the
-// server supplies none: a later retrieval supersedes an earlier one, the same
-// retrieval replayed is a same-revision replay that core skips, and an earlier
-// retrieval replayed later stays skipped as stale. A present but non-comparable
+// server supplies none: a later retrieval with changed content supersedes an
+// earlier one (an unchanged one leaves the active record alone, see
+// `retrievalRevision`), the same retrieval replayed is a same-revision replay
+// that core skips, and a retrieval older than the active revision stays
+// skipped as stale. A present but non-comparable
 // `lastUpdated` yields no revision so the fail-closed hold still applies. The
 // rule lives in `@murphai/clinical-records` because enrichment parent
 // attestation must bind derived document facets to the same revision.

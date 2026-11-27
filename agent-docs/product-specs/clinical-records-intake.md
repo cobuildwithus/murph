@@ -615,7 +615,17 @@ SUBSETTED resources and unorderable same-identity siblings remain raw evidence
 with an explicit incomplete disposition, leaving validated canonical facts
 unchanged. A resource that omits `meta.lastUpdated` takes its batch manifest
 `fetchedAt` as the source revision, so later retrievals supersede earlier ones
-and replays stay idempotent. Comparable clinical holds retain the existing
+and replays stay idempotent. That revision records only when Murph read the
+resource. A later read whose clinical content matches the active record, or
+that withdraws an already withdrawn record, writes nothing and counts as
+nothing new. The active revision stays the stale and conflict boundary. A
+delayed retrieval newer than it but older than such a read is treated as
+newer, and the next read restores current content. Each connection imports
+its retrievals in generation order, so this needs out-of-order imports. A
+document with downloaded attachment bytes keeps a revision per retrieval
+because its canonical note does not show the bytes. Its derived facts
+therefore always bind to the bytes they came from. Structured enrichment binds
+to the active revision. Comparable clinical holds retain the existing
 revision protection. A refresh preserves an existing parser hold for an unchanged
 Observation at the same revision only when its exact historical parser reason,
 identity, manifest-bound source bytes and resource contents match. Component

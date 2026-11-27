@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -223,7 +223,7 @@ it.each([null, "2020-03-12T12:00:00.000Z"])("persists structured source answers 
   expect(facts[0]!.attributes.evidence).toEqual([expect.not.objectContaining({ page: expect.anything() })]);
 });
 
-it.each(["Condition", "Observation"] as const)("only reports the first of three identical retrievals and enrichments for a retrieval-dated %s", async (resourceType) => {
+it.each(["Condition", "Observation"] as const)("writes nothing after the first of three identical retrievals and enrichments for a retrieval-dated %s", async (resourceType) => {
   const answer = "Synthetic intake finding";
   const resource = resourceType === "Condition"
     ? { resourceType, id: "undated-condition", subject: source().subject, code: { text: answer }, onsetDateTime: date }
@@ -243,27 +243,36 @@ it.each(["Condition", "Observation"] as const)("only reports the first of three 
         manifestSha256: retrieval.manifestSha256, structuredSources: retrieval.structuredEnrichmentSources }));
     }
     expect(retrieval.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
-    if (day > 1) expect(retrieval.canonical).toMatchObject({ supersededCount: 1, retractedCount: 1 });
+    if (day > 1) expect(retrieval.canonical).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
     await runCursorClinicalEnrichment(f.runtime);
     const applied = await applyClinicalEnrichmentProposals({ vaultRoot: f.vaultRoot, jobId });
-    expect(applied).toMatchObject({ counts: { created: 1 }, readback: { verifiedCount: 1 } });
+    // Later jobs bind to the unchanged first revision and find its fact.
+    expect(applied).toMatchObject({ counts: { created: day === 1 ? 1 : 0, existing: day === 1 ? 0 : 1, held: 0 }, readback: { verifiedCount: 1 } });
     expect(applied.receipt.changes).toHaveLength(day === 1 ? 1 : 0);
     await readNextClinicalEnrichment({ vaultRoot: f.vaultRoot, jobId });
+    expect(await readClinicalEnrichmentStatus({ vaultRoot: f.vaultRoot, jobId })).toMatchObject({ status: "complete" });
   }
+  expect(f.executeExtraction).toHaveBeenCalledOnce();
+  // One source note and one derived fact, each with a single revision.
+  const ledger = path.join(f.vaultRoot, "ledger/events");
+  const shards = (await readdir(ledger, { recursive: true })).filter((file) => file.endsWith(".jsonl"));
+  const rows = await Promise.all(shards.map(async (file) => (await readFile(path.join(ledger, file), "utf8")).trimEnd().split("\n")));
+  expect(rows.flat()).toHaveLength(2);
 });
 
 it("reports a corrected onset in a long retrieval-dated history note and fences older captures", async () => {
   const condition = { resourceType: "Condition", id: "sectioned", subject: source().subject,
     code: { text: "Synthetic finding" }, onsetDateTime: date, note: [{ text: "Detail ".repeat(1900) }] };
   const f = await fixture([condition], "Condition");
-  const check = (day: number, onsetDateTime: string) => importClinicalFhirSnapshot({ ...f.input,
-    retrievalJobId: `sectioned-${day}`, fetchedAt: `2026-07-0${day}T12:00:00.000Z`,
+  const check = (fetchedAt: string, onsetDateTime: string) => importClinicalFhirSnapshot({ ...f.input,
+    retrievalJobId: `sectioned-${fetchedAt.slice(0, 10)}`, fetchedAt,
     pages: [{ ...f.input.pages[0]!, content: JSON.stringify({ resourceType: "Bundle", type: "searchset",
       entry: [{ resource: { ...condition, onsetDateTime } }] }) }] });
   expect(f.result.receipt.changes).toMatchObject([{ action: "created" }]);
-  expect((await check(3, date)).receipt.changes).toEqual([]);
-  expect(await check(2, revision)).toMatchObject({ receipt: { changes: [] }, canonical: { skippedExistingCount: 1 } });
-  expect((await check(4, revision)).receipt.changes).toMatchObject([{ action: "superseded" }]);
+  expect(await check("2026-07-03T12:00:00.000Z", date)).toMatchObject({ receipt: { changes: [] }, canonical: { skippedExistingCount: 1, supersededCount: 0 } });
+  // The unchanged reread kept the first revision, so a capture older than it is stale.
+  expect(await check("2026-06-30T12:00:00.000Z", revision)).toMatchObject({ receipt: { changes: [] }, canonical: { skippedExistingCount: 1 } });
+  expect((await check("2026-07-04T12:00:00.000Z", revision)).receipt.changes).toMatchObject([{ action: "superseded" }]);
 });
 
 it("reimports an unchanged undated source across days and continues the enrichment queue", async () => {

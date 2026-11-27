@@ -54,9 +54,9 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-function lab(id: string, value: number, updated: Date, status = "final", patient = epicWireProfile.patient) {
+function lab(id: string, value: number, updated: Date | null, status = "final", patient = epicWireProfile.patient) {
   return { resourceType: "Observation", id, status, subject: { reference: `Patient/${patient}` },
-    meta: { lastUpdated: updated.toISOString() }, effectiveDateTime: "2020-01-05T12:00:00Z",
+    ...(updated && { meta: { lastUpdated: updated.toISOString() } }), effectiveDateTime: "2020-01-05T12:00:00Z",
     category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
     code: { coding: [{ system: "http://loinc.org", code: "4548-4", display: "Hemoglobin A1c" }] },
     valueQuantity: { value, unit: "%", code: "%", system: "http://unitsofmeasure.org" } };
@@ -188,7 +188,7 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
   it("publishes full, identical and corrected generations before removing local access", async () => {
     const f = await connect();
     const now = new Date();
-    f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 5, now), lab("second", 6, now)]);
+    f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 5, null), lab("second", 6, now)]);
     const encounter = (id: string, start: Date) => ({ resourceType: "Encounter", id, status: "finished",
       class: { system: "http://terminology.hl7.org/CodeSystem/v3-ActCode", code: "AMB" }, meta: { lastUpdated: start.toISOString() },
       subject: { reference: `Patient/${epicWireProfile.patient}` }, period: { start: start.toISOString(), end: start.toISOString() } });
@@ -201,6 +201,16 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     expect(await f.projection()).toMatchObject({ state: "ready", updates: "daily" });
     const first = await fact(initial.workspace.vaultRoot, "first");
     expect(first).toMatchObject({ results: [{ value: 5 }] });
+    const canonicalFiles = async (root: string) => {
+      const ledger = join(root, "ledger/events");
+      const files = (await readdir(ledger, { recursive: true })).filter(file => file.endsWith(".jsonl")).sort();
+      return Promise.all(files.map(async file => {
+        const rows = await readFile(join(ledger, file), "utf8");
+        return { file, revisions: rows.trimEnd().split("\n").length, digest: digest(rows) };
+      }));
+    };
+    const original = await canonicalFiles(initial.workspace.vaultRoot);
+    expect(original.reduce((total, shard) => total + shard.revisions, 0)).toBe(4);
     const nextDay = (await f.connection()).nextSyncAt!;
     const admit = async (at: Date) => expect(await admitClinicalDailySync({
       memberId: f.memberId, connectionId: f.connectionId, now: at,
@@ -212,19 +222,27 @@ describe.skipIf(!enabled)("Epic vendor lifecycle on PostgreSQL", () => {
     const dailyIds = f.vendor.returnedIds.slice(repeatStart);
     expect(dailyIds).toEqual(expect.arrayContaining(["recent-visit", "first", "second"]));
     expect(dailyIds).not.toContain("older-visit");
+    expect(await canonicalFiles(repeat.workspace.vaultRoot)).toEqual(original);
     expect(refreshes(f)).toBe(1);
     expect(repeat.run.outcomeCountsJson).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
     expect(await fact(repeat.workspace.vaultRoot, "first")).toEqual(first);
     expect(await f.projection()).toMatchObject({ state: "nothing_new" });
     const encounterWindow = (from: number) => f.vendor.requests.slice(from)
       .find(({ url }) => url.pathname.endsWith("/Encounter") && url.searchParams.has("date"))?.url.searchParams.getAll("date");
-    const previousWindow = encounterWindow(0);
+    let previousWindow = encounterWindow(0);
     expect(previousWindow).toHaveLength(2);
-    const changed = new Date(now.getTime() + 1000);
-    f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 7, changed, "corrected"), lab("second", 6, changed, "entered-in-error")]);
     await admit(new Date(nextDay.getTime() + 86_400_000));
+    const secondDailyStart = f.vendor.requests.length;
+    const repeatAgain = await importGeneration(f, repeat.workspace);
+    expect(await canonicalFiles(repeatAgain.workspace.vaultRoot)).toEqual(original);
+    expect(repeatAgain.run.outcomeCountsJson).toMatchObject({ createdCount: 0, supersededCount: 0, retractedCount: 0 });
+    expect(await f.projection()).toMatchObject({ state: "nothing_new" });
+    previousWindow = encounterWindow(secondDailyStart);
+    const changed = new Date(now.getTime() + 1000);
+    f.vendor.setSearchResults("Observation", "laboratory", [lab("first", 7, null, "corrected"), lab("second", 6, changed, "entered-in-error")]);
+    await admit(new Date(nextDay.getTime() + 2 * 86_400_000));
     const startAt = f.vendor.requests.length;
-    const daily = await importGeneration(f, repeat.workspace);
+    const daily = await importGeneration(f, repeatAgain.workspace);
     expect(daily.run.outcomeCountsJson).toMatchObject({ supersededCount: 1, retractedCount: 1 });
     const nextWindow = encounterWindow(startAt);
     expect(nextWindow).toHaveLength(2);
