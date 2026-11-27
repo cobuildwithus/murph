@@ -117,15 +117,19 @@ export function resolveOracleStart(provider: OracleProviderDirectoryEntry, membe
 
 type OracleGrant = { redirectUri: string; clientId?: string } | { grant: "refresh"; clientId: string };
 
+/** The one FHIR base shape Oracle patient access uses: its host and a single tenant segment, written exactly. */
+export function isOracleFhirBaseUrl(value: string): boolean {
+  const tenant = ORACLE_FHIR_BASE_PATH.exec(URL.parse(value)?.pathname ?? "")?.[1];
+  return Boolean(tenant) && value === `https://${ORACLE_FHIR_HOST}/r4/${tenant}`;
+}
+
 function registrationMatches(profile: OracleProfile, provider: { id: string; fhirBaseUrl: string }, grant: OracleGrant) {
   if (profile.integration !== ORACLE_INTEGRATION_ID || profile.method !== "private_key_jwt") return false;
   const sandbox = profile.environment === "sandbox";
   if ("redirectUri" in grant && grant.redirectUri !== (sandbox ? ORACLE_SANDBOX_CALLBACK : PRODUCTION_CALLBACK)) return false;
   if (sandbox) return provider.id === ORACLE_SANDBOX_ENTRY.id && provider.fhirBaseUrl === ORACLE_SANDBOX_ENTRY.fhirBaseUrl;
-  const tenant = ORACLE_FHIR_BASE_PATH.exec(URL.parse(provider.fhirBaseUrl)?.pathname ?? "")?.[1];
   return profile.environment === "production" && provider.id.startsWith("oracle-") && provider.id !== ORACLE_SANDBOX_ENTRY.id
-    && provider.fhirBaseUrl !== ORACLE_SANDBOX_ENTRY.fhirBaseUrl && Boolean(tenant)
-    && provider.fhirBaseUrl === `https://${ORACLE_FHIR_HOST}/r4/${tenant}`;
+    && provider.fhirBaseUrl !== ORACLE_SANDBOX_ENTRY.fhirBaseUrl && isOracleFhirBaseUrl(provider.fhirBaseUrl);
 }
 
 export function resolveOracleClientAuth(

@@ -302,6 +302,7 @@ describe.skipIf(!enabled)("daily clinical admission PostgreSQL", () => {
       await provisionActiveHostedDomainRootEnvelopeForUserOnly({ domain: "device", prisma: client, reason: "synthetic-test", userId: f.memberId });
       await client.clinicalRecordConnection.update({ where: { id: f.connectionId }, data: {
         fhirBaseHash: createHash("sha256").update(fhirBaseUrl).digest("hex"),
+        fhirBaseUrlEncrypted: await sealClinicalConnectionFhirBaseUrl({ memberId: f.memberId, connectionId: f.connectionId, value: fhirBaseUrl }),
         patientBindingEncrypted: await sealClinicalConnectionSecret({ memberId: f.memberId, connectionId: f.connectionId,
           tokenVersion, field: "patientBinding", value: hashClinicalFhirPatientId(patientId) }),
       } });
