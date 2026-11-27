@@ -1,0 +1,17 @@
+{
+  "key": "albumin",
+  "label": "Albumin",
+  "value": 4.6,
+  "unit": "g/dL",
+  "years": -2.5,
+  "target": {
+    "text": "Comparison value 4.6 g/dL"
+  },
+  "history": [
+    {
+      "date": "2024-09-16",
+      "value": 4.6
+    }
+  ],
+  "whatItIs": "Albumin is reported in g/dL on your lab panel."
+}

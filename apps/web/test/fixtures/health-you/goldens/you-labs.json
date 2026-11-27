@@ -1,0 +1,134 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "state": "ready",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "age": {
+    "value": 72.3,
+    "real": 57,
+    "gap": 15.3,
+    "low": 54.1,
+    "high": 90.5
+  },
+  "week": {
+    "daysAged": 7,
+    "saved": 0,
+    "partial": true,
+    "basis": "referenceOnly"
+  },
+  "thisWeek": [
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [
+    {
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "group": "blood",
+      "value": "16.4",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 12.1 %"
+      },
+      "years": 10.1,
+      "yearsText": "+10.1",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "rdw",
+      "state": "counted"
+    },
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "group": "blood",
+      "value": "3.4",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 4.6 g/dL"
+      },
+      "years": 5.2,
+      "yearsText": "+5.2",
+      "rank": {
+        "percentile": 10,
+        "label": "10th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "albumin",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [
+    {
+      "key": "strength",
+      "label": "Strength test",
+      "icon": "strength",
+      "action": "combine",
+      "primary": true
+    },
+    {
+      "key": "food",
+      "label": "Food week",
+      "icon": "food",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "action": "connectWearable",
+      "primary": false
+    }
+  ],
+  "questions": [
+    {
+      "key": "smoking",
+      "text": "Which best describes your cigarette use?",
+      "options": [
+        {
+          "value": "never",
+          "label": "Never smoked regularly"
+        },
+        {
+          "value": "former",
+          "label": "Former smoker"
+        },
+        {
+          "value": "current",
+          "label": "Currently smoke"
+        },
+        {
+          "value": "unknown",
+          "label": "Skip"
+        }
+      ]
+    }
+  ]
+}

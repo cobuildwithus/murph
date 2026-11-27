@@ -124,6 +124,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "healthPostAttachments HealthPostAttachment[]",
     'healthFeedHides HealthFeedHide[] @relation("HealthHideOwner")',
     'healthFeedHiddenBy HealthFeedHide[] @relation("HealthHideSubject")',
+    "healthYouCache HealthYouCache?",
     "healthWinSets HealthWinSet[]",
     "healthWinNudge HealthWinNudge?",
     'gameInvitations GameInvitee[] @relation("GameInviteeMember")',

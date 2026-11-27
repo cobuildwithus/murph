@@ -1,0 +1,177 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "state": "ready",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "age": {
+    "value": 36.5,
+    "real": 41,
+    "gap": -4.5,
+    "low": 17.4,
+    "high": 55.7
+  },
+  "week": {
+    "daysAged": 7,
+    "saved": 0,
+    "partial": false,
+    "basis": "observed"
+  },
+  "thisWeek": [
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [
+    {
+      "key": "cardioFitness",
+      "label": "Cardio fitness",
+      "icon": "cardioFitness",
+      "group": "fitness",
+      "value": "16.9",
+      "unit": "peak METs",
+      "target": {
+        "text": "Comparison value 13 peak METs"
+      },
+      "years": -2.1,
+      "yearsText": "−2.1",
+      "rank": null,
+      "grade": "A",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "group": "habits",
+      "value": "54",
+      "unit": "bpm",
+      "target": {
+        "text": "Comparison value 60.8 bpm"
+      },
+      "years": -0.9,
+      "yearsText": "−0.9",
+      "rank": {
+        "percentile": 10,
+        "label": "10th percentile",
+        "cohort": "Women near age 41"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "group": "fitness",
+      "value": "41.5",
+      "unit": "kg, mean hand maximum",
+      "target": {
+        "text": "Comparison value 37.7 kg, mean hand maximum"
+      },
+      "years": -0.7,
+      "yearsText": "−0.7",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 41"
+      },
+      "grade": "B",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "11,500",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 13,699.6 steps/day"
+      },
+      "years": -0.6,
+      "yearsText": "−0.6",
+      "rank": {
+        "percentile": 79,
+        "label": "79th percentile",
+        "cohort": "Women near age 41"
+      },
+      "grade": null,
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "group": "sleep",
+      "value": "7h 25m",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 7"
+      },
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "rank": {
+        "percentile": 64,
+        "label": "64th percentile",
+        "cohort": "Women near age 41"
+      },
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [
+    {
+      "key": "food",
+      "label": "Food week",
+      "icon": "food",
+      "action": "foodWeek",
+      "primary": true
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    }
+  ],
+  "questions": [
+    {
+      "key": "smoking",
+      "text": "Which best describes your cigarette use?",
+      "options": [
+        {
+          "value": "never",
+          "label": "Never smoked regularly"
+        },
+        {
+          "value": "former",
+          "label": "Former smoker"
+        },
+        {
+          "value": "current",
+          "label": "Currently smoke"
+        },
+        {
+          "value": "unknown",
+          "label": "Skip"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-27",
+  "order": 100,
+  "item": {
+    "id": "private-you-age",
+    "kind": "feature",
+    "priority": 2,
+    "title": "See what goes into your age estimate",
+    "summary": "In the private You preview, see how your available measurements contribute to a modeled age comparison.",
+    "details": "The estimate includes a range. You can open a factor to see the observations behind it.",
+    "relevanceTags": ["health", "measurements"],
+    "sourcePullRequests": []
+  }
+}

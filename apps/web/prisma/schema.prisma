@@ -753,6 +753,7 @@ model HostedMember {
   healthPostAttachments          HealthPostAttachment[]
   healthFeedHides                HealthFeedHide[]                @relation("HealthHideOwner")
   healthFeedHiddenBy             HealthFeedHide[]                @relation("HealthHideSubject")
+  healthYouCache                 HealthYouCache?
   healthWinSets                  HealthWinSet[]
   healthWinNudge                 HealthWinNudge?
   progressTaskMeasures           GameProgressTaskMeasure[]
@@ -3398,6 +3399,16 @@ model HealthFeedHide {
   @@id([memberId, hiddenMemberId])
   @@index([hiddenMemberId, memberId])
   @@map("health_feed_hide")
+}
+
+model HealthYouCache {
+  memberId       String       @id @map("member_id")
+  revision       String       @db.Uuid
+  dependency     String
+  viewsEncrypted String       @map("views_encrypted")
+  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("health_you_cache")
 }
 
 model HealthWinSet {

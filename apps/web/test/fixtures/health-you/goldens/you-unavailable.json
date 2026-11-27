@@ -1,0 +1,13 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "state": "unavailable",
+  "thisWeek": [],
+  "factors": [],
+  "notCounted": [],
+  "questions": []
+}

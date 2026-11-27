@@ -1,0 +1,56 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "state": "paused",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "paused": {
+    "text": "An age estimate is outside the model’s supported range for this profile."
+  },
+  "thisWeek": [
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [],
+  "notCounted": [
+    {
+      "key": "strength",
+      "label": "Strength test",
+      "icon": "strength",
+      "action": "combine",
+      "primary": true
+    },
+    {
+      "key": "food",
+      "label": "Food week",
+      "icon": "food",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "action": "connectWearable",
+      "primary": false
+    }
+  ],
+  "questions": []
+}

@@ -1,0 +1,137 @@
+{
+  "latest": "2024-09-16",
+  "years": -4.9,
+  "factors": [
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "group": "blood",
+      "value": "4.6",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 4.6 g/dL"
+      },
+      "years": -2.5,
+      "yearsText": "−2.5",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "albumin",
+      "state": "counted"
+    },
+    {
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "group": "blood",
+      "value": "12",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 12.1 %"
+      },
+      "years": -2.2,
+      "yearsText": "−2.2",
+      "rank": {
+        "percentile": 19,
+        "label": "19th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "rdw",
+      "state": "counted"
+    },
+    {
+      "key": "cholesterol",
+      "label": "Non-HDL cholesterol",
+      "icon": "cholesterol",
+      "group": "blood",
+      "value": "117",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 126.5 mg/dL"
+      },
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "rank": {
+        "percentile": 18,
+        "label": "18th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "non-hdl",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [],
+  "unchanged": [
+    {
+      "key": "hs-crp",
+      "label": "hs-CRP",
+      "value": 0.9,
+      "unit": "mg/L",
+      "flag": null
+    }
+  ],
+  "worthALook": [],
+  "all": {
+    "inRange": 4,
+    "total": 4,
+    "systems": [
+      {
+        "name": "Liver",
+        "markers": [
+          {
+            "key": "albumin",
+            "label": "Albumin",
+            "value": 4.6,
+            "unit": "g/dL",
+            "flag": null
+          }
+        ]
+      },
+      {
+        "name": "Other markers",
+        "markers": [
+          {
+            "key": "hs-crp",
+            "label": "hs-CRP",
+            "value": 0.9,
+            "unit": "mg/L",
+            "flag": null
+          }
+        ]
+      },
+      {
+        "name": "Lipids",
+        "markers": [
+          {
+            "key": "non-hdl",
+            "label": "Non-HDL cholesterol",
+            "value": 117,
+            "unit": "mg/dL",
+            "flag": null
+          }
+        ]
+      },
+      {
+        "name": "Blood counts",
+        "markers": [
+          {
+            "key": "rdw",
+            "label": "Red cell distribution width",
+            "value": 12,
+            "unit": "%",
+            "flag": null
+          }
+        ]
+      }
+    ]
+  }
+}

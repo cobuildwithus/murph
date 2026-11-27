@@ -1,0 +1,392 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "state": "ready",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "age": {
+    "value": 38.7,
+    "real": 57,
+    "gap": -18.3,
+    "low": 26.4,
+    "high": 51
+  },
+  "week": {
+    "daysAged": 7,
+    "saved": 0,
+    "partial": false,
+    "basis": "observed"
+  },
+  "thisWeek": [
+    {
+      "kind": "challenge",
+      "gameId": "synthetic-game",
+      "title": "Take a lunch walk",
+      "streak": 3,
+      "partner": {
+        "memberId": "synthetic-partner",
+        "firstName": "Teammate"
+      },
+      "days": [
+        "done",
+        "todo",
+        "todo",
+        "todo",
+        "todo",
+        "none",
+        "none"
+      ]
+    },
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [
+    {
+      "key": "smoking",
+      "label": "Smoking",
+      "icon": "smoking",
+      "group": "habits",
+      "value": "Never",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 0"
+      },
+      "years": -3.6,
+      "yearsText": "−3.6",
+      "rank": {
+        "percentile": 27,
+        "label": "27th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": "B",
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "cardioFitness",
+      "label": "Cardio fitness",
+      "icon": "cardioFitness",
+      "group": "fitness",
+      "value": "13.4",
+      "unit": "peak METs",
+      "target": {
+        "text": "Comparison value 13 peak METs"
+      },
+      "years": -2.7,
+      "yearsText": "−2.7",
+      "rank": null,
+      "grade": "A",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "albumin",
+      "label": "Albumin",
+      "icon": "albumin",
+      "group": "blood",
+      "value": "4.6",
+      "unit": "g/dL",
+      "target": {
+        "text": "Comparison value 4.6 g/dL"
+      },
+      "years": -2.5,
+      "yearsText": "−2.5",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "albumin",
+      "state": "counted"
+    },
+    {
+      "key": "health",
+      "label": "Self-rated health",
+      "icon": "health",
+      "group": "habits",
+      "value": "2",
+      "unit": "ordinal 1–5",
+      "target": {
+        "text": "Comparison value 1 ordinal 1–5"
+      },
+      "years": -2.5,
+      "yearsText": "−2.5",
+      "rank": {
+        "percentile": 33,
+        "label": "33rd percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "rdw",
+      "label": "Red cell distribution width",
+      "icon": "rdw",
+      "group": "blood",
+      "value": "12",
+      "unit": "%",
+      "target": {
+        "text": "Comparison value 12.1 %"
+      },
+      "years": -2.2,
+      "yearsText": "−2.2",
+      "rank": {
+        "percentile": 19,
+        "label": "19th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "rdw",
+      "state": "counted"
+    },
+    {
+      "key": "disease",
+      "label": "Health history",
+      "icon": "disease",
+      "group": "habits",
+      "value": "No",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 0"
+      },
+      "years": -1.4,
+      "yearsText": "−1.4",
+      "rank": {
+        "percentile": 42,
+        "label": "42nd percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "grip",
+      "label": "Grip",
+      "icon": "grip",
+      "group": "fitness",
+      "value": "41.5",
+      "unit": "kg, mean hand maximum",
+      "target": {
+        "text": "Comparison value 33.5 kg, mean hand maximum"
+      },
+      "years": -1,
+      "yearsText": "−1.0",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": "B",
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "group": "habits",
+      "value": "54",
+      "unit": "bpm",
+      "target": {
+        "text": "Comparison value 64 bpm"
+      },
+      "years": -1,
+      "yearsText": "−1.0",
+      "rank": {
+        "percentile": 10,
+        "label": "10th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "steps",
+      "label": "Daily steps",
+      "icon": "steps",
+      "group": "activity",
+      "value": "11,500",
+      "unit": "steps/day",
+      "target": {
+        "text": "Comparison value 13,024.5 steps/day"
+      },
+      "years": -0.7,
+      "yearsText": "−0.7",
+      "rank": {
+        "percentile": 82,
+        "label": "82nd percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "fitness",
+      "state": "counted"
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "group": "blood",
+      "value": "158",
+      "unit": "mmHg",
+      "target": {
+        "text": "Comparison value 113.9 mmHg"
+      },
+      "years": 0.6,
+      "yearsText": "+0.6",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "bloodPressure",
+      "state": "counted"
+    },
+    {
+      "key": "fibre",
+      "label": "Dietary fibre",
+      "icon": "fibre",
+      "group": "food",
+      "value": "31",
+      "unit": "g/day",
+      "target": {
+        "text": "Comparison value 25.9 g/day"
+      },
+      "years": -0.5,
+      "yearsText": "−0.5",
+      "rank": {
+        "percentile": 90,
+        "label": "90th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": "B",
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "diabetes",
+      "label": "Diabetes",
+      "icon": "diabetes",
+      "group": "habits",
+      "value": "No",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 0"
+      },
+      "years": -0.3,
+      "yearsText": "−0.3",
+      "rank": {
+        "percentile": 45,
+        "label": "45th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "group": "sleep",
+      "value": "7h 25m",
+      "unit": null,
+      "target": {
+        "text": "Comparison value 7"
+      },
+      "years": -0.3,
+      "yearsText": "−0.3",
+      "rank": {
+        "percentile": 64,
+        "label": "64th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "sleep",
+      "state": "counted"
+    },
+    {
+      "key": "cholesterol",
+      "label": "Non-HDL cholesterol",
+      "icon": "cholesterol",
+      "group": "blood",
+      "value": "117",
+      "unit": "mg/dL",
+      "target": {
+        "text": "Comparison value 126.5 mg/dL"
+      },
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "rank": {
+        "percentile": 18,
+        "label": "18th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "non-hdl",
+      "state": "counted"
+    },
+    {
+      "key": "alcohol",
+      "label": "Alcohol",
+      "icon": "alcohol",
+      "group": "food",
+      "value": "4",
+      "unit": "g/day",
+      "target": {
+        "text": "Comparison value 0.2 g/day"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "rank": {
+        "percentile": 78,
+        "label": "78th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": "B",
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "phq9",
+      "label": "Mood questionnaire",
+      "icon": "phq9",
+      "group": "habits",
+      "value": "3",
+      "unit": "points",
+      "target": {
+        "text": "Comparison value 0 points"
+      },
+      "years": 0,
+      "yearsText": "+0.0",
+      "rank": {
+        "percentile": 59,
+        "label": "59th percentile",
+        "cohort": "Women near age 57"
+      },
+      "grade": null,
+      "detail": "none",
+      "state": "counted"
+    }
+  ],
+  "notCounted": [],
+  "questions": []
+}

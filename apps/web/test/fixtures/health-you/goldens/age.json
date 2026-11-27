@@ -1,0 +1,99 @@
+{
+  "value": 38.7,
+  "real": 57,
+  "gap": -18.3,
+  "low": 26.4,
+  "high": 51,
+  "history": [
+    {
+      "date": "2024-08-12",
+      "age": 54.9,
+      "real": 56.9
+    },
+    {
+      "date": "2024-08-19",
+      "age": 55,
+      "real": 56.9
+    },
+    {
+      "date": "2024-08-26",
+      "age": 55,
+      "real": 56.9
+    },
+    {
+      "date": "2024-09-02",
+      "age": 55,
+      "real": 57
+    },
+    {
+      "date": "2024-09-09",
+      "age": 55,
+      "real": 57
+    },
+    {
+      "date": "2024-09-16",
+      "age": 38.7,
+      "real": 57
+    }
+  ],
+  "historyLabel": "Reconstructed using the current model and available dated measurements.",
+  "weeks": [
+    {
+      "weekStart": "2024-08-06",
+      "daysAged": 7,
+      "basis": "referenceOnly"
+    },
+    {
+      "weekStart": "2024-08-13",
+      "daysAged": 7,
+      "basis": "observed"
+    },
+    {
+      "weekStart": "2024-08-20",
+      "daysAged": 7,
+      "basis": "observed"
+    },
+    {
+      "weekStart": "2024-08-27",
+      "daysAged": 7,
+      "basis": "observed"
+    },
+    {
+      "weekStart": "2024-09-03",
+      "daysAged": 7,
+      "basis": "observed"
+    },
+    {
+      "weekStart": "2024-09-10",
+      "daysAged": 7,
+      "basis": "observed"
+    }
+  ],
+  "events": [
+    {
+      "date": "2024-09-11",
+      "kind": "bloodPressure",
+      "label": "Blood pressure"
+    },
+    {
+      "date": "2024-09-14",
+      "kind": "bloodPressure",
+      "label": "Blood pressure"
+    },
+    {
+      "date": "2024-09-16",
+      "kind": "bloodWork",
+      "label": "Blood work"
+    },
+    {
+      "date": "2024-09-16",
+      "kind": "combine",
+      "label": "Fitness test"
+    },
+    {
+      "date": "2024-09-16",
+      "kind": "foodWeek",
+      "label": "Food week"
+    }
+  ]
+}

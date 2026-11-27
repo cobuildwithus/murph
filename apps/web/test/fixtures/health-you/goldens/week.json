@@ -1,0 +1,43 @@
+{
+  "daysAged": 7,
+  "saved": 0,
+  "days": [
+    {
+      "date": "2024-09-10",
+      "label": "Tue",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-11",
+      "label": "Wed",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-12",
+      "label": "Thu",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-13",
+      "label": "Fri",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-14",
+      "label": "Sat",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-15",
+      "label": "Sun",
+      "aged": 1
+    },
+    {
+      "date": "2024-09-16",
+      "label": "Mon",
+      "aged": 1
+    }
+  ],
+  "helped": [],
+  "cost": []
+}

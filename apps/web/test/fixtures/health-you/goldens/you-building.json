@@ -1,0 +1,81 @@
+{
+  "version": "r2.0",
+  "asOf": "2024-09-16",
+  "state": "building",
+  "profile": {
+    "memberId": "synthetic-member",
+    "firstName": "Example"
+  },
+  "building": {
+    "have": 0,
+    "need": 7,
+    "text": "7 recent nights of measured sleep, or a qualifying measurement"
+  },
+  "thisWeek": [
+    {
+      "kind": "target",
+      "factor": "lifts",
+      "title": "Strength sessions",
+      "icon": "lifts",
+      "value": 0,
+      "goal": 2,
+      "text": "0 of 2",
+      "progress": 0
+    }
+  ],
+  "factors": [],
+  "notCounted": [
+    {
+      "key": "strength",
+      "label": "Strength test",
+      "icon": "strength",
+      "action": "combine",
+      "primary": true
+    },
+    {
+      "key": "food",
+      "label": "Food week",
+      "icon": "food",
+      "action": "foodWeek",
+      "primary": false
+    },
+    {
+      "key": "bloodPressure",
+      "label": "Blood pressure",
+      "icon": "bloodPressure",
+      "action": "addBloodPressure",
+      "primary": false
+    },
+    {
+      "key": "sleepTime",
+      "label": "Sleep duration",
+      "icon": "sleepTime",
+      "action": "connectWearable",
+      "primary": false
+    }
+  ],
+  "questions": [
+    {
+      "key": "smoking",
+      "text": "Which best describes your cigarette use?",
+      "options": [
+        {
+          "value": "never",
+          "label": "Never smoked regularly"
+        },
+        {
+          "value": "former",
+          "label": "Former smoker"
+        },
+        {
+          "value": "current",
+          "label": "Currently smoke"
+        },
+        {
+          "value": "unknown",
+          "label": "Skip"
+        }
+      ]
+    }
+  ]
+}

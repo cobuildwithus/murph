@@ -402,6 +402,8 @@ disabled. Wait for every older reader to drain before enabling payoffs. Keep
 the scoped readers on every rollback once any payoff has been posted.
 
 The feed, recording, Diet and payoff allowlists take member IDs, or `*` for every member.
+The private You endpoints also require `MURPH_HEALTH_YOU_MEMBER_IDS`. An empty list disables them and `*` admits feed members. The endpoints return only the signed-in member’s views.
+
 The feed uses `MURPH_HEALTH_FEED_MEMBER_IDS`. Timed recording also requires membership in
 `MURPH_HEALTH_RECORD_MEMBER_IDS`. Route recording additionally requires
 `MURPH_HEALTH_ROUTE_MEMBER_IDS`. Deploy route-capable Web and the companion's
