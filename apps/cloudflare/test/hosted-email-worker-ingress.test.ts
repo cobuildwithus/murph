@@ -1,3 +1,4 @@
+import { forwardedPortalFallback } from "@murphai/clinical-records/portal-discovery-link";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const hostedExecutionMocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -26,6 +27,12 @@ import {
   HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH,
   parseHostedEmailThreadTarget,
 } from "@murphai/runtime-state";
+
+vi.mock("@murphai/clinical-records/provider-directory.v2.json", () => ({ default: {
+  schema: "murph.clinical-provider-directory.v2", version: "synthetic", generatedAt: "2030-01-01T00:00:00.000Z", sourceBundleSha256: "1".repeat(64),
+  entries: [{ aliases: [], brandName: "Copper Basin", clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID", locations: [],
+    fhirBaseUrl: "https://fhir.copper-basin.test/r4", id: "epic-copper", policyId: "synthetic" }],
+} }));
 
 const mocks = vi.hoisted(() => ({
   appendHostedEmailIngressWakeInWeb: vi.fn(),
@@ -587,6 +594,40 @@ describe("hosted email worker ingress", () => {
       from: "Owner <owner@example.com>",
       to: replyAliasAddress,
     })));
+  });
+
+  it.each(["inline", "apple", "attached", "group"] as const)("minimizes an authorized %s portal forward before storage and callbacks", async style => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const config = { domain: "mail.example.test", localPart: "assistant", signingSecret: "super-secret-signing-key" };
+    const alias = style === "group"
+      ? await createHostedEmailGroupReplyAliasRoute({ ...config, groupId: "hgrp_AAAAAAAAAAAAAAAA" })
+      : await createHostedEmailUserReplyAliasRoute({ ...config, userId: "sample-forwarder" });
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(Response.json({ userId: "sample-forwarder" }));
+    const from = "forwarder@example.test";
+    const inner = "From: private-sender-marker MyChart <notice@mail.copper-basin.test>\r\nSubject: Portal notice\r\n\r\nprivate-body-marker https://private-link.test/secret";
+    const raw = style === "attached"
+      ? buildRawEmailWithAttachment({ from, to: alias.address, body: "", attachmentBase64: Buffer.from(inner).toString("base64"),
+          attachmentContentType: "message/rfc822", attachmentFileName: "private-sender-marker.eml" })
+      : buildRawEmail({ from, to: alias.address, subject: "Fwd: patient portal", body: (style === "apple" ? "Begin forwarded message:" : "---------- Forwarded message ----------") + "\r\n" + inner });
+    const reject = vi.fn();
+    await handleHostedEmailIngressProduction({ from, raw, to: alias.address, setReject: reject }, createWorkerEnv(bucket));
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    const surfaces = [mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls,
+      mocks.appendHostedEmailIngressWakeInWeb.mock.calls, hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls];
+    expect(JSON.stringify(surfaces)).not.toMatch(/private-(?:sender|body|link)/u);
+    if (style === "group") {
+      expect(reject).toHaveBeenCalledOnce();
+      expect(bucket.objects.size).toBe(0);
+      expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+      return;
+    }
+    const [{ body }] = mocks.appendHostedEmailIngressWakeInWeb.mock.calls[0]!;
+    expect(body).toMatchObject({ threadIsDirect: true, textPreview: forwardedPortalFallback });
+    const stored = await readHostedEmailRawMessage({ bucket, key: TEST_KEY, keyId: "v1", rawMessageKey: body.rawMessageKey, userId: "sample-forwarder" });
+    const projection = new TextDecoder().decode(stored!);
+    expect(projection).toContain("Possible portal account at Copper Basin");
+    expect(projection).toContain("#find=Copper+Basin&provider=epic-copper");
+    expect(projection).not.toMatch(/private-(?:sender|body|link)/u);
   });
 
   it("preserves signed group reply aliases from group email send through email reply ingress and follow-up fanout", async () => {

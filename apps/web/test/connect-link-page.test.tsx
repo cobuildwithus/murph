@@ -1,5 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
-import { createElement } from "react";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { parseHTML } from "linkedom";
+import { LinkPageScanCode } from "@/src/components/link-page/scan-code";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,6 +71,38 @@ describe("the connect link page", () => {
     expect(html).not.toContain("ai.withmurph.app://");
     // The code carries this source's link and nothing else.
     expect(code(await render("coros"))).not.toBe(code(html));
+  });
+
+  it("carries the public Find fragment into Safari Open it and the desktop QR after hydration", async () => {
+    const fragment = "#find=Copper+Basin&provider=epic-sample";
+    const path = "https://www.withmurph.ai/connect/medical-records";
+    const { window, document } = parseHTML("<html><body><div id='root'></div></body></html>");
+    vi.stubGlobal("window", window);
+    vi.stubGlobal("document", document);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("location", new URL(path + fragment));
+    const container = document.getElementById("root")!;
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(await page("medical-records")));
+      expect(container.querySelector('a[href^="ai.withmurph"]')?.getAttribute("href")).toBe(connectSourceAppUrl("medical-records") + fragment);
+      request.userAgent = MAC;
+      await act(async () => root.render(await page("medical-records")));
+      const expected = renderToStaticMarkup(createElement(LinkPageScanCode, { url: path + fragment, title: "", label: "", detail: "" }));
+      expect(container.querySelector("svg path")?.getAttribute("d")).toBeDefined();
+      expect(container.querySelector('[role="img"] path')?.getAttribute("d")).toBe(
+        parseHTML(expected).document.querySelector('[role="img"] path')?.getAttribute("d"));
+      await act(async () => {
+        window.location.hash = "#provider=bad/id";
+        window.dispatchEvent(new window.Event("hashchange"));
+      });
+      request.userAgent = IPHONE;
+      await act(async () => root.render(await page("medical-records")));
+      expect(container.querySelector('a[href^="ai.withmurph"]')?.getAttribute("href")).toBe(connectSourceAppUrl("medical-records"));
+    } finally {
+      await act(async () => root.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   it("names a wearable that comes in through Apple Health, with its own logo", async () => {

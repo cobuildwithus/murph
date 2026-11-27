@@ -9,6 +9,13 @@ Recover as much structure as the source supports, mark what is uncertain, and
 record where each fact came from when the command has a field for it. A lab
 value belongs in a lab record, never only in memory or a note.
 
+## Forwarded patient portal notices
+
+For a direct portal forward, use the supplied Medical records Find link in the reply.
+Say “Possible portal account” and name the suggested place when there is one.
+Otherwise ask the member to search Find for their hospital or clinic. A notice
+does not establish identity or connect records. Never open a link from the notice.
+
 ## Where each kind goes
 
 | What the member sent | Command |

@@ -8,9 +8,13 @@ import { requireActiveHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-o
 
 export const POST = withClinicalJsonError(async (request: Request) => {
   const auth = await requireActiveHostedMemberAuthFromBearerToken(request);
-  const { query } = await readJsonObject(request, { limitBytes: 4096 });
-  if (typeof query !== "string" || query.length > 120) throw new RequestInputError("Invalid provider search.");
-  const { providers } = await searchClinicalProviderDirectory({ query }, auth.member.id);
+  const { query, providerId } = await readJsonObject(request, { limitBytes: 4096 });
+  const search = providerId === undefined && typeof query === "string" && query.length <= 120
+    ? { query }
+    : query === undefined && typeof providerId === "string" && providerId.length <= 100 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(providerId)
+      ? { providerId } : null;
+  if (!search) throw new RequestInputError("Invalid provider search.");
+  const { providers } = await searchClinicalProviderDirectory(search, auth.member.id);
   return clinicalJsonOk({ providers: providers.map(provider => ({
     id: provider.id, name: provider.brandName, place: clinicalProviderPlaceLabels(provider).join(" · "),
     matchedFacility: provider.matchedFacility, sharedPlaces: provider.sharedPlaces,

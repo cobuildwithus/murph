@@ -29,12 +29,17 @@ export function resolveClinicalProviderDirectoryEntry(
 }
 
 export async function searchClinicalProviderDirectory(input: {
+  providerId?: string;
   city?: string | null;
   query?: string | null;
   state?: string | null;
 }, memberId?: string) {
   const directory = readClinicalProviderDirectory();
-  const result = searchClinicalProviderDirectorySnapshot(directory, { ...input, grouped: memberId !== undefined, accessRank: epicPortalAccessRank });
+  const selected = input.providerId ? resolveClinicalProviderDirectoryEntry(input.providerId) : null;
+  if (input.providerId && !selected) return { directoryVersion: directory.version, providers: [] };
+  const scope = selected ? { ...directory, entries: directory.entries.filter(entry => entry.fhirBaseUrl === selected.fhirBaseUrl) } : directory;
+  const result = searchClinicalProviderDirectorySnapshot(scope, { ...input, query: selected?.brandName ?? input.query,
+    grouped: memberId !== undefined, accessRank: epicPortalAccessRank });
   if (memberId === undefined || !result.providers.length) return result;
   const hashes = result.providers.map(provider => {
     const entry = resolveClinicalProviderDirectoryEntry(provider.id)!;

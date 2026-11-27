@@ -8,6 +8,7 @@ import { connectSourceAppUrl } from "@/src/lib/game/app-links";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS, MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
 
+import { MedicalRecordsConnectLinkView } from "./medical-records-connect-link-view";
 import { ConnectLinkView } from "./connect-link-view";
 
 // The page reads the device from the request, so it is never prerendered.
@@ -49,11 +50,12 @@ export default async function ConnectLinkPage(props: ConnectLinkPageProps) {
   const source = resolveConnectLinkSource(await resolveDecodedRouteParam(props.params, "source"));
   if (!source) redirect("/connect");
   if (source.kind === "web") redirect(`/connect#${source.id}`);
+  const View = source.id === "medical-records" ? MedicalRecordsConnectLinkView : ConnectLinkView;
   return (
     <main className="flex min-h-dvh flex-col bg-[#1C1915]">
       {/* The night ground reaches past the page: overscroll and Safari's bars. */}
       <style>{"html,body{background:#1C1915}"}</style>
-      <ConnectLinkView
+      <View
         appUrl={connectSourceAppUrl(source.id)}
         linkUrl={`${MURPH_PUBLIC_SITE_URL}/connect/${encodeURIComponent(source.id)}`}
         onComputer={!isAppleMobileUserAgent((await headers()).get("user-agent"))}

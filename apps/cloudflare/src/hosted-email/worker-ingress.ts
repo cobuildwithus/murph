@@ -1,3 +1,5 @@
+import { forwardedPortalFallback } from "@murphai/clinical-records/portal-discovery-link";
+import { forwardedPortalSender, projectPersonalPortalForward } from "./portal-forward.ts";
 import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   emitHostedExecutionStructuredLog,
@@ -25,6 +27,7 @@ import {
 
 import { readHostedExecutionEnvironment } from "../env.ts";
 import type {
+  HostedEmailInboundRoute,
   HostedEmailWorkerRequest,
 } from "../hosted-email.ts";
 import {
@@ -253,14 +256,41 @@ export async function handleHostedEmailIngress(
     return;
   }
 
+  await acceptAuthorizedHostedEmail({ env, environment, route, rawBytes, parsedMessage, message });
+}
+
+async function acceptAuthorizedHostedEmail(input: {
+  env: WorkerEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  route: HostedEmailInboundRoute;
+  rawBytes: Uint8Array;
+  parsedMessage: ParsedEmailMessage;
+  message: HostedEmailWorkerRequest;
+}) {
+  const { env, environment, route, message } = input;
+  let { rawBytes, parsedMessage } = input;
+  const portalSender = forwardedPortalSender(parsedMessage);
+  if (portalSender !== undefined) {
+    if (route.authorization !== "signed-reply-alias" || route.groupId !== null) {
+      message.setReject?.("Hosted email message was not accepted.");
+      return;
+    }
+    rawBytes = await projectPersonalPortalForward({
+      sender: portalSender, from: message.from, to: route.routeAddress, message: parsedMessage,
+    });
+    parsedMessage = parseRawEmailMessage(rawBytes);
+  }
+
   const userCrypto = await resolveHostedExecutionUserCryptoContext({
     bucket: env.BUNDLES,
     domain: "ingress",
     environment,
     userId: route.userId,
   });
+  // A directory refresh can change the suggestion between SMTP retries. Keep the
+  // same event identity while isolating the replacement from legacy raw-email objects.
   const rawMessageStorageRef = await resolveHostedEmailRawMessageStorageRef({
-    plaintext: rawBytes,
+    plaintext: portalSender === undefined ? rawBytes : new TextEncoder().encode(`portal-forward.v1:${input.parsedMessage.rawHash}`),
     userId: route.userId,
   });
 
@@ -328,6 +358,7 @@ export async function handleHostedEmailIngress(
     baseUrl: environment.hostedWebBaseUrl,
     body: {
       ...promptProjection,
+      ...(portalSender === undefined ? {} : { textPreview: forwardedPortalFallback }),
       assistantStyleSettingsAuthorized: route.authorization === "direct-public-sender",
       eventId,
       identityId: isGroupRoute ? null : route.identityId,

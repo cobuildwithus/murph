@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-26",
+  "order": 300,
+  "item": {
+    "id": "forward-patient-portal-email",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Find a hospital from a portal email",
+    "summary": "Forward a MyChart or patient portal notice from your verified email to your personal Murph address in Settings. Murph replies with a Medical records link.",
+    "details": "When the notice points to one place, the reply names it as a possible portal account. Otherwise Murph asks you to search for your clinic. You choose whether to sign in and connect.",
+    "relevanceTags": ["medical-records", "email"],
+    "sourcePullRequests": [5376]
+  }
+}

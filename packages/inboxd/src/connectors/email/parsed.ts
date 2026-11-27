@@ -333,7 +333,7 @@ function collectMimeLeafContent(entity: ParsedMimeEntity, budget: MimeParseBudge
   const contentBytes = decodeMimeBodyBytes(entity.bodyText, entity.contentTransferEncoding);
   consumeDecodedMimeBytes(budget, contentBytes.byteLength);
   const contentType = entity.contentType ?? "text/plain";
-  const isAttachment = isMimeAttachment(entity, fileName);
+  const isAttachment = contentType === "message/rfc822" || isMimeAttachment(entity, fileName);
 
   if (isAttachment) {
     budget.attachmentCount += 1;

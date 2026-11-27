@@ -89,3 +89,21 @@ function normalizeHostedEmailReplyAliasConfigString(value: string | undefined): 
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
 }
+
+// Both member surfaces derive this address from the current verified sender and route.
+export async function hostedMemberPersonalEmailAddress(member: {
+  suspendedAt: Date | null;
+  emailAuthorization: {
+    verifiedEmailAddressEncrypted: string | null;
+    verifiedEmailLookupKey: string | null;
+    verifiedEmailVerifiedAt: Date | null;
+  } | null;
+  routing: { replyAliasLookupKey: string | null } | null;
+} | null) {
+  const verified = member?.emailAuthorization;
+  if (member?.suspendedAt || !verified?.verifiedEmailAddressEncrypted
+    || !verified.verifiedEmailLookupKey || !verified.verifiedEmailVerifiedAt) return null;
+  return (await createHostedMemberReplyAliasRouteFromLookupKey({
+    replyAliasLookupKey: member?.routing?.replyAliasLookupKey,
+  }))?.address ?? null;
+}

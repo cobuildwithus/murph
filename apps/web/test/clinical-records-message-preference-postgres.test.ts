@@ -1,3 +1,4 @@
+import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -170,6 +171,30 @@ describe.skipIf(!enabled)("clinical record message preference", () => {
     await expect(setClinicalRecordMessageMode(auth, "off")).rejects.toMatchObject({ httpStatus: 401 });
     expect((await postMode("off")).status).toBe(401);
     await expect(setting()).resolves.toEqual({ clinicalRecordMessageMode: "notice", clinicalRecordMessageRevision: 0 });
+  });
+
+  it("rederives the forwarding address after route rotation and verification loss", async () => {
+    vi.stubEnv("HOSTED_EMAIL_SIGNING_SECRET", "synthetic-portal-signing-key");
+    vi.stubEnv("HOSTED_EMAIL_DOMAIN", "mail.example.test");
+    const read = async () => {
+      const response = await list(request("sources"));
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const first = (await createHostedMemberReplyAliasRoute({ memberId }))!;
+    const next = (await createHostedMemberReplyAliasRoute({ memberId, generation: 2 }))!;
+    const prisma = getPrisma();
+    await prisma.hostedMemberRouting.create({ data: { memberId, replyAliasLookupKey: first.replyAliasLookupKey } });
+    expect(await read()).not.toHaveProperty("forwardTo");
+    await prisma.hostedMemberEmailAuthorization.create({ data: { memberId, verifiedEmailLookupKey: randomUUID(),
+      verifiedEmailAddressEncrypted: "synthetic-sealed", verifiedEmailVerifiedAt: new Date() } });
+    expect((await read()).forwardTo).toBe(first.address);
+    await prisma.hostedMemberRouting.update({ where: { memberId }, data: { replyAliasLookupKey: null } });
+    expect(await read()).not.toHaveProperty("forwardTo");
+    await prisma.hostedMemberRouting.update({ where: { memberId }, data: { replyAliasLookupKey: next.replyAliasLookupKey } });
+    expect((await read()).forwardTo).toBe(next.address);
+    await prisma.hostedMemberEmailAuthorization.delete({ where: { memberId } });
+    expect(await read()).not.toHaveProperty("forwardTo");
   });
 
   it("shares the daily-grant projection across list, complete and removal", async () => {

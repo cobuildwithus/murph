@@ -18,7 +18,7 @@ import {
   HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
   resolveHostedMemberAssistantModel,
 } from "./assistant-model-preference";
-import { createHostedMemberReplyAliasRouteFromLookupKey } from "./hosted-email-reply-alias";
+import { hostedMemberPersonalEmailAddress } from "./hosted-email-reply-alias";
 import { projectHostedMemberEmailAuthorizationState } from "./hosted-member-store";
 import type { HostedMemberStripeBillingRefSnapshot } from "./hosted-member-billing-store";
 import {
@@ -207,11 +207,7 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
       })
     : null;
   const verifiedEmail = privateSettings?.emailAuthorization?.verifiedEmail ?? null;
-  const murphEmailRoute = verifiedEmail
-    ? await createHostedMemberReplyAliasRouteFromLookupKey({
-        replyAliasLookupKey: member?.routing?.replyAliasLookupKey,
-      })
-    : null;
+  const murphEmailAddress = await hostedMemberPersonalEmailAddress(member);
   const telegramUserId = privateSettings?.routingPrivate?.telegramUserId ?? null;
 
   return {
@@ -228,7 +224,7 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
         address: verifiedEmail?.address
           ?? privateSettings?.emailAuthorization?.stripeCheckoutEmail?.address
           ?? null,
-        murphEmailAddress: murphEmailRoute?.address ?? null,
+        murphEmailAddress,
         verifiedAt: verifiedEmail?.verifiedAt.toISOString() ?? null,
       },
       phone: {

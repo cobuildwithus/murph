@@ -367,6 +367,36 @@ Official patient-app request contracts: [radiology](https://fhir.epic.com/Specif
 [outside notes](https://fhir.epic.com/Specifications?api=10999), and
 [outside vital signs](https://fhir.epic.com/Specifications?api=11422).
 
+## Forwarded patient portal notices
+
+Companion sources derives optional `forwardTo` from the current verified sender and signed
+personal reply alias used by Settings. Suspension, missing verified-email fields, a missing
+routing key or unavailable signing configuration suppress the address.
+
+On the personal alias, ingress checks the authenticated outer sender and current route first.
+It recognizes inline and attached forwards, treats the inner From as evidence and matches it
+locally against the same committed public directory as Web. Exact names include brand,
+facility and aliases. An organization domain or exact name must identify a single FHIR
+base across the whole directory. Shared mail services identify a place only by name.
+The public bootstrap discards bodies and a recognized forward to a group is rejected.
+
+For a recognized forward, private email storage holds a replacement message containing
+the public suggestion or generic Find guidance. Web receives the ordinary routing identity,
+opaque raw-message key and generic preview. The original notice, links, display name and
+attachments are discarded. Private runtime reads the replacement for the reply. No
+provider call, OAuth intent, identity assertion or saved connection results from matching.
+
+A matched link opens `/connect/medical-records#find=<public-brand>&provider=<public-id>`.
+Both fragment values use URLSearchParams encoding. Browser Open it and QR carry the
+same bounded fragment. Find sends `{"providerId":"<id>"}` to the existing companion
+provider-search POST. It returns the current grouped row and preferred registration,
+or an empty list for a retired ID. Find then searches the
+public name when the ID has retired or the app understands only search. A fragment-blind
+client opens the generic records drawer and the reply supplies the search name. Unknown
+or malformed selection never starts authorization. Roll out the bridge and native reader
+before advertising selection. Old workers retain ordinary email behavior and old runners
+read the generic Find preview. Signed connect-intent requests are unchanged.
+
 ## Retrieval contract and limits
 
 Assistant link creation reuses the same signed Web control boundary through
@@ -905,7 +935,7 @@ client id fails closed before redirect.
 
 - TEFCA/QHIN participation, CLEAR-style identity proofing, record-locator
   services, and automatic nationwide provider discovery.
-- Email scanning for portal/provider inference.
+- Mailbox-wide scanning for portal/provider inference.
 - Cerner/Oracle and provider-specific adapters beyond Epic SMART.
 - Provider-directory network refresh jobs and provider-specific data erasure.
 - Claims-based matching or promises that the result is a complete legal

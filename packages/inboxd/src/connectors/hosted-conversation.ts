@@ -62,6 +62,10 @@ export async function normalizeHostedTelegramConversationCapture(
   return normalizeHostedTelegramMessage(input);
 }
 
+export function readHostedEmailConversationBody(rawMessage: Uint8Array): string | null {
+  return parseRawEmailMessage(rawMessage).text ?? null;
+}
+
 export async function normalizeHostedEmailConversationCapture({
   rawMessage,
   ...input

@@ -92,6 +92,7 @@ import {
 } from "./context.ts";
 import {
   HostedRawEmailMessageMissingError,
+  readPortalForwardForAssistant,
 } from "./events/email.ts";
 import {
   recordHostedAssistantMilestonesBestEffort,
@@ -454,7 +455,7 @@ async function stageHostedConversationMailboxItem(
     assistantTarget,
     item: input.item,
     vaultRoot: input.vaultRoot,
-    wake: decoded.wake,
+    wake: await readPortalForwardForAssistant(decoded.wake, input.runtime.platform.effectsPort),
   });
   const foregroundAssistantInputId =
     pendingReplyEligible && input.item.durablyConsumed !== true

@@ -85,3 +85,15 @@ it.each(["basic", "hospital"] as const)("selects the %s sibling in both grouped 
     }
   }
 });
+
+it("resolves a public selection to the current portal group and returns no row for a retired ID", async () => {
+  const read = async (body: object) => companionSearch(new Request("https://app.example.test/search", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }));
+  findMany.mockResolvedValue([]);
+  const found = await (await read({ providerId: "epic-birch" })).json();
+  expect(found.providers).toHaveLength(1);
+  expect(found.providers[0].name).toBe("Birch");
+  expect((await (await read({ providerId: "epic-retired" })).json()).providers).toEqual([]);
+  expect((await read({ providerId: "epic-birch", query: "ambiguous" })).status).toBe(400);
+});

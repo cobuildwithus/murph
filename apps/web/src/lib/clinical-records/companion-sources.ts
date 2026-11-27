@@ -1,5 +1,6 @@
 import "server-only";
 import type { HostedNativeMemberAuth } from "../better-auth/native-auth";
+import { hostedMemberPersonalEmailAddress } from "../hosted-onboarding/hosted-email-reply-alias";
 import { getPrisma } from "../prisma";
 import { classifyClinicalSource, hasImportCapacity } from "./source-state";
 import { lastRunActivity, lifecycleRunSelect } from "./run-lifecycle";
@@ -54,10 +55,15 @@ export async function readCompanionSources(auth: HostedNativeMemberAuth) {
       updates: row.status !== "disconnected" && row.refreshTokenEncrypted ? "daily" as const : "one_time" as const,
     };
   });
-  if (!sources.some(source => source.updates === "daily")) return { sources, canAdd };
   const member = await prisma.hostedMember.findUniqueOrThrow({
     where: { id: auth.member.id },
-    select: { clinicalRecordMessageMode: true },
+    select: {
+      clinicalRecordMessageMode: true, suspendedAt: true,
+      routing: { select: { replyAliasLookupKey: true } },
+      emailAuthorization: { select: { verifiedEmailAddressEncrypted: true, verifiedEmailLookupKey: true, verifiedEmailVerifiedAt: true } },
+    },
   });
-  return { sources, canAdd, messageMode: member.clinicalRecordMessageMode };
+  const forwardTo = await hostedMemberPersonalEmailAddress(member);
+  return { sources, canAdd, ...(forwardTo ? { forwardTo } : {}),
+    ...(sources.some(source => source.updates === "daily") ? { messageMode: member.clinicalRecordMessageMode } : {}) };
 }

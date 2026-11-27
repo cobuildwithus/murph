@@ -19,6 +19,9 @@ export type ConnectLinkSource =
  * too.
  */
 export function resolveConnectLinkSource(raw: string): ConnectLinkSource | null {
+  if (raw === "medical-records") {
+    return { id: raw, kind: "app", name: "Medical records", logoPath: "/brand-logos/connect/medical-records.png" };
+  }
   const id = normalizeDeviceConnectSourceId(raw);
   const ui = id ? readConnectSourceUi(id) : null;
   if (!id || !ui || !isDeviceConnectSourceAvailableForConnection(id)) return null;
