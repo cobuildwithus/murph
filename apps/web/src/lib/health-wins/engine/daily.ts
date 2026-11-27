@@ -103,9 +103,11 @@ function monthlyCandidates(metric: Metric, rows: readonly DailySample[], today: 
     const period = thisYear.length >= 6 ? "this year" : "in the past 12 months";
     const previous = comparisonMonths.slice(0, -1).map(month => month.value);
     const previousBest = direction === 1 ? Math.max(...previous) : Math.min(...previous);
-    const comparison = compareMonthlyValues(current.value, previousBest) * direction;
+    // Compare what the title and bars show: a month that reads the same as another is no best month.
+    const shown = (value: number) => roundMetricValue(metric, value);
+    const comparison = compareMonthlyValues(shown(current.value), shown(previousBest)) * direction;
     const effect = (current.value - median(previous)) * direction;
-    if (comparison >= 0 && previous.some(value => compareMonthlyValues(current.value, value) !== 0)) {
+    if (comparison >= 0 && previous.some(value => compareMonthlyValues(shown(current.value), shown(value)) !== 0)) {
       candidates.push({
         date, eventDate: today, effect, noise: Math.max(trendStep ?? 1, mad(previous)),
         achievement: { kind: "best_month", subject: metric, period: currentMonth },

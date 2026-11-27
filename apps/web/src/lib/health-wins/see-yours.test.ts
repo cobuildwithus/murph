@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../game/http/auth", () => ({ requireGameMemberAuth: mocks.auth }));
 vi.mock("../better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: async () => ({ allowed: true }) }) }));
-vi.mock("../prisma", () => ({ getPrisma: () => ({ gameProfile: { findUnique: async () => ({ timeZone: "UTC" }) } }) }));
+vi.mock("../prisma", () => ({ getPrisma: () => ({ gameProfile: { findUnique: async () => ({ timeZone: "UTC" }) }, $queryRaw: async () => [] }) }));
 vi.mock("./read", () => ({ readVisibleFrozenCard: mocks.frozen, assertVisibleFrozenCardCurrent: mocks.recheck }));
 vi.mock("./inputs", () => ({ readMeasureInputs: mocks.inputs }));
 
