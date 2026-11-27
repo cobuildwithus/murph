@@ -9,6 +9,6 @@
     "summary": "In the private You preview, your steps, bedtime regularity, workouts and Food Week can contribute to your age estimate.",
     "details": "A few missing watch days can still leave enough evidence for a comparison. The weekly view accounts separately for changes in your habits and changes in the measurements available.",
     "relevanceTags": ["health", "measurements"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5436]
   }
 }
