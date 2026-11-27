@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { addHostedExecutionRuntimeAuthority, encodeHostedExecutionSignedRequestPayload } from "@murphai/hosted-execution/auth";
 import { parseHostedClinicalRecordsFetchDocumentResponse, parseHostedClinicalRecordsFetchPageResponse, parseHostedClinicalRecordsReadRunResponse } from "@murphai/hosted-execution/clinical-records";
 import {
@@ -38,7 +39,8 @@ export async function createClinicalRuntimeRoutePort(userId: string, authority: 
       [HOSTED_EXECUTION_TIMESTAMP_HEADER]: timestamp,
       [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
     } }));
-    if (!response.ok) throw new Error("Clinical runtime route failed.");
+    // Plain errors, not Vitest assertions, because the Epic sandbox proof also drives these routes outside Vitest.
+    if (response.status !== 200) throw new Error(`Clinical runtime ${route} returned HTTP ${response.status}.`);
     return response.json();
   }
   return {
@@ -46,8 +48,9 @@ export async function createClinicalRuntimeRoutePort(userId: string, authority: 
     fetchPage: async body => parseHostedClinicalRecordsFetchPageResponse(await post("fetch-page", body)),
     fetchDocument: async body => parseHostedClinicalRecordsFetchDocumentResponse(await post("fetch-document", body)),
     recordOutcome: async body => {
-      const result = await post("record-outcome", body);
-      if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== true) throw new Error("Outcome rejected.");
+      if (!isDeepStrictEqual(await post("record-outcome", body), { ok: true })) {
+        throw new Error("Clinical runtime record-outcome returned an unexpected body.");
+      }
     },
   };
 }
