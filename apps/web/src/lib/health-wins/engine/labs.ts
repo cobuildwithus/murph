@@ -96,9 +96,12 @@ function formatLabValue(value: number, unit: string): string {
 function intervalSubtitle({ low, high }: Interval, unit: string): string {
   // Keep exact bounds in the gauge when rounding them would change the stated range.
   if ([low, high].some(bound => bound && !Number.isInteger(bound.value * 10))) return "within the reference range";
-  if (low && high) return `within ${labNumber(low.value, unit)}–${formatLabValue(high.value, unit)}`;
-  if (low) return `${low.inclusive ? "at or above" : "above"} ${formatLabValue(low.value, unit)}`;
-  return `${high!.inclusive ? "at or below" : "below"} ${formatLabValue(high!.value, unit)}`;
+  // "0–149 mg/dL" says no more than "at or below 149 mg/dL", in fewer words a friend reads at once.
+  const floor = low && low.value > 0 ? low : undefined;
+  if (floor && high) return `within ${labNumber(floor.value, unit)}–${formatLabValue(high.value, unit)}`;
+  if (floor) return `${floor.inclusive ? "at or above" : "above"} ${formatLabValue(floor.value, unit)}`;
+  if (!high) return "within the reference range";
+  return `${high.inclusive ? "at or below" : "below"} ${formatLabValue(high.value, unit)}`;
 }
 
 /** Decimal places the lab reported, at most two. */

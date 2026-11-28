@@ -121,6 +121,13 @@ describe("lab draws", () => {
     expect(cards([{ ...only, flag: "low" }])).toEqual([]);
   });
 
+  it("13. says a range from zero as its upper bound", () => {
+    const tg = { analyte: "triglycerides", referenceRange: { low: 0, high: 149 } } as const;
+    expect(cards([draw(98, 7, tg)])).toMatchObject([{ kind: "lab_range", subtitle: "at or below 149 mg/dL",
+      chart: { range: { low: { value: 0 }, high: { value: 149 } } } }]);
+    expect(cards([draw(98, 7, { ...tg, referenceRange: { low: 40, high: 149 } })])).toMatchObject([{ subtitle: "within 40–149 mg/dL" }]);
+  });
+
   it("keeps precise measurements and range boundaries in the chart", () => {
     const only = draw(0.026, 7, { analyte: "hs_crp", unit: "mg/L", referenceRange: { high: 2.35 } });
     expect(cards([only])).toMatchObject([{ kind: "lab_range", title: { number: "<0.1 mg/L" },
