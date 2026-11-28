@@ -106,7 +106,8 @@ function reportedPlaces(draws: readonly LabDraw[]): number {
   return Math.min(2, Math.max(...draws.map(({ value }) => String(value).split(".")[1]?.length ?? 0)));
 }
 
-function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: string): Candidate | undefined {
+/** The latest draw against the median of its like-for-like prior draws. Favorable moves are positive. */
+function labMove(latest: LabDraw, prior: LabDraw[], rule: LabRule) {
   if (!rule.step || labUnitKey(rule.unit) !== labUnitKey(latest.unit)) return;
   let reference = prior;
   const fastingRelevant = latest.analyte === "glucose" || latest.analyte === "triglycerides";
@@ -122,8 +123,12 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   const baseline = Number(median(values).toFixed(reportedPlaces([latest, ...reference])));
   // Decimal lab units can land one floating-point ulp below an exact clinical step.
   const delta = Number((latest.value - baseline).toPrecision(12));
-  const effect = latest.analyte === "hdl" ? delta : -delta;
-  if (effect < rule.step) return;
+  return { values, baseline, delta, effect: latest.analyte === "hdl" ? delta : -delta, step: rule.step, fastingKnown };
+}
+
+function labChange(latest: LabDraw, move: NonNullable<ReturnType<typeof labMove>>, rule: LabRule, dateLabel: string): Candidate | undefined {
+  const { values, baseline, delta, effect, step, fastingKnown } = move;
+  if (effect < step) return;
   return {
     date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
     achievement: { kind: "lab_change", subject: latest.analyte, period: latest.date },
@@ -154,8 +159,11 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
 
     const dateLabel = formatWinDate(latest.date, input.member.today);
     const displayValue = formatLabValue(latest.value, latest.unit);
-    const change = labChange(latest, prior, rule, dateLabel);
+    const move = labMove(latest, prior, rule);
+    const change = move && labChange(latest, move, rule, dateLabel);
     if (change) candidates.push(change);
+    // A draw at least a step worse than the usual is no win, however near the range's edge it still sits.
+    const worse = move !== undefined && move.effect <= -move.step;
     const percentile = rule.rankMetric && percentileCandidate({
       rank: rank(rule.rankMetric, latest.value, { member: input.member, unit: latest.unit, fasting: latest.fasting }),
       value: latest.value,
@@ -165,7 +173,7 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
     if (percentile) candidates.push({
       ...percentile, achievement: { kind: "lab_percentile", subject: analyte, period: latest.date },
     });
-    if ((options.rangeMode === "independent" || (!change && !percentile)) && interval && within) candidates.push({
+    if ((options.rangeMode === "independent" || (!change && !percentile && !worse)) && interval && within) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {
         id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs", measure: analyte,
