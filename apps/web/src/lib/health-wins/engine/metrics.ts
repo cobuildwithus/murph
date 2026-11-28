@@ -78,9 +78,11 @@ export function roundMetricValue(metric: Metric, value: number): number {
 export function formatMetricValue(metric: Metric, value: number, style: "full" | "title" | "delta" = "full"): string {
   const { label, unit } = metricInfo(metric);
   if (unit === "min" && style !== "delta") return formatDuration(value);
-  const sign = style === "delta" ? (value < 0 ? "−" : "+") : "";
+  // A change that reads as zero carries no sign: See yours can show a flat month ("0 bpm", never "+0 bpm").
+  const shown = roundMetricValue(metric, Math.abs(value));
+  const sign = style === "delta" && shown !== 0 ? (value < 0 ? "−" : "+") : "";
   if (unit === "km") return `${sign}${formatHealthWinDistance(Math.abs(value))} km`;
-  const number = sign + formatNumber(roundMetricValue(metric, Math.abs(value)));
+  const number = sign + formatNumber(shown);
   if (style !== "full" && (unit === label || metric === "sleep_score")) return number;
   return unit === "%" ? `${number}%` : `${number} ${unit}`;
 }
