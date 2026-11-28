@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { generateHealthWins } from "./index";
-import { chooseSeeYours, seeYoursCard } from "./see-yours";
+import { chooseSeeYours, seeYoursCard, seeYoursIsOld } from "./see-yours";
 import type { DailySample, HealthWinRank, HealthWinsInput, LabDraw, Metric } from "./types";
 
 const member: HealthWinsInput["member"] = { today: "2038-08-16", age: 46, sex: "female", wearableProvider: "garmin" };
@@ -62,6 +62,15 @@ describe("See yours detection", () => {
       expect(chooseSeeYours({ ...input, daily: incomplete }, "steps", "trend_change", true))
         .toEqual({ reason: "not_enough_data" });
     }
+  });
+
+  it("marks a lab whose latest draw is over a year old, so it's shown but not posted", () => {
+    const at = (date: string) => ({ member, labs: [{ ...latest, date }] });
+    expect(seeYoursIsOld(at("2037-08-16"), latest.analyte)).toBe(false);
+    expect(seeYoursIsOld(at("2037-08-15"), latest.analyte)).toBe(true);
+    expect(seeYoursIsOld({ member, labs: [{ ...latest, date: "2036-01-02" }, { ...latest, date: "2038-07-01" }] }, latest.analyte))
+      .toBe(false);
+    expect(seeYoursIsOld({ member, daily: [] }, "steps")).toBe(false);
   });
 
   it("can fall back to a trend for floors, which has no suggestion threshold", () => {

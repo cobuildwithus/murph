@@ -259,6 +259,23 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     expect(await (await shared.read(viewer)).json()).toMatchObject({ card: { id: first.card.id }, shared: true });
   });
 
+  it("shows a viewer's draw from over a year ago as old and won't post it", async () => {
+    const author = await person(), viewer = await person();
+    await pair(author, viewer);
+    const shared = await frozenLabPost(author);
+    const today = new Date().toISOString().slice(0, 10);
+    const input = insulinReading(8.1, today);
+    input.labs = [{ ...input.labs![0], date: new Date(Date.now() - 400 * 86_400_000).toISOString().slice(0, 10) }];
+    vi.spyOn(inputs, "readMeasureInputs").mockResolvedValue({ input, observed: true });
+    const opened = await (await shared.read(viewer)).json();
+    expect(opened).toMatchObject({ card: { candidateId: "mine:insulin:percentile" }, old: true, shared: false });
+    const original = opened.card.change_options.find((option: { id: string }) => option.id === "original");
+    const refused = await post(viewer.request("posts", "POST", { id: randomUUID(),
+      cards: [{ candidateId: opened.card.candidateId, option: "original", specRevision: original.specRevision }] }));
+    expect(refused.status).toBe(400);
+    expect(await db.healthPost.count({ where: { authorMemberId: viewer.id } })).toBe(0);
+  });
+
   it("opens only a visible partner's selected measure and rejects stale post versions after the replica read", async () => {
     const author = await person(), viewer = await person();
     await pair(author, viewer);
