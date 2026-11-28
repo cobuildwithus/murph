@@ -10,7 +10,7 @@ import {
 } from "../src/browser-vault.ts";
 
 test("browser vault generation rebuilds replicas with canonical check-ins and nightly sleep timing", () => {
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 21);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 22);
 });
 
 test("browser vault owns one fixed 32-bucket lowercase hexadecimal namespace", () => {

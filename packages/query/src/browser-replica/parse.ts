@@ -71,6 +71,12 @@ const sessionSchema = z.object({
   type: z.enum(["run", "walk", "sauna", "hiit", "basketball", "other"]),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
   minutes: z.number().positive().max(1440),
+  zones: z.object({
+    provider: z.enum(["whoop", "garmin", "apple_watch", "apple_health", "fitbit", "google_health"]),
+    first: z.number().int().min(0).max(20),
+    minutes: z.array(z.number().nonnegative().max(1440)).min(1).max(20),
+    reportedAt: z.isoDateTime({offset:true}).optional(),
+  }).strict().optional(),
 }).strict();
 const activitySessionsSchema = z.array(sessionSchema);
 const detailedWorkoutsSchema = z.array(sessionSchema.extend({ type: z.enum(DETAILED_WORKOUT_TYPES) }));

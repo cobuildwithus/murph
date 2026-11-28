@@ -1,3 +1,5 @@
+import { habitQuestionsV1 } from "./habit-questions-v1.ts";
+export { habitQuestionsV1 };
 import * as z from "./zod-runtime.ts";
 import { companionMealIdSchema } from "./companion-meals.ts";
 import { memoryDisplayNameSchema, memoryDemographicsPatchSchema } from "./memory.ts";
@@ -580,6 +582,13 @@ export const foodWeekAnswersSchema = z.array(foodAnswer).min(1).max(15).refine(r
 });
 const yesNoUnsure = z.enum(["yes", "no", "unsure"]);
 export const oneOffAnswerSchema = z.discriminatedUnion("key", [
+  z.strictObject({
+    key: z.enum(Object.keys(habitQuestionsV1) as (keyof typeof habitQuestionsV1)[]),
+    value: z.string().max(160),
+  }).refine(answer => Object.hasOwn(habitQuestionsV1[answer.key].options, answer.value), {
+    message: "Choose one of the options for this question.",
+    path: ["value"],
+  }),
   z.strictObject({ key: z.literal("ageEligibility"), value: z.enum(["pregnant", "postpartum", "neither"]) }),
   z.strictObject({ key: z.literal("whoopZones"), value: z.enum(["yes", "no", "notSure"]) }),
   z.strictObject({ key: z.literal("smoking"), value: z.enum(["never", "former", "current", "unsure"]) }),

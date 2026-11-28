@@ -804,7 +804,7 @@ export function buildActivitySessionStableResourceIdentity(
   ]);
 }
 
-function resolveActivitySessionCandidatePublicProvider(
+export function resolveActivitySessionCandidatePublicProvider(
   candidate: WearableMetricCandidate,
 ): string {
   return resolveWearablePublicSourceProvider({

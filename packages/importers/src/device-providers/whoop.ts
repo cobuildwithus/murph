@@ -725,6 +725,17 @@ function emitWhoopCycle(
   );
 }
 
+function workoutZones(score: PlainObject | undefined) {
+  const durations = asPlainObject(score?.zone_durations);
+  if (!durations) return undefined;
+  const bins = ["zero", "one", "two", "three", "four", "five"].map((name, zone) => {
+    const ms = durations[`zone_${name}_milli`];
+    return typeof ms === "number" && Number.isFinite(ms) && ms >= 0
+      ? { zone, durationMinutes: ms / 60_000 } : null;
+  });
+  return bins.every(bin => bin !== null) ? bins : undefined;
+}
+
 function emitWhoopWorkout(
   events: DeviceEventPayload[],
   evidenceParts: DeviceEvidencePartPayload[],
@@ -773,6 +784,7 @@ function emitWhoopWorkout(
             endedAt: endAt,
             sessionNote: `WHOOP ${sportName}`,
             metrics: buildWhoopWorkoutMetrics(workout, score),
+            heartRateZones: workout.score_state === "SCORED" ? workoutZones(score) : undefined,
             exercises: [],
           },
         }),
