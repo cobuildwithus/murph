@@ -96,9 +96,12 @@ function formatLabValue(value: number, unit: string): string {
 function intervalSubtitle({ low, high }: Interval, unit: string): string {
   // Keep exact bounds in the gauge when rounding them would change the stated range.
   if ([low, high].some(bound => bound && !Number.isInteger(bound.value * 10))) return "within the reference range";
-  if (low && high) return `within ${labNumber(low.value, unit)}–${formatLabValue(high.value, unit)}`;
-  if (low) return `${low.inclusive ? "at or above" : "above"} ${formatLabValue(low.value, unit)}`;
-  return `${high!.inclusive ? "at or below" : "below"} ${formatLabValue(high!.value, unit)}`;
+  // "0–149 mg/dL" says no more than "at or below 149 mg/dL", in fewer words a friend reads at once.
+  const floor = low && low.value > 0 ? low : undefined;
+  if (floor && high) return `within ${labNumber(floor.value, unit)}–${formatLabValue(high.value, unit)}`;
+  if (floor) return `${floor.inclusive ? "at or above" : "above"} ${formatLabValue(floor.value, unit)}`;
+  if (!high) return "within the reference range";
+  return `${high.inclusive ? "at or below" : "below"} ${formatLabValue(high.value, unit)}`;
 }
 
 /** Decimal places the lab reported, at most two. */
@@ -106,7 +109,8 @@ function reportedPlaces(draws: readonly LabDraw[]): number {
   return Math.min(2, Math.max(...draws.map(({ value }) => String(value).split(".")[1]?.length ?? 0)));
 }
 
-function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: string): Candidate | undefined {
+/** The latest draw against the median of its like-for-like prior draws. Favorable moves are positive. */
+function labMove(latest: LabDraw, prior: LabDraw[], rule: LabRule) {
   if (!rule.step || labUnitKey(rule.unit) !== labUnitKey(latest.unit)) return;
   let reference = prior;
   const fastingRelevant = latest.analyte === "glucose" || latest.analyte === "triglycerides";
@@ -122,10 +126,16 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
   const baseline = Number(median(values).toFixed(reportedPlaces([latest, ...reference])));
   // Decimal lab units can land one floating-point ulp below an exact clinical step.
   const delta = Number((latest.value - baseline).toPrecision(12));
-  const effect = latest.analyte === "hdl" ? delta : -delta;
-  if (effect < rule.step) return;
+  return { values, baseline, delta, effect: latest.analyte === "hdl" ? delta : -delta, step: rule.step, fastingKnown };
+}
+
+type LabMove = NonNullable<ReturnType<typeof labMove>>;
+
+function labChange(latest: LabDraw, move: LabMove | undefined, rule: LabRule, dateLabel: string): Candidate | undefined {
+  if (!move || move.effect < move.step) return;
+  const { values, baseline, delta, effect, step, fastingKnown } = move;
   return {
-    date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
+    date: latest.date, effect, noise: Math.max(step, mad(values)),
     achievement: { kind: "lab_change", subject: latest.analyte, period: latest.date },
     card: {
       id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs", measure: latest.analyte,
@@ -135,6 +145,12 @@ function labChange(latest: LabDraw, prior: LabDraw[], rule: LabRule, dateLabel: 
       chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },
     },
   };
+}
+
+/** A gauge stands in when there's no change or percentile, never for a draw at least a step worse than the
+ * usual, however near the range's edge it still sits. See yours draws one privately either way. */
+function rangeOffered(mode: "fallback" | "independent" | undefined, other: unknown, move: LabMove | undefined) {
+  return mode === "independent" || (!other && !(move && move.effect <= -move.step));
 }
 
 export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
@@ -154,7 +170,8 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
 
     const dateLabel = formatWinDate(latest.date, input.member.today);
     const displayValue = formatLabValue(latest.value, latest.unit);
-    const change = labChange(latest, prior, rule, dateLabel);
+    const move = labMove(latest, prior, rule);
+    const change = labChange(latest, move, rule, dateLabel);
     if (change) candidates.push(change);
     const percentile = rule.rankMetric && percentileCandidate({
       rank: rank(rule.rankMetric, latest.value, { member: input.member, unit: latest.unit, fasting: latest.fasting }),
@@ -165,7 +182,7 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
     if (percentile) candidates.push({
       ...percentile, achievement: { kind: "lab_percentile", subject: analyte, period: latest.date },
     });
-    if ((options.rangeMode === "independent" || (!change && !percentile)) && interval && within) candidates.push({
+    if (interval && within && rangeOffered(options.rangeMode, change ?? percentile, move)) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {
         id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs", measure: analyte,
