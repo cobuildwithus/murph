@@ -12,6 +12,7 @@ import {
 } from "@murphai/hosted-execution/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+  ORACLE_LIFETIME_PAGE_HEADER,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 import { describe, expect, it, vi } from "vitest";
 
@@ -108,6 +109,7 @@ describe("hosted clinical records runtime port", () => {
         });
       }
       if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH) {
+        expect(request.headers.get(ORACLE_LIFETIME_PAGE_HEADER)).toBe("1");
         return Response.json({
           body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
           nextCursor: null,
@@ -137,7 +139,7 @@ describe("hosted clinical records runtime port", () => {
       requestId: "request_1",
       resourceType: "Observation",
       runId: "run_1",
-    })).resolves.toMatchObject({ nextCursor: null, status: "page" });
+    }, { oracleLifetimeSearch: true })).resolves.toMatchObject({ nextCursor: null, status: "page" });
     await expect(port.recordOutcome({ retrievalProtocol: "query-slices-v2", retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 0,

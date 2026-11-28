@@ -148,3 +148,25 @@ test("bot pull requests cannot make a held change; people can", () => {
   const known = directory([alder, birch, ["epic-birch-2", "https://birch.example.test/r4"], sandbox]);
   assert.match(checkPullRequest({ authorType: "Bot", baseText: current, headText: known }), /keeps its connection/u);
 });
+
+test("the first server-registered tenant needs human review before the refresh can add siblings", () => {
+  const oracle = { id: "oracle-millennium-r4-v1", sourceSystem: "cerner-fhir" };
+  const first = { id: "oracle-" + "a".repeat(20), policyId: oracle.id, integration: "oracle-millennium-r4",
+    fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/Test-A", brandName: "North Annex", aliases: [], locations: [facility] };
+  const second = { ...first, id: "oracle-" + "b".repeat(20), fhirBaseUrl: "https://fhir-myrecord.cerner.com/r4/Test-B" };
+  const mixed = (...rows) => {
+    const base = JSON.parse(current);
+    return JSON.stringify({ ...base, policies: [...base.policies, oracle], entries: [...base.entries, ...rows] });
+  };
+  assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: current, headText: mixed(first) }), /cannot make/u);
+  assert.match(checkPullRequest({ authorType: "User", baseText: current, headText: mixed(first) }), /person authored/u);
+  const publication = (candidateText, held = []) => checkPublication({ currentText: mixed(first), candidateText,
+    heldText: JSON.stringify(held), allowCountDrop: true });
+  assert.equal(publication(mixed(first, second)), "");
+  assert.throws(() => publication(mixed()), /only a person/u);
+  assert.throws(() => publication(mixed({ ...first, fhirBaseUrl: second.fhirBaseUrl })), /only a person/u);
+  assert.throws(() => publication(mixed({ ...first, clientIdEnvironmentKey: PRODUCTION })), /integration/u);
+  assert.throws(() => publication(mixed(first, { ...second, fhirBaseUrl: "https://other.example.test/r4/Test-B" })), /unsupported/u);
+  assert.throws(() => publication(mixed(first), [{ kind: "addition", id: second.id, candidate: second.fhirBaseUrl,
+    brandName: second.brandName, clientIdEnvironmentKey: null }]), /does not match/u);
+});

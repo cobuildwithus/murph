@@ -269,16 +269,16 @@ and import-again actions follow the same launcher and bounded lifecycle below.
 ## Provider directory
 
 `provider-directory.v2.json` is a committed, versioned build artifact generated
-offline from Epic's recommended R4 User-access Brands Bundle. It records the
-SHA-256 of the exact source bytes, contains one checked-in Epic acquisition
-policy, and lets each provider entry reference that policy instead of repeating
-the same SMART scopes and resource list. The official
+offline from Epic's R4 User-access Brands Bundle and Oracle's public
+Millennium patient R4 endpoint list. Each entry references its server-owned
+acquisition policy. `sourceBundleSha256` identifies the Epic bytes. The Oracle
+record in `sources` pins its commit, download URL and SHA-256. The official
 source page is `https://open.epic.com/MyApps/Endpoints`; its machine-readable
 download is `https://open.epic.com/Endpoints/Brands`. Epic explicitly advises
 applications to download and re-host this data instead of querying it at
 runtime. Runtime search therefore performs no directory network request and
-never accepts a caller-supplied FHIR base URL. Provider ids derive from Epic's
-stable brand identifier, not an endpoint URL. All published facility tuples
+never accepts a caller-supplied FHIR base URL. Epic IDs derive from the stable brand identifier. Oracle IDs prefix the first
+20 hex digits of the case-sensitive tenant's SHA-256 with `oracle-`. All published facility tuples
 are retained so city/facility matches beyond the first visible results remain
 discoverable.
 
@@ -380,8 +380,13 @@ does not exist yet.
 refresh rule. Upstream names, aliases and facilities publish. Three changes are
 held: any change to an existing entry's URL (path included), client key or
 policy keeps the published value; an existing entry missing upstream stays as
-published; and a new entry is left out unless it uses `EPIC_SMART_CLIENT_ID`
-on an endpoint origin a production entry already uses. The sandbox host does
+published. A new entry needs a published production entry with the same
+origin, policy and registration. For Epic the registration is
+`EPIC_SMART_CLIENT_ID`. Oracle registration is server-owned. Its first
+production entries and policy require a human-reviewed directory PR. The
+weekly importer reads the public patient endpoint bundle at the commit in
+`sources`, matches the O3 tenant template and maps ZIPs with the same offline
+ZCTA table used for Epic. The sandbox host does
 not count as a production host. A run that holds changes opens or updates the
 oldest open GitHub issue “Clinical directory changes need review” listing every
 held change, even when the directory itself is unchanged, and closes newer
@@ -389,7 +394,7 @@ duplicates. The re-check proves each listed row but cannot prove the list is
 complete, so a run that holds nothing never closes the issue: it comments once
 that the run reported no held changes, and a person checks and closes it. The issue
 says its upstream values are unverified and must be re-checked against
-open.epic.com, and a report over the issue size limit ends with a count of
+the corresponding pinned source or open.epic.com, and a report over the issue size limit ends with a count of
 unlisted rows. To accept one, a person changes the committed directory in
 their own pull request.
 
@@ -422,12 +427,18 @@ gcloud kms keys add-iam-policy-binding frog-app --project=murph-495013 \
 ```
 
 
-To build the same artifact manually from the repository root:
+To refresh manually from the repository root, download the pinned Oracle input first.
 
 ```bash
+oracle_commit=$(gh api repos/oracle-samples/ignite-endpoints/commits/HEAD --jq .sha)
+oracle_input=$(mktemp)
+curl --proto '=https' --fail --max-time 300 --max-filesize 33554432 \
+  "https://raw.githubusercontent.com/oracle-samples/ignite-endpoints/$oracle_commit/oracle_health_fhir_endpoints/millennium_patient_r4_endpoints.json" \
+  -o "$oracle_input" &&
 curl --fail --location --silent --show-error \
   https://open.epic.com/Endpoints/Brands |
   pnpm --dir apps/web clinical-records:providers:import -- --input - \
+  --oracle-input "$oracle_input" --oracle-commit "$oracle_commit" \
   --held-output held-changes.json
 ```
 

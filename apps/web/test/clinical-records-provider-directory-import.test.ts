@@ -3,9 +3,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { parseClinicalProviderDirectory, searchClinicalProviderDirectorySnapshot } from "@/src/lib/clinical-records/provider-directory";
+import { postalCentroid } from "@/src/lib/clinical-records/postal-centroids";
 import { parseClinicalProviderSearchResponse } from "@/src/lib/clinical-records/client-contracts";
 import { assertDirectoryRefreshCounts } from "@/src/lib/clinical-records/provider-directory-artifact";
-import { buildEpicProviderDirectoryArtifact, refreshEpicProviderDirectory } from "@/scripts/import-epic-clinical-provider-directory";
+import { appendOracleDirectory, buildEpicProviderDirectoryArtifact, refreshEpicProviderDirectory } from "@/scripts/import-epic-clinical-provider-directory";
 
 const generatedAt = "2026-07-20T08:00:05.631Z";
 
@@ -143,6 +144,63 @@ describe("Epic Clinical Records provider directory importer", () => {
       ...bundle,
       entry: [...bundle.entry, bundle.entry[0]],
     }))).toThrow(/duplicate entry fullUrls/u);
+  });
+});
+
+describe("Oracle directory refresh", () => {
+  const base = "https://fhir-myrecord.cerner.com/r4/";
+  function source(tenants: string[]) {
+    const entry = tenants.flatMap((address, index) => [
+      { resource: { resourceType: "Endpoint", id: `ref-${index}`, status: address.endsWith("inactive/") ? "off" : "active", address } },
+      { resource: { resourceType: "Organization", name: "Cove Institute", endpoint: [{ reference: `Endpoint/ref-${index}` }],
+        identifier: [{ system: "urn:ietf:rfc:3986", value: "urn:oid:1.2.3" }],
+        address: [{ city: "Cove", state: "GA", postalCode: "30309", line: ["4 Cove Lane"] }] } },
+    ]);
+    return { bytes: Buffer.from(JSON.stringify({ resourceType: "Bundle", type: "collection", entry })), commit: "b".repeat(40) };
+  }
+  const epic = JSON.stringify(makeBundle());
+  it("joins organizations by reference, hashes the exact tenant and maps seven-field locations for old readers", () => {
+    const input = source([base + "Aa-B/", base + "aa-B/", base + "inactive/", base + "missing-slash",
+      base + "not_supported/", base + "bad/nested/", base + "unsafe%2F/", base + "tenant/?q=1/", base.replace("myrecord", "other") + "tenant/"]);
+    const build = () => {
+      const artifact = buildEpicProviderDirectoryArtifact(epic);
+      appendOracleDirectory(artifact, input);
+      return artifact;
+    };
+    const artifact = build();
+    expect(JSON.stringify(artifact)).toBe(JSON.stringify(build()));
+    expect(artifact.sources?.[0]).toEqual({ vendor: "oracle", commit: input.commit, url: expect.stringContaining(input.commit),
+      sha256: createHash("sha256").update(input.bytes).digest("hex") });
+    const expected = ["Aa-B", "aa-B"].map(tenant => "oracle-" + createHash("sha256").update(tenant).digest("hex").slice(0, 20)).sort();
+    const rows = artifact.entries.filter(entry => entry.integration);
+    expect(rows.map(entry => entry.id)).toEqual(expected);
+    for (const row of rows) {
+      expect(row).not.toHaveProperty("clientIdEnvironmentKey");
+      expect(row.upstreamId).toBe("urn:oid:1.2.3");
+      expect(row.locations[0]).toHaveLength(7);
+    }
+    const snapshot = parseClinicalProviderDirectory(artifact);
+    for (const location of [{ near: { lat: 33.8, lon: -84.386 } }, { query: "30309" }]) {
+      const result = searchClinicalProviderDirectorySnapshot(snapshot, { ...location, grouped: true, includeDistance: true,
+        sourceSystems: ["cerner-fhir"], postalCentroid });
+      expect(result.providers.map(row => row.id).sort()).toEqual(expected);
+      expect(result.providers[0]?.matchedFacility?.street).toEqual(["4 Cove Lane"]);
+    }
+    expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), source([base + "dup/", base + "dup/"]))).toThrow(/duplicate/u);
+    expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), { ...input, commit: "main" })).toThrow(/pinned/u);
+    expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), { ...input, bytes: new Uint8Array(32 * 1024 * 1024 + 1) })).toThrow(/32 MiB/u);
+  });
+  it("holds the bootstrap, pins the published entries and publishes new tenants only after review establishes the host", () => {
+    const first = source([base + "original/"]);
+    const reviewed = buildEpicProviderDirectoryArtifact(epic);
+    const held = refreshEpicProviderDirectory(epic, JSON.stringify(reviewed), { oracle: first });
+    expect(held.held.map(change => change.kind)).toEqual(["addition"]);
+    expect(held.artifact.policies).toEqual(reviewed.policies);
+    appendOracleDirectory(reviewed, first);
+    const next = refreshEpicProviderDirectory(epic, JSON.stringify(reviewed), { oracle: source([base + "new/"]) });
+    expect(next.held.map(change => change.kind)).toEqual(["removal"]);
+    expect(next.artifact.entries.filter(row => row.integration)).toHaveLength(2);
+    expect(next.artifact.entries.filter(row => row.id.startsWith("epic-"))).toEqual(buildEpicProviderDirectoryArtifact(epic).entries);
   });
 });
 

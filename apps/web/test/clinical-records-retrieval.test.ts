@@ -24,6 +24,7 @@ import {
   hashClinicalFhirPatientId,
   type ClinicalFhirRetrievalSlice,
 } from "@murphai/clinical-records";
+import { createClinicalVendorSimulator, oracleWireProfile } from "./support/clinical-vendor-simulator";
 import baseline from "./fixtures/clinical-records-query-baseline.json";
 import type { HostedClinicalRecordsFetchPageRequest } from "@murphai/hosted-execution/clinical-records";
 
@@ -31,7 +32,7 @@ import {
   buildEpicBetaRetrievalPlan,
   EPIC_BETA_FHIR_PAGE_COUNT,
 } from "@/src/lib/clinical-records/epic-policy";
-import { buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
+import { buildOracleDailyRetrievalPlan, buildOracleRetrievalPlan } from "@/src/lib/clinical-records/oracle-policy";
 
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
@@ -1681,7 +1682,7 @@ describe("Clinical Records retrieval control plane", () => {
 });
 
 describe("Oracle runs at the Web retrieval boundary", () => {
-  const ORACLE_BASE = "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic";
+  const ORACLE_BASE = oracleWireProfile.base;
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readClinicalTransportAccess.mockResolvedValue(true);
@@ -1712,18 +1713,110 @@ describe("Oracle runs at the Web retrieval boundary", () => {
     meta: { lastUpdated: "2026-11-01T12:00:00.000Z" }, subject: { reference: "Patient/patient-1" }, ...extra,
   });
 
+  it("finishes a 39-second lifetime page, fences its claim and resumes after gateway failures", async () => {
+    const harness = oracleHarness(["Patient", "Procedure", "Condition"]);
+    const portal = createClinicalVendorSimulator(oracleWireProfile, {}, "access-token");
+    portal.setSearchResults("Procedure", null, Array.from({ length: 587 }, (_, index) => resource("Procedure", `sample-${index}`)));
+    vi.useFakeTimers();
+    // Native AbortSignal.timeout uses an internal clock. Drive its deadline with the scenario clock.
+    const deadlines = vi.spyOn(AbortSignal, "timeout").mockImplementation(ms => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), ms);
+      return controller.signal;
+    });
+    const runPage = (id: string, oracleLifetimeSearch = true) => fetchClinicalRetrievalPage({ oracleLifetimeSearch, memberId: MEMBER_ID, fetchImpl: portal.fetchImpl,
+      request: request(slice(harness, id), id) });
+    function delayedPage(delay: number, status = 200) {
+      const started = deferred<void>();
+      portal.onNext("search", (response, _url, signal) => new Promise((resolve, reject) => {
+        started.resolve();
+        const timer = setTimeout(() => resolve(status === 200 ? response : new Response(null, { status })), delay);
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      }));
+      return started.promise;
+    }
+    try {
+      const legacyStarted = delayedPage(39_000);
+      const legacy = runPage("procedures", false);
+      await legacyStarted;
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(legacy).resolves.toMatchObject({ status: "unavailable", retryable: true });
+      const started = delayedPage(39_000);
+      const pending = runPage("procedures");
+      await started;
+      await vi.advanceTimersByTimeAsync(31_000);
+      await expect(runPage("procedures", false)).resolves.toMatchObject({ errorCode: "request-in-progress" });
+      await vi.advanceTimersByTimeAsync(8_000);
+      const first = await pending;
+      expect(first.status).toBe("page");
+      if (first.status === "page") expect(JSON.parse(first.body).entry).toHaveLength(587);
+
+      for (const status of [504, 502]) {
+        const started = delayedPage(55_000, status);
+        const attempt = runPage("conditions");
+        await started;
+        await vi.advanceTimersByTimeAsync(55_000);
+        await expect(attempt).resolves.toMatchObject({ status: "unavailable", retryable: true });
+      }
+      await expect(runPage("conditions")).resolves.toMatchObject({ status: "page" });
+      expect(portal.requests).toHaveLength(5);
+      expect(harness.state.run.pageCount).toBe(2);
+    } finally { deadlines.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it("stops retrying a permanent gateway outage at the existing page claim limit", async () => {
+    const harness = oracleHarness(["Patient", "Condition"]);
+    const portal = createClinicalVendorSimulator(oracleWireProfile, {}, "access-token");
+    const page = request(slice(harness, "conditions"), "gateway-outage");
+    const runPage = () => fetchClinicalRetrievalPage({
+      memberId: MEMBER_ID, oracleLifetimeSearch: true, fetchImpl: portal.fetchImpl, request: page,
+    });
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      portal.onNext("search", () => new Response(null, { status: 504 }));
+      const result = await runPage();
+      if (result.status === "unavailable" && !result.retryable) break;
+      expect(result).toMatchObject({ status: "unavailable", retryable: true });
+    }
+    const egressCount = portal.requests.length;
+    await expect(runPage()).resolves.toMatchObject({ errorCode: "request-retry-limit-reached", retryable: false });
+    expect(egressCount).toBeGreaterThan(1);
+    expect(egressCount).toBeLessThanOrEqual(20);
+    expect(portal.requests).toHaveLength(egressCount);
+    expect(harness.state.run.pageCount).toBe(0);
+  });
+
+  it("keeps the ordinary deadline for a daily window and a Patient read with a capable caller", async () => {
+    const families = ["Patient", "Procedure"];
+    const harness = oracleHarness(families);
+    harness.state.run.retrievalPlanJson = buildOracleDailyRetrievalPlan({
+      previous: buildOracleRetrievalPlan({ resourceTypes: families }), generation: 2, now: new Date(),
+    });
+    const portal = createClinicalVendorSimulator(oracleWireProfile, {}, "access-token");
+    const deadlines = vi.spyOn(AbortSignal, "timeout");
+    try {
+      for (const id of ["patient-demographics", "procedures"]) {
+        await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, oracleLifetimeSearch: true,
+          fetchImpl: portal.fetchImpl, request: request(slice(harness, id), id) })).resolves.toMatchObject({ status: "page" });
+        expect(deadlines).toHaveBeenLastCalledWith(20_000);
+      }
+    } finally { deadlines.mockRestore(); }
+  });
+
   it("keeps every frozen Epic request byte-identical through the vendor dispatch", async () => {
     vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    const deadlines = vi.spyOn(AbortSignal, "timeout");
     for (const row of baseline) {
       const harness = createHarness(["Patient"]);
       const frozen = clinicalFhirRetrievalSliceSchema.parse(row.slice);
       harness.state.run.retrievalPlanJson = { schemaVersion: "murph.clinical-retrieval-plan.v1", slices: [frozen] };
       const fetchImpl = vi.fn(async () => fhirResponse(frozen.resourceType === "Patient"
         ? { resourceType: "Patient", id: "patient-1" } : { resourceType: "Bundle", entry: [] }));
-      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, request: request(frozen, `epic-${frozen.queryScopeId}`) }))
+      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl, oracleLifetimeSearch: true, request: request(frozen, `epic-${frozen.queryScopeId}`) }))
         .resolves.toMatchObject({ status: "page" });
       expect(String((fetchImpl.mock.calls[0] as unknown[])[0])).toBe(row.url);
+      expect(deadlines).toHaveBeenLastCalledWith(20_000);
     }
+    deadlines.mockRestore();
   });
 
   it("builds Oracle requests from its own catalog and refuses another vendor's frozen identity before egress", async () => {

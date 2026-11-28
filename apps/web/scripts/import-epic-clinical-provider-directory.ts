@@ -1,3 +1,4 @@
+import { ORACLE_ACQUISITION_POLICY, ORACLE_INTEGRATION_ID } from "../src/lib/clinical-records/oracle-policy";
 import type { DirectoryFacilityTuple } from "../src/lib/clinical-records/directory-geography";
 import { postalCentroid } from "../src/lib/clinical-records/postal-centroids";
 import { createHash } from "node:crypto";
@@ -8,7 +9,6 @@ import { pathToFileURL } from "node:url";
 import {
   EPIC_ACQUISITION_POLICY,
   EPIC_ACQUISITION_POLICY_ID,
-  type EpicAcquisitionPolicy,
 } from "../src/lib/clinical-records/epic-policy";
 import {
   CLINICAL_PROVIDER_DIRECTORY_SCHEMA,
@@ -18,6 +18,7 @@ import {
 import {
   assertDirectoryRefreshCounts,
   holdDirectoryChangesForReview,
+  oracleFhirTenant,
   type HeldDirectoryChange,
 } from "../src/lib/clinical-records/provider-directory-artifact";
 
@@ -37,21 +38,22 @@ const EPIC_SANDBOX_ENTRY = {
 
 type JsonRecord = Record<string, unknown>;
 
-interface EpicProviderDirectoryArtifactV2 {
+interface ProviderDirectoryArtifactV2 {
   entries: Array<{
     aliases: string[];
     brandName: string;
-    clientIdEnvironmentKey:
-      | "EPIC_SMART_CLIENT_ID"
-      | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
+    clientIdEnvironmentKey?: "EPIC_SMART_CLIENT_ID" | "EPIC_SMART_NON_PRODUCTION_CLIENT_ID";
+    integration?: typeof ORACLE_INTEGRATION_ID;
+    upstreamId?: string;
     fhirBaseUrl: string;
     id: string;
     locations: DirectoryFacilityTuple[];
     policyId: string;
   }>;
   generatedAt: string;
-  policies: readonly EpicAcquisitionPolicy[];
+  policies: readonly (typeof EPIC_ACQUISITION_POLICY | typeof ORACLE_ACQUISITION_POLICY)[];
   schema: typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA;
+  sources?: { vendor: "oracle"; commit: string; url: string; sha256: string }[];
   sourceBundleSha256: string;
   version: string;
 }
@@ -65,7 +67,7 @@ if (entrypointPath && import.meta.url === pathToFileURL(path.resolve(entrypointP
 }
 
 async function main(): Promise<void> {
-  const { allowCountDrop, heldOutputPath, inputPath, outputPath } = parseArguments(process.argv.slice(2));
+  const { allowCountDrop, heldOutputPath, inputPath, outputPath, oracleInput, oracleCommit } = parseArguments(process.argv.slice(2));
   if (inputPath !== "-") {
     const inputStats = await stat(inputPath);
     if (!inputStats.isFile() || inputStats.size <= 0 || inputStats.size > MAX_INPUT_BYTES) {
@@ -75,11 +77,17 @@ async function main(): Promise<void> {
   const sourceBytes = inputPath === "-"
     ? await readBoundedStdin()
     : await readFile(inputPath);
+  let oracle: OracleSource | undefined;
+  if (oracleInput && oracleCommit) {
+    const info = await stat(oracleInput);
+    if (!info.isFile() || info.size > MAX_ORACLE_BYTES) throw new RangeError("Oracle source exceeds 32 MiB.");
+    oracle = { bytes: await readFile(oracleInput), commit: oracleCommit };
+  }
   const previous = await readFile(outputPath, "utf8");
-  const { artifact, held } = refreshEpicProviderDirectory(sourceBytes, previous, { allowCountDrop });
+  const { artifact, held } = refreshEpicProviderDirectory(sourceBytes, previous, { allowCountDrop, oracle });
   await writeFile(outputPath, `${JSON.stringify(artifact)}\n`, { encoding: "utf8", mode: 0o644 });
   if (heldOutputPath) await writeFile(heldOutputPath, `${JSON.stringify(held)}\n`, { encoding: "utf8", mode: 0o644 });
-  process.stdout.write(`Wrote ${artifact.entries.length} Epic Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
+  process.stdout.write(`Wrote ${artifact.entries.length} Clinical Records directory entries to ${path.relative(process.cwd(), outputPath)}.\n`);
   if (held.length) process.stdout.write(`Held ${held.length} directory changes for review.\n`);
 }
 
@@ -89,17 +97,72 @@ async function main(): Promise<void> {
 export function refreshEpicProviderDirectory(
   source: string | Uint8Array,
   previousText: string,
-  options: { allowCountDrop?: boolean } = {},
-): { artifact: EpicProviderDirectoryArtifactV2; held: HeldDirectoryChange[] } {
+  options: { allowCountDrop?: boolean; oracle?: OracleSource } = {},
+): { artifact: ProviderDirectoryArtifactV2; held: HeldDirectoryChange[] } {
   // The production parser proves the committed shape before its raw entries are reused.
-  const previous: EpicProviderDirectoryArtifactV2 = JSON.parse(previousText);
+  const previous: ProviderDirectoryArtifactV2 = JSON.parse(previousText);
   const prior = parseClinicalProviderDirectory(previous);
   const upstream = buildEpicProviderDirectoryArtifact(source);
+  if (options.oracle) appendOracleDirectory(upstream, options.oracle);
+  else if (previous.policies.some(policy => policy.id === ORACLE_ACQUISITION_POLICY.id)) throw new TypeError("Refreshing a mixed directory requires the pinned Oracle input.");
   const { entries, held } = holdDirectoryChangesForReview(previous, upstream);
-  const artifact = { ...upstream, entries };
+  // The publication checker pins the committed policy definitions as well as entries.
+  // Only the reviewed bootstrap can introduce the Oracle definition.
+  const artifact = { ...upstream, entries, policies: previous.policies };
   const parsed = parseClinicalProviderDirectory(artifact);
   if (!options.allowCountDrop) assertDirectoryRefreshCounts(prior, parsed);
   return { artifact, held };
+}
+
+const MAX_ORACLE_BYTES = 32 * 1024 * 1024;
+interface OracleSource { bytes: Uint8Array; commit: string }
+
+/** Builds the upstream candidate. Automatic publication must still apply the refresh hold. */
+export function appendOracleDirectory(artifact: ProviderDirectoryArtifactV2, { bytes, commit }: OracleSource): void {
+  if (!/^[a-f0-9]{40}$/u.test(commit)) throw new TypeError("Expected a pinned Oracle commit.");
+  if (!bytes.length || bytes.length > MAX_ORACLE_BYTES) throw new RangeError("Oracle source is missing or exceeds 32 MiB.");
+  const bundle = requireRecord(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), "Oracle bundle");
+  if (bundle.resourceType !== "Bundle" || bundle.type !== "collection") throw new TypeError("Expected an Oracle collection Bundle.");
+  const resources = requireArray(bundle.entry, "Oracle entries").map(entry =>
+    requireRecord(requireRecord(entry, "Oracle entry").resource, "Oracle resource"));
+  const endpoints = indexActiveOracleEndpoints(resources);
+  for (const resource of resources) {
+    if (resource.resourceType !== "Organization" || resource.active === false || !Array.isArray(resource.endpoint)) continue;
+    for (const link of resource.endpoint) {
+      const endpoint = endpoints.get(readReference(link) ?? "");
+      if (!endpoint) continue;
+      const brandName = requireString(resource.name, "Oracle organization name", 160);
+      const oid = readIdentifier(resource.identifier, "urn:ietf:rfc:3986");
+      artifact.entries.push({
+        aliases: [], brandName, fhirBaseUrl: endpoint.base,
+        id: "oracle-" + createHash("sha256").update(endpoint.tenant).digest("hex").slice(0, 20),
+        integration: ORACLE_INTEGRATION_ID, locations: readLocations(resource),
+        policyId: ORACLE_ACQUISITION_POLICY.id, ...(oid?.startsWith("urn:oid:") ? { upstreamId: oid } : {}),
+      });
+    }
+  }
+  artifact.entries.sort((left, right) => left.id.localeCompare(right.id));
+  artifact.policies = [EPIC_ACQUISITION_POLICY, ORACLE_ACQUISITION_POLICY];
+  artifact.sources = [{ vendor: "oracle", commit,
+    url: `https://raw.githubusercontent.com/oracle-samples/ignite-endpoints/${commit}/oracle_health_fhir_endpoints/millennium_patient_r4_endpoints.json`,
+    sha256: createHash("sha256").update(bytes).digest("hex") }];
+  parseClinicalProviderDirectory(artifact);
+}
+
+function indexActiveOracleEndpoints(resources: JsonRecord[]) {
+  const endpoints = new Map<string, { base: string; tenant: string }>();
+  for (const resource of resources) {
+    if (resource.resourceType !== "Endpoint" || resource.status !== "active") continue;
+    const address = resource.address;
+    if (typeof address !== "string" || !address.endsWith("/")) continue;
+    const base = address.slice(0, -1);
+    const tenant = oracleFhirTenant(base);
+    if (!tenant) continue;
+    const reference = `Endpoint/${requireString(resource.id, "Oracle endpoint id", 100)}`;
+    if (endpoints.has(reference)) throw new TypeError("Duplicate Oracle endpoint reference.");
+    endpoints.set(reference, { base, tenant });
+  }
+  return endpoints;
 }
 
 async function readBoundedStdin(): Promise<Buffer> {
@@ -121,7 +184,7 @@ async function readBoundedStdin(): Promise<Buffer> {
 
 export function buildEpicProviderDirectoryArtifact(
   source: string | Uint8Array,
-): EpicProviderDirectoryArtifactV2 {
+): ProviderDirectoryArtifactV2 {
   const sourceBytes = typeof source === "string" ? Buffer.from(source, "utf8") : source;
   if (sourceBytes.byteLength <= 0 || sourceBytes.byteLength > MAX_INPUT_BYTES) {
     throw new RangeError("Epic User-access Brands bundle is missing or exceeds the 256 MiB import bound.");
@@ -179,7 +242,7 @@ export function buildEpicProviderDirectoryArtifact(
       brandIdentifier,
       brandName,
       endpoint,
-      facilities: readLocations(organization),
+      facilities: readLocations(organization.resource),
     });
   }
 
@@ -203,7 +266,7 @@ export function buildEpicProviderDirectoryArtifact(
   ]
     .sort((left, right) => left.id.localeCompare(right.id));
 
-  const artifact: EpicProviderDirectoryArtifactV2 = {
+  const artifact: ProviderDirectoryArtifactV2 = {
     entries,
     generatedAt,
     policies: [EPIC_ACQUISITION_POLICY],
@@ -232,7 +295,7 @@ function attachFacilities(
     }
     const owner = ref ? owners.get(ref) : undefined;
     for (const child of visited) owners.set(child, owner ?? "");
-    if (owner) primaryBrands.get(owner)!.facilities.push(...readLocations(organization));
+    if (owner) primaryBrands.get(owner)!.facilities.push(...readLocations(organization.resource));
   }
 }
 
@@ -240,7 +303,7 @@ function parseArguments(args: string[]) {
   const values = new Map<string, string>();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]!;
-    if (!["--input", "--output", "--held-output"].includes(argument)) continue;
+    if (!["--input", "--output", "--held-output", "--oracle-input", "--oracle-commit"].includes(argument)) continue;
     const value = args[index + 1];
     if (!value || value.startsWith("--")) throw new TypeError(`Missing ${argument} path.`);
     values.set(argument, value);
@@ -249,10 +312,14 @@ function parseArguments(args: string[]) {
   const input = values.get("--input");
   if (!input) {
     throw new TypeError("Usage: --input <downloaded Epic Brands Bundle> [--output <versioned artifact path>] "
-      + "[--held-output <held change report>] [--allow-count-drop]");
+      + "[--oracle-input <patient endpoint bundle> --oracle-commit <sha>] [--held-output <held change report>] [--allow-count-drop]");
   }
+  const oracleInput = values.get("--oracle-input");
+  const oracleCommit = values.get("--oracle-commit");
+  if (Boolean(oracleInput) !== Boolean(oracleCommit)) throw new TypeError("Oracle input and commit are required together.");
   const heldOutput = values.get("--held-output");
   return {
+    oracleInput, oracleCommit,
     allowCountDrop: args.includes("--allow-count-drop"),
     heldOutputPath: heldOutput ? path.resolve(heldOutput) : null,
     inputPath: input === "-" ? input : path.resolve(input),
@@ -285,8 +352,7 @@ function readReference(value: unknown): string | null {
   return optionalString((value as JsonRecord).reference, 240);
 }
 
-function readLocations(org: { resource: JsonRecord; fullUrl: string }): DirectoryFacilityTuple[] {
-  const { resource } = org;
+function readLocations(resource: JsonRecord): DirectoryFacilityTuple[] {
   const name = optionalString(resource.name, 180);
   const aliases = [...new Set(readStringArray(resource.alias, 20, 120))].sort();
   const addresses = Array.isArray(resource.address) && resource.address.length ? resource.address : [{}];

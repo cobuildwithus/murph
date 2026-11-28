@@ -5,6 +5,7 @@ import {
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_FETCH_DOCUMENT_RESPONSE_MAX_BYTES,
   HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+  ORACLE_LIFETIME_PAGE_CALLBACK_MS, ORACLE_LIFETIME_PAGE_HEADER,
 } from "@murphai/hosted-execution/clinical-records-boundary";
 
 import {
@@ -98,7 +99,8 @@ export function createHostedWebClinicalRecordsPort(input: {
           maxBytes: HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
         },
         signal: options?.signal ?? null,
-        timeoutMs: input.timeoutMs,
+        headers: options?.oracleLifetimeSearch ? new Headers({ [ORACLE_LIFETIME_PAGE_HEADER]: "1" }) : undefined,
+        timeoutMs: options?.oracleLifetimeSearch ? Math.max(input.timeoutMs, ORACLE_LIFETIME_PAGE_CALLBACK_MS) : input.timeoutMs,
         transport: input.transport,
       });
 
