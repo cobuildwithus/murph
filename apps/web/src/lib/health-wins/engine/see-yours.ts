@@ -5,7 +5,7 @@ import { labCandidates } from "./labs";
 import { isMetric } from "./metrics";
 import { percentileCandidates } from "./percentiles";
 import { decorateCard } from "./ranking";
-import { isDate } from "./shared";
+import { dayNumber, isDate } from "./shared";
 import type { Candidate, CardSpec, HealthWinsInput, Measure } from "./types";
 
 function measureCandidates(input: HealthWinsInput, measure: Measure): Candidate[] {
@@ -30,6 +30,18 @@ function selectCard(input: HealthWinsInput, measure: Measure, kinds: readonly st
     if (candidate) return decorateCard(candidate.card);
   }
   return null;
+}
+
+/**
+ * A lab's latest draw is over a year old. See yours still shows it to its viewer, but it isn't posted: a lab card
+ * names no year, so an old draw would read as news (the same rule keeps it out of suggestions).
+ */
+export function seeYoursIsOld(input: HealthWinsInput, measure: Measure): boolean {
+  if (isMetric(measure) || !isDate(input.member.today)) return false;
+  const today = input.member.today;
+  const latest = (input.labs ?? []).filter(draw => draw.analyte === measure && isDate(draw.date) && draw.date <= today)
+    .map(draw => draw.date).sort().at(-1);
+  return latest !== undefined && dayNumber(today) - dayNumber(latest) > 365;
 }
 
 /** Recompute the exact requested kind for publication, with no fallback or suggestion ranking. */

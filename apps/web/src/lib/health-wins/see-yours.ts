@@ -9,7 +9,7 @@ import {
   prepareSeeYoursCandidate, previewRecordedCandidate, resolveRecordedSelection, type FrozenHealthCard, type HealthCardSelection,
 } from "./card-options";
 import { isMeasure, measures } from "./engine/measures";
-import { chooseSeeYours, seeYoursCard } from "./engine/see-yours";
+import { chooseSeeYours, seeYoursCard, seeYoursIsOld } from "./engine/see-yours";
 import { labUnitKey } from "./engine/shared";
 import type { CardSpec, Measure } from "./engine/types";
 import { readMeasureInputs } from "./inputs";
@@ -66,8 +66,10 @@ export async function readSeeYours(
   const measure = { key, ...measures[key] };
   const card = "card" in result ? previewRecordedCandidate(prepareSeeYoursCandidate(viewer, result.card, units)) : null;
   const shared = card ? await alreadyShared(viewer, card.id) : false;
+  // A draw over a year old is the viewer's to see, not to post as news.
+  const old = card !== null && seeYoursIsOld(input, key);
   const response = "card" in result ? {
-    measure, card, reason: null, friend: friendMarker(spec, result.card), shared,
+    measure, card, reason: null, friend: friendMarker(spec, result.card), shared, old,
   } : { measure, card: null, reason: result.reason, friend: null };
   await assertVisibleFrozenCardCurrent(auth, postId, version).catch(concealRevokedRead);
   return response;
@@ -83,6 +85,7 @@ export async function resolveSeeYoursSelection(
   const [prefix, measure, kind, ...extra] = pick.candidateId.split(":");
   if (prefix !== "mine" || !isMeasure(measure) || !kind || extra.length) throw invalidGameRequest("Choose a See yours card.");
   const { input } = await readViewerMeasure(auth, measure, signal);
+  if (seeYoursIsOld(input, measure)) throw invalidGameRequest("That test is over a year old. See yours keeps it just for you.");
   const card = seeYoursCard(input, measure, kind);
   if (!card) throw cardChanged();
   const candidate = prepareSeeYoursCandidate(auth.member.id, card, units);

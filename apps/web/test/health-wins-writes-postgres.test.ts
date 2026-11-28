@@ -139,7 +139,8 @@ describe.skipIf(!enabled)("health write transactions", () => {
     for (const scope of ["launch.legal", "launch.health-data"] as const) {
       await recordHostedLaunchRequiredConsent({ memberId, scope, prisma: db });
     }
-    const date = "2021-10-18";
+    // A recent draw: See yours keeps one over a year old just for its viewer.
+    const date = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     const { preview, input, engineCard } = labRange(memberId, {
       ...draw, date, referenceRange: { low: draw.value - 1, high: draw.value + 1 },
     });
@@ -161,7 +162,8 @@ describe.skipIf(!enabled)("health write transactions", () => {
   it("checks a See yours digest before publishing, deduplicates aliases, and removes either kind from a mixed post", async () => {
     const owner = await member(), memberId = owner.member.id, db = getPrisma();
     await db.gameProfile.create({ data: { memberId, timeZone: "UTC", firstNameEncrypted: "fixture-label" } });
-    const draw = { analyte: "glucose", value: 91, unit: "mg/dL", date: "2022-09-14", referenceRange: { low: 68, high: 112 } } as const;
+    const draw = { analyte: "glucose", value: 91, unit: "mg/dL", date: new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10),
+      referenceRange: { low: 68, high: 112 } } as const;
     const { input, candidate, preview } = labRange(memberId, draw);
     const pick = { candidateId: preview.candidateId, option: "original", specRevision: preview.specRevision };
     const mine = { id: preview.id, specRevision: preview.specRevision, spec: candidate.variants[0].spec };
