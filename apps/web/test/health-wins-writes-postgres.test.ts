@@ -560,7 +560,7 @@ describe.skipIf(!enabled)("health write transactions", () => {
     expect(state.sent).toHaveBeenCalledTimes(1);
     const [notification] = state.sent.mock.calls[0]!;
     expect(notification.memberId).toBe(recipient.member.id);
-    expect(notification.request.data).toEqual({ notification: "health_comment", postId: post.id });
+    expect(notification.request.data).toEqual({ notification: "health_comment", postId: post.id, commentId: reply.id });
     expect(notification.request.message).toEqual({ kind: "alert", body: "Someone replied to your comment." });
     expect(JSON.stringify(notification.request)).not.toContain(reply.body);
 
