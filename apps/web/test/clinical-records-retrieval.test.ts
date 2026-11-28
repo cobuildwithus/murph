@@ -1745,7 +1745,8 @@ describe("Oracle runs at the Web retrieval boundary", () => {
       const pending = runPage("procedures");
       await started;
       await vi.advanceTimersByTimeAsync(31_000);
-      await expect(runPage("procedures", false)).resolves.toMatchObject({ errorCode: "request-in-progress" });
+      const duplicate = await runPage("procedures", false);
+      expect(duplicate.status === "unavailable" && duplicate.errorCode).toBe("request-in-progress");
       await vi.advanceTimersByTimeAsync(8_000);
       const first = await pending;
       expect(first.status).toBe("page");
@@ -2183,6 +2184,7 @@ function updateRetrievalRequest(
     id?: string;
     reservedBytes?: number;
     responseBytes?: null | { not: null };
+    OR?: { claimedAt?: { lte: Date } }[];
   };
   const row = [...requests.values()].find((candidate) => candidate.id === where.id);
   if (!row) return { count: 0 };
@@ -2203,9 +2205,9 @@ function updateRetrievalRequest(
     return { count: 1 };
   }
   if (data.claimVersion && typeof data.claimVersion === "object") {
-    const staleBefore = new Date(Date.now() - 30_000);
+    const staleBefore = where.OR?.find(clause => clause.claimedAt)?.claimedAt?.lte;
     const completedReplay = row.completedAt !== null && row.reservedBytes === 0;
-    const staleClaim = row.claimedAt <= staleBefore;
+    const staleClaim = staleBefore !== undefined && row.claimedAt <= staleBefore;
     if (
       row.claimVersion !== where.claimVersion
       || (!completedReplay && !staleClaim)
