@@ -30,6 +30,12 @@ for (const [name, id] of [
 ] as const) {
   const row = cases.find((r) => r.case === id)!;
   const evidence = adapt(row.member, row.history);
+  // Published meal portions carry nutrients, but no whole-day intake confirmation.
+  if (name === "complete") evidence.checkins = evidence.checkins?.map(checkin => {
+    const projected = { ...checkin };
+    delete projected.diet_day_complete;
+    return projected;
+  });
   if (name === "labs") {
     evidence.daily = [];
     evidence.sleep_sessions = [];
@@ -84,7 +90,7 @@ for (const [name, id] of [
       days: ["done", "todo", "todo", "todo", "todo", "none", "none"],
     });
     for (const key of ["age", "week", "sleep", "fitness", "blood"] as const) write(key, bundle[key]);
-    write("marker", bundle.markers.albumin);
+    write("marker", bundle.markers.alp);
   }
   write("you-" + name, bundle.you);
 }

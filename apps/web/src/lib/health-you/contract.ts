@@ -87,9 +87,8 @@ const ageDetail = age.extend({
   events: z.array(
     z.object({
       date,
-      kind: z.enum(["bloodWork", "combine", "foodWeek", "bloodPressure", "evidenceChange"]),
+      kind: z.enum(["bloodWork", "combine", "foodWeek", "bloodPressure"]),
       label: s,
-      evidenceChangeYears: n.optional(),
     }),
   ),
 });

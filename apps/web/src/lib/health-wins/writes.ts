@@ -20,7 +20,7 @@ import { openHealthTexts, sealHealthTexts } from "./crypto";
 import type { RecordedActivity } from "./engine/types";
 import { assertHealthRecordEnabled, healthRecordCapability } from "./flag";
 import { publishHealthAttachmentTx, purgeRetiredHealthAttachments, retireHealthPostAttachmentTx } from "./media";
-import { CHEER_WINDOW_MS, prepareHealthNotification, sendHealthNotificationAfterCommit } from "./notifications";
+import { CHEER_WINDOW_MS, commentNotificationTargets, prepareHealthNotifications, sendHealthNotificationsAfterCommit } from "./notifications";
 import { assertPayoffCurrentTx, preparePayoffSelection } from "./payoff";
 import { postedCardKeys } from "./posted-card-keys";
 import { prepareHealthActivity, storeRecordedActivityTx } from "./recorded-activities";
@@ -33,7 +33,10 @@ type Auth = HostedNativeMemberAuth;
 type Content = { caption?: string | null; setRevision?: string; cards?: readonly HealthCardSelection[] };
 type CreatePost = Content & { id: string; attachmentId?: string; activity?: RecordedActivity };
 type CreateCardContext = { recorded?: readonly CachedHealthCandidate[]; units: ClientUnits; signal?: AbortSignal };
-type Comment = { id: string; visibility?: "everyone" | "poster"; body: string; replyTo?: string };
+type Comment = { id: string; body: string } & (
+  | { replyTo?: undefined; visibility?: "everyone" | "poster" }
+  | { replyTo: string; visibility?: unknown }
+);
 const postReceipt = { id: true, authorMemberId: true, deletedAt: true, version: true } as const;
 const notFound = () => hostedOnboardingError({ code: "HEALTH_NOT_FOUND", httpStatus: 404, message: "That item is unavailable." });
 const conflict = () => hostedOnboardingError({ code: "HEALTH_WRITE_CONFLICT", httpStatus: 409, message: "That item has changed." });
@@ -271,51 +274,69 @@ async function lockVisiblePost(tx: Tx, actor: string, postId: string) {
 
 export async function setHealthCheer(auth: Auth, postId: string, enabled: boolean): Promise<void> {
   const actor = auth.member.id;
-  const notification = await getPrisma().$transaction(async tx => {
+  const notifications = await getPrisma().$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
     if (!enabled) {
       // The viewer can retract an existing cheer after a hide.
       const removed = await tx.healthPostCheer.deleteMany({ where: { postId, memberId: actor } });
       if (!removed.count && !await findVisibleHealthPost(tx, actor, postId)) throw notFound();
-      return null;
+      return [];
     }
     const post = await lockVisiblePost(tx, actor, postId);
     const now = new Date();
     const inserted = await tx.healthPostCheer.createMany({ data: [{ postId, memberId: actor, createdAt: now }], skipDuplicates: true });
-    if (!inserted.count || actor === post.authorMemberId) return null;
+    if (!inserted.count || actor === post.authorMemberId) return [];
     const claimed = await tx.healthPost.updateMany({ where: { id: postId, deletedAt: null, OR: [
       { cheerPushClaimedAt: null }, { cheerPushClaimedAt: { lte: new Date(now.getTime() - CHEER_WINDOW_MS) } },
     ] }, data: { cheerPushClaimedAt: now } });
-    if (!claimed.count) return null;
-    return prepareHealthNotification(tx, { actor, postId, memberId: post.authorMemberId, subject: { kind: "cheer" }, claimedAt: now });
+    if (!claimed.count) return [];
+    return prepareHealthNotifications(tx, { actor, postId, subject: { kind: "cheer" }, claimedAt: now },
+      [{ memberId: post.authorMemberId, reason: "cheer" }]);
   });
-  sendHealthNotificationAfterCommit(notification);
+  sendHealthNotificationsAfterCommit(notifications);
 }
 
-async function privateReplyRecipient(tx: Tx, poster: string, postId: string, replyTo: string) {
-  // DELETE tombstones the source without locking the post. Hold this row through insertion.
-  const [source] = await tx.$queryRaw<Array<{ authorMemberId: string }>>`
-    SELECT c.author_member_id AS "authorMemberId" FROM health_post_comment c
-    WHERE c.id = ${replyTo}::uuid AND c.post_id = ${postId}::uuid AND c.author_member_id <> ${poster}
-      AND c.visibility = 'poster' AND c.recipient_member_id IS NULL
-      AND ${visibleHealthCommentOnPostSql(poster, Prisma.sql`${poster}::text`)}
+function publicReplyVisibility(visibility: unknown) {
+  if (visibility !== undefined && visibility !== "everyone") throw invalidGameRequest("A reply to a public comment is visible to everyone on the post.");
+  return "everyone" as const;
+}
+
+async function commentAudience(tx: Tx, actor: string, poster: string, postId: string, input: Comment) {
+  if (input.replyTo === undefined) return { visibility: input.visibility ?? "everyone", recipientMemberId: null, parentAuthorId: null };
+  // Comment withdrawal does not lock the post. Hold the visible parent through insertion.
+  const [parent] = await tx.$queryRaw<Array<{ author: string; visibility: string; recipient: string | null }>>`
+    SELECT c.author_member_id AS author, c.visibility, c.recipient_member_id AS recipient FROM health_post_comment c
+    WHERE c.id = ${input.replyTo}::uuid AND c.post_id = ${postId}::uuid
+      AND ${visibleHealthCommentOnPostSql(actor, Prisma.sql`${poster}::text`)}
     FOR SHARE OF c`;
-  if (!source) throw notFound();
-  return source.authorMemberId;
+  if (!parent) throw notFound();
+  if (parent.visibility === "everyone") {
+    return { visibility: publicReplyVisibility(input.visibility), recipientMemberId: null, parentAuthorId: parent.author };
+  }
+  if (parent.recipient === null) {
+    if (actor !== poster || parent.author === poster) throw notFound();
+    return { visibility: "poster", recipientMemberId: parent.author, parentAuthorId: parent.author };
+  }
+  if (actor !== parent.recipient) throw notFound();
+  return { visibility: "poster", recipientMemberId: null, parentAuthorId: parent.author };
 }
 
 async function checkCommentReplay(tx: Tx, prior: {
-  postId: string; authorMemberId: string; recipientMemberId: string | null; deletedAt: Date | null;
-}, actor: string, postId: string, replyTo?: string) {
+  postId: string; authorMemberId: string; parentCommentId: string | null; visibility: string;
+  recipientMemberId: string | null; deletedAt: Date | null;
+}, actor: string, postId: string, input: Comment) {
   if (prior.postId !== postId || prior.authorMemberId !== actor || prior.deletedAt) throw conflict();
-  if (!replyTo) {
-    if (prior.recipientMemberId !== null) throw conflict();
+  if (prior.parentCommentId !== null) {
+    if (prior.parentCommentId !== input.replyTo?.toLowerCase()) throw conflict();
+    // The same parent fixes the audience, including when a legacy client submitted "everyone" privately.
+    if (prior.visibility === "everyone") publicReplyVisibility(input.visibility);
     return;
   }
-  // A withdrawn original still proves the audience of a committed receipt.
-  if (!prior.recipientMemberId || !await tx.healthPostComment.findFirst({
-    where: { id: replyTo, postId, visibility: "poster", recipientMemberId: null, authorMemberId: prior.recipientMemberId },
+  if (!input.replyTo && prior.recipientMemberId === null) return;
+  // Old private answers stored only their recipient. A withdrawn original still proves that receipt.
+  if (!input.replyTo || !prior.recipientMemberId || !await tx.healthPostComment.findFirst({
+    where: { id: input.replyTo, postId, visibility: "poster", recipientMemberId: null, authorMemberId: prior.recipientMemberId },
     select: { id: true },
   })) throw conflict();
 }
@@ -329,32 +350,30 @@ export async function createHealthComment(auth: Auth, postId: string, input: Com
   const [bodyEncrypted] = existing ? [] : await sealHealthTexts([
     { memberId: actor, table: "health_post_comment", field: "body", rowId: id, value: input.body },
   ]);
-  const notification = await db.$transaction(async tx => {
+  const notifications = await db.$transaction(async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId: actor, prisma: tx });
     const post = await lockVisiblePost(tx, actor, target);
-    if (input.replyTo && post.authorMemberId !== actor) throw notFound();
     const prior = await tx.healthPostComment.findUnique({ where: { id }, select: {
-      postId: true, authorMemberId: true, recipientMemberId: true, deletedAt: true,
+      postId: true, authorMemberId: true, parentCommentId: true, visibility: true, recipientMemberId: true, deletedAt: true,
     } });
     if (prior) {
-      await checkCommentReplay(tx, prior, actor, target, input.replyTo);
-      return null;
+      await checkCommentReplay(tx, prior, actor, target, input);
+      return [];
     }
     if (!bodyEncrypted) throw conflict();
-    const recipientMemberId = input.replyTo ? await privateReplyRecipient(tx, actor, target, input.replyTo) : null;
-    const memberId = recipientMemberId ?? post.authorMemberId;
+    const { visibility, recipientMemberId, parentAuthorId } = await commentAudience(tx, actor, post.authorMemberId, target, input);
+    const targets = commentNotificationTargets(actor, post.authorMemberId, parentAuthorId, recipientMemberId);
     const now = new Date();
     const inserted = await tx.healthPostComment.createMany({ data: [{
       id, authorMemberId: actor, postId: target, recipientMemberId, bodyEncrypted,
-      visibility: recipientMemberId ? "poster" : input.visibility ?? "everyone",
-      pushClaimedAt: actor === memberId ? null : now,
+      parentCommentId: input.replyTo, visibility, pushClaimedAt: targets.length ? now : null,
     }], skipDuplicates: true });
     // Same-post writers hold the parent lock, so an insert collision here belongs to another post.
     if (!inserted.count) throw conflict();
-    return prepareHealthNotification(tx, { actor, postId: target, memberId, subject: { kind: "comment", commentId: id }, claimedAt: now }, recipientMemberId !== null);
+    return prepareHealthNotifications(tx, { actor, postId: target, subject: { kind: "comment", commentId: id }, claimedAt: now }, targets);
   });
-  sendHealthNotificationAfterCommit(notification);
+  sendHealthNotificationsAfterCommit(notifications);
   return { id };
 }
 

@@ -1,3 +1,4 @@
+import { ORACLE_LIFETIME_PAGE_CALLBACK_MS, ORACLE_LIFETIME_PAGE_HEADER } from "@murphai/hosted-execution/clinical-records-boundary";
 import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
 import { readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
@@ -222,6 +223,9 @@ export async function handleRunnerWebControlRequest(input: {
       String(vaultShareEffectDeadlineAtEpochMs),
     );
   }
+  const callbackTimeoutMs = clinicalPageCallbackTimeout(
+    policy.operation, input.request.headers, forwardHeaders, input.environment.webControlTimeoutMs,
+  );
   const forwardStartedAt = performance.now();
   const webControlTiming: { prepareMs?: number; fetchHeadersMs?: number } = {};
   const response = await forwardWithRuntimeUsageSettlement({
@@ -251,7 +255,7 @@ export async function handleRunnerWebControlRequest(input: {
             vaultShareEffectDeadlineAtEpochMs,
           ) - Date.now(),
         )
-        : input.environment.webControlTimeoutMs,
+        : callbackTimeoutMs,
     }),
   });
   if (response.headers.has('x-murph-recap-scope')) await applyRecapMediaScope(input, policy.operation, response, writeAuthority);
@@ -340,6 +344,12 @@ async function forwardWithRuntimeUsageSettlement(input: {
   }
   await receipt.finish(allowed);
   return response;
+}
+
+function clinicalPageCallbackTimeout(operation: string, incoming: Headers, forwarded: Headers, defaultMs: number) {
+  if (operation !== "clinical_records_fetch_page" || incoming.get(ORACLE_LIFETIME_PAGE_HEADER) !== "1") return defaultMs;
+  forwarded.set(ORACLE_LIFETIME_PAGE_HEADER, "1");
+  return Math.max(defaultMs, ORACLE_LIFETIME_PAGE_CALLBACK_MS);
 }
 
 function requireHostedVaultShareSettlementDeadlineAtEpochMs(

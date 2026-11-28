@@ -3417,6 +3417,7 @@ model HealthPostCheer {
 model HealthPostComment {
   id                String        @id @db.Uuid
   postId            String        @map("post_id") @db.Uuid
+  parentCommentId   String?       @map("parent_comment_id") @db.Uuid
   authorMemberId    String        @map("author_member_id")
   recipientMemberId String?       @map("recipient_member_id")
   visibility        String        @default("everyone")
@@ -3427,7 +3428,10 @@ model HealthPostComment {
   author            HostedMember  @relation("HealthCommentAuthor", fields: [authorMemberId], references: [id], onDelete: Cascade)
   recipient         HostedMember? @relation("HealthCommentRecipient", fields: [recipientMemberId], references: [id], onDelete: Cascade)
   post              HealthPost    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent            HealthPostComment?  @relation("HealthCommentReplies", fields: [parentCommentId], references: [id], onDelete: SetNull)
+  replies           HealthPostComment[] @relation("HealthCommentReplies")
 
+  @@index([postId, parentCommentId])
   @@index([postId, deletedAt, createdAt(sort: Desc), id(sort: Desc)])
   @@index([authorMemberId])
   @@index([recipientMemberId])

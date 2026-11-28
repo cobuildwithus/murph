@@ -1,3 +1,4 @@
+import { ORACLE_LIFETIME_PAGE_HEADER } from "@murphai/hosted-execution/clinical-records-boundary";
 import * as requestParsers from "@murphai/hosted-execution/clinical-records";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -289,7 +290,7 @@ describe("Clinical Records internal runtime routes", () => {
     });
   });
 
-  it("accepts complete query-aware page and outcome identities and rejects partial identity", async () => {
+  it.each([false, true])("accepts complete query-aware identities with lifetime hint %s", async (oracleLifetimeSearch) => {
     const headers = runtimeWriteFenceHeaders();
     const page = {
       cursor: null,
@@ -318,7 +319,7 @@ describe("Clinical Records internal runtime routes", () => {
       fetchPageRoute.POST(jsonRequest(
         "/api/internal/clinical-records/runtime/fetch-page",
         page,
-        headers,
+        { ...headers, ...(oracleLifetimeSearch && { [ORACLE_LIFETIME_PAGE_HEADER]: "1" }) },
       )),
       recordOutcomeRoute.POST(jsonRequest(
         "/api/internal/clinical-records/runtime/record-outcome",
@@ -337,6 +338,7 @@ describe("Clinical Records internal runtime routes", () => {
     expect(invalidOutcomeResponse.status).toBe(400);
     expect(await invalidOutcomeResponse.json()).toMatchObject({ error: { code: "CLINICAL_RECORD_RUNTIME_REQUEST_INVALID" } });
     expect(mocks.fetchClinicalRetrievalPage).toHaveBeenCalledWith({
+      oracleLifetimeSearch,
       memberId: "member_clinical_1",
       request: page,
     });

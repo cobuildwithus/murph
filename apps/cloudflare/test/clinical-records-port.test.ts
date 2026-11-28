@@ -12,7 +12,10 @@ import {
 } from "@murphai/hosted-execution/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_FETCH_PAGE_RESPONSE_MAX_BYTES,
+  ORACLE_LIFETIME_PAGE_CALLBACK_MS,
+  ORACLE_LIFETIME_PAGE_HEADER,
 } from "@murphai/hosted-execution/clinical-records-boundary";
+import { HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS } from "@murphai/hosted-execution/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -108,6 +111,7 @@ describe("hosted clinical records runtime port", () => {
         });
       }
       if (path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH) {
+        expect(request.headers.get(ORACLE_LIFETIME_PAGE_HEADER)).toBe("1");
         return Response.json({
           body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
           nextCursor: null,
@@ -127,17 +131,24 @@ describe("hosted clinical records runtime port", () => {
     });
 
     const requestKey = `scheduled_${"a".repeat(64)}`;
+    const deadlines = vi.spyOn(AbortSignal, "timeout");
     await expect(port.createConnectLink?.({ requestKey }))
       .resolves.toMatchObject({ ok: true });
     await expect(port.readRun({ generation: 1, runId: "run_1" }))
       .resolves.toMatchObject({ status: "ready" });
+    expect(deadlines).toHaveBeenNthCalledWith(1, 5_000);
+    deadlines.mockClear();
     await expect(port.fetchPage({ retrievalProtocol: "query-slices-v2", queryScopeId: "observation", sliceId: "whole", queryFingerprint: HASH,
       cursor: null,
       generation: 1,
       requestId: "request_1",
       resourceType: "Observation",
       runId: "run_1",
-    })).resolves.toMatchObject({ nextCursor: null, status: "page" });
+    }, { oracleLifetimeSearch: true })).resolves.toMatchObject({ nextCursor: null, status: "page" });
+    // The Worker waits up to the lifetime callback; the runner keeps the commit margin beyond it.
+    expect(deadlines).toHaveBeenNthCalledWith(1, ORACLE_LIFETIME_PAGE_CALLBACK_MS + HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS);
+    expect(ORACLE_LIFETIME_PAGE_CALLBACK_MS + HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS).toBe(105_000);
+    deadlines.mockRestore();
     await expect(port.recordOutcome({ retrievalProtocol: "query-slices-v2", retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 0,

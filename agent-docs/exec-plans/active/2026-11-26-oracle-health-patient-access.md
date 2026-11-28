@@ -1,16 +1,15 @@
 # Oracle Health patient access
 
-Status: active (O1/O2 merged; O3 implemented for sandbox qualification; O4/O5 pending)
+Status: active (O1–O3 merged, O4 in review, O5 pending)
 Created: 2026-11-26
 Updated: 2026-11-27
 
 ## Goal
 
 Members connect an Oracle Health (Millennium, `cerner-fhir`) patient portal
-through the existing clinical pipeline. Oracle is a second integration profile:
-the control plane, encrypted grants, refresh lease, generation fencing, runtime,
-importer, vault and notices stay as they are. No migration, runtime or
-Cloudflare release, and no new data recipient.
+through the existing clinical pipeline. Oracle uses the existing grant, refresh
+lease, generation fence, importer and vault owners. O4 coordinates the
+long-page timeout across Web and the separate hosted runtime release.
 
 The v1 plan and its ReviewGPT review are kept outside the repository. The
 registered client ID is a confidential credential under the vendor's terms; it
@@ -22,8 +21,8 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
 | --- | --- | --- |
 | O1 readers | Profile union, trust rule, SMART v1 pin, Oracle catalog and dispatch, refresh gate, search parser and negotiation, directory policy set, query gate, shared page bound | Merged |
 | O2 keys and config | Public JWKS, signer resolution, flags and allowlist (all off) | Merged |
-| O3 writer | Oracle start, hidden `oracle-sandbox` entry, `oracle:sandbox:offline` proof | Draft |
-| O4 directory | Importer `--oracle-input`, Oracle entries and `sources`, weekly workflow step | Pending |
+| O3 writer | Oracle start, hidden `oracle-sandbox` entry, `oracle:sandbox:offline` proof | Merged |
+| O4 directory | Importer `--oracle-input`, Oracle entries and `sources`, weekly workflow step | In review |
 | O5 copy and docs | Assistant wording, intake spec, `agent-docs/references/oracle-health-patient-access.md`, unbranded changelog | Pending |
 
 ## Decisions (as built in O1/O2)
@@ -103,7 +102,7 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
   `public/.well-known/oracle/production.jwks.json` (RS384, kid
   `murph-oracle-production-4D9w9oKpPTN3`). No sandbox key set is published, so
   a `sandbox` profile fails closed. Flags: `CLINICAL_RECORDS_ORACLE_STARTS`,
-  `CLINICAL_RECORDS_ORACLE_MEMBER_IDS` (exact opaque IDs),
+  `CLINICAL_RECORDS_ORACLE_MEMBER_IDS` (exact opaque IDs, or `*` for every member on production entries only; the sandbox entry always needs an exact ID),
   `CLINICAL_RECORDS_ORACLE_SEARCH`, `CLINICAL_RECORDS_ORACLE_DISABLED`
   (stops callbacks, refreshes, pages and documents; records stay). Enabling
   flags need exactly `1`; the kill switch is on for any value except empty,
@@ -170,6 +169,26 @@ loses Encounters until the member reconnects even after rolling forward
 again. Older readers also refuse sandbox profiles and ask to reconnect.
 After the first row, #5372 is also a floor. Keep the Oracle JWKS published and the signer
 configured while any Oracle grant exists.
+
+### O4 directory and retrieval rollout
+
+The initial batch belongs in a human-reviewed PR. The weekly job admits a new
+tenant only after a production entry establishes its host and registration.
+The importer uses the same case-sensitive tenant grammar as O3. At the pinned
+revision, 96 addresses contain underscores and remain outside that grammar.
+
+Keep starts and search off during deployment. Deploy Web and then the manually
+released Cloudflare Worker, port and runner image. Each can run against the
+previous version. Only an end-to-end fetch-page capability hint and a saved
+Oracle whole-family search select the 65-second provider deadline. The Worker
+allows 100 seconds for that callback and the runner port 105, the same 5-second
+margin the Worker environment requires of the runner commit timeout. An older
+component keeps the 20-second provider path. A saved Oracle whole-family
+search's claim ceiling scales with its wider window, from 20 to 65, so
+foreground interruptions cost no more per second of provider wait. The saved
+slice sets it without the hint, so a caller rolled back mid-run keeps it. Retryable gateway errors resume through
+the existing checkpoint and mailbox delay. O4 adds no persistent format or rollback floor.
+Keep O3 Web and the signer once an Oracle session exists.
 
 ## Verification
 

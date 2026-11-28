@@ -154,18 +154,20 @@ delete their own posts and comments.
 A member can cheer once per post. Adding or removing a cheer requires the
 viewer's current health consent. Comments default to
 **Everyone**, meaning people who can open the post. **Just the poster** limits
-a comment to its writer and the poster. The poster can reply privately to that
-writer. Deleting the original comment preserves the reply and its audience.
+a comment to its writer and the poster. Anyone who can read a public comment
+can reply publicly. In a private exchange the poster and partner take turns.
+Withdrawing a comment preserves its replies and their individual audiences.
 Hides and blocks apply to the comment
 writer as well as the poster. A partner’s comment disappears for all readers
 if the writer and poster stop sharing a game, or either blocks or hides the other.
 Only authors on the rollout allowlist can share posts and comments. The feed
 shows neither interaction counts nor automatic comments from Murph.
 
-The poster can receive a push for a new comment or cheer. An hour of cheers
-on one post generates at most one push. A private comment from a partner can
-notify only the poster. The poster's private reply can notify only the partner
-who wrote the original. Removing access before delivery suppresses the notification.
+A comment can notify the poster. A reply also notifies its parent's author.
+When both are the same person, they receive one reply alert. Writers receive
+no alert for their own action. The push includes the new comment ID. Each
+recipient must still have access at delivery. An hour of cheers on one post
+generates at most one cheer push.
 
 ## See yours
 
@@ -225,7 +227,7 @@ when recording is disabled.
 | `GET posts/{id}/see-yours?card={frozenCardId}` | Returns `{measure, card, reason, friend}` in the viewer’s client units. An inaccessible post or missing card returns 404. The viewer’s own post or a card without a measure returns 400. The limit is 10 reads per viewer per minute, then 429. |
 | `GET feed` | Returns `{posts, nextCursor}`. Pass `nextCursor` in `?cursor=` until it is null. An intervening removal can leave an empty page with a continuation. |
 | `PUT / DELETE posts/{id}/cheer` | Set or clear the viewer's cheer. Both return 204. |
-| `GET / POST posts/{id}/comments` | GET returns `{comments, nextCursor}`. POST takes a client UUID in `id`, `body`, optional `visibility` (`everyone` or `poster`) and optional UUID `replyTo`. Only the poster can use `replyTo`, targeting another writer's visible, original poster-only comment on this post. Web ignores submitted visibility for a reply. POST returns `{id}`. |
+| `GET / POST posts/{id}/comments` | GET returns `{comments, ancestors, nextCursor}`. POST takes a client UUID in `id`, `body`, optional `visibility` (`everyone` or `poster`) and an optional same-post parent UUID in `replyTo`. The parent determines the reply audience. Explicit `poster` on a public reply returns 400. POST returns `{id}`. |
 | `DELETE comments/{id}` | Deletes the writer's comment and returns 204. |
 | `GET people/{memberId}/profile` | Returns `{memberId, firstName, avatarUrl, numbers, posts, nextCursor}`. Numbers come from the pair board and are null when unavailable. |
 | `GET hides` | Returns `{people: [{memberId, firstName, avatarUrl}]}` for the viewer’s outgoing hides, newest first. Name and avatar can be null when the profile is unavailable to the viewer. |
@@ -381,13 +383,15 @@ summary remains available in Settings export.
 
 Posts include `id`, `authorMemberId`, `firstName`, `avatarUrl`, `createdAt`,
 `version`, `caption`, `cards`, `attachmentId` and `cheered`. Each published
-card carries `{id, specRevision, spec}`. Comments include their `id`, `postId`,
-author ID, first name, avatar URL, creation time, visibility and body. Each
-also includes nullable `recipientMemberId` and `recipientFirstName`. A private
-reply has `poster` visibility and identifies the partner who receives it.
-The name is null when the viewer lacks access to the partner's profile or
-no name is available. Ordinary comments return null for both fields. Feed,
-profile posts and comments page newest first, up to 20 per page.
+card carries `{id, specRevision, spec}`. Readable comments include their `id`,
+`postId`, nullable `parentId`, author ID, first name, avatar URL, creation
+time, visibility and body. A private answer from the poster identifies its
+partner in `recipientMemberId`. The partner's answer leaves that field null.
+`recipientFirstName` is null when the recipient or their name is unavailable.
+Feed, profile posts and comments page newest first, up to 20 per page.
+Merge the comment page with its additional transitive ancestors by ID.
+An unavailable ancestor supplies only `id`, `postId`, `parentId`, `createdAt`
+and either `deleted: true` or `hidden: true`.
 After consent withdrawal the author receives only `{id, createdAt, version}`
 for their own posts. A cumulative distance card’s map chart may contain
 `art: {url}`, a link to the painting selected when the card was prepared.
@@ -422,7 +426,7 @@ its modeled effect immediately. A stopped Combine session returns 409 before sub
 Deploy generation 21 replica builders and runtime consumers with the flag off,
 then Web, the companion client and finally the allowlist.
 
-Round four adds provider-qualified bedtime regularity, aerobic workout minutes, weekly food patterns, verified game habits and additional lab comparisons. A meal log needs whole-day confirmation to count towards fibre.
+Round four adds provider-qualified bedtime regularity, aerobic workout minutes, weekly food patterns, verified game habits and additional lab comparisons. Round five counts fibre per 1,000 logged calories when portions include both nutrients on at least three dates in nine. Confirmed whole days use daily fibre instead. Ordinary wearable variation has less effect on the weekly estimate, and the estimated range reflects the measurements available from the reference examination panel.
 
 The private You view uses completed sleep nights and finalized draws. Blood and marker detail include qualifying imports from before signup. Reconstructed age history starts at signup or the first date with a complete contributing workout window, whichever is later. A dated pregnancy or postpartum answer pauses the estimate. A newer answer can end the pause. Postpartum answers expire after 180 days.
 

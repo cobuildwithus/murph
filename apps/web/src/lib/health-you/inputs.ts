@@ -350,7 +350,7 @@ function recordMetric(
 
 // Source-unit catalog entries may retain an arbitrary reporting unit. Only publish known physical units.
 const sourceLabUnits = new Set([
-  ...Object.values(fields).map((f) => normalizeUnit(f.unit)),
+  ...Object.values(fields).filter(f => f.group === "blood").map(f => normalizeUnit(f.unit)),
   ...[
     "mg/dL",
     "nmol/L",

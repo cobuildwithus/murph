@@ -1,3 +1,4 @@
+import { ORACLE_LIFETIME_PAGE_HEADER } from "@murphai/hosted-execution/clinical-records-boundary";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { parseHostedSecureBoxEnvelope } from "@murphai/runtime-state";
 import {
@@ -35,7 +36,9 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     if (!parsed.data.cursor.trim()) throw new RequestInputError("Clinical page cursor must not be blank.");
     parseInput(parseRequestJson(parsed.data.cursor), parseHostedSecureBoxEnvelope);
   }
-  const result = await fetchClinicalRetrievalPage({ memberId, request: parsed.data });
+  const result = await fetchClinicalRetrievalPage({
+    memberId, request: parsed.data, oracleLifetimeSearch: request.headers.get(ORACLE_LIFETIME_PAGE_HEADER) === "1",
+  });
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 });
 

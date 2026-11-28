@@ -1,6 +1,7 @@
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS,
+  HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS,
 } from "@murphai/hosted-execution/contracts";
 import {
   type HostedExecutionBaseUrlNormalizationOptions,
@@ -34,7 +35,6 @@ const HOSTED_EXECUTION_LOOPBACK_HOSTS = new Set([
   "::1",
   "[::1]",
 ]);
-const HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 
 export interface HostedExecutionWorkerEnvironmentOptions {
   allowHostedWebHttpHosts?: readonly string[];

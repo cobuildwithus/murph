@@ -16,6 +16,7 @@ import {
   isOracleProfile,
   oracleEgressDisabled,
   oracleSearchEnabled,
+  oracleSandboxEnabledFor,
   oracleStartsEnabledFor,
   ORACLE_SMART_ENDPOINT_TRUST,
   ORACLE_STORED_CLIENT_REFERENCE,
@@ -273,6 +274,32 @@ describe("Oracle flags", () => {
   it("requires the allowlist even when starts are on", () => {
     vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
     expect(oracleStartsEnabledFor("hm_synthetic")).toBe(false);
+  });
+
+  it("admits every member only when the allowlist is exactly *", () => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "*");
+    expect(oracleStartsEnabledFor("hm_synthetic")).toBe(false);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
+    expect(oracleStartsEnabledFor("hm_synthetic")).toBe(true);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", " * ");
+    expect(oracleStartsEnabledFor("hm_other")).toBe(true);
+    for (const list of ["*,hm_other", "hm_other,*", "**", "*hm_synthetic"]) {
+      vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", list);
+      expect(oracleStartsEnabledFor("hm_synthetic")).toBe(false);
+    }
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "*");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_DISABLED", "1");
+    expect(oracleStartsEnabledFor("hm_synthetic")).toBe(false);
+  });
+
+  it("never opens the hidden sandbox entry to *", () => {
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_STARTS", "1");
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "*");
+    expect(oracleStartsEnabledFor("hm_synthetic")).toBe(true);
+    expect(oracleSandboxEnabledFor("hm_synthetic")).toBe(false);
+    vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "hm_synthetic");
+    expect(oracleSandboxEnabledFor("hm_synthetic")).toBe(true);
+    expect(oracleSandboxEnabledFor("hm_other")).toBe(false);
   });
 });
 

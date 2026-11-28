@@ -1,18 +1,15 @@
 {
-  "key": "albumin",
-  "label": "Albumin",
-  "value": 4.6,
-  "unit": "g/dL",
-  "years": -1.9,
-  "target": {
-    "text": "Comparison value 4.6 g/dL"
-  },
+  "key": "alp",
+  "label": "Alkaline phosphatase",
+  "value": 66,
+  "unit": "U/L",
+  "years": -0.1,
+  "target": null,
   "history": [
     {
       "date": "2025-01-22",
-      "value": 4.6
+      "value": 66
     }
   ],
-  "whatItIs": "Albumin is the main protein in the liquid part of blood.",
-  "whatLowersIt": "Seeing albumin beside total protein gives the result more context."
+  "whatItIs": "This enzyme comes mainly from the liver and bones."
 }

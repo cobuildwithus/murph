@@ -95,7 +95,6 @@ export function stationPercentile(key: CombineStation, value: number, age: numbe
 
 function label(percentile: number) {
   if (percentile >= 60) return `Top ${Math.max(1, Math.ceil(100 - percentile))}%`;
-  if (percentile >= 40) return "Average";
   return undefined;
 }
 
@@ -116,12 +115,14 @@ export function combineResult(id: string, session: Session, demographics?: Memor
     .filter(t => t.key !== "step_3min" || !tests.some(row => row.key === "march_2min" && row.percentile !== undefined));
   const meanRank = ranked.length ? ranked.reduce((sum, t) => sum + t.percentile!, 0) / ranked.length : undefined;
 
-  const years = ageEffect?.(session);
-  return { id, date: session.date, tests, recorded: tests.filter(t => t.percentile === undefined)
+  const completed = tests.length;
+  const skipped = session.tests.filter(row => row.skipped).length;
+  const years = completed >= 3 ? ageEffect?.(session) : undefined;
+  return { id, date: session.date, completed, skipped, tests, recorded: tests.filter(t => t.percentile === undefined)
     .map(({ key, title, value }) => ({ key, title, value })), retestOn: addDaysToIsoDate(session.date, 42),
     ...(meanRank === undefined ? {} : {
       ...(label(meanRank) ? { rank: { percentile: Math.round(meanRank), label: label(meanRank)!,
-        cohort: `Average across stations for ${sex === "male" ? "men" : "women"} of comparable age` } } : {}),
+        cohort: `Across stations for ${sex === "male" ? "men" : "women"} of comparable age` } } : {}),
       score: Math.floor(ranked.reduce((sum, t) => sum + linear(t.percentile!, [0, 10, 25, 50, 75], [0, 50, 70, 85, 100]), 0) / ranked.length),
     }), ...(years === undefined ? {} : { years }) };
 }

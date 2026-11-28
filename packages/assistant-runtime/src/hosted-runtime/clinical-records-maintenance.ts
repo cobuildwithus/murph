@@ -1,4 +1,4 @@
-import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
+import { CLINICAL_RECEIPT_PROTOCOL, isOracleLifetimeSearch, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
 import { hasClinicalRunChanges } from "@murphai/core";
 import { createHash } from "node:crypto";
 import type {
@@ -43,6 +43,10 @@ const CLINICAL_RECORDS_VAULT_MODULE_SPECIFIER =
   "@murphai/vault-usecases/clinical-records";
 
 type ClinicalFhirRetrievalWork = HostedClinicalRecordsRetrievalSlice;
+
+function clinicalPageFetchOptions(signal: AbortSignal | null, sourceSystem: string, scope: ClinicalFhirRetrievalWork) {
+  return isOracleLifetimeSearch(sourceSystem, scope) ? { signal, oracleLifetimeSearch: true } : { signal };
+}
 
 type ClinicalRecordsVaultModule = {
   clearClinicalFhirRetrievalCheckpoint(input: {
@@ -292,6 +296,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
       );
     }
     throwIfPreempted(input);
+    const pageOptions = clinicalPageFetchOptions(input.signal, checkpointIdentity.sourceSystem, scope);
     let completed = false;
 
     while (!completed) {
@@ -319,7 +324,7 @@ async function runHostedClinicalRecordsSyncWakeLaneWithCancellation(input: {
           resourceType: scope.resourceType,
           runId: checkpointIdentity.runId,
         },
-        { signal: input.signal },
+        pageOptions,
       );
       const response = parseHostedClinicalRecordsFetchPageResponse(responsePayload);
       checkpoint.pageFetchCount += 1;

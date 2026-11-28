@@ -2,7 +2,7 @@
   "title": "Fitness",
   "hero": {
     "value": "9,560",
-    "unit": "steps/day",
+    "unit": "steps a day",
     "years": -0.5
   },
   "chart": null,
@@ -13,20 +13,16 @@
       "icon": "steps",
       "group": "activity",
       "value": "9,560",
-      "unit": "steps/day",
+      "unit": "steps a day",
       "target": {
-        "text": "Comparison value 11,000 steps/day"
+        "text": "Aim for 8,000+ steps a day"
       },
       "years": -0.5,
       "yearsText": "−0.5",
       "featured": false,
       "whatItIs": "This counts the steps the device recorded each day.",
-      "whatLowersIt": "Carrying or wearing the same device consistently improves the comparison.",
-      "rank": {
-        "percentile": 58,
-        "label": "Average",
-        "cohort": "Women near age 51"
-      },
+      "whatLowersIt": "Add a short walk to a part of your day when you usually sit.",
+      "rank": null,
       "grade": null,
       "detail": "fitness",
       "state": "counted"
@@ -41,5 +37,10 @@
       "primary": true
     }
   ],
-  "tiles": []
+  "tiles": [
+    {
+      "label": "Active minutes",
+      "value": "28 active min in 7 days"
+    }
+  ]
 }

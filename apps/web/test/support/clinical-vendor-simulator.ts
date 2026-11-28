@@ -21,10 +21,19 @@ export const epicWireProfile = {
   grants: ["openid", "fhirUser", "launch/patient", "offline_access", "patient/Patient.r", "patient/Observation.s", "patient/Encounter.s"],
 };
 
+export const oracleWireProfile = {
+  ...epicWireProfile,
+  base: "https://fhir-myrecord.cerner.com/r4/0aB1cD2e-synthetic",
+  authorize: "https://authorization.cerner.com/tenants/0aB1cD2e-synthetic/protocols/oauth2/profiles/smart-v1/personas/patient/authorize",
+  token: "https://authorization.cerner.com/tenants/0aB1cD2e-synthetic/hosts/fhir-myrecord.cerner.com/protocols/oauth2/profiles/smart-v1/token",
+  patient: "patient-1",
+  searchPageSize: 1000,
+};
+
 type Resource = { resourceType: string; id: string; [field: string]: unknown };
 type Exchange = "authorization_code" | "refresh_token";
 type Operation = Exchange | "discovery" | "authorize" | "read" | "search";
-type Fault = (response: Response, url: URL) => Response | Promise<Response>;
+type Fault = (response: Response, url: URL, signal: AbortSignal) => Response | Promise<Response>;
 
 type Period = { start?: string; end?: string };
 type DatedResource = Resource & {
@@ -54,12 +63,12 @@ function matchesDateBound(value: string | Period, bound: string) {
 }
 
 /** A single offline portal. Faults are consumed at scenario-selected wire boundaries. */
-export function createClinicalVendorSimulator(profile: typeof epicWireProfile, publicKey: JWK) {
+export function createClinicalVendorSimulator(profile: typeof epicWireProfile & { searchPageSize?: number }, publicKey: JWK, accessToken?: string) {
   const codes = new Map<string, { challenge: string; redirect: string; scope: string }>();
   const keys = createLocalJWKSet({ keys: [publicKey] });
   const faults = new Map<Operation, Fault>();
   const requests: { operation: Operation; url: URL }[] = [];
-  let access: string | undefined;
+  let access = accessToken;
   let refresh: string | undefined;
   let scope = "";
   const reads = new Map<string, Resource>([[`Patient/${profile.patient}`, { resourceType: "Patient", id: profile.patient }]]);
@@ -115,13 +124,14 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
     const page = Number(url.searchParams.get("fixture-page") ?? "0");
     const rows = (searches.get(searchKey(path, url.searchParams.get("category"))) ?? [])
       .filter(row => matchesWindow(row, url.searchParams));
-    const entries = rows.slice(page, page + 1);
+    const nextOffset = page + (profile.searchPageSize ?? 1);
+    const entries = rows.slice(page, nextOffset);
     returnedIds.push(...entries.map(row => row.id));
     const next = new URL(url);
-    next.searchParams.set("fixture-page", String(page + 1));
+    next.searchParams.set("fixture-page", String(nextOffset));
     return Response.json({ resourceType: "Bundle", type: "searchset",
       entry: entries.map(resource => ({ resource })),
-      link: page + 1 < rows.length ? [{ relation: "next", url: next.href }] : [] });
+      link: nextOffset < rows.length ? [{ relation: "next", url: next.href }] : [] });
   }
 
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -150,7 +160,7 @@ export function createClinicalVendorSimulator(profile: typeof epicWireProfile, p
     requests.push({ operation, url: operation === "search" ? url : new URL(url.origin + url.pathname) });
     const fault = faults.get(operation);
     faults.delete(operation);
-    return fault ? fault(response, url) : response;
+    return fault ? fault(response, url, request.signal) : response;
   };
   return { fetchImpl, requests, returnedIds,
     setRead(resource: Resource) { reads.set(resource.resourceType + "/" + resource.id, resource); },

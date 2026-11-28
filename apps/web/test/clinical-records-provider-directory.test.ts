@@ -39,12 +39,16 @@ describe("Clinical Records provider directory", () => {
     expect(directory.schema).toBe(CLINICAL_PROVIDER_DIRECTORY_SCHEMA);
     expect(directory.sourceBundleSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
-    expect(directory.entries.every((entry) => entry.policyId === EPIC_ACQUISITION_POLICY_ID)).toBe(true);
-    expect(directory.entries.every((entry) =>
+    const epicEntries = directory.entries.filter(entry => entry.sourceSystem === "epic-fhir");
+    const oracleEntries = directory.entries.filter(entry => entry.sourceSystem === "cerner-fhir");
+    expect(oracleEntries.length).toBeGreaterThan(1000);
+    expect(oracleEntries.every(entry => new URL(entry.fhirBaseUrl).hostname === "fhir-myrecord.cerner.com")).toBe(true);
+    expect(epicEntries.every((entry) => entry.policyId === EPIC_ACQUISITION_POLICY_ID)).toBe(true);
+    expect(epicEntries.every((entry) =>
       JSON.stringify(entry.requestedBaseScopes)
         === JSON.stringify(EPIC_BETA_REQUESTED_BASE_SCOPES)
     )).toBe(true);
-    expect(directory.entries.every((entry) =>
+    expect(epicEntries.every((entry) =>
       JSON.stringify(entry.resourceTypes) === JSON.stringify(EPIC_BETA_RESOURCE_TYPES)
     )).toBe(true);
     expect(directory.entries.find((entry) => entry.id === "epic-sandbox")).toMatchObject({
@@ -64,6 +68,9 @@ describe("Clinical Records provider directory", () => {
       expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "other")).toBeNull();
       expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")?.sourceSystem).toBe("cerner-fhir");
       expect(readClinicalProviderDirectory().entries.some(entry => entry.id === "oracle-sandbox")).toBe(false);
+      vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "*");
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")).toBeNull();
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "any-member")).toBeNull();
     } finally { vi.unstubAllEnvs(); }
   });
 
@@ -374,10 +381,26 @@ describe("Clinical Records provider directory policy set", () => {
 
   it.each([
     ["a registration key", { clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" }, /integration is unsupported/u],
+    ["an embedded client id", { clientId: "synthetic-registration" }, /integration is unsupported/u],
+    ["an embedded client secret", { client_secret: "synthetic-secret" }, /integration is unsupported/u],
+    ["any field the importer does not write", { redirectUri: "https://synthetic.example.test/callback" }, /integration is unsupported/u],
+    ["a free-text upstream id", { upstreamId: "synthetic note" }, /integration is unsupported/u],
+    ["a nested upstream id", { upstreamId: { value: "urn:oid:1.2.3" } }, /integration is unsupported/u],
+    ["a malformed upstream OID", { upstreamId: "urn:oid:1..2" }, /integration is unsupported/u],
+    ["an overlong upstream OID", { upstreamId: `urn:oid:1${".2".repeat(46)}` }, /integration is unsupported/u],
     ["no integration", { integration: undefined }, /integration is unsupported/u],
     ["another vendor's id", { id: "epic-synthetic-valley" }, /integration is unsupported|strictly sorted/u],
   ])("rejects an Oracle entry with %s", (_label, overrides, message) => {
     expect(() => parseClinicalProviderDirectory(expanded(overrides))).toThrow(message);
+  });
+
+  it("accepts exactly the fields the importer writes and rejects any other on an Epic entry", () => {
+    expect(parseClinicalProviderDirectory(expanded({ upstreamId: "urn:oid:1.2.3" })).entries).toHaveLength(2);
+    const epic = makeDirectory({});
+    for (const extra of [{ client_secret: "synthetic-secret" }, { integration: "oracle-millennium-r4" }, { upstreamId: "urn:oid:1.2.3" }]) {
+      expect(() => parseClinicalProviderDirectory({ ...epic, entries: [{ ...epic.entries[0], ...extra }] }))
+        .toThrow(/unsupported field/u);
+    }
   });
 
   it("rejects missing, duplicate, altered or extra policies", () => {

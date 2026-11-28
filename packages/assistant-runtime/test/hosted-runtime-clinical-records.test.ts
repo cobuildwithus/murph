@@ -90,6 +90,7 @@ describe("hosted clinical records maintenance", () => {
       fetchDocument: async () => documentResponse("downloaded clinical document") });
     const importSnapshot = vi.fn(importClinicalFhirSnapshot);
     const result = await run(port, importSnapshot);
+    expect(fetchPage.mock.calls.every(([, options]) => options?.oracleLifetimeSearch)).toBe(true);
     expect(fetchPage.mock.calls.map(([request]) => [request.queryScopeId, request.cursor])).toEqual([
       ["procedures", null], ["service-requests", null], ["service-requests", "oracle-next"], ["service-request-referrals", null], ["documents", null],
     ]);

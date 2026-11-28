@@ -1,5 +1,5 @@
 {
-  "version": "r4.0",
+  "version": "r5.0",
   "asOf": "2025-03-29",
   "state": "paused",
   "profile": {
@@ -7,7 +7,7 @@
     "firstName": "Example"
   },
   "paused": {
-    "text": "An age estimate is outside the model’s supported range for this profile."
+    "text": "Murph works out ages 20 to 80"
   },
   "thisWeek": [
     {
