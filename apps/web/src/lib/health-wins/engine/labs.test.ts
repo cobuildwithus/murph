@@ -46,6 +46,18 @@ describe("lab draws", () => {
     expect(cards([...history, draw(85, 17, options)])).toMatchObject([{ kind: "lab_change", title: { number: "−10 mg/dL" } }]);
   });
 
+  it("13. gives no range card to a draw at least a step worse than the usual", () => {
+    const ldl = { referenceRange: { high: 130 }, fasting: true, flag: "normal" } as const;
+    const ldlHistory = [draw(96, 1, ldl), draw(104, 2, ldl)];
+    expect(cards([...ldlHistory, draw(127, 3, ldl)])).toEqual([]);
+    expect(cards([...ldlHistory, draw(109, 3, ldl)])).toMatchObject([{ kind: "lab_range", title: { number: "109 mg/dL" } }]);
+    const hdl = { analyte: "hdl", referenceRange: { low: 50 }, fasting: true } as const;
+    expect(cards([draw(72, 1, hdl), draw(66, 2, hdl), draw(55, 3, hdl)])).toEqual([]);
+    // See yours still answers privately with the range.
+    expect(labCandidates({ member, labs: [...ldlHistory, draw(127, 3, ldl)] }, () => null, { rangeMode: "independent" })
+      .map(result => result.card)).toMatchObject([{ kind: "lab_range" }]);
+  });
+
   it("13. reads the usual value at the precision the lab reports", () => {
     const options = { analyte: "triglycerides" as const, fasting: true };
     expect(cards([draw(141, 1, options), draw(120, 2, options), draw(92, 3, options)])).toMatchObject([{
@@ -107,6 +119,13 @@ describe("lab draws", () => {
     const only = draw(0, 7, { analyte: "hs_crp", unit: "mg/L", referenceRange: { low: 0, high: 1.7 } });
     expect(cards([only])).toMatchObject([{ kind: "lab_range", chart: { value: 0 } }]);
     expect(cards([{ ...only, flag: "low" }])).toEqual([]);
+  });
+
+  it("13. says a range from zero as its upper bound", () => {
+    const tg = { analyte: "triglycerides", referenceRange: { low: 0, high: 149 } } as const;
+    expect(cards([draw(98, 7, tg)])).toMatchObject([{ kind: "lab_range", subtitle: "at or below 149 mg/dL",
+      chart: { range: { low: { value: 0 }, high: { value: 149 } } } }]);
+    expect(cards([draw(98, 7, { ...tg, referenceRange: { low: 40, high: 149 } })])).toMatchObject([{ subtitle: "within 40–149 mg/dL" }]);
   });
 
   it("keeps precise measurements and range boundaries in the chart", () => {

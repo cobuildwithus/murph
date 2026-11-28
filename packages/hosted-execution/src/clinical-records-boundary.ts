@@ -3,6 +3,9 @@ import {
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES, CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol,
 } from "@murphai/clinical-records/retrieval-limits";
 
+export { ORACLE_LIFETIME_PAGE_CALLBACK_MS } from "@murphai/clinical-records/retrieval-limits";
+export const ORACLE_LIFETIME_PAGE_HEADER = "x-murph-oracle-lifetime-page";
+
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS = 5 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_TOTAL_BODY_BYTES = 32 * 1024 * 1024;
 export const HOSTED_CLINICAL_RECORDS_MAX_PAGES = 500;

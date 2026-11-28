@@ -1,5 +1,5 @@
 {
-  "version": "r4.0",
+  "version": "r5.0",
   "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
@@ -7,15 +7,15 @@
     "firstName": "Example"
   },
   "age": {
-    "value": 44.8,
+    "value": 45,
     "real": 51.2,
-    "gap": -6.4,
-    "low": 29.4,
-    "high": 60.1
+    "gap": -6.2,
+    "low": 34.9,
+    "high": 55.1
   },
   "week": {
-    "daysAged": 10.5,
-    "saved": -3.5,
+    "daysAged": 9.17,
+    "saved": -2.17,
     "partial": false,
     "basis": "observed"
   },
@@ -162,24 +162,6 @@
       "state": "counted"
     },
     {
-      "key": "mealFibre",
-      "label": "Fibre from meals",
-      "icon": "mealFibre",
-      "group": "food",
-      "value": "27",
-      "unit": "g a day",
-      "target": null,
-      "years": -0.5,
-      "yearsText": "−0.5",
-      "featured": false,
-      "whatItIs": "Fibre in meals on days marked complete.",
-      "whatLowersIt": "Add beans, whole grains or fruit to a meal.",
-      "rank": null,
-      "grade": null,
-      "detail": "food",
-      "state": "counted"
-    },
-    {
       "key": "steps",
       "label": "Daily steps",
       "icon": "steps",
@@ -253,6 +235,41 @@
       "state": "counted"
     },
     {
+      "key": "mealFibreDensity",
+      "label": "Fibre in logged meals",
+      "icon": "mealFibreDensity",
+      "group": "food",
+      "value": "13.6",
+      "unit": "g per 1,000 logged calories",
+      "target": null,
+      "years": -0.2,
+      "yearsText": "−0.2",
+      "featured": false,
+      "whatItIs": "Fibre per thousand calories in the meals you logged.",
+      "rank": null,
+      "grade": null,
+      "detail": "food",
+      "state": "counted"
+    },
+    {
+      "key": "alp",
+      "label": "Alkaline phosphatase",
+      "icon": "alp",
+      "group": "blood",
+      "value": "66",
+      "unit": "U/L",
+      "target": null,
+      "years": -0.1,
+      "yearsText": "−0.1",
+      "featured": false,
+      "whatItIs": "This enzyme comes mainly from the liver and bones.",
+      "rank": null,
+      "grade": null,
+      "detail": "marker",
+      "markerKey": "alp",
+      "state": "counted"
+    },
+    {
       "key": "homocysteine",
       "label": "Homocysteine",
       "icon": "homocysteine",
@@ -323,24 +340,6 @@
       "rank": null,
       "grade": "B",
       "detail": "food",
-      "state": "counted"
-    },
-    {
-      "key": "alp",
-      "label": "Alkaline phosphatase",
-      "icon": "alp",
-      "group": "blood",
-      "value": "66",
-      "unit": "U/L",
-      "target": null,
-      "years": 0,
-      "yearsText": "+0.0",
-      "featured": false,
-      "whatItIs": "This enzyme comes mainly from the liver and bones.",
-      "rank": null,
-      "grade": null,
-      "detail": "marker",
-      "markerKey": "alp",
       "state": "counted"
     },
     {
@@ -520,6 +519,23 @@
       "grade": null,
       "detail": "marker",
       "markerKey": "iron",
+      "state": "counted"
+    },
+    {
+      "key": "mostDrinks",
+      "label": "Most drinks in one sitting",
+      "icon": "mostDrinks",
+      "group": "food",
+      "value": "1",
+      "unit": "standard drinks",
+      "target": null,
+      "years": 0,
+      "yearsText": "+0.0",
+      "featured": false,
+      "whatItIs": "Most standard drinks reported in one sitting during your food week.",
+      "rank": null,
+      "grade": null,
+      "detail": "food",
       "state": "counted"
     },
     {

@@ -1,4 +1,4 @@
-"""Import only frozen aggregate parameters and invented parity cases from the R4 release."""
+"""Import only frozen aggregate parameters and invented parity cases from the R5 release."""
 import json
 import sys
 from pathlib import Path
@@ -7,6 +7,7 @@ sys.dont_write_bytecode = True
 study = Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(study / "model"))
 import age
+from hazard import BACKGROUND
 
 web = Path(__file__).resolve().parents[2]
 def write(path, data):
@@ -30,9 +31,11 @@ model.update(coef=age.M["fit"]["coef"], strength=age.M["fit"]["strength"],
              overlap=age.CAT["overlap"], optional=sorted(age.OPTIONAL), labs=age.LAB,
              feeds=age.CONFIG, extra_context=age.EXTRA_CONTEXT, bridges=age.BRIDGES,
              completion=age.COMPLETION, display=age.FACTOR_TEXT, extra_ranks=age.EXTRA_RANKS,
+             background={k: BACKGROUND[k] for k in ("accident_fraction","young_panel","historical")},
              calibration=age.CAL, reference=age.TABLE)
 model["policy"]["protocol"]["member_entered_home_cuff_assumed_validated"] = True
 write(web / "src/lib/health-you/engine/model.json", model)
 cases = [row for path in sorted((study / "golden").glob("*.json")) for row in json.loads(path.read_text())]
-assert len({row["case"] for row in cases}) == len(cases) == 168
+assert model["version"] == "r5.0" and all(row["history"] for row in cases)
+assert len({row["case"] for row in cases}) == len(cases) == 180
 write(web / "test/fixtures/health-you/reference.json", cases)

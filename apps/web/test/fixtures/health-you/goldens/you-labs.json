@@ -1,5 +1,5 @@
 {
-  "version": "r4.0",
+  "version": "r5.0",
   "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
@@ -10,8 +10,8 @@
     "value": 46.4,
     "real": 51.2,
     "gap": -4.8,
-    "low": 31,
-    "high": 61.8
+    "low": 36.1,
+    "high": 56.6
   },
   "week": {
     "daysAged": 7,

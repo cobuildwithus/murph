@@ -26,7 +26,7 @@ interface PostRow extends Identity, HealthPagePosition {
   version: number; captionEncrypted: string | null; cardsEncrypted: string[]; attachmentId: string | null; cheered: boolean;
 }
 interface CommentRow extends Identity, HealthPagePosition {
-  postId: string; bodyEncrypted: string; visibility: "everyone" | "poster";
+  postId: string; parentId: string | null; bodyEncrypted: string; visibility: "everyone" | "poster";
   recipientMemberId: string | null; recipientFirstNameEncrypted: string | null;
 }
 
@@ -181,16 +181,43 @@ function recipientFirstNameSql(viewerId: string) {
   ) END`;
 }
 
-export function healthCommentPageSql(viewerId: string, postId: string, posterId: string, position?: HealthPagePosition) {
-  return Prisma.sql`SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
+function commentContentSql(viewerId: string) {
+  return Prisma.sql`SELECT c.id, c.post_id AS "postId", c.parent_comment_id AS "parentId", c.author_member_id AS "authorMemberId",
       c.created_at AS "createdAt", c.body_encrypted AS "bodyEncrypted", c.visibility,
       c.recipient_member_id AS "recipientMemberId", ${recipientFirstNameSql(viewerId)} AS "recipientFirstNameEncrypted",
       profile.first_name_encrypted AS "firstNameEncrypted", profile.photo_key AS "photoKey"
     FROM health_post_comment c
-    LEFT JOIN game_profile profile ON profile.member_id = c.author_member_id
+    LEFT JOIN game_profile profile ON profile.member_id = c.author_member_id`;
+}
+
+export function healthCommentPageSql(viewerId: string, postId: string, posterId: string, position?: HealthPagePosition) {
+  return Prisma.sql`${commentContentSql(viewerId)}
     WHERE c.post_id = ${postId}::uuid AND ${visibleHealthCommentOnPostSql(viewerId, Prisma.sql`${posterId}::text`)}
       ${cursorWhere(position, Prisma.sql`(c.created_at, c.id)`)}
     ORDER BY c.deleted_at, c.created_at DESC, c.id DESC LIMIT ${PAGE_SIZE + 1}`;
+}
+
+// Start only at missing parents of the selected page. UNION visits a shared ancestor once.
+async function missingAncestorIds(db: Db, postId: string, page: CommentRow[]) {
+  const onPage = new Set(page.map(row => row.id));
+  const parents = page.flatMap(row => row.parentId && !onPage.has(row.parentId) ? [row.parentId] : []);
+  if (!parents.length) return [];
+  const rows = await db.$queryRaw<Array<{ id: string }>>`
+    WITH RECURSIVE ancestors AS (
+      SELECT id, parent_comment_id FROM health_post_comment WHERE post_id = ${postId}::uuid AND id = ANY(${parents}::uuid[])
+      UNION
+      SELECT c.id, c.parent_comment_id FROM ancestors a JOIN health_post_comment c ON c.id = a.parent_comment_id
+      WHERE c.post_id = ${postId}::uuid
+    )
+    SELECT id FROM ancestors`;
+  return rows.map(row => row.id).filter(id => !onPage.has(id));
+}
+
+interface CheckedComment extends HealthPagePosition {
+  parentId: string | null;
+  deleted: boolean;
+  readable: boolean;
+  recipientFirstNameEncrypted: string | null;
 }
 
 export async function readHealthComments(auth: Auth, postId: string, cursor?: string | null) {
@@ -200,36 +227,60 @@ export async function readHealthComments(auth: Auth, postId: string, cursor?: st
   const collection = `comments:${postId}`;
   const position = await openHealthCursor(viewer, collection, cursor);
   const fetched = await db.$queryRaw<CommentRow[]>(healthCommentPageSql(viewer, postId, parent.authorMemberId, position));
-  const rows = fetched.slice(0, PAGE_SIZE);
+  const page = fetched.slice(0, PAGE_SIZE);
+  const ancestorIds = await missingAncestorIds(db, postId, page);
+  const ancestorsToOpen = ancestorIds.length ? await db.$queryRaw<CommentRow[]>`
+    ${commentContentSql(viewer)} JOIN health_post p ON p.id = c.post_id
+    WHERE c.id = ANY(${ancestorIds}::uuid[]) AND c.post_id = ${postId}::uuid AND ${visibleHealthCommentSql(viewer)}` : [];
+  const rows = [...page, ...ancestorsToOpen];
   const recipients = rows.flatMap(row => row.recipientMemberId && row.recipientFirstNameEncrypted !== null ? [{
     authorMemberId: row.recipientMemberId, firstNameEncrypted: row.recipientFirstNameEncrypted, photoKey: null,
   }] : []);
   // Prefer the full author profile when a recipient also wrote a comment on this page.
   const [identities, content, nextCursor] = await together([names([...recipients, ...rows]), openHealthTexts(rows.map(row => ({
     memberId: row.authorMemberId, table: "health_post_comment", rowId: row.id, field: "body", value: row.bodyEncrypted,
-  }))), sealHealthCursor(viewer, collection, fetched.length > PAGE_SIZE ? rows.at(-1) : undefined)]);
+  }))), sealHealthCursor(viewer, collection, fetched.length > PAGE_SIZE ? page.at(-1) : undefined)]);
+  const ids = [...page.map(row => row.id), ...ancestorIds];
   const [post, current] = await finishRead(auth, tx => Promise.all([
     findVisibleHealthPost(tx, viewer, postId),
-    rows.length ? tx.$queryRaw<Array<Pick<CommentRow, "id" | "recipientFirstNameEncrypted">>>`
-      SELECT c.id, ${recipientFirstNameSql(viewer)} AS "recipientFirstNameEncrypted"
+    ids.length ? tx.$queryRaw<CheckedComment[]>`
+      SELECT c.id, c.parent_comment_id AS "parentId", c.created_at AS "createdAt", c.deleted_at IS NOT NULL AS deleted,
+        (${visibleHealthCommentOnPostSql(viewer, Prisma.sql`p.author_member_id`)}) AS readable,
+        ${recipientFirstNameSql(viewer)} AS "recipientFirstNameEncrypted"
       FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
-      WHERE c.id IN (${Prisma.join(rows.map(row => Prisma.sql`${row.id}::uuid`))}) AND ${visibleHealthCommentSql(viewer)}` : [],
+      WHERE c.post_id = ${postId}::uuid AND c.id = ANY(${ids}::uuid[]) AND ${visibleHealthPostSql(viewer)}` : [],
   ]));
   if (!post) throw gameNotFound();
-  const visible = new Map(current.map(row => [row.id, row]));
-  const comments = rows.flatMap((row, index) => {
-    const checked = visible.get(row.id);
-    if (!checked) return [];
+  const structure = new Map(current.map(row => [row.id, row]));
+  const readable = new Map(rows.flatMap((row, index) => {
+    const checked = structure.get(row.id);
+    if (!checked?.readable) return [];
     const recipientFirstName = row.recipientMemberId && checked.recipientFirstNameEncrypted !== null
       && checked.recipientFirstNameEncrypted === row.recipientFirstNameEncrypted
       ? identities.get(row.recipientMemberId)!.firstName : null;
-    return [{
-      id: row.id, postId, authorMemberId: row.authorMemberId, ...identities.get(row.authorMemberId)!,
+    return [[row.id, {
+      id: row.id, postId, parentId: checked.parentId, authorMemberId: row.authorMemberId, ...identities.get(row.authorMemberId)!,
       createdAt: row.createdAt.toISOString(), visibility: row.visibility, body: content[index],
       recipientMemberId: row.recipientMemberId, recipientFirstName,
-    }];
-  });
-  return { comments, nextCursor };
+    }] as const];
+  }));
+  const comments = page.flatMap(row => readable.get(row.id) ?? []);
+  const included = new Set(comments.map(row => row.id));
+  const ancestors = [];
+  for (const comment of comments) {
+    let id = comment.parentId;
+    while (id && !included.has(id)) {
+      const row = structure.get(id);
+      if (!row) break;
+      included.add(id);
+      ancestors.push(readable.get(id) ?? {
+        id, postId, parentId: row.parentId, createdAt: row.createdAt.toISOString(),
+        ...(row.deleted ? { deleted: true } : { hidden: true }),
+      });
+      id = row.parentId;
+    }
+  }
+  return { comments, ancestors, nextCursor };
 }
 
 async function profileIdentity(db: Db, viewer: string, memberId: string) {

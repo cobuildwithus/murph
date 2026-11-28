@@ -6,9 +6,9 @@
     "kind": "improvement",
     "priority": 2,
     "title": "See how daily habits affect your age estimate",
-    "summary": "In the private You preview, your steps, bedtime regularity, workouts and Food Week can contribute to your age estimate.",
-    "details": "A few missing watch days can still leave enough evidence for a comparison. The weekly view accounts separately for changes in your habits and changes in the measurements available.",
+    "summary": "In the private You preview, your steps, bedtime regularity, workouts, Food Week and fibre in logged meals can contribute to your age estimate.",
+    "details": "The weekly estimate stays steadier through ordinary watch fluctuations. When you log fibre and calories on at least three days in nine, the estimate can use those meals even if you only logged part of each day.",
     "relevanceTags": ["health", "measurements"],
-    "sourcePullRequests": [5436]
+    "sourcePullRequests": [5436, 5441]
   }
 }

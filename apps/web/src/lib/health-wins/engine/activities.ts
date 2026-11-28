@@ -87,12 +87,15 @@ function experimentOutcome(metric: Metric, before: number, during: number) {
   const step = metric === "sleep_score" ? 2 : trendStep ?? 1;
   const change = during - before;
   if (change * direction <= -step) return null;
-  const subject = metric === "distance_km" ? "Distance on foot" : label[0].toUpperCase() + label.slice(1);
+  // Friends read these words: no "RHR", and time asleep is longer, not higher.
+  const subject = metric === "distance_km" ? "Distance on foot" : metric === "rhr_bpm" ? "Resting heart rate"
+    : label[0].toUpperCase() + label.slice(1);
   const verb = metric === "steps" || metric === "floors" ? "were" : "was";
+  const duration = metric === "sleep_total_min" || metric === "sleep_deep_min";
   const sentence = Math.abs(change) < step
     ? `${metric === "sleep_score" ? "Sleep" : subject} stayed about the same.`
-    : `${subject} ${verb} ${during > before ? "higher" : "lower"} during the experiment.`;
-  return { label: metric === "rhr_bpm" ? "Resting heart rate" : subject, sentence };
+    : `${subject} ${verb} ${during > before ? duration ? "longer" : "higher" : duration ? "shorter" : "lower"} during the experiment.`;
+  return { label: subject, sentence };
 }
 
 function experimentCandidates(inputs: readonly Experiment[], today: string): Candidate[] {
@@ -125,8 +128,9 @@ function experimentCandidates(inputs: readonly Experiment[], today: string): Can
     const overlap = [...new Set(concurrent.map(other => other.title))].sort().join(", ");
     const runningBlock = /\brun(?:ning)?\s+(?:\w+\s+)?block\b/iu.test(title);
     const nightly = /\b(?:bedtime|before bed|nightly|each night)\b/iu.test(title);
-    const countUnit = runningBlock ? "run" : nightly ? "night" : "";
-    const counted = (n: number) => formatNumber(n, 0) + (countUnit ? ` ${countUnit}${n === 1 ? "" : "s"}` : "");
+    // Every count says what it counts: "3 of 8 sessions logged", not "3 of 8 logged".
+    const countUnit = runningBlock ? "run" : nightly ? "night" : "session";
+    const counted = (n: number) => `${formatNumber(n, 0)} ${countUnit}${n === 1 ? "" : "s"}`;
     const progress = adherence.target > 0 && adherence.done <= adherence.target
       ? `${formatNumber(adherence.done, 0)} of ${counted(adherence.target)} logged`
       : `${counted(adherence.done)} logged against a target of ${formatNumber(adherence.target, 0)}`;

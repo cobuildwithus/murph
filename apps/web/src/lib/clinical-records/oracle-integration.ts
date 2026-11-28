@@ -1,5 +1,7 @@
 import "server-only";
 
+import { oracleFhirTenant } from "./provider-directory-artifact";
+
 import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/oracle/production.jwks.json";
 import sandboxSet from "../../../public/.well-known/oracle/sandbox.jwks.json";
@@ -15,7 +17,6 @@ import type { SmartEndpointTrust } from "./smart";
 
 const ORACLE_AUTHORIZATION_ORIGIN = "https://authorization.cerner.com";
 const ORACLE_FHIR_HOST = "fhir-myrecord.cerner.com";
-const ORACLE_FHIR_BASE_PATH = /^\/r4\/([A-Za-z0-9-]{1,64})$/u;
 
 export const ORACLE_SANDBOX_ENTRY = {
   id: "oracle-sandbox", integration: ORACLE_INTEGRATION_ID, policyId: ORACLE_ACQUISITION_POLICY_ID,
@@ -62,11 +63,23 @@ export function oracleSearchEnabled(): boolean {
   return process.env.CLINICAL_RECORDS_ORACLE_SEARCH === "1" && !oracleEgressDisabled();
 }
 
-/** New Oracle starts need the flag and an exact opaque member ID from the allowlist. */
+function oracleStartAllowlist(): string[] | null {
+  if (process.env.CLINICAL_RECORDS_ORACLE_STARTS !== "1" || oracleEgressDisabled()) return null;
+  return (process.env.CLINICAL_RECORDS_ORACLE_MEMBER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+}
+
+/**
+ * New production Oracle starts need the flag and either an exact opaque member ID
+ * from the allowlist or the single value `*`, which admits every member.
+ */
 export function oracleStartsEnabledFor(memberId: string): boolean {
-  return process.env.CLINICAL_RECORDS_ORACLE_STARTS === "1" && !oracleEgressDisabled()
-    && (process.env.CLINICAL_RECORDS_ORACLE_MEMBER_IDS ?? "").split(",").map((id) => id.trim())
-      .filter(Boolean).includes(memberId);
+  const allowed = oracleStartAllowlist();
+  return !!allowed && ((allowed.length === 1 && allowed[0] === "*") || allowed.includes(memberId));
+}
+
+/** The hidden sandbox entry never follows `*`: it needs an exact listed member ID. */
+export function oracleSandboxEnabledFor(memberId: string): boolean {
+  return !!oracleStartAllowlist()?.includes(memberId);
 }
 
 /**
@@ -83,9 +96,8 @@ export function readOracleQueryGate(queryScopeId: string): { code: string; retry
  * Each role must equal its exact template for the FHIR base's own tenant and host.
  */
 export function requireOracleSmartEndpoint(role: "authorization" | "token", value: unknown, fhirBase: URL): string {
-  const tenant = ORACLE_FHIR_BASE_PATH.exec(fhirBase.pathname)?.[1];
-  if (!tenant || fhirBase.href !== `https://${ORACLE_FHIR_HOST}/r4/${tenant}`
-    || typeof value !== "string" || value.length > 2_048) {
+  const tenant = oracleFhirTenant(fhirBase.href);
+  if (!tenant || typeof value !== "string" || value.length > 2_048) {
     throw untrustedEndpoint();
   }
   const path = role === "authorization"
@@ -108,9 +120,11 @@ export const ORACLE_SMART_ENDPOINT_TRUST: SmartEndpointTrust = {
 };
 
 export function resolveOracleStart(provider: OracleProviderDirectoryEntry, memberId: string, redirectUri: string) {
-  if (!oracleStartsEnabledFor(memberId) || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES !== "1") throw notConfigured();
+  const sandbox = provider.id === ORACLE_SANDBOX_ENTRY.id;
+  const allowed = sandbox ? oracleSandboxEnabledFor(memberId) : oracleStartsEnabledFor(memberId);
+  if (!allowed || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES !== "1") throw notConfigured();
   const profile: OracleProfile = { integration: provider.integration, method: "private_key_jwt",
-    environment: provider.id === ORACLE_SANDBOX_ENTRY.id ? "sandbox" : "production" };
+    environment: sandbox ? "sandbox" : "production" };
   return { profile, auth: resolveOracleClientAuth(profile, provider, { redirectUri }),
     resourceTypes: ORACLE_RESOURCE_TYPES, endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1" as const };
 }
@@ -119,8 +133,7 @@ type OracleGrant = { redirectUri: string; clientId?: string } | { grant: "refres
 
 /** The one FHIR base shape Oracle patient access uses: its host and a single tenant segment, written exactly. */
 export function isOracleFhirBaseUrl(value: string): boolean {
-  const tenant = ORACLE_FHIR_BASE_PATH.exec(URL.parse(value)?.pathname ?? "")?.[1];
-  return Boolean(tenant) && value === `https://${ORACLE_FHIR_HOST}/r4/${tenant}`;
+  return oracleFhirTenant(value) !== undefined;
 }
 
 function registrationMatches(profile: OracleProfile, provider: { id: string; fhirBaseUrl: string }, grant: OracleGrant) {

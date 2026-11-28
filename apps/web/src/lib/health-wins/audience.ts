@@ -101,10 +101,11 @@ export async function findVisibleHealthPost(db: Db, viewerId: string, postId: st
 }
 
 export async function findVisibleHealthComment(db: Db, viewerId: string, commentId: string) {
-  const rows = await db.$queryRaw<Array<{ id: string; postId: string; authorMemberId: string; recipientMemberId: string | null; pushClaimedAt: Date | null }>>`
+  const rows = await db.$queryRaw<Array<{ id: string; postId: string; authorMemberId: string; recipientMemberId: string | null; parentAuthorId: string | null; pushClaimedAt: Date | null }>>`
     SELECT c.id, c.post_id AS "postId", c.author_member_id AS "authorMemberId",
-      c.recipient_member_id AS "recipientMemberId", c.push_claimed_at AS "pushClaimedAt"
+      c.recipient_member_id AS "recipientMemberId", c.push_claimed_at AS "pushClaimedAt", parent.author_member_id AS "parentAuthorId"
     FROM health_post_comment c JOIN health_post p ON p.id = c.post_id
+    LEFT JOIN health_post_comment parent ON parent.id = c.parent_comment_id AND parent.post_id = c.post_id
     WHERE c.id = ${commentId}::uuid AND ${visibleHealthCommentSql(viewerId)}`;
   return rows[0] ?? null;
 }

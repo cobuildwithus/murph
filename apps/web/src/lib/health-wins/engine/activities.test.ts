@@ -34,7 +34,7 @@ describe("finished experiments", () => {
     expect(cards({ experiments: [baseExperiment, concurrent, separate] })).toEqual([
       expect.objectContaining({
         kind: "experiment_result", title: { number: "Morning sketching", measure: "" },
-        subtitle: "Sleep score was higher during the experiment. 3 of 8 logged. Ran alongside Quiet drawing.",
+        subtitle: "Sleep score was higher during the experiment. 3 of 8 sessions logged. Ran alongside Quiet drawing.",
         chart: {
           type: "two_bars", barWidth: "thin", unit: "points", metric: "sleep_score", label: "Sleep score", expectedDirection: "increase",
           series: [
@@ -51,7 +51,7 @@ describe("finished experiments", () => {
     const unchanged = { ...baseExperiment, interventionMean: baseExperiment.baselineMean };
     const [card] = cards({ experiments: [unchanged] });
     expect(card.title.number).toBe("Morning sketching");
-    expect(card.subtitle).toBe("Sleep stayed about the same. 3 of 8 logged.");
+    expect(card.subtitle).toBe("Sleep stayed about the same. 3 of 8 sessions logged.");
     expect(card.chart).not.toHaveProperty("overlap");
     for (const experiment of [
       { ...baseExperiment, intervention: { ...baseExperiment.intervention, end: "2025-04-20" } },
@@ -92,9 +92,19 @@ describe("finished experiments", () => {
     for (const [done, target] of [[0, 0], [2, 0], [11, 8]]) {
       const adherence = { done, target };
       const [card] = cards({ experiments: [{ ...baseExperiment, adherence }] });
-      expect(card.subtitle).toContain(`${done} logged against a target of ${target}.`);
+      expect(card.subtitle).toContain(`${done} sessions logged against a target of ${target}.`);
       expect(card.chart).toHaveProperty("adherence", adherence);
     }
+  });
+
+  it("says what a count counts, and that sleep ran longer, in a friend's words", () => {
+    const sauna = { ...baseExperiment, title: "Sauna", metric: "sleep_total_min" as const, baselineMean: 417.5, interventionMean: 463.5 };
+    expect(cards({ experiments: [{ ...sauna, adherence: { done: 13, target: 12 } }] })[0].subtitle)
+      .toBe("Sleep was longer during the experiment. 13 sessions logged against a target of 12.");
+    expect(cards({ experiments: [{ ...sauna, metric: "sleep_deep_min", baselineMean: 80, interventionMean: 60, adherence: { done: 1, target: 1 } }] }))
+      .toEqual([]);
+    expect(cards({ experiments: [{ ...sauna, metric: "rhr_bpm", baselineMean: 56, interventionMean: 53, adherence: { done: 1, target: 1 } }] })[0])
+      .toMatchObject({ subtitle: "Resting heart rate was lower during the experiment. 1 of 1 session logged.", chart: { label: "Resting heart rate" } });
   });
 
   it("headlines the intervention and keeps measured values on before and during bars (audit 16)", () => {
@@ -119,7 +129,7 @@ describe("finished experiments", () => {
     };
     expect(cards({ experiments: [runs] })[0]).toMatchObject({
       title: { number: "11 runs", measure: "in 3 weeks" },
-      subtitle: "RHR was lower during the experiment. 11 of 15 runs logged.",
+      subtitle: "Resting heart rate was lower during the experiment. 11 of 15 runs logged.",
     });
     expect(cards({ experiments: [{ ...runs, intervention: { ...runs.intervention, end: "2025-04-12" } }] })[0].title)
       .toEqual({ number: "11 runs", measure: "in 18 days" });
@@ -130,7 +140,7 @@ describe("finished experiments", () => {
       ...baseExperiment, metric: "sleep_efficiency", baselineMean: 88.7, interventionMean: 92.4,
     };
     expect(cards({ experiments: [trial] })[0]).toMatchObject({
-      subtitle: "Sleep efficiency was higher during the experiment. 3 of 8 logged.",
+      subtitle: "Sleep efficiency was higher during the experiment. 3 of 8 sessions logged.",
       chart: { metric: "sleep_efficiency", unit: "%", series: [{ mean: 88.7 }, { mean: 92.4 }] },
     });
     expect(cards({ experiments: [{ ...trial, baselineMean: 0, interventionMean: 100 }] })).toHaveLength(1);
@@ -138,12 +148,12 @@ describe("finished experiments", () => {
   });
 
   it.each([
-    { metric: "rhr_bpm", mean: 68, step: 2, favorable: -1, subject: "RHR", label: "Resting heart rate" },
-    { metric: "hrv_ms", mean: 50, step: 5, favorable: 1, subject: "Heart rate variability", label: "Heart rate variability" },
-    { metric: "sleep_efficiency", mean: 83, step: 1, favorable: 1, subject: "Sleep efficiency", label: "Sleep efficiency" },
-    { metric: "sleep_score", mean: 75, step: 2, favorable: 1, subject: "Sleep", label: "Sleep score" },
-    { metric: "sleep_total_min", mean: 434, step: 15, favorable: 1, subject: "Sleep", label: "Sleep" },
-  ] as const)("offers neutral and favorable $metric outcomes only (audit 26)", ({ metric, mean, step, favorable, subject, label }) => {
+    { metric: "rhr_bpm", mean: 68, step: 2, favorable: -1, subject: "Resting heart rate", label: "Resting heart rate", moved: "was lower" },
+    { metric: "hrv_ms", mean: 50, step: 5, favorable: 1, subject: "Heart rate variability", label: "Heart rate variability", moved: "was higher" },
+    { metric: "sleep_efficiency", mean: 83, step: 1, favorable: 1, subject: "Sleep efficiency", label: "Sleep efficiency", moved: "was higher" },
+    { metric: "sleep_score", mean: 75, step: 2, favorable: 1, subject: "Sleep", label: "Sleep score", moved: "was higher" },
+    { metric: "sleep_total_min", mean: 434, step: 15, favorable: 1, subject: "Sleep", label: "Sleep", moved: "was longer" },
+  ] as const)("offers neutral and favorable $metric outcomes only (audit 26)", ({ metric, mean, step, favorable, subject, label, moved }) => {
     const trial = {
       ...baseExperiment, title: "Running technique block", metric, baselineMean: mean,
       adherence: { done: 5, target: 7 },
@@ -157,7 +167,7 @@ describe("finished experiments", () => {
     }
     expect(result(-favorable * step)).toEqual([]);
     expect(result(-favorable * (step + 1))).toEqual([]);
-    expect(result(favorable * step)[0].subtitle).toContain(favorable > 0 ? "was higher" : "was lower");
+    expect(result(favorable * step)[0].subtitle).toContain(moved);
   });
 });
 

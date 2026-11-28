@@ -5,6 +5,10 @@ import { lookup } from "./engine/model";
 const labels: Record<string, string> = {
   onset_sd: "Bedtime regularity",
   aerobic: "Aerobic workouts",
+  meal_density: "Fibre in logged meals",
+  alcohol_peak: "Most drinks in one sitting",
+  caffeine_timing: "Last caffeine before sleep",
+  alcohol_timing: "Last alcohol before sleep",
   meal_fibre: "Fibre from meals",
   food_pattern: "Weekly eating pattern",
   ldl: "LDL cholesterol",

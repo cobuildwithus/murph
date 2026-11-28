@@ -1,4 +1,7 @@
-import { CLINICAL_RECEIPT_PROTOCOL, type ClinicalRetrievalProtocol } from "@murphai/clinical-records/retrieval-limits";
+import {
+  CLINICAL_RECEIPT_PROTOCOL, isOracleLifetimeSearch, ORACLE_LIFETIME_SEARCH_TIMEOUT_MS,
+  ORACLE_LIFETIME_PAGE_CALLBACK_MS, type ClinicalRetrievalProtocol,
+} from "@murphai/clinical-records/retrieval-limits";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { hasClinicalProcessorApprovals } from "./processor-registry";
@@ -192,6 +195,7 @@ export async function readClinicalRetrievalRun(input: {
 }
 
 export async function fetchClinicalRetrievalPage(input: {
+  oracleLifetimeSearch?: boolean;
   fetchImpl?: typeof fetch;
   memberId: string;
   request: HostedClinicalRecordsFetchPageRequest;
@@ -280,7 +284,10 @@ export async function fetchClinicalRetrievalPage(input: {
         retrievalSlice.sliceId,
         pageUrlHash,
       ].join("\n"));
+  const timing = clinicalPageTiming(input.oracleLifetimeSearch, run.connection.sourceSystem, retrievalSlice);
   const claimed = await claimRetrievalPageRequest({
+    staleMs: timing.staleMs,
+    maxClaimVersion: timing.maxClaimVersion,
     requiresProcessorApprovals: run.connection.requiresProcessorApprovals,
     firstStart: run.startedAt === null,
     connectionId: run.connection.id,
@@ -305,6 +312,7 @@ export async function fetchClinicalRetrievalPage(input: {
       accessToken,
       fetchImpl: input.fetchImpl,
       pageUrl: pageUrl.url,
+      timeoutMs: timing.timeoutMs,
     });
     return await finishClinicalRetrievalPage({ response, input, run, retrievalSlice, pageUrl,
       fhirBaseUrl, openedPatientId: requireFhirPatientId(openedPatientId), claimed });
@@ -1000,7 +1008,24 @@ async function requireCurrentAccessToken(input: {
   return accessToken;
 }
 
+// Only a capable caller and the Web-owned frozen slice can extend this request.
+function clinicalPageTiming(capable: boolean | undefined, sourceSystem: string, slice: ClinicalFhirRetrievalSlice) {
+  if (!isOracleLifetimeSearch(sourceSystem, slice)) {
+    return { maxClaimVersion: MAX_LOGICAL_REQUEST_CLAIM_VERSION, timeoutMs: FHIR_REQUEST_TIMEOUT_MS, staleMs: PAGE_REQUEST_CLAIM_STALE_MS };
+  }
+  // The saved slice alone sets the claim window and ceiling, so a caller rolled back mid-run
+  // cannot strand a page. A shorter-lived caller can encounter a claim held by a longer-lived one.
+  // A foreground interruption costs a claim and a completion. Scale the ceiling with the
+  // wider window so interruptions per second of provider wait stay within the ordinary budget.
+  return {
+    maxClaimVersion: Math.ceil(MAX_LOGICAL_REQUEST_CLAIM_VERSION * ORACLE_LIFETIME_SEARCH_TIMEOUT_MS / FHIR_REQUEST_TIMEOUT_MS),
+    timeoutMs: capable ? ORACLE_LIFETIME_SEARCH_TIMEOUT_MS : FHIR_REQUEST_TIMEOUT_MS,
+    staleMs: ORACLE_LIFETIME_PAGE_CALLBACK_MS,
+  };
+}
+
 async function fetchFhirPage(input: {
+  timeoutMs?: number;
   accessToken: string;
   accept?: string;
   fetchImpl?: typeof fetch;
@@ -1016,7 +1041,7 @@ async function fetchFhirPage(input: {
       },
       method: "GET",
       redirect: "manual",
-      signal: AbortSignal.timeout(FHIR_REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(input.timeoutMs ?? FHIR_REQUEST_TIMEOUT_MS),
     });
   } catch (cause) {
     throw clinicalRecordsError({
@@ -1153,6 +1178,8 @@ function hasSurroundingAsciiWhitespace(value: string): boolean {
 }
 
 async function claimRetrievalPageRequest(input: {
+  staleMs?: number;
+  maxClaimVersion?: number;
   requiresProcessorApprovals: boolean | null;
   firstStart: boolean;
   reservationBytes?: number;
@@ -1203,12 +1230,12 @@ async function claimRetrievalPageRequest(input: {
     || record.queryScopeId !== (input.queryScopeId ?? null)
     || record.sliceId !== (input.sliceId ?? null)
   ) return { claimed: false, errorCode: "request-page-conflict", retryable: false };
-  if (record.claimVersion >= MAX_LOGICAL_REQUEST_CLAIM_VERSION) {
+  if (record.claimVersion >= (input.maxClaimVersion ?? MAX_LOGICAL_REQUEST_CLAIM_VERSION)) {
     return { claimed: false, errorCode: "request-retry-limit-reached", retryable: false };
   }
   const isFirstCompletion = record.responseBytes === null;
   const previousCompletedAt = record.completedAt;
-  const staleBefore = new Date(now.getTime() - PAGE_REQUEST_CLAIM_STALE_MS);
+  const staleBefore = new Date(now.getTime() - (input.staleMs ?? PAGE_REQUEST_CLAIM_STALE_MS));
   try {
     return await prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, input.memberId);

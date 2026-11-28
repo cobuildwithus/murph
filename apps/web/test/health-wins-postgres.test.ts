@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createBrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +10,7 @@ import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route
 import { freezeHealthSelections, prepareHealthCandidates } from "../src/lib/health-wins/card-options";
 import { generateHealthWins, type HealthWinsInput } from "../src/lib/health-wins/engine";
 import * as inputs from "../src/lib/health-wins/inputs";
+import * as companion from "../src/lib/device-sync/companion-numbers";
 import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/profile/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { GET as photo } from "../app/api/game/v1/health/photos/[id]/route";
@@ -21,6 +23,7 @@ import { DELETE as deleteComment } from "../app/api/game/v1/health/comments/[id]
 import { GET as listHides } from "../app/api/game/v1/health/hides/route";
 import { DELETE as unhide, PUT as hide } from "../app/api/game/v1/health/hides/[memberId]/route";
 import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transport";
+import * as applePush from "../src/lib/apple-push/send";
 import * as board from "../src/lib/game/board";
 import * as gameCrypto from "../src/lib/game/crypto";
 import * as moderation from "../src/lib/game/moderation";
@@ -32,6 +35,7 @@ import * as crypto from "../src/lib/health-wins/crypto";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { getPrisma } from "../src/lib/prisma";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
+import { experimentReplica } from "./support/health-win-experiment-replica";
 
 const deferred = vi.hoisted(() => [] as Array<() => Promise<void>>);
 const readPhotoObject = vi.hoisted(() => vi.fn());
@@ -60,9 +64,9 @@ async function person(firstName = "Finch") {
   for (const scope of ["launch.legal", "launch.health-data"] as const) {
     await recordHostedLaunchRequiredConsent({ memberId: id, scope, prisma: db });
   }
-  const { token } = await issueHostedAppSession({ memberId: id });
+  const { token, sessionId } = await issueHostedAppSession({ memberId: id });
   vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", members.join(","));
-  return { id, request(path: string, method = "GET", body?: object) {
+  return { id, sessionId, request(path: string, method = "GET", body?: object) {
     return new Request(`https://example.test/api/game/v1/health/${path}`, {
       method, headers: { authorization: `Bearer ${serializeHostedNativeSessionToken(token)}`, "content-type": "application/json" },
       body: body && JSON.stringify(body),
@@ -129,11 +133,37 @@ async function addComment(who: Person, postId: string, fields?: CommentFields) {
   return id;
 }
 
-async function readComments(who: Person, postId: string) {
-  const response = await comments(who.request(`posts/${postId}/comments`), context(postId));
+type PageComment = { id: string; parentId: string | null; recipientMemberId: string | null; recipientFirstName: string | null };
+async function commentPage(who: Person, postId: string, cursor?: string) {
+  const query = cursor ? "?cursor=" + encodeURIComponent(cursor) : "";
+  const response = await comments(who.request(`posts/${postId}/comments${query}`), context(postId));
   expect(response.status).toBe(200);
-  const result: { comments: { id: string; recipientMemberId: string | null; recipientFirstName: string | null }[] } = await response.json();
-  return result.comments;
+  const page: { comments: PageComment[]; ancestors: { id: string }[]; nextCursor: string | null } = await response.json();
+  return page;
+}
+async function readComments(who: Person, postId: string) {
+  return (await commentPage(who, postId)).comments;
+}
+
+async function captureCommentPushes(people: Person[]) {
+  const tokens = new Map(people.map(who => [who.id, randomUUID().replaceAll("-", "").repeat(2)]));
+  await db.companionPushRoute.createMany({ data: people.map(who => ({
+    userId: who.id, gameSessionId: who.sessionId, installationId: randomUUID(), token: tokens.get(who.id)!,
+    environment: "development", topic: "ai.withmurph.app.dev", alertsAllowed: true, updatedAt: new Date(),
+  })) });
+  vi.spyOn(applePush, "prepareApplePushProviderToken").mockResolvedValue({ value: "fixture", issuedAt: Date.now() });
+  const sends = vi.spyOn(applePush, "sendApplePush").mockResolvedValue("sent");
+  return async (postId: string, commentId: string, targets: [Person, "reply" | "comment"][]) => {
+    for (const task of deferred.splice(0)) await task();
+    const requests = sends.mock.calls.map(([request]) => request);
+    expect(requests).toHaveLength(targets.length);
+    for (const [who, reason] of targets) expect(requests).toContainEqual(expect.objectContaining({
+      target: expect.objectContaining({ token: tokens.get(who.id) }),
+      data: { notification: "health_comment", postId, commentId },
+      message: { kind: "alert", body: reason === "reply" ? "Someone replied to your comment." : "You have a new comment on your post." },
+    }));
+    sends.mockClear();
+  };
 }
 
 async function commentIds(who: Person, postId: string) {
@@ -153,6 +183,24 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     deferred.length = 0;
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("serves the logged intervention and run counts from the stored win set", async () => {
+    const member = await person();
+    const client = createBrowserVaultQueryClient(await experimentReplica());
+    const load = vi.spyOn(companion, "loadPublishedCompanionMetricReplica").mockResolvedValue({ client, state: "ready", freshness: "fresh" });
+    for (let read = 0; read < 2; read++) {
+      const response = await wins(member.request("wins"));
+      expect(response.status).toBe(200);
+      const { candidates } = await response.json();
+      expect(candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "experiment_result", title: { number: "Meditation", measure: "" },
+          chart: expect.objectContaining({ adherence: { done: 13, target: 10 } }) }),
+        expect.objectContaining({ kind: "experiment_result", title: { number: "Running", measure: "" },
+          chart: expect.objectContaining({ adherence: { done: 11, target: 15 } }) }),
+      ]));
+    }
+    expect(load).toHaveBeenCalledOnce();
   });
 
   it("reads one viewer measure privately, leaving the viewer's suggestions and the post's interactions intact", async () => {
@@ -696,7 +744,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     const response = await comments(reader.request(`posts/${postId}/comments`), context(postId));
     expect(opening).toHaveBeenCalledOnce();
     expect(response.status).toBe(role === "poster" ? 404 : 200);
-    if (role === "commenter") expect(await response.json()).toEqual({ comments: [], nextCursor: null });
+    if (role === "commenter") expect(await response.json()).toEqual({ comments: [], ancestors: [], nextCursor: null });
   });
 
   it("shows poster-only comments to their two participants and respects commenter hides and blocks", async () => {
@@ -773,7 +821,6 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     const otherRecipient = await addComment(peer, postId, { visibility: "poster" });
     const foreign = await addComment(recipient, otherPostId, { visibility: "poster" });
     const own = await addComment(poster, postId, { visibility: "poster" });
-    const publicComment = await addComment(recipient, postId);
     const reply = await addComment(poster, postId, { replyTo: source });
     const denied = async (who: Person, replyTo: string) => {
       const id = randomUUID();
@@ -784,7 +831,7 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     };
     await denied(recipient, source);
     await denied(peer, source);
-    for (const target of [foreign, own, publicComment, reply, randomUUID()]) await denied(poster, target);
+    for (const target of [foreign, own, reply, randomUUID()]) await denied(poster, target);
     for (const response of [
       await submitComment(poster, postId, own, { replyTo: source }),
       await submitComment(poster, postId, reply),
@@ -801,6 +848,208 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     await db.healthFeedHide.deleteMany({ where: { memberId: recipient.id } });
     expect((await deleteComment(recipient.request("comments/" + source, "DELETE"), context(source))).status).toBe(204);
     await denied(poster, source);
+  });
+
+  it("fans out public replies from the winning insert and deduplicates the poster and parent author", async () => {
+    const poster = await person(), writer = await person(), peer = await person();
+    await pair(poster, writer);
+    await pair(poster, peer);
+    const postId = await share(poster);
+    const pushes = await captureCommentPushes([poster, writer, peer]);
+    const parent = await addComment(writer, postId);
+    await pushes(postId, parent, [[poster, "comment"]]);
+
+    const id = randomUUID();
+    expect((await submitComment(peer, postId, id, { replyTo: parent, visibility: "poster" })).status).toBe(400);
+    expect(await db.healthPostComment.count({ where: { id } })).toBe(0);
+    const send = () => submitComment(peer, postId, id, { replyTo: parent });
+    expect((await Promise.all([send(), send()])).map(response => response.status)).toEqual([200, 200]);
+    expect(await db.healthPostComment.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      parentCommentId: parent, visibility: "everyone", recipientMemberId: null,
+    });
+    await pushes(postId, id, [[poster, "comment"], [writer, "reply"]]);
+    expect((await submitComment(peer, postId, id, { replyTo: parent, visibility: "poster" })).status).toBe(400);
+    const self = await addComment(writer, postId, { replyTo: parent });
+    await pushes(postId, self, [[poster, "comment"]]);
+    const answer = await addComment(poster, postId, { replyTo: parent });
+    await pushes(postId, answer, [[writer, "reply"]]);
+    const followup = await addComment(peer, postId, { replyTo: answer });
+    await pushes(postId, followup, [[poster, "reply"]]);
+
+    const revoked = await addComment(peer, postId, { replyTo: parent });
+    await db.healthFeedHide.create({ data: { memberId: writer.id, hiddenMemberId: peer.id } });
+    await pushes(postId, revoked, [[poster, "comment"]]);
+    const withdrawn = await addComment(poster, postId, { replyTo: parent });
+    expect((await deleteComment(poster.request("comments/" + withdrawn, "DELETE"), context(withdrawn))).status).toBe(204);
+    await pushes(postId, withdrawn, []);
+    const removedPost = await addComment(peer, postId, { replyTo: answer });
+    expect((await deletePost(poster.request("posts/" + postId, "DELETE"), context(postId))).status).toBe(204);
+    await pushes(postId, removedPost, []);
+  });
+
+  it("alternates a private thread between its participants and rechecks the recipient before each push", async () => {
+    const poster = await person(), friend = await person(), peer = await person();
+    await pair(poster, friend);
+    await pair(poster, peer);
+    const postId = await share(poster);
+    const pushes = await captureCommentPushes([poster, friend, peer]);
+    const root = await addComment(friend, postId, { visibility: "poster" });
+    await pushes(postId, root, [[poster, "comment"]]);
+    const answer = await addComment(poster, postId, { replyTo: root, visibility: "everyone" });
+    expect((await deleteComment(friend.request("comments/" + root, "DELETE"), context(root))).status).toBe(204);
+    await pushes(postId, answer, [[friend, "reply"]]);
+    const followup = await addComment(friend, postId, { replyTo: answer });
+    await pushes(postId, followup, [[poster, "reply"]]);
+    for (const actor of [poster, peer]) expect((await submitComment(actor, postId, randomUUID(), { replyTo: answer })).status).toBe(404);
+    for (const actor of [friend, peer]) expect((await submitComment(actor, postId, randomUUID(), { replyTo: followup })).status).toBe(404);
+    const last = await addComment(poster, postId, { replyTo: followup });
+    for (const who of [poster, friend]) {
+      const page = await commentPage(who, postId);
+      expect(page.comments).toMatchObject([
+        { id: last, parentId: followup, visibility: "poster", recipientMemberId: friend.id },
+        { id: followup, parentId: answer, visibility: "poster", recipientMemberId: null },
+        { id: answer, parentId: root, visibility: "poster", recipientMemberId: friend.id },
+      ]);
+      expect(page.ancestors).toEqual([{ id: root, parentId: null, postId, deleted: true, createdAt: expect.any(String) }]);
+    }
+    expect(await commentPage(peer, postId)).toEqual({ comments: [], ancestors: [], nextCursor: null });
+    await db.healthFeedHide.create({ data: { memberId: friend.id, hiddenMemberId: poster.id } });
+    await pushes(postId, last, []);
+  });
+
+  it("preserves old unlinked private receipts after withdrawal and binds new receipts to the exact parent", async () => {
+    const poster = await person(), friend = await person();
+    await pair(poster, friend);
+    const postId = await share(poster);
+    const source = await addComment(friend, postId, { visibility: "poster" });
+    const other = await addComment(friend, postId, { visibility: "poster" });
+    const pushes = await captureCommentPushes([poster, friend]);
+    const id = await addComment(poster, postId, { replyTo: source });
+    expect((await submitComment(poster, postId, id, { replyTo: other })).status).toBe(409);
+    // Model a rolling-deploy writer that stored only the recipient and claimed the push.
+    await db.healthPostComment.update({ where: { id }, data: { parentCommentId: null } });
+    expect((await submitComment(poster, postId, id, { replyTo: source })).status).toBe(200);
+    await pushes(postId, id, [[friend, "reply"]]);
+    expect((await deleteComment(friend.request("comments/" + source, "DELETE"), context(source))).status).toBe(204);
+    const replay = await submitComment(poster, postId, id, { replyTo: source, visibility: "everyone" });
+    expect(await replay.json()).toEqual({ id });
+    expect(await db.healthPostComment.findUniqueOrThrow({ where: { id } })).toMatchObject({ parentCommentId: null });
+    await pushes(postId, id, []);
+  });
+
+  it("returns only structural keys for consecutive unavailable ancestors and drops them with the last descendant", async () => {
+    const poster = await person(), first = await person(), second = await person(), reader = await person();
+    for (const friend of [first, second, reader]) await pair(poster, friend);
+    const postId = await share(poster);
+    const root = await addComment(first, postId);
+    const middle = await addComment(second, postId, { replyTo: root });
+    const leaf = await addComment(poster, postId, { replyTo: middle });
+    expect((await deleteComment(first.request("comments/" + root, "DELETE"), context(root))).status).toBe(204);
+    await db.healthFeedHide.create({ data: { memberId: reader.id, hiddenMemberId: second.id } });
+    const open = crypto.openHealthTexts;
+    const bodies = vi.spyOn(crypto, "openHealthTexts");
+    const identities = vi.spyOn(gameCrypto, "openGameTexts");
+    const page = await commentPage(reader, postId);
+    expect(page.comments.map(row => row.id)).toEqual([leaf]);
+    expect(page.ancestors).toEqual([
+      { id: middle, postId, parentId: root, createdAt: expect.any(String), hidden: true },
+      { id: root, postId, parentId: null, createdAt: expect.any(String), deleted: true },
+    ]);
+    expect(bodies.mock.calls.flatMap(([entries]) => entries.map(entry => entry.rowId))).toEqual([leaf]);
+    expect(identities.mock.calls.flatMap(([entries]) => entries.map(entry => entry.memberId))).toEqual([poster.id]);
+    bodies.mockImplementationOnce(async (...args) => {
+      const values = await open(...args);
+      await db.healthPostComment.update({ where: { id: leaf }, data: { deletedAt: new Date(), bodyEncrypted: null } });
+      return values;
+    });
+    expect(await commentPage(reader, postId)).toEqual({ comments: [], ancestors: [], nextCursor: null });
+  });
+
+  it.each(["hidden", "deleted"] as const)("replaces a parent that becomes %s during opening with a sparse ancestor", async reason => {
+    const poster = await person(), writer = await person(), reader = await person();
+    await pair(poster, writer);
+    await pair(poster, reader);
+    const postId = await share(poster);
+    const parent = await addComment(writer, postId);
+    const child = await addComment(reader, postId, { replyTo: parent });
+    const open = crypto.openHealthTexts;
+    vi.spyOn(crypto, "openHealthTexts").mockImplementationOnce(async (...args) => {
+      const values = await open(...args);
+      if (reason === "hidden") await db.healthFeedHide.create({ data: { memberId: reader.id, hiddenMemberId: writer.id } });
+      else await db.healthPostComment.update({ where: { id: parent }, data: { deletedAt: new Date(), bodyEncrypted: null } });
+      return values;
+    });
+    const page = await commentPage(reader, postId);
+    expect(page.comments.map(row => row.id)).toEqual([child]);
+    expect(page.ancestors).toEqual([{ id: parent, postId, parentId: null, createdAt: expect.any(String), [reason]: true }]);
+  });
+
+  it("detaches surviving public replies on account erasure and retains the post cascade", async () => {
+    const poster = await person(), writer = await person(), friend = await person();
+    const shared = await pair(poster, writer);
+    await pair(poster, friend);
+    const postId = await share(poster);
+    const root = await addComment(writer, postId);
+    const child = await addComment(friend, postId, { replyTo: root });
+    const leaf = await addComment(poster, postId, { replyTo: child });
+    await db.game.delete({ where: { id: shared } });
+    await db.hostedMember.delete({ where: { id: writer.id } });
+    const page = await commentPage(friend, postId);
+    expect(page.comments).toMatchObject([{ id: leaf, parentId: child }, { id: child, parentId: null }]);
+    expect(page.ancestors).toEqual([]);
+    expect((await submitComment(friend, postId, child, { replyTo: root })).status).toBe(409);
+    await db.healthPost.delete({ where: { id: postId } });
+    expect(await db.healthPostComment.count({ where: { postId } })).toBe(0);
+  });
+
+  it("serializes a new reply with withdrawal of its parent", async () => {
+    const poster = await person(), friend = await person();
+    await pair(poster, friend);
+    const postId = await share(poster);
+    const parent = await addComment(friend, postId), id = randomUUID();
+    const [reply, removal] = await Promise.all([
+      submitComment(poster, postId, id, { replyTo: parent }),
+      deleteComment(friend.request("comments/" + parent, "DELETE"), context(parent)),
+    ]);
+    expect(removal.status).toBe(204);
+    expect([200, 404]).toContain(reply.status);
+    const page = await commentPage(poster, postId);
+    expect(page.comments.map(row => row.id)).toEqual(reply.ok ? [id] : []);
+    expect(page.ancestors).toEqual(reply.ok ? [{ id: parent, parentId: null, postId, createdAt: expect.any(String), deleted: true }] : []);
+  });
+
+  it("pages tied timestamps beyond 300 and adds readable off-page ancestors without changing legacy cursors", async () => {
+    const poster = await person(), postId = await share(poster);
+    const ids = Array.from({ length: 303 }, () => randomUUID()).sort().reverse();
+    const createdAt = new Date();
+    const sealed = await crypto.sealHealthTexts(ids.map(rowId => ({
+      memberId: poster.id, table: "health_post_comment", rowId, field: "body", value: "Synthetic page entry",
+    })));
+    const root = ids[302], middle = ids[301];
+    await db.healthPostComment.createMany({ data: ids.map((id, index) => ({
+      id, postId, authorMemberId: poster.id, createdAt, bodyEncrypted: sealed[index],
+      parentCommentId: index < 2 ? middle : id === middle ? root : null,
+    })) });
+    const page = await commentPage(poster, postId);
+    expect(page.comments.map(row => row.id)).toEqual(ids.slice(0, 20));
+    expect(page.ancestors).toMatchObject([
+      { id: middle, parentId: root, body: "Synthetic page entry", authorMemberId: poster.id },
+      { id: root, parentId: null, body: "Synthetic page entry", authorMemberId: poster.id },
+    ]);
+    // Issue a cursor using the pre-thread wire format and resume through the live route.
+    const collection = "comments:" + postId;
+    const [legacy] = await crypto.sealHealthTexts([{ memberId: poster.id, table: "health_post", rowId: collection,
+      field: "page_cursor", value: [collection, createdAt.toISOString(), ids[19]].join("|") }]);
+    let cursor: string | null = Buffer.from(legacy).toString("base64url");
+    const chronological = page.comments.map(row => row.id).reverse();
+    expect(page.nextCursor).toEqual(expect.any(String));
+    while (cursor) {
+      const next = await commentPage(poster, postId, cursor);
+      expect(next.comments.map(row => row.id)).toEqual(ids.slice(chronological.length, chronological.length + 20));
+      chronological.unshift(...next.comments.map(row => row.id).reverse());
+      cursor = next.nextCursor;
+    }
+    expect(chronological).toEqual([...ids].reverse());
   });
 
   it("masks a recipient's name when access changes while the poster opens a private reply", async () => {

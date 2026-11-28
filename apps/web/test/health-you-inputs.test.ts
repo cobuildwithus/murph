@@ -114,6 +114,28 @@ describe("dated private replica projections", () => {
     expect(views.week?.days).toHaveLength(7);
     expect(views.you.factors.map((f) => f.key).sort()).toEqual(["restingHeartRate", "sleepTime"]);
   });
+  it("carries portion nutrients and timestamps into a private fibre-density row", () => {
+    const r = replica();
+    const meals = r.meals!;
+    for (let i = 0; i < 3; i++) {
+      const date = offset(today, -i);
+      const calories = 400, fiberGrams = i === 0 ? 0 : 6;
+      const totals = { calories, proteinGrams: null, carbsGrams: null, fatGrams: null };
+      meals.days.push({
+        ...totals, date, mealCount: 1, calorieMealCount: 1,
+        meals: [{ ...totals, id: "meal_sample" + i, name: null, eatenAt: date + "T15:00:00Z", fiberGrams, uploadId: null }],
+      });
+    }
+    const input = read(r);
+    expect(input.evidence.meals?.[0]).toMatchObject({ date: today, timestamp: today + "T15:00:00Z", fiber_g: 0 });
+    const view = buildViews(input).you;
+    expect(view.factors.find(f => f.key === "mealFibreDensity")).toMatchObject({
+      group: "food", label: "Fibre in logged meals", value: "15", unit: "g per 1,000 logged calories", target: null, rank: null,
+    });
+    expect(view.factors.map(f => f.key)).not.toContain("mealFibre");
+    delete meals.days[0].meals[0].fiberGrams;
+    expect(score(read(r).evidence, today)?.rows.meal_density).toBeUndefined();
+  });
   it("qualifies sleep timing by the selected provider and preserves offsets across a clock change", () => {
     const r = replica();
     const date = "2031-11-02";
@@ -582,7 +604,7 @@ describe("canonical check-in and sleep timing projections", () => {
   });
 });
 
-describe("round 4 private views", () => {
+describe("private age views", () => {
   it("marks a reference week partial even with daily phone samples", () => {
     const r = replica();
     r.metricRows = r.metricRows.map((row) => ({
@@ -643,10 +665,17 @@ describe("round 4 private views", () => {
     });
     expect(views.you.age).toBeUndefined();
   });
+  it("keeps an established sleep estimate steady within the tolerance band", () => {
+    const r = replica();
+    for (const row of r.metricRows) row.value = row.date > offset(today, -7) ? 400 : 390;
+    const input = read(r);
+    expect(score(input.evidence, today)?.changes.sleep).toBe(0);
+    expect(buildViews(input).you.week).toMatchObject({ daysAged: 7, basis: "observed" });
+  });
   it.each([-1, 1])("omits tiny observed weekly movements in direction %i", direction => {
     const r = replica();
     r.metricRows = r.metricRows.map(row => ({ ...row,
-      value: 390 + (row.date > offset(today, -7) ? direction * 0.01 : 0),
+      value: 390 + (row.date > offset(today, -7) ? direction * (model.daily.deadband.sleep * 60 + 0.1) : 0),
     }));
     const input = read(r);
     const movement = Math.abs(score(input.evidence, today)!.changes.sleep * YEAR);
