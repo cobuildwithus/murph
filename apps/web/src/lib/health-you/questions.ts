@@ -1,7 +1,9 @@
+import { habitQuestionsV1 } from "@murphai/contracts";
+import { ageAt } from "./engine";
 import { readCompanionClientInfo } from "../companion/client-info";
 import type { Bundle, YouView } from "./contract";
 import type { YouInputs } from "./evidence";
-import { coef, effectiveAnswer, eligible, type Rows } from "./engine/model";
+import { coef, effectiveAnswer, eligible, model, type Rows } from "./engine/model";
 
 type Question = YouView["questions"][number];
 const options = (...pairs: [string, string][]) => pairs.map(([value, label]) => ({ value, label }));
@@ -21,6 +23,27 @@ const questions: Record<string, Question> = {
     options: options(["yes", "Yes"], ["no", "No"], ["notSure", "Not sure"]) },
 };
 
+const habitOrder = [
+  "usual_pace", "coffee_cups", "tea_cups", "cycle_commute", "cycle_participation", "racquet_sport",
+  "swim_participation", "aerobics_participation", "home_stairs", "sitting_inactive", "weekly_group_activity",
+  "nut_frequency", "yogurt_frequency", "olive_oil", "table_salt", "fruit_juice", "tv_hours", "sleep_initiation",
+  "early_waking", "nonrestorative_sleep", "daytime_sleepiness", "habitual_nap", "natural_teeth", "living_alone",
+  "visits_household", "volunteer_hours", "loneliness", "passive_smoke", "daily_cigar", "smokeless",
+] as const satisfies readonly (keyof typeof habitQuestionsV1)[];
+
+function nextHabit(input: YouInputs, answered: Set<unknown>): Question | undefined {
+  const { whole } = ageAt(input.evidence, input.asOf, input.asOf);
+  const sex = input.evidence.profile.sex;
+  const key = habitOrder.find(key => {
+    const spec = model.evidence.factors[key];
+    return !answered.has(key) && whole >= spec.ages[0] && whole <= spec.ages[1]
+      && (!("sexes" in spec) || spec.sexes.some(value => value === sex));
+  });
+  if (!key) return;
+  const q = habitQuestionsV1[key];
+  return { key, text: q.question, inputKind: "options", options: Object.keys(q.options).map(value => ({ value, label: value })) };
+}
+
 export function nextQuestion(input: YouInputs, rows: Rows, optionsOnly = false, paused = false): Question[] {
   const answers = (input.evidence.checkins ?? []).filter(r => r.answerKey && eligible(r, input.asOf) && effectiveAnswer(r, input.asOf));
   if (answers.some(r => r.reported_at === input.asOf)) return [];
@@ -37,6 +60,10 @@ export function nextQuestion(input: YouInputs, rows: Rows, optionsOnly = false, 
     candidates.push(...factors.map(key => questions[key]));
   }
   if (!paused && input.needsWhoopAnswer) candidates.push(questions.whoopZones);
+  if (!paused && input.hasHabitQuestions) {
+    const habit = nextHabit(input, answered);
+    if (habit) candidates.push(habit);
+  }
   return candidates.filter(q => (!optionsOnly || q.options.length > 0) && !answered.has(q.key)).slice(0, 1);
 }
 

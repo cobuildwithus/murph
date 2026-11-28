@@ -1,3 +1,4 @@
+import { releasedGroups, visibleRevisions, factor, clamp } from "./daily";
 import { stepCapacity } from "./combine";
 import {
   between,
@@ -5,6 +6,8 @@ import {
   contrast,
   curveAt,
   dated,
+  eligible,
+  interp,
   distance,
   model,
   lookup,
@@ -43,6 +46,50 @@ function peakOxygen(data: MemberEvidence, at: string, inputs: Record<string, unk
     inputs.vo2_method = cpet.length ? "cpet" : "watch";
   }
 }
+function floorAndBalance(
+  tests: Observation[],
+  age: number,
+  inputs: Record<string, unknown>,
+  proxy: Record<string, number>,
+  legacy: boolean,
+) {
+  for (const [test, key, u] of [
+    ["sit_and_rise", "floor_rise", "points"],
+    ["floor_rise", "floor_rise", "points"],
+    ["one_leg_balance", "balance", "s"],
+  ]) {
+    if (!legacy && test === "floor_rise") continue;
+    const aliases = legacy
+      ? [test]
+      : key === "floor_rise"
+        ? ["sit_and_rise", "floor_rise"]
+        : ["one_leg_balance", "single_leg_balance"];
+    let matches = tests.filter((r) => aliases.includes(String(r.test)) && r.unit === u);
+    if (!legacy) {
+      const latest = matches.map(rowDay).sort().at(-1);
+      matches = matches.filter((r) => rowDay(r) === latest);
+    }
+    if ((legacy ? tests.filter((r) => r.test === test) : matches).some((r) => r.verified === "self"))
+      proxy[key] = model.feeds.self_test_quality;
+    const v = number(pick(matches, "value"));
+    if (!between(v, 0, 10)) continue;
+    if (key === "floor_rise") {
+      inputs[key] = v;
+      if (
+        !legacy &&
+        age >= 51 &&
+        matches.every((r) => r.verified !== "self" && r.completed_protocol === true)
+      )
+        inputs.observed_floor = true;
+    } else if (v === 10) inputs[key] = "pass";
+    else if (
+      !legacy &&
+      matches.every((r) => r.eyes_open === true && r.attempts === 3 && r.completed_protocol === true)
+    )
+      inputs[key] = "fail";
+  }
+}
+
 function performance(
   data: MemberEvidence,
   at: string,
@@ -50,9 +97,21 @@ function performance(
   sex: Sex,
   inputs: Record<string, unknown>,
   proxy: Record<string, number>,
+  legacy: boolean,
 ) {
   peakOxygen(data, at, inputs);
-  const tests = dated(data, "fitness_tests", at, 49).filter(
+  const released = legacy
+    ? dated(data, "fitness_tests", at, 49)
+    : visibleRevisions(data.fitness_tests ?? [], at, (r) => [
+        r.test,
+        r.session_id ?? "",
+        r.side ?? "",
+      ]).filter(
+        (r) =>
+          distance(at, rowDay(r)) <= model.policy.protocol.combine_days &&
+          ["final", "amended", "corrected"].includes(String(r.status ?? "final")),
+      );
+  const tests = released.filter(
     (r) =>
       ["video", "coach", "self"].includes(String(r.verified)) &&
       r.protocol === "murph-combine-v1" &&
@@ -75,34 +134,30 @@ function performance(
       hands.set(id, hand);
     }
   }
-  for (const [test, key, u] of [
-    ["sit_and_rise", "floor_rise", "points"],
-    ["floor_rise", "floor_rise", "points"],
-    ["one_leg_balance", "balance", "s"],
-  ]) {
-    if (tests.some((r) => r.verified === "self" && r.test === test))
-      proxy[key] = model.feeds.self_test_quality;
-    const v = number(
-      pick(
-        tests.filter((r) => r.test === test && r.unit === u),
-        "value",
-      ),
-    );
-    if (between(v, 0, 10) && (key === "floor_rise" || v === 10)) inputs[key] = key === "balance" ? "pass" : v;
-  }
+  floorAndBalance(tests, age, inputs, proxy, legacy);
+  const completeHands = [...hands.entries()].filter(([, h]) => h.left.length && h.right.length);
   const grip = number(
     pick(
-      [...hands.values()]
-        .filter((h) => h.left.length && h.right.length)
-        .map((h) => ({ date: h.date, value: (Math.max(...h.left) + Math.max(...h.right)) / 2 })),
+      completeHands.map(([, h]) => ({
+        date: h.date,
+        value: (Math.max(...h.left) + Math.max(...h.right)) / 2,
+      })),
       "value",
     ),
   );
+  const latestDay = completeHands
+    .map(([, h]) => h.date)
+    .sort()
+    .at(-1);
+  const latestSessions = new Set(completeHands.filter(([, h]) => h.date === latestDay).map(([id]) => id));
   const qs = curveAt(age, model.grip_ref[sex], (r) => r);
   if (grip !== null && qs) {
     if (
       tests.some(
-        (r) => r.verified === "self" && ["grip", "grip_max", "grip_strength"].includes(String(r.test)),
+        (r) =>
+          (legacy || latestSessions.has(JSON.stringify([rowDay(r), r.session_id ?? ""]))) &&
+          r.verified === "self" &&
+          ["grip", "grip_max", "grip_strength"].includes(String(r.test)),
       )
     )
       proxy.grip = model.feeds.self_test_quality;
@@ -110,6 +165,24 @@ function performance(
     return { grip, qs };
   }
   return null;
+}
+
+function methodWeight(k: string, inputs: Record<string, unknown>, legacy: boolean) {
+  const f = catalog[k];
+  const method = f.method_key && String(inputs[f.method_key]);
+  return !legacy && k === "vo2_peak" && method === "step"
+    ? model.projection.step_vo2.quality
+    : method
+      ? f.method_weights?.[method]
+      : 1;
+}
+
+function studyWeight(k: string, age: number, observedFloor: unknown, legacy: boolean) {
+  let shrinkage = (!legacy && lookup(model.display_weights, k)) || catalog[k].shrinkage;
+  if (!legacy && age < 51 && ["balance", "floor_rise"].includes(k)) shrinkage *= 0.65;
+  if (!legacy && age < 51 && k === "grip") shrinkage = interp(age, [35, 51], [0.62, 0.32]);
+  if (!legacy && k === "floor_rise" && observedFloor) shrinkage = 0.18;
+  return shrinkage;
 }
 
 function publishedCurves(
@@ -126,17 +199,19 @@ function publishedCurves(
       !f ||
       excluded.has(k) ||
       (typeof v !== "number" && typeof v !== "string") ||
-      (f.age_range && !between(age, f.age_range[0], f.age_range[1])) ||
+      (f.age_range &&
+        !(!legacy && age >= 20 && age < 51 && ["floor_rise", "balance"].includes(k)) &&
+        !between(age, f.age_range[0], f.age_range[1])) ||
       Object.entries(f.requires ?? {}).some(([key, value]) => inputs[key] !== value)
     )
       continue;
-    const weight = f.method_key ? f.method_weights?.[String(inputs[f.method_key])] : 1;
+    const weight = methodWeight(k, inputs, legacy);
     const log = contrast(f, v);
     if (weight == null || log === null) continue;
     let target: Scalar;
     if (f.curve.bounds) target = f.curve.bounds.slice().sort((a, b) => contrast(f, a)! - contrast(f, b)!)[0];
     else target = f.curve.rows!.reduce((a, b) => (a.ratio <= b.ratio ? a : b)).value;
-    const shrinkage = (!legacy && lookup(model.display_weights, k)) || f.shrinkage;
+    const shrinkage = studyWeight(k, age, inputs.observed_floor, legacy);
     result[k] = {
       value: v,
       unit: f.unit,
@@ -157,7 +232,7 @@ function coreExclusions(core: Rows) {
   const excluded = new Set<string>();
   for (const [owned, keys] of [
     [core.sleep, groups.sleep],
-    [core.steps || core.activity || core.hip_minutes, groups.volume],
+    [core.steps || core.activity || core.hip_minutes || core.zone_intensity, groups.volume],
     [core.non_hdl, groups.atherogenic_lipids],
     [core.gait || core.knee, groups.function],
     [core.fibre, ["fibre", ...suppresses.fibre, "diet_pattern"]],
@@ -236,6 +311,60 @@ function describeCapacity(result: Rows, inputs: Record<string, unknown>, age: nu
   }
 }
 
+function pushupFactor(
+  data: MemberEvidence,
+  at: string,
+  age: number,
+  sex: Sex,
+  core: Rows,
+  result: Rows,
+  multiplier: number,
+) {
+  if (
+    between(age, 20, 50) &&
+    !["grip", "floor_rise", "balance", "gait", "gait_speed", "knee"].some((k) => result[k] || core[k])
+  ) {
+    const rows = releasedGroups(data.fitness_tests ?? [], at, (r) => r.test)
+      .flat()
+      .filter(
+        (r) =>
+          r.test === "pushups_max" &&
+          r.protocol === "murph-combine-v1" &&
+          distance(at, rowDay(r)) <= model.policy.protocol.combine_days,
+      );
+    const latest = rows.map(rowDay).sort().at(-1),
+      group = rows.filter((r) => rowDay(r) === latest),
+      n = number(group[0]?.value);
+    if (
+      between(n, 0, 300) &&
+      Number.isInteger(n) &&
+      group.every(
+        (r) =>
+          number(r.value) === n &&
+          eligible(r, at) &&
+          !r.partial &&
+          !r.pain_or_stop &&
+          ["final", "amended", "corrected"].includes(String(r.status ?? "final")) &&
+          r.variant === "toes" &&
+          r.unit === "reps" &&
+          ["coach", "video", "self"].includes(String(r.verified)),
+      )
+    ) {
+      const q = 0.045 * (group.some((r) => r.verified === "self") ? 0.65 : 1) * (sex === "2" ? 0.65 : 1);
+      result.pushups_max = factor(
+        "pushups_max",
+        n,
+        "reps",
+        null,
+        (multiplier * q * Math.log(0.04) * (clamp(n, 10, 41) - 25)) / 31,
+        q,
+        "C, occupational cardiovascular event transfer",
+        "https://pubmed.ncbi.nlm.nih.gov/30768197/",
+      );
+    }
+  }
+}
+
 export function published(
   data: MemberEvidence,
   at: string,
@@ -251,7 +380,7 @@ export function published(
   questionnaireInputs(data, at, ci, inputs, proxy);
   const { absolute_log_caps: caps } = model.overlap;
   const limited = Boolean(restrictions(data.profile).restricted);
-  const grip = limited ? null : performance(data, at, age, sex, inputs, proxy);
+  const grip = limited ? null : performance(data, at, age, sex, inputs, proxy, legacy);
   if (limited) for (const k of caps.conditioning.factors) delete inputs[k];
   if (core.running || core.lifting) delete inputs.lifting;
   if (core.vo2) delete inputs.vo2_peak;
@@ -281,6 +410,7 @@ export function published(
       percentile: percentile(grip.grip, grip.qs),
       target: grip.qs.at(-1),
     });
+  if (!legacy && !limited) pushupFactor(data, at, age, sex, core, result, multiplier);
   return result;
 }
 

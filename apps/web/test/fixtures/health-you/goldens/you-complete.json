@@ -1,5 +1,5 @@
 {
-  "version": "r7.0",
+  "version": "r17.0",
   "asOf": "2025-03-29",
   "state": "ready",
   "profile": {
@@ -11,11 +11,11 @@
     "real": 51.2,
     "gap": -4.8,
     "low": 36.1,
-    "high": 56.6
+    "high": 56.7
   },
   "week": {
-    "daysAged": 7.92,
-    "saved": -0.92,
+    "daysAged": 8.01,
+    "saved": -1.01,
     "partial": false,
     "basis": "observed"
   },
@@ -99,10 +99,10 @@
       "target": {
         "text": "Aim for 8,000+ steps a day"
       },
-      "years": -1.7,
-      "yearsText": "−1.7",
+      "years": -1.6,
+      "yearsText": "−1.6",
       "featured": true,
-      "whatItIs": "This counts the steps the device recorded each day.",
+      "whatItIs": "These are recorded steps. Shorter wearing time can also explain a lower count.",
       "whatLowersIt": "Add a short walk to a part of your day when you usually sit.",
       "rank": null,
       "grade": null,
@@ -117,8 +117,8 @@
       "value": "25",
       "unit": "min of variation",
       "target": null,
-      "years": -0.4,
-      "yearsText": "−0.4",
+      "years": -0.5,
+      "yearsText": "−0.5",
       "featured": true,
       "whatItIs": "How much your sleep start time varies across nights.",
       "whatLowersIt": "Try going to bed around the same time each night.",

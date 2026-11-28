@@ -1,50 +1,56 @@
 {
-  "daysAged": 7.92,
-  "saved": -0.92,
+  "daysAged": 8.01,
+  "saved": -1.01,
   "days": [
     {
       "date": "2025-03-23",
       "label": "Sun",
-      "aged": 1.31
+      "aged": 1.39
     },
     {
       "date": "2025-03-24",
       "label": "Mon",
-      "aged": 1.31
+      "aged": 1.39
     },
     {
       "date": "2025-03-25",
       "label": "Tue",
-      "aged": 1.22
+      "aged": 1.39
     },
     {
       "date": "2025-03-26",
       "label": "Wed",
-      "aged": 1.22
+      "aged": 1.38
     },
     {
       "date": "2025-03-27",
       "label": "Thu",
-      "aged": 0.99
+      "aged": 1.21
     },
     {
       "date": "2025-03-28",
       "label": "Fri",
-      "aged": 0.93
+      "aged": 1.15
     },
     {
       "date": "2025-03-29",
       "label": "Sat",
-      "aged": 0.93
+      "aged": 1.15
     }
   ],
   "helped": [],
   "cost": [
     {
+      "key": "restingHeartRate",
+      "label": "Resting heart rate",
+      "icon": "restingHeartRate",
+      "days": 0.19
+    },
+    {
       "key": "steps",
       "label": "Daily steps",
       "icon": "steps",
-      "days": 0.24
+      "days": 0.19
     },
     {
       "key": "mealFibreDensity",

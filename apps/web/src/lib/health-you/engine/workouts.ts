@@ -156,7 +156,7 @@ function habitFactor(
   if (
     key === "step_goal" &&
     !restricted &&
-    !["steps", "activity", "hip_minutes", "aerobic"].some((k) => core[k])
+    !["steps", "activity", "hip_minutes", "aerobic", "zone_intensity"].some((k) => core[k])
   ) {
     const rec = device("steps", sum / config.habit_days, age, sex, legacy);
     if (rec)

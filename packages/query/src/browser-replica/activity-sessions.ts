@@ -10,9 +10,10 @@ import {
   buildActivitySessionCandidate,
   dedupeActivitySessionCandidates,
   groupMetricCandidatesByDate,
+  resolveActivitySessionCandidatePublicProvider,
 } from "../wearables/candidates.ts";
 import { readWearableExternalRef } from "../wearables/observation.ts";
-import type { WearableDataset } from "../wearables/types.ts";
+import type { WearableDataset, WearableMetricCandidate } from "../wearables/types.ts";
 import { isRunActivity } from "./runs.ts";
 
 function detailedType(value: string | null | undefined) {
@@ -67,6 +68,36 @@ function loggedSession(event: CanonicalEntity) {
   return buildActivitySessionCandidate(event, "manual", ref);
 }
 
+const zoneProviders: Record<string, NonNullable<ProjectedActivitySession["zones"]>["provider"]> = {
+  whoop: "whoop",
+  garmin: "garmin",
+  garmin_connect: "garmin",
+  apple_watch: "apple_watch",
+  apple_health: "apple_health",
+  apple_health_kit: "apple_health",
+  apple_healthkit: "apple_health",
+  fitbit: "fitbit",
+  google_health: "google_health",
+};
+
+function sessionZones(row: WearableMetricCandidate): ProjectedActivitySession["zones"] {
+  const zones = row.heartRateZones;
+  if (!zones?.length || zones.length > 20) return;
+  const source = resolveActivitySessionCandidatePublicProvider(row).toLowerCase().replaceAll("-", "_");
+  if (!Object.hasOwn(zoneProviders, source)) return;
+  const bins = [...zones].sort((a, b) => (a.zone ?? -1) - (b.zone ?? -1));
+  const first = bins[0].zone;
+  if (first === undefined || !Number.isInteger(first) || first < 0 || first > 20) return;
+  if (bins.some((bin, i) => bin.zone !== first + i || !Number.isFinite(bin.durationMinutes) ||
+    bin.durationMinutes < 0 || bin.durationMinutes > 1440)) return;
+  return {
+    provider: zoneProviders[source],
+    first,
+    minutes: bins.map(bin => bin.durationMinutes),
+    ...(row.recordedAt && { reportedAt: row.recordedAt }),
+  };
+}
+
 /** The composer counts sessions this month. Retain enough for a delayed publication at a month boundary. */
 export function projectActivitySessions(vault: VaultReadModel, wearables: WearableDataset, today: string) {
   const from = addDaysToIsoDate(today, -62);
@@ -88,13 +119,18 @@ export function projectActivitySessions(vault: VaultReadModel, wearables: Wearab
   const detailedWorkouts: DetailedWorkout[] = [];
   const activitySessions = [...groupMetricCandidatesByDate(recent)]
     .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([date, rows]) =>
-      dedupeActivitySessionCandidates(rows).map((row) => {
+    .flatMap(([date, rows]) => {
+      // Use the winning original session. Mirrored aggregates can combine different devices' bins.
+      const originals = new Map(rows.map(row => [row.candidateId,row]));
+      return dedupeActivitySessionCandidates(rows).map((row) => {
         const type = sessionType(row.activityType);
         const detail = type === "other" && detailedType(row.activityType);
-        if (detail) detailedWorkouts.push({ date, type: detail, minutes: row.value });
-        return { date, type, minutes: row.value };
-      }),
-    );
+        const source = originals.get(row.candidateId);
+        const zones = source && sessionZones(source);
+        const session = {date, minutes:row.value, ...(zones && {zones})};
+        if (detail) detailedWorkouts.push({ ...session, type: detail });
+        return {date,type,minutes:row.value,...(!detail && zones && {zones})};
+      });
+    });
   return { activitySessions, detailedWorkouts };
 }

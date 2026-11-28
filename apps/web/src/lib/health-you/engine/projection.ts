@@ -29,7 +29,7 @@ function standardized(key: string, row: Contribution) {
   const z = (v - Number(center)) / Number(sd);
   return clamp(kind === "above" ? Math.max(0, z) : kind === "below" ? Math.max(0, -z) : z, -3, 3);
 }
-function fitted(key: string, row: Contribution, sex: Sex) {
+export function fitted(key: string, row: Contribution, sex: Sex) {
   const z = standardized(key, row);
   return z === null
     ? null
@@ -43,17 +43,13 @@ export function blend(rows: Rows, age: number, sex: Sex) {
     if (!w) continue;
     const landmark = fitted(key, row, sex);
     const transport = policy.transport.includes(key) ? 1 : (lookup(policy.limited_transport, key) ?? 0);
-    const projected = transport ? (row.years * transport) / shrink(age) : (landmark ?? 0);
+    const projected = transport
+      ? (row.years * transport) / shrink(age)
+      : (landmark ?? 0) * (lookup(policy.landmark_display_fraction, key) ?? 1);
     row.landmark_years = landmark;
     row.projected_years = projected;
     row.years = (1 - w) * row.years + w * projected;
     if (row.level !== undefined) row.level *= 1 - w + (w * transport) / shrink(age);
-    if (["albumin", "a1c", "rdw"].includes(key)) {
-      const median = curveAt(age, refs[key].ref[sex], (r) => [r.q[2]])![0];
-      const center = fitted(key, { ...row, value: median }, sex) ?? 0;
-      row.projected_years -= center;
-      row.years -= w * center;
-    }
   }
 }
 

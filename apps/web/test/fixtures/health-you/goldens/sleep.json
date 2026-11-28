@@ -3,7 +3,7 @@
   "hero": {
     "value": "6h 37m",
     "unit": null,
-    "years": -0.2
+    "years": -0.3
   },
   "chart": {
     "kind": "trend",
@@ -396,8 +396,8 @@
       "value": "25",
       "unit": "min of variation",
       "target": null,
-      "years": -0.4,
-      "yearsText": "−0.4",
+      "years": -0.5,
+      "yearsText": "−0.5",
       "featured": true,
       "whatItIs": "How much your sleep start time varies across nights.",
       "whatLowersIt": "Try going to bed around the same time each night.",

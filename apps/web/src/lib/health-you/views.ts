@@ -1,3 +1,4 @@
+import { habitQuestionsV1 } from "@murphai/contracts";
 import { offerings } from "./offerings";
 import { youLabel } from "./labels";
 import { nextQuestion } from "./questions";
@@ -184,7 +185,7 @@ function factorFor(k: string, r: Contribution, tenths: number, input: YouInputs,
     unit,
     years: tenths / 10,
     yearsText: signed(tenths / 10),
-    whatItIs: lookup(model.display, k)?.what_it_is,
+    whatItIs: r.what_it_is ?? lookup(model.display, k)?.what_it_is,
     whatLowersIt: lookup(actions, k),
     rank,
     target: targetText ? { text: targetText } : null,
@@ -474,6 +475,12 @@ export function buildViews(input: YouInputs): Bundle {
 }
 
 function factorGroup(k: string): Factor["group"] {
+  const family = lookup(model.evidence.factors, k)?.family;
+  if (family === "motion") return "activity";
+  if (family === "food") return "food";
+  if (["sleep_initiation","early_waking","nonrestorative_sleep","daytime_sleepiness","habitual_nap"].includes(k)) return "sleep";
+  if (k==="pushups_max") return "fitness";
+  if (k==="thigh_cm" || k==="waist_hip_ratio") return "body";
   return fields[k]?.group === "blood" || bloodKeys.has(k) || k === "sbp"
     ? "blood"
     : ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint", "ahi"].includes(k)
@@ -513,6 +520,11 @@ function categoryValue(r: Contribution, value: string) {
   return value;
 }
 
+function habitLabel(k: string, value: Contribution["value"]) {
+  const question = lookup<{ options: Readonly<Record<string, string | number | null>> }>(habitQuestionsV1, k);
+  return question && Object.entries(question.options).find(([, comparison]) => comparison === value)?.[0];
+}
+
 function displayValue(k: string, r: Contribution) {
   let value = typeof r.value === "number" ? fmt(r.value) : r.value,
     unit: string | null = displayUnit(r.unit) || null;
@@ -523,7 +535,7 @@ function displayValue(k: string, r: Contribution) {
   if (r.unit === "HEI-2015 cohort quintile") value = String(r.value).replace(/^Q/, "");
   if (r.unit === "habitual weightlifting frequency category") value = value.replace("/week", " a week").replace("/month", " a month");
   if (r.unit === "h SD") value = fmt(Number(r.value) * 60, 0);
-  if (r.unit === "moderate-equivalent min/day") {
+  if (["moderate-equivalent min/day", "recorded moderate-equivalent min/day"].includes(r.unit)) {
     value = fmt(Number(r.value) * 7, 0);
     unit = "active min a week";
   }
@@ -533,6 +545,8 @@ function displayValue(k: string, r: Contribution) {
     unit = null;
   }
   value = categoryValue(r, value);
+  const habit = habitLabel(k, r.value);
+  if (habit !== undefined) return { value: habit, unit: null };
   if (k === "smoking") {
     value = Number(r.value) === 0 ? "Never" : Number(r.value) === 1 ? "Current" : "Former";
     unit = null;

@@ -142,6 +142,19 @@ describe("private check-in routes", () => {
       instrument: "you-answer", instrumentVersion: 1, answer: { key, value },
     });
   });
+  it("submits a closed habit answer with a replayable action ID after the publication upgrade", async () => {
+    const fields = { id, key: "coffee_cups", value: "Three" };
+    expect((await answer(req(fields))).status).toBe(503);
+    mocks.load.mockResolvedValue(ready({ ...replica, generation: 22 }));
+    expect((await answer(req({ ...fields, value: "unlisted" }))).status).toBe(400);
+    expect(mocks.submit).not.toHaveBeenCalled();
+    for (let replay = 0; replay < 2; replay++) expect((await answer(req(fields))).status).toBe(200);
+    const requests = mocks.submit.mock.calls.map(([call]) => call.request);
+    expect(requests[1].actionId).toEqual(requests[0].actionId);
+    expect(requests[1].action).toEqual(requests[0].action);
+    expect(requests[0]).toMatchObject({ actionId: id, action: { kind: "assessment.respond",
+      response: { instrument: "you-answer", instrumentVersion: 1, answer: { key: fields.key, value: fields.value } } } });
+  });
   it.each([["diabetes", true], ["selfRatedHealth", "unsure"], ["quitDate", "2100-05-01"],
     ["quitDate", "2026-02-30"], ["alcoholDrinksPerWeek", -1], ["smoking", "yes"]])(
     "rejects an invalid %s answer before submission", async (key, value) => {
