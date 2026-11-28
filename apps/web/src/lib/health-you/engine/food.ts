@@ -3,7 +3,6 @@ import {
   dated,
   day,
   distance,
-  eligible,
   isObject,
   model,
   native,
@@ -14,7 +13,8 @@ import {
   type Rows,
   type Sex,
 } from "./model";
-import { clamp, factor, replay, visibleRevisions, type StreamDates } from "./daily";
+import { factor } from "./daily";
+import { mealFactors } from "./meals";
 const config = model.daily;
 function pattern(r: Observation, profile: Observation) {
   const answers = r.answers;
@@ -38,66 +38,14 @@ function pattern(r: Observation, profile: Observation) {
     parts.push(Math.min(1, fish / 2));
   const drinks = number(answers.alcohol),
     peak = number(answers.most_in_one_sitting);
+  const validDrinks =
+    between(drinks, 0, 150) && (!("most_in_one_sitting" in answers) || between(peak, 0, drinks));
   return {
     value: (100 * parts.reduce((a, b) => a + b, 0)) / parts.length,
     quality: (config.food_quality * parts.length) / 7,
-    drinks:
-      between(drinks, 0, 150) && (!("most_in_one_sitting" in answers) || between(peak, 0, drinks))
-        ? drinks
-        : null,
+    drinks: validDrinks ? drinks : null,
+    peak: validDrinks ? peak : null,
   };
-}
-function inconsistentMealEnergy(r: Observation): boolean {
-  const kcal = number(r.calories),
-    protein = number(r.protein_g),
-    carbs = number(r.carbs_g),
-    fat = number(r.fat_g);
-  return (
-    between(kcal, 1, 8000) &&
-    between(protein, 0, 1000) &&
-    between(carbs, 0, 1000) &&
-    between(fat, 0, 1000) &&
-    Math.abs(4 * (protein + carbs) + 9 * fat - kcal) > Math.max(120, 0.45 * kcal)
-  );
-}
-function confirmedMealDays(ci: Observation[]) {
-  const complete = new Map<string, Set<boolean>>();
-  for (const r of ci)
-    if (typeof r.diet_day_complete === "boolean")
-      complete.set(rowDay(r), (complete.get(rowDay(r)) ?? new Set()).add(r.diet_day_complete));
-  return complete;
-}
-function mealDays(data: MemberEvidence, at: string, ci: Observation[]) {
-  const complete = confirmedMealDays(ci);
-  const meals = new Map<string, Map<unknown, number>>(),
-    invalid = new Set<string>();
-  for (const r of visibleRevisions(data.meals ?? [], at, (r) => r.id, true)) {
-    const date = rowDay(r),
-      confirmed = complete.get(date);
-    if (r.eaten === false || !confirmed?.has(true) || confirmed.has(false)) continue;
-    const v = number(r.fiber_g ?? r.fibre_g),
-      ids = meals.get(date) ?? new Map();
-    if (
-      !eligible(r, at) ||
-      r.partial ||
-      r.confirmed === false ||
-      !["number", "string"].includes(typeof r.id) ||
-      !between(v, 0, 100) ||
-      (ids.has(r.id) && ids.get(r.id) !== v) ||
-      inconsistentMealEnergy(r)
-    ) {
-      invalid.add(date);
-      continue;
-    }
-    meals.set(date, ids.set(r.id, v));
-  }
-  const dates: StreamDates = new Map();
-  for (const [date, ids] of meals) {
-    const total = [...ids.values()].reduce((a, b) => a + b, 0);
-    if (!invalid.has(date) && total <= 100)
-      dates.set(date, new Map([["confirmed food log", new Set([total])]]));
-  }
-  return dates;
 }
 export function foodFactors(
   data: MemberEvidence,
@@ -124,9 +72,23 @@ export function foodFactors(
     weeks.every(
       (w) =>
         w.date !== week.date ||
-        (w.value === week.value && w.quality === week.quality && w.drinks === week.drinks),
+        (w.value === week.value &&
+          w.quality === week.quality &&
+          w.drinks === week.drinks &&
+          w.peak === week.peak),
     )
   ) {
+    if (week.peak !== null)
+      result.alcohol_peak = factor(
+        "alcohol_peak",
+        week.peak,
+        "US drinks/sitting",
+        null,
+        0,
+        0,
+        "C, seven-day recall",
+        "https://pubmed.ncbi.nlm.nih.gov/24621084/",
+      );
     if (!disordered)
       result.food_pattern = factor(
         "food_pattern",
@@ -142,18 +104,6 @@ export function foodFactors(
       if (rec) result.alcohol = { ...rec, reference: "reported seven-day alcohol proxy" };
     }
   }
-  if (!disordered && !ci.some((r) => "habitual_fibre_g_day" in r && distance(at, rowDay(r)) <= 90)) {
-    const rec = replay("meal_fibre", mealDays(data, at, ci), at, (v) =>
-      factor(
-        "meal_fibre",
-        v,
-        "g/day",
-        30,
-        (mult * config.meal_quality * Math.log(0.89) * (clamp(v, 10, 35) - 20)) / 10,
-        config.meal_quality,
-      ),
-    );
-    if (rec) result.meal_fibre = rec;
-  }
+  if (!disordered) Object.assign(result, mealFactors(data, at, ci, Boolean(core.fibre), mult));
   return result;
 }

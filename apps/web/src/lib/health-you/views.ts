@@ -11,6 +11,10 @@ import type { MarkerInput, YouInputs } from "./evidence";
 const keys: Record<string, string> = {
   onset_sd: "bedtime",
   meal_fibre: "mealFibre",
+  meal_density: "mealFibreDensity",
+  alcohol_peak: "mostDrinks",
+  caffeine_timing: "caffeineTiming",
+  alcohol_timing: "alcoholTiming",
   food_pattern: "foodPattern",
   ldl: "cholesterol",
   lpa_molar: "lpa",
@@ -55,6 +59,10 @@ const food = new Set([
   ...model.overlap.absolute_log_caps.food.factors,
   "alcohol",
   "meal_fibre",
+  "meal_density",
+  "alcohol_peak",
+  "caffeine_timing",
+  "alcohol_timing",
   "food_pattern",
 ]);
 const fitness = new Set([
@@ -100,6 +108,9 @@ const units: Record<string, string> = {
   "steps/day": "steps a day",
   "moderate-equivalent min/week": "active min a week",
   "estimated moderate-equivalent min/week": "active min a week",
+  "US drinks/sitting": "standard drinks",
+  "g/1,000 logged kcal": "g per 1,000 logged calories",
+  "hours before main sleep": "hours before sleep",
   "h SD": "min of variation",
   "ms RMSSD": "ms",
   "bpm asleep": "bpm",
@@ -610,6 +621,7 @@ function weekView(
         ...(evidence.sleep_sessions ?? []),
         ...(evidence.checkins ?? []),
         ...(evidence.workouts ?? []),
+        ...(current.changes.meal_density !== undefined ? evidence.meals ?? [] : []),
       ]
         .map(rowDay)
         .filter((d) => d >= offset(asOf, -6) && d <= asOf),

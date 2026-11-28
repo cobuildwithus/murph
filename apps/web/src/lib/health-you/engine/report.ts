@@ -12,6 +12,7 @@ import {
   number,
   percentile,
   refs,
+  type Contribution,
   type Family,
   type MemberEvidence,
   type Rows,
@@ -44,7 +45,8 @@ function countedEvidence(rows: Rows) {
     counted.add("workouts");
     counted.add("workout_minutes");
   }
-  if (rows.meal_fibre) {
+  if (rows.alcohol_peak) counted.add("food_week.most_in_one_sitting");
+  if (rows.meal_fibre || rows.meal_density) {
     counted.add("meals");
     counted.add("fibre");
   }
@@ -155,6 +157,15 @@ function rankFactor(k: string, r: Omit<Rows[string], "grade">, age: number, sex:
     r.target_source = "Survey median, descriptive only";
   }
 }
+function targetStatus(key: string, row: Pick<Contribution, "source" | "target">) {
+  if (key === "meal_density") return "no individual intake target";
+  if (["lean_change", "hrv", "alcohol_peak", "alcohol_timing", "caffeine_timing"].includes(key))
+    return "descriptive trend only";
+  if (row.source === "Development NHANES examination cohorts" && lookup(model.clinical_fit.coefficients, key) === 0)
+    return "descriptive only; fitted residual is zero";
+  if (coef[key] === 0) return "descriptive median; no independent fitted effect";
+  return row.target !== null ? "reference comparison" : "no independent fitted effect";
+}
 export function finishFactors(rows: Rows, parts: Record<string, number>, age: number, sex: Sex) {
   return Object.fromEntries(
     Object.entries(rows).map(([k, row]) => {
@@ -171,16 +182,6 @@ export function finishFactors(rows: Rows, parts: Record<string, number>, age: nu
         r.percentile = native(k, model.policy.protocol.smoking_codes.former, age, sex)?.percentile ?? null;
         r.reference = "former-smoking category; duration unranked";
       }
-      const target_status = ["lean_change", "hrv"].includes(k)
-        ? "descriptive trend only"
-        : r.source === "Development NHANES examination cohorts" &&
-            lookup(model.clinical_fit.coefficients, k) === 0
-          ? "descriptive only; fitted residual is zero"
-          : coef[k] === 0
-            ? "descriptive median; no independent fitted effect"
-            : r.target !== null
-              ? "reference comparison"
-              : "no independent fitted effect";
       const rank_status =
         k === "steps" && r.reference.includes("wear unknown")
           ? "lower-bound comparison"
@@ -193,7 +194,7 @@ export function finishFactors(rows: Rows, parts: Record<string, number>, age: nu
           ...r,
           ...lookup(model.display, k)!,
           evidence_grade: grade,
-          target_status,
+          target_status: targetStatus(k, r),
           rank_status,
           contribution_tenths: parts[k] ?? 0,
         },
@@ -220,10 +221,30 @@ export function absoluteRisk(
     base +
     younger * Math.min(1, Math.max(0, (55 - chronological) / 35)) +
     older * Math.min(1, Math.max(0, (chronological - 55) / 25));
-  const shift = c.intercept + (sex === "1" ? c.male_offset : 0) + panel * coverage;
+  const young = Math.min(1, Math.max(0, (45 - chronological) / 10));
+  const background = model.background;
+  const fraction = background.accident_fraction[sex] * young;
+  const shift =
+    c.intercept +
+    (sex === "1" ? c.male_offset : 0) +
+    panel * coverage +
+    background.young_panel * young * coverage +
+    background.historical * interp(year, [1979, 1988, 1994, 1999], [0, 1, 1, 0]);
+  const years = policy.risk_horizon;
+  const hazard =
+    (1 - fraction) * integratedHazard(age, sex, year, years, shift) +
+    (fraction ? fraction * integratedHazard(chronological, sex, year, years, 0) : 0);
+  return {
+    probability: -Math.expm1(-hazard),
+    years,
+    reference_year: Math.min(Math.max(year, t.years[0]), t.years.at(-1)!),
+  };
+}
+
+function integratedHazard(age: number, sex: Sex, year: number, years: number, shift: number) {
+  const t = model.reference;
   const grid = t.age_centers,
-    rates = sex === "1" ? t.male : t.female,
-    years = policy.risk_horizon;
+    rates = sex === "1" ? t.male : t.female;
   let total = 0;
   for (const [j, node] of t.nodes.entries()) {
     const elapsed = node * years,
@@ -241,9 +262,5 @@ export function absoluteRisk(
       (t.weights[j] * Math.exp(shift + lo + ((hi - lo) * (a - grid[i])) / (grid[i + 1] - grid[i]))) /
       t.denominator;
   }
-  return {
-    probability: -Math.expm1(-years * total),
-    years,
-    reference_year: Math.min(Math.max(year, t.years[0]), t.years.at(-1)!),
-  };
+  return years * total;
 }

@@ -25,13 +25,13 @@ function compare(actual: unknown, expected: unknown, path: string) {
     for (const [k, v] of Object.entries(expected)) compare(actual[k], v, path + "." + k);
   } else expect(actual, path).toEqual(expected);
 }
-describe("round 4 scorer parity", () => {
-  it("contains the entire synthetic release", () => expect(new Set(cases.map((r) => r.case)).size).toBe(168));
+describe("round 5 scorer parity", () => {
+  it("contains the entire synthetic release", () => expect(new Set(cases.map((r) => r.case)).size).toBe(180));
   for (const row of cases)
     it(row.case, () => {
       compare(fromRaw(row.member, row.as_of, row.history), row.expected, row.case);
     });
-  it("counts fibre only on confirmed days with internally consistent meal energy", () => {
+  it("uses daily fibre grams on confirmed days with consistent meal energy", () => {
     const at = "2034-08-19";
     const dates = Array.from({ length: 9 }, (_, i) => offset(at, -i));
     const data = {
@@ -47,8 +47,12 @@ describe("round 4 scorer parity", () => {
         calories: 500,
       })),
     };
-    expect(score(data, at)?.rows.meal_fibre?.value).toBe(23);
-    expect(score({ ...data, checkins: [] }, at)?.rows.meal_fibre).toBeUndefined();
+    const confirmed = score(data, at)?.rows;
+    expect(confirmed?.meal_fibre?.value).toBe(23);
+    expect(confirmed?.meal_density).toBeUndefined();
+    const partial = score({ ...data, checkins: [] }, at)?.rows;
+    expect(partial?.meal_fibre).toBeUndefined();
+    expect(partial?.meal_density?.value).toBe(46);
     expect(
       score({ ...data, meals: data.meals.map((m) => ({ ...m, calories: 1800 })) }, at)?.rows.meal_fibre,
     ).toBeUndefined();

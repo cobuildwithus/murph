@@ -90,7 +90,11 @@ export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex
   const streaks = verifiedHabits(data, at, age, sex, result, mult);
   Object.assign(result, streaks);
   if (result.sleep_regularity) delete result.onset_sd;
-  capFamily(result, [...caps.food.factors, "food_pattern", "meal_fibre"], model.daily.food_cap * mult);
+  capFamily(
+    result,
+    [...caps.food.factors, "food_pattern", "meal_fibre", "meal_density"],
+    model.daily.food_cap * mult,
+  );
   capFamily(result, ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint"], model.daily.sleep_cap * mult);
   if ([wear, workouts, streaks].some((r) => Object.keys(r).length))
     capFamily(
@@ -125,9 +129,9 @@ export function comparableMovement(
     ["daily", ["pulse", "steps", "hip_minutes", "activity", "hrv"]],
     ["sleep_sessions", ["sleep", "onset_sd"]],
     ["workouts", ["aerobic", "lifting", "sauna"]],
-    ["meals", ["meal_fibre"]],
+    ["meals", ["meal_fibre", "meal_density"]],
     ["habits", ["steps", "lifting", "sauna", "alcohol"]],
-    ["checkins", ["smoking", "alcohol", "fibre", "meal_fibre"]],
+    ["checkins", ["smoking", "alcohol", "fibre", "meal_fibre", "meal_density"]],
   ] as const) {
     if (
       data[group]?.some((r) =>
@@ -183,15 +187,15 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     .sort((a, b) => remainder(b) - remainder(a) || (a < b ? -1 : 1))
     .slice(0, extra))
     parts[k]++;
-  let unknown = 0,
-    total = 0;
-  for (const [k, c] of Object.entries(coef)) {
-    total += c * c;
-    unknown += c * c * (1 - (rows[k]?.quality ?? 0));
-  }
-  const half = Math.hypot(
-    model.policy.completion_floor_years,
-    interp(age, model.completion.age, model.completion.half_width) * Math.sqrt(unknown / total),
+  const panel = model.completion;
+  const weights = Object.entries(panel.weights);
+  const observed =
+    sumYears(weights.map(([k, weight]) => weight * (rows[k]?.quality ?? 0))) /
+    sumYears(weights.map(([, weight]) => weight));
+  const half = interp(
+    observed,
+    panel.fractions,
+    panel.widths.map((width) => interp(age, panel.age, width)),
   );
   const cutoff = offset(at, -period);
   let days: number | null = null;
@@ -215,7 +219,17 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     ...(factors.some(
       ([k]) =>
         model.optional.includes(k) ||
-        ["onset_sd", "meal_fibre", "food_pattern", "aerobic", "apob", "steps", "sleep", "pulse"].includes(k),
+        [
+          "onset_sd",
+          "meal_fibre",
+          "meal_density",
+          "food_pattern",
+          "aerobic",
+          "apob",
+          "steps",
+          "sleep",
+          "pulse",
+        ].includes(k),
     )
       ? ["published_extension_unvalidated_as_combined"]
       : []),
