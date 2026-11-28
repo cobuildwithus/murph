@@ -102,7 +102,7 @@ lives only in the hosted secret `ORACLE_SMART_CLIENT_ID`.
   `public/.well-known/oracle/production.jwks.json` (RS384, kid
   `murph-oracle-production-4D9w9oKpPTN3`). No sandbox key set is published, so
   a `sandbox` profile fails closed. Flags: `CLINICAL_RECORDS_ORACLE_STARTS`,
-  `CLINICAL_RECORDS_ORACLE_MEMBER_IDS` (exact opaque IDs),
+  `CLINICAL_RECORDS_ORACLE_MEMBER_IDS` (exact opaque IDs, or `*` for every member on production entries only; the sandbox entry always needs an exact ID),
   `CLINICAL_RECORDS_ORACLE_SEARCH`, `CLINICAL_RECORDS_ORACLE_DISABLED`
   (stops callbacks, refreshes, pages and documents; records stay). Enabling
   flags need exactly `1`; the kill switch is on for any value except empty,
