@@ -39,7 +39,7 @@ function recordedSessions(types: SessionType[]) {
       type, minutes: 16, date: `${today.slice(0, 7)}-${day}`,
     })));
     return { input: { member: { today, age: null, sex: null, wearableProvider: null }, sessions },
-      sourceRevision: types.join("-"), complete: true, distanceArtUrl: null };
+      milestones: [], sourceRevision: types.join("-"), complete: true, distanceArtUrl: null };
   });
 }
 

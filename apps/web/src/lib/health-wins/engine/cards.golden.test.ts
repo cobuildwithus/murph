@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { encodePolyline } from "../../game/progress/route-geometry";
 import { addDays } from "../../game/time";
+import { milestoneCard } from "../milestones";
 import { buildGameResultCard } from "./game-result";
 import { detectHealthWins, type CardKind, type CardSpec, type DailySample, type HealthWinsInput } from "./index";
 import { newestHealthWinsFirst } from "./ranking";
@@ -11,6 +12,7 @@ import type { RecordedActivity } from "./types";
 
 const goldenFile = new URL("./fixtures/cards.golden.json", import.meta.url);
 const chartsByKind = {
+  milestone: ["medal"],
   trend_change: ["trend"],
   threshold_count: ["bars"],
   streak: ["bars", "bars"],
@@ -177,8 +179,11 @@ it("exports synthetic examples of every rendered shape", () => {
     ...recorded.map(candidate => candidate.variants[0].spec),
     ...newestHealthWinsFirst(diet.selected),
     gameResult,
+    milestoneCard({ id: "synthetic-coin", key: "fixture-crossing", kind: "total", measureId: "squats.reps",
+      subjectMemberId: null, on: "2036-11-18", createdAt: new Date(0), seenAt: null,
+      data: { value: 600, unit: "reps", noun: "squats" } })!,
   ];
-  expect(cards).toHaveLength(23);
+  expect(cards).toHaveLength(24);
   for (const [kind, charts] of Object.entries(chartsByKind)) {
     expect(cards.filter(card => card.kind === kind).map(card => card.chart.type).sort(), kind).toEqual(charts);
   }

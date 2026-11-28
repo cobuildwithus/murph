@@ -251,6 +251,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.health_post_cheer",
   "prisma.health_feed_hide",
   "prisma.health_you_cache",
+  "prisma.health_notification_read",
   "prisma.health_win_set",
   "prisma.health_win_nudge",
   "prisma.health_post_attachment",

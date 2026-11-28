@@ -5,6 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PUT as saveActivity } from "../app/api/game/v1/health/activities/[id]/route";
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
+import { GET as pinCandidates } from "../app/api/game/v1/health/me/pin-candidates/route";
+import { PUT as pin } from "../app/api/game/v1/health/me/pins/route";
+import { readAwards, settleAwards } from "../src/lib/game/progress/awards";
+import { gameWinInputs } from "../src/lib/health-wins/game-inputs";
+import { GET as notifications } from "../app/api/game/v1/health/notifications/route";
+import { GET as unread } from "../app/api/game/v1/health/notifications/unread/route";
+import { POST as seen } from "../app/api/game/v1/health/notifications/seen/route";
+import { profileFactorLookupKeys } from "../src/lib/hosted-onboarding/contact-privacy-core";
+import { prepareHealthProfileExport } from "../src/lib/health-profile/export";
 import { GET as wins } from "../app/api/game/v1/health/wins/route";
 import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route";
 import { freezeHealthSelections, prepareHealthCandidates } from "../src/lib/health-wins/card-options";
@@ -185,6 +194,133 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     vi.unstubAllEnvs();
   });
 
+  it("posts and freezes the same personal milestone while a partner cannot read the private award", async () => {
+    const owner = await person("Thistle"), peer = await person("Larch");
+    await pair(peer, owner);
+    const day = new Date().toISOString().slice(0, 10);
+    await settleAwards(owner.id, [{ kind: "total", key: "synthetic-squat-crossing", measureId: "squats.reps",
+      on: day, subjectMemberId: null, data: { unit: "reps", value: 600, noun: "squats" } }], async () => {});
+    const awards = await readAwards(owner.id);
+    const id = awards[0].id, key = "milestone:" + id;
+    const source = gameWinInputs(owner.id, day, { facts: [], states: new Map(), awards }, null);
+    vi.spyOn(inputs, "readHealthWinInputs").mockResolvedValue({ input: { member: { today: day, age: null, sex: null, wearableProvider: null } },
+      milestones: source.milestones, sourceRevision: source.sourceRevision, distanceArtUrl: null, complete: true });
+    const privateNotes = await (await notifications(owner.request("notifications"))).json();
+    expect(privateNotes.highlights).toMatchObject([{ id: key, actors: [], unread: true,
+      open: { kind: "milestone", key: id }, action: { kind: "post", milestoneKey: id } }]);
+    expect((await (await notifications(peer.request("notifications"))).json()).highlights).toEqual([]);
+    await db.gameProgressAward.update({ where: { memberId_lookup: { memberId: owner.id, lookup: id } }, data: { seenAt: new Date() } });
+    expect((await (await notifications(owner.request("notifications"))).json()).highlights[0].unread).toBe(false);
+    const picker = await (await wins(owner.request("wins"))).json();
+    expect(picker.candidates).toMatchObject([{ id: key, kind: "milestone", filter: "milestones", chart: { type: "medal" } }]);
+    const publish = await post(owner.request("posts", "POST", { id: randomUUID(), setRevision: picker.setRevision,
+      cards: [{ candidateId: key, option: "original", specRevision: picker.candidates[0].specRevision }] }));
+    expect(publish.status).toBe(200);
+    expect((await (await notifications(owner.request("notifications"))).json()).highlights).toEqual([]);
+    vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", owner.id);
+    const offered = await (await pinCandidates(owner.request("me/pin-candidates"))).json();
+    expect(offered.candidates).toContainEqual(expect.objectContaining({ key, revision: picker.setRevision, filter: "milestones" }));
+    const result = await pin(owner.request("me/pins", "PUT", { picks: [{ key, revision: picker.setRevision }] }));
+    expect(result.status).toBe(200);
+    expect((await result.json()).pins).toMatchObject([{ key, pinnedOn: day, card: { kind: "milestone" } }]);
+  });
+
+  it("shows only dated working cheers, visible replies, open tickets, current joins and actionable invites", async () => {
+    const owner = await person("Balsa"), peer = await person("Reedgrass");
+    vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", owner.id);
+    const gameId = await pair(owner, peer);
+    const ticket = await db.gameTicket.create({ data: { id: randomUUID(), stakeKey: "synthetic-stake",
+      gameId, owedBySeats: [1], owedToSeats: [0] } });
+    const factor = profileFactorLookupKeys(owner.id, "steps").current;
+    await db.healthWorkingOn.create({ data: { memberId: owner.id, factor, since: "2026-03-07", position: 0 } });
+    const working = { ownerId: owner.id, memberId: peer.id, factor };
+    await db.healthWorkingOnCheer.create({ data: { ...working, createdAt: null } });
+    const postId = randomUUID(), parent = randomUUID(), child = randomUUID();
+    await db.healthPost.create({ data: { id: postId, authorMemberId: peer.id } });
+    await db.healthPostComment.create({ data: { id: parent, postId, authorMemberId: owner.id, bodyEncrypted: "synthetic-sealed" } });
+    await db.healthPostComment.create({ data: { id: child, postId, parentCommentId: parent, authorMemberId: peer.id, bodyEncrypted: "synthetic-sealed" } });
+    const inviteId = randomUUID(), token = randomUUID();
+    games.push(inviteId);
+    const sealed = await gameCrypto.sealGameText({ table: "game", field: "invite_token", memberId: peer.id, rowId: inviteId }, token);
+    await db.game.create({ data: { id: inviteId, createdBy: peer.id, wordsOwnerMemberId: peer.id,
+      status: "invited", terms: {}, termsWordsEncrypted: "unused", inviteTokenEncrypted: sealed,
+      invitees: { create: { seat: 1, memberId: owner.id } } } });
+    const list = async () => {
+      const result = await notifications(owner.request("notifications"));
+      expect(result.status).toBe(200);
+      return result.json();
+    };
+    expect(await list()).toMatchObject({ unread: 4, items: expect.arrayContaining([
+      expect.objectContaining({ kind: "ticket", open: { kind: "tickets" } }),
+      expect.objectContaining({ kind: "reply", open: { kind: "post", postId } }),
+      expect.objectContaining({ kind: "joined", open: { kind: "game", gameId } }),
+      expect.objectContaining({ kind: "challenge", open: { kind: "invite", token } }),
+    ]) });
+    await db.healthWorkingOnCheer.update({ where: { memberId_ownerId_factor: working }, data: { createdAt: new Date() } });
+    expect(await list()).toMatchObject({ unread: 5, items: expect.arrayContaining([
+      expect.objectContaining({ kind: "workingOnCheer", open: { kind: "workingOn", factor: "steps" } }),
+    ]) });
+    await db.gameTicket.update({ where: { id: ticket.id }, data: { status: "redeemed" } });
+    await db.game.update({ where: { id: inviteId }, data: { inviteExpiresAt: new Date(0) } });
+    vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", "");
+    expect(await list()).toMatchObject({ unread: 2 });
+  });
+
+  it("counts visible notifications, groups by local date and advances a single read mark", async () => {
+    const owner = await person("Ochre"), peer = await person("Quartz"), other = await person("Slate");
+    for (const handler of [notifications, unread, seen]) {
+      const unauthenticated = await handler(new Request("https://example.invalid/notifications"));
+      expect(unauthenticated.status).toBe(401);
+    }
+    const list = async () => {
+      const response = await notifications(owner.request("notifications"));
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const badge = async () => (await unread(owner.request("notifications/unread"))).json();
+    const mark = async (through: string) => (await seen(owner.request("notifications/seen", "POST", { through }))).json();
+    expect(await list()).toEqual({ unread: 0, highlights: [], items: [] });
+    await pair(peer, owner);
+    await pair(other, owner);
+    const postId = randomUUID();
+    await db.healthPost.create({ data: { id: postId, authorMemberId: owner.id } });
+    const now = Date.now();
+    const recent = new Date(now - 3600000);
+    await db.healthPostCheer.createMany({ data: [peer, other].map((actor, i) => ({ memberId: actor.id, postId,
+      createdAt: new Date(recent.getTime() - i) })) });
+    const cheer = { kind: "cheer", actorCount: 2, actors: [{ memberId: peer.id }, { memberId: other.id }] };
+    const first = await list();
+    expect(first).toMatchObject({ unread: 1, items: [cheer] });
+    expect((await list()).items[0].id).toBe(first.items[0].id);
+    await db.healthPostComment.createMany({ data: Array.from({ length: 198 }, (_, i) => ({
+      id: randomUUID(), postId, authorMemberId: peer.id, createdAt: new Date(now - 20000 - i), bodyEncrypted: "synthetic-unopened",
+    })) });
+    const timings: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const start = performance.now();
+      const loaded = await list();
+      timings.push(Math.round(performance.now() - start));
+      expect(loaded.unread).toBe(99);
+      expect(loaded.items).toHaveLength(80);
+    }
+    process.stdout.write(`Synthetic 200-event notifications GET (ms): ${timings.join(", ")}\n`);
+    expect(await badge()).toEqual({ unread: 99 });
+    const through = new Date(now).toISOString();
+    expect(await mark(through)).toEqual({ unread: 0 });
+    expect(await mark(new Date(now - 86400000).toISOString())).toEqual({ unread: 0 });
+    const stream = await prepareHealthProfileExport(owner.id, async () => {});
+    const chunks = [];
+    for await (const chunk of stream!()) chunks.push(JSON.parse(chunk));
+    expect(chunks[0].healthProfile.notificationsSeenThrough).toBe(through);
+    await db.healthFeedHide.create({ data: { memberId: peer.id, hiddenMemberId: owner.id } });
+    expect(await list()).toMatchObject({ items: [{ kind: "cheer", actorCount: 1, actors: [{ memberId: other.id }] }] });
+    await db.gameBlock.create({ data: { blockerMemberId: owner.id, blockedMemberId: other.id } });
+    expect(await list()).toEqual({ unread: 0, items: [], highlights: [] });
+    await db.healthFeedHide.deleteMany({ where: { memberId: peer.id } });
+    await revokeHostedConsentScope({ memberId: peer.id, scope: "launch.health-data", prisma: db });
+    expect(await list()).toEqual({ unread: 0, items: [], highlights: [] });
+  });
+
   it("serves the logged intervention and run counts from the stored win set", async () => {
     const member = await person();
     const client = createBrowserVaultQueryClient(await experimentReplica());
@@ -211,12 +347,14 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     const input = insulinReading(8.1, new Date().toISOString().slice(0, 10));
     vi.spyOn(inputs, "readHealthWinInputs").mockResolvedValue({
       input: { ...input, sessions: Array.from({ length: 3 }, () => ({ date: input.member.today, type: "walk", minutes: 23 })) },
-      sourceRevision: "fixture", complete: true, distanceArtUrl: null,
+      milestones: [], sourceRevision: "fixture", complete: true, distanceArtUrl: null,
     });
     const suggestions = await wins(viewer.request("wins"));
     expect(suggestions.status).toBe(200);
     const before = await suggestions.json();
     expect(before.candidates).toHaveLength(1);
+    const offered = (await (await notifications(viewer.request("notifications"))).json()).highlights;
+    expect(offered).toMatchObject([{ kind: "winReady", action: { kind: "post", winId: before.candidates[0].id } }]);
     const stored = () => db.healthWinSet.findMany({ where: { memberId: viewer.id } });
     const sealed = await stored();
     const presentation = () => db.healthWinNudge.findUniqueOrThrow({ where: { memberId: viewer.id } });

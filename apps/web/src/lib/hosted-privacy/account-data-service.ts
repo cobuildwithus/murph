@@ -195,6 +195,10 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deleting the member cascades their sealed derived views. Canonical measurements remain in the vault export.",
   },
   {
+    slug: "prisma.health_notification_read", label: "Health notifications read through", deletion: "live-delete",
+    note: "Settings exports the read timestamp. Deleting the member cascades the timestamp.",
+  },
+  {
     slug: "prisma.health_win_set",
     label: "Health win suggestions",
     deletion: "live-delete",

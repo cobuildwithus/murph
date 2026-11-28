@@ -4,7 +4,7 @@ import type { Candidate, CardKind, CardSpec, DetectedHealthWins, Filter, HealthW
 export type { SelectedHealthWin } from "./types";
 
 const themes = {
-  Sleep: "sleep", Fitness: "fitness", Heart: "heart",
+  milestones: "milestones", Sleep: "sleep", Fitness: "fitness", Heart: "heart",
   Labs: "labs", Diet: "diet", Challenges: "challenges", Experiments: "experiments",
 } as const satisfies Record<Filter, CardSpec["theme"]>;
 

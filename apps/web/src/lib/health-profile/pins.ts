@@ -34,6 +34,7 @@ function ageCard(value: number, gap: number) {
 }
 function filter(card: { filter: string; kind: string }) {
   switch (card.filter) {
+    case "milestones": return "milestones";
     case "Heart": return "heart";
     case "Sleep": return "sleep";
     case "Labs": return "labs";
@@ -57,7 +58,7 @@ export async function publishedPins(memberId: string, pins: Awaited<ReturnType<t
 async function offered(auth: ProfileAuth, signal: AbortSignal, units: ClientUnits) {
   const owner = auth.member.id;
   await assertProfileAccess(getPrisma(), auth, owner);
-  const wins = await readHealthWins(auth, { signal, units }).catch(error => {
+  const wins = await readHealthWins(auth, { signal, units, includePostedMilestones: true }).catch(error => {
     if (error?.code === "HEALTH_WINS_UNAVAILABLE") return { candidates: [], setRevision: null };
     throw error;
   });
@@ -114,7 +115,7 @@ export async function setPins(auth: ProfileAuth, picks: Pick[], signal: AbortSig
     if (frozen && wins.setRevision) {
       if (localToday(currentProfile) !== pinnedOn) throw changed();
       await assertHealthSetCurrent(tx, owner, frozen.day, wins.setRevision);
-      const keys = [...postedCardKeys(owner, winPicks.map(p => p.key)).values()];
+      const keys = [...postedCardKeys(owner, winPicks.filter(p => !p.key.startsWith("milestone:")).map(p => p.key)).values()];
       if (keys.length && await tx.healthPost.findFirst({ where: { authorMemberId: owner, deletedAt: null,
         postedCardKeys: { hasSome: keys } }, select: { id: true } })) throw changed();
     }

@@ -1,8 +1,7 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
-import type { Amount, Health, HealthMetric, Measure, SavedHealth } from "./contract";
-import type { StoredAward } from "./awards";
-import { HEALTH_RECS, healthAgeTitle, healthMean14, healthMedalFace, healthWinText } from "./health";
+import type { Amount, Health, HealthMetric, Measure } from "./contract";
+import { HEALTH_RECS, healthMean14 } from "./health";
 import { formatAmount, formatNumber } from "./format";
 import { heartRateWindowSource, rankAge, agePercentile, type AgeProfile } from "./norms";
 
@@ -11,9 +10,7 @@ export interface HealthMetricInput {
   daily: RawHealthPoint[];
   baseline: number | null;
   baselineSource?: string | null;
-  step: number;
   direction: number;
-  wins: StoredAward[];
 }
 const labels = { restingHeartRate: "Resting HR", steps: "Steps", sleep: "Sleep" } as const;
 const units = { restingHeartRate: "bpm", steps: "steps", sleep: "seconds" } as const;
@@ -31,15 +28,13 @@ export function healthView(input: {
       : metric.daily.length ? "ok" : "missing",
   }));
   const available = input.metrics.filter(metric => metric.daily.length > 0);
-  const winCount = input.metrics.reduce((sum, metric) => sum + metric.wins.length, 0);
-  if (!input.snapshot && winCount === 0) return { joinedOn: input.joinedOn, today: input.today,
+  if (!input.snapshot) return { joinedOn: input.joinedOn, today: input.today,
     state: "notConnected", savedAt: null, winCount: 0, metrics: [], sums: [], recs: [] };
-  const state: Health["state"] = !input.snapshot ? "notConnected"
-    : input.snapshot.freshness === "stale" ? "stale"
+  const state: Health["state"] = input.snapshot.freshness === "stale" ? "stale"
     : available.length === 1 && available[0].id === "steps" ? "noWearable"
-    : input.joinedOn === input.today && winCount === 0 ? "connectedToday" : "ok";
-  return { joinedOn: input.joinedOn, today: input.today, state, savedAt: input.snapshot?.savedAt ?? null,
-    winCount, metrics, sums: input.sums,
+    : input.joinedOn === input.today ? "connectedToday" : "ok";
+  return { joinedOn: input.joinedOn, today: input.today, state, savedAt: input.snapshot.savedAt,
+    winCount: 0, metrics, sums: input.sums,
     recs: metrics.flatMap((metric, index) => metric.baseline !== null
       && healthMean14(input.metrics[index].daily, input.today) !== null && metric.direction !== "better" ? HEALTH_RECS[metric.id] : []) };
 }
@@ -48,8 +43,6 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   const current = healthMean14(metric.daily, today);
   const change = current !== null && metric.baseline !== null ? current - metric.baseline : null;
   const direction = change === null || change === 0 ? "flat" : change * metric.direction > 0 ? "better" : "worse";
-  const highest = Math.max(0, ...metric.wins.filter(award => award.kind === "health").map(award => award.data.level as number));
-  const target = metric.baseline === null ? null : metric.baseline + metric.direction * (highest + 1) * metric.step;
   const source = metric.id === "restingHeartRate" ? heartRateWindowSource(metric.daily, addDaysToIsoDate(today, -13), today) : null;
   const daily: HealthMetric["daily"] = [];
   const values = new Map(metric.daily.map(point => [point.date, point.value]));
@@ -63,33 +56,8 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
     ...(metric.id === "sleep" ? { comparisonValue: current } : {}),
     ...healthHeadlines(metric.id, change, daily, today),
     daily, baseline: metric.baseline === null ? null : healthAmount(metric.id, metric.baseline),
-    wins: metric.wins.map(award => {
-      const amount = award.data.amount as number;
-      const share = award.data.percentile === 50 ? "half" : award.data.percentile === 25 ? "1 in 4" : "1 in 3";
-      const age = award.kind === "healthAge";
-      const title = age ? healthAgeTitle(award.data.percentile as number) : metric.id === "restingHeartRate" ? `Down ${formatNumber(amount, "compact")}`
-        : metric.id === "steps" ? `${formatNumber(amount, "compact")} more`
-        : `Up ${metric.id === "sleep" ? `${formatNumber(amount / 60, "compact")} min` : formatNumber(amount, "compact", 1)}`;
-      const detail = age ? award.data.detail as string : "";
-      return { medalId: award.id, on: award.on, text: age ? `${title}${share === "half" ? " of" : ""} ${detail}` : healthWinText(metric.id, amount),
-        face: age ? { delta: { icon: "age", text: share } } : healthMedalFace(metric.id, amount),
-        title, detail };
-    }),
-    next: target === null ? null : { title: metric.wins.length ? "Next" : "Next win", detail:
-      `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}`,
-      face: healthMedalFace(metric.id, (highest + 1) * metric.step) },
+    wins: [], next: null,
     age: healthAgeView(metric.id, metric.baseline, current, source, metric.baselineSource ?? null, profile, joinedOn) };
-}
-
-export function savedHealthView(joinedOn: string, today: string, metrics: HealthMetricInput[]): SavedHealth {
-  return { joinedOn, today, winCount: metrics.reduce((count, metric) => count + metric.wins.length, 0),
-    metrics: metrics.map(metric => {
-      const { id, label, unit, baseline, wins, next } = healthMetricView(metric, joinedOn, today, { age: null, sex: null });
-      const held = metric.wins.filter(award => award.kind === "health")
-        .sort((a, b) => (b.data.level as number) - (a.data.level as number))[0];
-      return { id, label, unit, baseline, wins, next,
-        headline: held ? healthHeadline(id, metric.direction * (held.data.amount as number)) : null };
-    }) };
 }
 
 /** Sleep leads with your usual night and says its change since joining under it; the rest lead with the change. */

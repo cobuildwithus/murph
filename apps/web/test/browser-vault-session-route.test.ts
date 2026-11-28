@@ -803,6 +803,7 @@ describe("browser vault session route", () => {
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({ member: { id: memberId }, sessionId: "export-session" });
     mocks.getPrisma.mockReturnValue({
       healthActivity: { findMany },
+      healthNotificationRead: { findUnique: vi.fn().mockResolvedValue({ through: createdAt }) },
       healthProfilePin: { findMany: vi.fn().mockResolvedValue([{ sourceKey: "age", specEncrypted: "sealed-pin" }]) },
       gameProfile: { findUnique: vi.fn().mockResolvedValue({ coverKind: "art", coverArt: "gold" }) },
       healthWorkingOn: { findMany: vi.fn().mockResolvedValue([]) },
@@ -824,7 +825,7 @@ describe("browser vault session route", () => {
 
     expect(JSON.parse(await result.blob.text())).toEqual({
       browserVault: null, exportedAt: result.generatedAt, progressShares: [],
-      healthProfile: { cover: { art: "gold" }, pins: [{ key: "age", kind: "age" }], workingOn: [] },
+      healthProfile: { notificationsSeenThrough: createdAt.toISOString(), cover: { art: "gold" }, pins: [{ key: "age", kind: "age" }], workingOn: [] },
       recordedActivities: rows.map(row => ({ ...summary(row.id), day: row.day, createdAt: createdAt.toISOString(), postId: null })),
     });
     expect(findMany).toHaveBeenCalledTimes(2);

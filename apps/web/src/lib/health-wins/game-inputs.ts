@@ -1,4 +1,5 @@
 import "server-only";
+import { milestoneCard } from "./milestones";
 import { obligationDays } from "../game/board-streak";
 import { ladderRungs, roundTotals } from "../game/progress/achievements";
 import type { StoredAward } from "../game/progress/awards";
@@ -102,7 +103,13 @@ export function gameWinInputs(memberId: string, today: string, { facts, states, 
     context.measures.map(({ id, points, rungs }) => ({ id, points, rungs })).sort((a, b) => a.id.localeCompare(b.id)),
     rounds.map(({ key, on }) => [key, on]).sort(), awards.map(({ id, on }) => [id, on]).sort(),
   ]))!;
-  return { games, gameStreak, sourceRevision, complete: true };
+  const milestones = [];
+  for (const award of awards) {
+    const card = milestoneCard(award);
+    if (card) milestones.push(card);
+    if (milestones.length === 80) break;
+  }
+  return { milestones, games, gameStreak, sourceRevision, complete: true };
 }
 
 export async function readHealthWinGameInputs(memberId: string, today: string, runs: VaultRuns | null, clock = new Date(), signal?: AbortSignal) {

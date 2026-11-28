@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-28",
+  "order": 100,
+  "item": {
+    "id": "health-notifications",
+    "kind": "feature",
+    "priority": 2,
+    "title": "See who cheered your post",
+    "summary": "When notifications are available in your Health feed, open the heart to see cheers, replies and game invitations.",
+    "details": "You can share an earned milestone in a post or pin its card to your profile.",
+    "relevanceTags": ["health", "games"],
+    "sourcePullRequests": []
+  }
+}

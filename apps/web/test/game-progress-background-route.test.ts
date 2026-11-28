@@ -143,8 +143,8 @@ it("freezes pre-join health and earns both exercise passes after the response, v
   expect((await healthState())?.baseline).toEqual({ value: 74, source: "Apple Watch", from: "2026-09-23", to: "2026-10-20" });
   expect(mocks.raw.mock.calls[0].slice(2)).toEqual([["restingHeartRate", "steps", "sleep"], { browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" }]);
   const earned = await readAwards("ava");
-  expect(earned.filter(award => award.kind === "health").map(award => award.data.level).sort()).toEqual([1, 2, 3]);
-  expect(earned.some(award => award.kind === "healthAge")).toBe(true);
+  expect(earned.filter(award => award.kind === "health").map(award => award.data.level).sort()).toEqual([]);
+  expect(earned.some(award => award.kind === "healthAge")).toBe(false);
   expect(earned.filter(award => award.kind === "friend")).toEqual(expect.arrayContaining([
     expect.objectContaining({ measureId: "pushups.reps", on: "2026-11-02", data: expect.objectContaining({ title: "Passed Leo" }) }),
     expect.objectContaining({ measureId: "planks.seconds", on: "2026-11-02" }),
@@ -190,9 +190,7 @@ it("freezes covered health baselines and initializes Steps and Sleep journeys th
   }
   const earned = await readAwards("ava");
   expect(earned).toEqual(expect.arrayContaining([
-    expect.objectContaining({ measureId: "steps", kind: "health" }),
     expect.objectContaining({ measureId: "steps", kind: "route" }),
-    expect.objectContaining({ measureId: "sleep", kind: "health" }),
     expect.objectContaining({ measureId: "sleep", kind: "time" }),
   ]));
   expect(mocks.resolve).toHaveBeenCalledTimes(1);
@@ -343,7 +341,7 @@ it("returns the Health page while a background receipt commits against the same 
   release.resolve();
   const [response] = await Promise.all([page, background]);
   expect(response.status).toBe(200);
-  expect(healthSchema.parse(await response.json()).winCount).toBeGreaterThan(0);
+  expect(healthSchema.parse(await response.json()).winCount).toBe(0);
   expect(mocks.updateState).toHaveBeenCalledTimes(1);
   expect((await healthState())?.healthSettlement?.savedAt).toBe(savedAt);
 });
@@ -417,6 +415,10 @@ it("a failed background batch preserves the response, emits only one code and do
 
 it("does not mark partial health work complete when award insertion fails", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  const snapshot = healthSnapshot();
+  mocks.raw.mockResolvedValue({ ...snapshot, numbers: { ...snapshot.numbers,
+    sleep: { daily: snapshot.numbers.restingHeartRate.daily.map(point => ({ ...point, value: 480 })) },
+  } });
   mocks.createAwards.mockRejectedValueOnce(new Error("synthetic write failure"));
   await GET(request()); await drain();
   expect((await healthState())?.baseline?.value).toBe(74);
@@ -442,15 +444,15 @@ it.each([
 it("opens Health awards once on a settled replica and keeps the ordered wins", async () => {
   const read = async () => healthSchema.parse(await (await healthGET(request())).json());
   const first = await read();
-  expect(first.winCount).toBeGreaterThan(0);
+  expect(first.winCount).toBe(0);
   expect(mocks.profile).toHaveBeenCalledOnce();
-  expect(mocks.awards).toHaveBeenCalledTimes(2);
+  expect(mocks.awards).toHaveBeenCalledTimes(1);
   mocks.awards.mockClear();
   mocks.createAwards.mockClear();
   const opened = vi.spyOn(crypto, "openProgressMany");
   expect(await read()).toEqual(first);
   expect(mocks.awards).toHaveBeenCalledOnce();
-  expect(opened.mock.calls.filter(([rows]) => rows[0]?.table === "game_progress_award")).toHaveLength(1);
+  expect(opened.mock.calls.filter(([rows]) => rows[0]?.table === "game_progress_award")).toHaveLength(0);
   expect(mocks.createAwards).not.toHaveBeenCalled();
 });
 
@@ -473,7 +475,7 @@ it("retries a missing Steps map on the same replica after settling other awards"
   mocks.resolve.mockRejectedValueOnce(new Error("Map unavailable")).mockResolvedValue({
     from: "A", to: "B", distanceM: 1000, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [], straightLine: false });
   await GET(request()); await drain();
-  expect((await readAwards("ava")).some(award => award.measureId === "restingHeartRate")).toBe(true);
+  expect((await healthState())?.baseline?.value).toBe(74);
   expect((await healthState())?.healthSettlement).toBeUndefined();
   await GET(request()); await drain();
   expect((await healthState())?.healthSettlement).toBeDefined();

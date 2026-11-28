@@ -175,8 +175,8 @@ export interface HealthWinsInput {
   rank?: HealthWinRank;
 }
 
-export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments" | "Diet";
-type Charts = DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts & RouteCharts & DietCharts & GameResultCharts;
+export type Filter = "Sleep" | "Fitness" | "Heart" | "Labs" | "Challenges" | "Experiments" | "Diet" | "milestones";
+type Charts = { milestone: { type: "medal"; art: string } } & DailyCharts & LabCharts & PercentileCharts & ActivityCharts & RecordedCharts & RouteCharts & DietCharts & GameResultCharts;
 export type CardKind = keyof Charts;
 
 type DetectedCard = {

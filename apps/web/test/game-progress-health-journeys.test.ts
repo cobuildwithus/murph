@@ -6,7 +6,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ rea
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolve }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
 import { healthJourneys, healthJourneyViews } from "../src/lib/game/progress/health-journeys";
-import { healthAgeShare, healthSteps } from "../src/lib/game/progress/health";
 import { friendPasses } from "../src/lib/game/progress/friends";
 import { medalView } from "../src/lib/game/progress/view";
 import { medalSchema, measureSchema } from "../src/lib/game/progress/contract";
@@ -22,7 +21,7 @@ const joinedOn = "2026-10-21", today = "2026-11-16";
 const before = vi.fn();
 const leg = { from: "A", to: "B", distanceM: 16093.44, polyline: encodePolyline([[0, 0], [1, 0]]),
   towns: [{ name: "B", atM: 16093.44 }], straightLine: false, startTotal: 0 };
-const metric = (id: "steps" | "sleep", value: number): HealthMetricInput => ({ id, baseline: null, step: 1, direction: 1, wins: [],
+const metric = (id: "steps" | "sleep", value: number): HealthMetricInput => ({ id, baseline: null, direction: 1,
   daily: Array.from({ length: 27 }, (_, i) => ({ date: addDaysToIsoDate(joinedOn, i), value, source: "Garmin", observedAt: `${today}T12:00:00Z` })) });
 const saved = (candidates: Candidate[]) => candidates.map(candidate => ({ ...candidate, id: candidate.key, createdAt: new Date(`${today}T12:00:00Z`), seenAt: null }));
 const prepare = (metrics: HealthMetricInput[], states = new Map<string, MeasureState>(), awards: ReturnType<typeof saved> = []) => healthJourneys({ memberId: "ava", metrics, states, awards,
@@ -92,17 +91,14 @@ it("reuses frozen geometry without another provider call", async () => {
   expect(mocks.patch).not.toHaveBeenCalled();
 });
 
-it("new health, friend and route awards decode through the shared medal view", async () => {
-  const context = { metric: "restingHeartRate" as const, joinedOn, baseline: 100, step: 1, direction: -1,
-    profile: { age: 35, sex: "female" as const }, means: metric("steps", 60).daily };
-  const health = [...healthSteps(context), ...healthAgeShare(context)];
+it("new friend and route awards decode through the shared medal view", async () => {
   const friends = friendPasses({ measureId: "pushups.reps", people: [
     { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, joinedOn, daily: [{ date: today, amount: 100 }] },
     { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn, daily: [
       { date: "2026-11-10", amount: 20 }, { date: "2026-11-11", amount: 20 }, { date: "2026-11-12", amount: 10 }] },
   ] });
   const routes = (await prepare([metric("steps", 1000)])).candidates;
-  for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);
+  for (const award of saved([...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);
 });
 
 it("keeps health journeys and earned milestones available while the first Steps route retries", async () => {

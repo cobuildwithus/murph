@@ -119,13 +119,6 @@ export const healthSchema = z.object({
 });
 export type Health = z.infer<typeof healthSchema>;
 
-/** Read-only saved presentation in a live-read 503's error.details.health. */
-export const savedHealthSchema = healthSchema.pick({ joinedOn: true, today: true, winCount: true }).extend({
-  metrics: z.array(healthMetric.pick({ id: true, label: true, unit: true, baseline: true, wins: true, next: true })
-    .extend({ headline: z.string().nullable() })),
-});
-export type SavedHealth = z.infer<typeof savedHealthSchema>;
-
 const friend = person.extend({ me: z.boolean(), invited: z.boolean(), joinedOn: day.nullable() });
 const friendRow = z.discriminatedUnion("private", [
   friend.extend({ private: z.literal(true), rank: z.null(), total: z.null() }),

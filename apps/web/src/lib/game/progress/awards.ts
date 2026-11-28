@@ -89,11 +89,11 @@ export async function readAwards(memberId: string, maxRows?: number, signal?: Ab
         ? { healthEnvelope: row.dataEncrypted } : {}) }]);
 }
 
-/** Kinds no longer earned: streaks, hours slept and VO2 max. Their rows wait for
+/** Retired medal kinds remain unreadable during the mixed-version deployment. Their rows wait for
  * scripts/migrations/remove-retired-progress-awards; until it has run they are
  * not awards. Delete this filter after it has. */
 export function retiredAward(award: Pick<Candidate, "kind" | "measureId">): boolean {
-  return award.kind === "streak" || award.measureId === "vo2Max" || (award.kind === "total" && award.measureId === "sleep");
+  return award.kind === "health" || award.kind === "healthAge" || award.kind === "streak" || award.measureId === "vo2Max" || (award.kind === "total" && award.measureId === "sleep");
 }
 
 /** The view resolves requested moment ids to their stored award ids. */

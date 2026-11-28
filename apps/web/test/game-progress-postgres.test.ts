@@ -12,8 +12,6 @@ import { openProgress, progressLookup, sealProgress } from "../src/lib/game/prog
 import * as crypto from "../src/lib/game/progress/crypto";
 import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/state";
 import type { Candidate } from "../src/lib/game/progress/registry";
-import { healthSteps } from "../src/lib/game/progress/health";
-import { savedHealthView } from "../src/lib/game/progress/health-view";
 import { roundTotals } from "../src/lib/game/progress/achievements";
 import { gameSeries } from "../src/lib/game/progress/series";
 import { achievementContext, visibleAwards } from "../src/lib/game/progress/view";
@@ -146,28 +144,6 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     source.state.entries[3].withdrawnAt = source.now;
     await settleAwards(id, candidates(), authorized);
     expect(await readAwards(id)).toEqual(earned);
-  });
-  it("settles every held health level on its earned date once, even after readings worsen", async () => {
-    const id = await member();
-    const context = { metric: "restingHeartRate" as const, baseline: 74, joinedOn: "2026-11-01", step: 1, direction: -1,
-      profile: { age: 35, sex: "female" as const }, means: Array.from({ length: 7 }, (_, index) => ({
-        date: `2026-11-0${index + 1}`, value: 71, source: "Apple Watch", observedAt: "2026-11-16T00:00:00Z",
-      })) };
-    await settleAwards(id, healthSteps(context), authorized);
-    const first = await readAwards(id);
-    expect(first).toHaveLength(3);
-    expect(first.every(award => award.on === "2026-11-07")).toBe(true);
-    await settleAwards(id, healthSteps(context), authorized);
-    await settleAwards(id, healthSteps({ ...context, means: context.means.map(point => ({ ...point, value: 76 })) }), authorized);
-    expect(await readAwards(id)).toEqual(first);
-    const state = await patchMeasureState(id, context.metric,
-      { baseline: { value: 74, from: "2026-10-04", to: "2026-10-31" } }, authorized);
-    const before = await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } });
-    const saved = savedHealthView(context.joinedOn, "2026-11-16", [{ id: context.metric, daily: [],
-      baseline: state.baseline!.value, step: context.step, direction: context.direction, wins: await readAwards(id) }]);
-    expect(saved.metrics[0]).toMatchObject({ headline: "Down 3 bpm", next: { detail: "70 bpm" } });
-    expect(saved.metrics[0].wins.map(win => [win.medalId, win.on])).toEqual(first.map(win => [win.id, win.on]));
-    expect(await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } })).toEqual(before);
   });
   it("settles concurrently and never revokes or rewrites the original crossing day", async () => {
     const id = await member();

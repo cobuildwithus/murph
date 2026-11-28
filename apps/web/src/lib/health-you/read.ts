@@ -300,6 +300,24 @@ export async function readYouAgeForPin(memberId: string) {
   }
 }
 
+/** Read only the owner's existing estimate. A cache miss never starts a model run here. */
+export async function cachedAgeChange(memberId: string, signal: AbortSignal) {
+  if (!isHealthYouEnabled(memberId)) return null;
+  const db = getPrisma();
+  const row = await db.healthYouCache.findUnique({ where: { memberId } });
+  if (!row) return null;
+  const saved = await open(row, signal);
+  if (!saved || saved.views.you.state !== "ready") return null;
+  const points = saved.views.age?.history ?? [];
+  const latest = points.at(-1);
+  const prior = points.at(-2);
+  if (!latest || !prior || Date.parse(latest.date) - Date.parse(prior.date) !== 7 * 86400000) return null;
+  const tenths = Math.round(latest.age * 10) - Math.round(prior.age * 10);
+  if (Math.abs(tenths) < 2) return null;
+  if (!await isYouAgePinCurrent(db, memberId, { revision: row.revision, timeZone: saved.timeZone })) return null;
+  return { date: latest.date, tenths, timeZone: saved.timeZone };
+}
+
 export async function isYouAgePinCurrent(
   tx: Prisma.TransactionClient,
   memberId: string,

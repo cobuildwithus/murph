@@ -757,6 +757,7 @@ model HostedMember {
   healthFeedHides                HealthFeedHide[]                @relation("HealthHideOwner")
   healthFeedHiddenBy             HealthFeedHide[]                @relation("HealthHideSubject")
   healthYouCache                 HealthYouCache?
+  healthNotificationRead        HealthNotificationRead?
   healthWinSets                  HealthWinSet[]
   healthWinNudge                 HealthWinNudge?
   progressTaskMeasures           GameProgressTaskMeasure[]
@@ -3391,6 +3392,7 @@ model HealthWorkingOn {
 }
 
 model HealthWorkingOnCheer {
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(3)
   memberId String @map("member_id")
   ownerId  String @map("owner_id")
   factor   String
@@ -3398,6 +3400,7 @@ model HealthWorkingOnCheer {
   item     HealthWorkingOn @relation(fields: [ownerId, factor], references: [memberId, factor], onDelete: Cascade)
 
   @@id([memberId, ownerId, factor])
+  @@index([ownerId, createdAt])
   @@index([ownerId, factor])
   @@map("health_working_on_cheer")
 }
@@ -3411,6 +3414,7 @@ model HealthPostCheer {
 
   @@id([postId, memberId])
   @@index([memberId])
+  @@index([postId, createdAt])
   @@map("health_post_cheer")
 }
 
@@ -3458,6 +3462,14 @@ model HealthYouCache {
   member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("health_you_cache")
+}
+
+model HealthNotificationRead {
+  memberId String @id @map("member_id")
+  through DateTime @db.Timestamptz(3)
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("health_notification_read")
 }
 
 model HealthWinSet {
