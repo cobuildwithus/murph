@@ -257,14 +257,14 @@ it("requires a version for edits and validates visibility on ordinary comments",
   expect((await comment(request("comments", "POST", { ...body, visibility: "global" }), postContext)).status).toBe(400);
 });
 
-it.each([{}, { visibility: "everyone" }, { visibility: { ignored: true } }])(
-  "accepts a reply target regardless of submitted visibility", async fields => {
+it.each([{}, { visibility: "everyone" }, { visibility: "poster" }, { visibility: { ignored: true } }])(
+  "preserves the reply audience for the locked parent check", async fields => {
     service.comment.mockResolvedValue({ id });
     const replyTo = "4bd94cef-6ac5-42d6-a80d-d089fb3d966b";
     const body = "Synthetic reply text";
     const response = await comment(request("comments", "POST", { id, body, replyTo: replyTo.toUpperCase(), ...fields }), postContext);
     expect(await response.json()).toEqual({ id });
-    expect(service.comment).toHaveBeenCalledExactlyOnceWith(auth, id, { id, body, replyTo });
+    expect(service.comment).toHaveBeenCalledExactlyOnceWith(auth, id, { id, body, replyTo, ...fields });
   },
 );
 
