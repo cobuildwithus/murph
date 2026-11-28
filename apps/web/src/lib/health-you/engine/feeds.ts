@@ -17,6 +17,7 @@ import {
 
 const config = model.feeds;
 const families = [
+  "extensions",
   "daily",
   "labs",
   "body",
@@ -90,6 +91,11 @@ export function adapt(member: Observation, history: Observation = {}): MemberEvi
   }));
   projectFood(weeks, result, context);
   for (const r of result.workouts!) context(r, "workout_minutes");
+  result.workouts = result.workouts!.map((r) => ({
+    ...r,
+    date: r.date ?? day(r.start),
+    minutes: r.minutes ?? r.duration_min,
+  }));
   return result;
 }
 

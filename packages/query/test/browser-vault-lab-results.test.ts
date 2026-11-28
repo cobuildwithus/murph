@@ -153,6 +153,8 @@ test("browser vault projects all live lab history without widening the wearable 
   const oldestHba1c = client.labResults.list({ metricKey: "HbA1c" })[0];
   assert.ok(oldestHba1c);
   assert.equal(oldestHba1c.date, "2020-02-01");
+  assert.equal(oldestHba1c.collectedAt?.slice(0, 10), oldestHba1c.date);
+  assert.equal(oldestHba1c.reportedAt?.slice(0, 10), "2020-02-02");
   assert.equal(oldestHba1c.value, 5.4);
   assert.equal(oldestHba1c.unit, "%");
   assert.equal(oldestHba1c.normalizedValue, 5.4);

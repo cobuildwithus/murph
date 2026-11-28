@@ -138,6 +138,9 @@ export interface BrowserVaultLabResultRow {
   metricKey: string;
   normalizedUnit: string | null;
   normalizedValue: number | null;
+  /** Available on newer publications when the canonical test supplies these timestamps. */
+  collectedAt?: string;
+  reportedAt?: string;
   observedAt: string;
   parentResultStatus: TestResultStatus;
   referenceRange: BrowserVaultLabResultReferenceRange | null;

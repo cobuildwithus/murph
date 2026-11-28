@@ -559,6 +559,12 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
   }
 
   return {
+    ...(record.collectedAt == null
+      ? {}
+      : { collectedAt: requireString(record.collectedAt, `${label}.collectedAt`) }),
+    ...(record.reportedAt == null
+      ? {}
+      : { reportedAt: requireString(record.reportedAt, `${label}.reportedAt`) }),
     analyte: requireString(record.analyte, `${label}.analyte`),
     biomarkerKey: readNullableString(record.biomarkerKey),
     comparator: readNullableMetricComparator(record.comparator, `${label}.comparator`),

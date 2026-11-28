@@ -25,6 +25,11 @@ export function labParentResultStatus(value: unknown): BrowserVaultLabResultRow[
   return TEST_RESULT_STATUSES.find((status) => status === value) ?? "unknown";
 }
 
+function labTimestamps(collection: unknown, reportedAt: string | null) {
+  const collectedAt = readOptionalString(collection);
+  return { ...(collectedAt && { collectedAt }), ...(reportedAt && { reportedAt }) };
+}
+
 export function toBrowserVaultLabResultRows(input: {
   entities: readonly CanonicalEntity[];
   points: readonly MetricPoint[];
@@ -51,16 +56,17 @@ export function toBrowserVaultLabResultRows(input: {
     const definition = resolveLabResultMetricDefinition(point.metricKey);
     const canonicalValue = readFiniteNumber(point.canonicalValue);
     const canUseRawComparableValue = definition === null || definition.canonicalUnit === null;
-    const comparableValue = value === null
-      ? null
-      : canonicalValue ?? (canUseRawComparableValue ? value : null);
-    const comparableUnit = comparableValue === null
-      ? null
-      : readOptionalString(point.canonicalUnit)
-        ?? (canUseRawComparableValue ? normalizeUnit(point.unit) : null);
+    const comparableValue =
+      value === null ? null : (canonicalValue ?? (canUseRawComparableValue ? value : null));
+    const comparableUnit =
+      comparableValue === null
+        ? null
+        : (readOptionalString(point.canonicalUnit) ??
+          (canUseRawComparableValue ? normalizeUnit(point.unit) : null));
     const normalizedValue = comparableUnit === null ? null : comparableValue;
     const normalizedUnit = normalizedValue === null ? null : comparableUnit;
     const row: BrowserVaultLabResultRow = {
+      ...labTimestamps(test.attributes.collectedAt, point.reportedAt),
       analyte: readOptionalString(result?.analyte) ?? point.metricKey,
       biomarkerKey: readOptionalString(point.biomarkerKey),
       comparator: point.comparator,
@@ -69,8 +75,7 @@ export function toBrowserVaultLabResultRows(input: {
       fastingStatus: labFastingStatus(test.attributes.fastingStatus),
       flag: readOptionalString(point.context.flag),
       id: `lab-result-row:${point.id}`,
-      labName: readOptionalString(point.provenance.labName)
-        ?? readOptionalString(test.attributes.labName),
+      labName: readOptionalString(point.provenance.labName) ?? readOptionalString(test.attributes.labName),
       metricKey: point.metricKey,
       normalizedUnit,
       normalizedValue,
@@ -91,9 +96,7 @@ export function toBrowserVaultLabResultRows(input: {
 }
 
 function readLabSpecimenKind(value: unknown): BrowserVaultLabSpecimenKind | null {
-  return value === "serum" || value === "plasma" || value === "whole_blood"
-    ? value
-    : null;
+  return value === "serum" || value === "plasma" || value === "whole_blood" ? value : null;
 }
 
 export function labResultRowMatchesFilters(
@@ -118,8 +121,7 @@ export function sortBrowserVaultLabResultRows(
 }
 
 function normalizeMetricFilterKey(metricKey: string): string {
-  return resolveLabResultMetricDefinition(metricKey)?.key
-    ?? normalizeMetricKey(metricKey);
+  return resolveLabResultMetricDefinition(metricKey)?.key ?? normalizeMetricKey(metricKey);
 }
 
 function readArray(value: unknown): unknown[] {
@@ -128,7 +130,7 @@ function readArray(value: unknown): unknown[] {
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 

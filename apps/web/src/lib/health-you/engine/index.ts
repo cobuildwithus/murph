@@ -1,3 +1,7 @@
+import { projectionSummary, projectionWeight, blend, centerClinical } from "./projection";
+import { combineContext } from "./combine";
+import { workoutZones } from "./workout-zones";
+import { studyFactors } from "./instruments";
 import { clinical, habits, labValues } from "./observations";
 import { foodFactors } from "./food";
 import { capFamily, clinicalMarkers } from "./clinical-markers";
@@ -44,7 +48,14 @@ export function ageAt(data: MemberEvidence, date: string, anchor: string) {
   const age = n === null ? NaN : n + distance(date, day(p.age_as_of) || anchor) / YEAR;
   return { age, whole: Math.floor(age + 1e-8) };
 }
-export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex) {
+export function snapshot(
+  data: MemberEvidence,
+  at: string,
+  age: number,
+  sex: Sex,
+  legacy = false,
+  reasons: Record<string, string> = {},
+) {
   const conditions = dated(data, "checkins", at, model.policy.protocol.checkin_days).filter((r) =>
     Array.isArray(r.conditions),
   );
@@ -64,14 +75,19 @@ export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex
       },
     };
   }
-  const { result, ci, labs } = clinical(data, at, age, sex);
+  const { result, ci, labs } = clinical(data, at, age, sex, legacy);
   if (["night", "rotating"].includes(String(pick(ci, "work_schedule"))))
     data = { ...data, profile: { ...data.profile, shift_worker: true } };
-  const wear = habits(data, at, age, sex);
+  const wear = habits(data, at, age, sex, legacy);
   if (wear.steps || wear.hip_minutes || wear.activity) delete result.activity;
   Object.assign(result, wear);
   const mult = model.policy.years_per_published_log_unit * shrink(age) * model.strength;
   const workouts = workoutFactors(data, at, age, sex, result, mult);
+  const zones = !legacy && workoutZones(data, at, result, mult);
+  if (zones) {
+    delete workouts.aerobic;
+    workouts.zone_intensity = zones;
+  }
   Object.assign(result, workouts, foodFactors(data, at, age, sex, ci, { ...result, ...workouts }, mult));
   const caps = model.overlap.absolute_log_caps;
   Object.assign(
@@ -84,10 +100,11 @@ export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex
       result,
       result.food_pattern ? ci.filter((r) => !("food_proxy" in r)) : ci,
       labs,
+      legacy,
     ),
   );
   if (caps.food.factors.some((k) => k !== "fibre" && result[k])) delete result.food_pattern;
-  const streaks = verifiedHabits(data, at, age, sex, result, mult);
+  const streaks = verifiedHabits(data, at, age, sex, result, mult, legacy);
   Object.assign(result, streaks);
   if (result.sleep_regularity) delete result.onset_sd;
   capFamily(
@@ -99,10 +116,25 @@ export function snapshot(data: MemberEvidence, at: string, age: number, sex: Sex
   if ([wear, workouts, streaks].some((r) => Object.keys(r).length))
     capFamily(
       result,
-      [...caps.conditioning.factors, "pulse", "hip_minutes", "activity", "aerobic", "knee", "gait", "vo2"],
-      mult * caps.conditioning.max_abs_log,
+      [
+        ...caps.conditioning.factors,
+        "pulse",
+        "hip_minutes",
+        "activity",
+        "aerobic",
+        "zone_intensity",
+        "knee",
+        "gait",
+        "vo2",
+      ],
+      mult * (legacy ? caps.conditioning.max_abs_log : 0.9),
     );
-  clinicalMarkers(result, data, at, age, sex, mult, labs.non_hdl);
+  clinicalMarkers(result, data, at, age, sex, mult, labs.non_hdl, legacy);
+  if (!legacy) {
+    centerClinical(result, age, sex, mult);
+    studyFactors(data, at, result, age, sex, reasons);
+    blend(result, age, sex);
+  }
   return result;
 }
 export function comparableMovement(
@@ -128,7 +160,7 @@ export function comparableMovement(
   for (const [group, keys] of [
     ["daily", ["pulse", "steps", "hip_minutes", "activity", "hrv"]],
     ["sleep_sessions", ["sleep", "onset_sd"]],
-    ["workouts", ["aerobic", "lifting", "sauna"]],
+    ["workouts", ["aerobic", "zone_intensity", "lifting", "sauna"]],
     ["meals", ["meal_fibre", "meal_density"]],
     ["habits", ["steps", "lifting", "sauna", "alcohol"]],
     ["checkins", ["smoking", "alcohol", "fibre", "meal_fibre", "meal_density"]],
@@ -168,7 +200,8 @@ export function score(data: MemberEvidence, at: string, period = 7) {
       ? "2"
       : null;
   if (!sex || pauseReason(data, at, at)) return null;
-  const rows = snapshot(data, at, age, sex),
+  const reasons: Record<string, string> = {};
+  const rows = snapshot(data, at, age, sex, false, reasons),
     factors = Object.entries(rows);
   const gap = sumYears(factors.map(([, r]) => r.years)),
     value = age + gap;
@@ -192,17 +225,35 @@ export function score(data: MemberEvidence, at: string, period = 7) {
   const observed =
     sumYears(weights.map(([k, weight]) => weight * (rows[k]?.quality ?? 0))) /
     sumYears(weights.map(([, weight]) => weight));
-  const half = interp(
-    observed,
-    panel.fractions,
-    panel.widths.map((width) => interp(age, panel.age, width)),
-  );
+  const half =
+    Math.abs(gap - sumYears(factors.map(([, r]) => r.current_years!))) +
+    2 * Math.max(0, ...factors.map(([, r]) => 1 - (r.wear_confidence ?? 1))) +
+    interp(
+      observed,
+      panel.fractions,
+      panel.widths.map((width) => interp(age, panel.age, width)),
+    );
   const cutoff = offset(at, -period);
   let days: number | null = null;
   let residual: number | null = null;
   let changes: Record<string, number> = {};
+  let reassessment: number | null = null;
   if (!pauseReason(data, cutoff, at)) {
-    changes = comparableMovement(data, at, cutoff, rows, snapshot(data, cutoff, age, sex));
+    const fixed = snapshot(data, cutoff, age, sex);
+    changes = comparableMovement(data, at, cutoff, rows, fixed);
+    reassessment =
+      roundEven(
+        sumYears(
+          Object.entries(changes)
+            .filter(
+              ([k]) =>
+                rows[k].wear_confidence !== undefined &&
+                rows[k].level !== undefined &&
+                fixed[k]?.level !== undefined,
+            )
+            .map(([k, move]) => rows[k].years - fixed[k].years - move),
+        ) * 1e8,
+      ) / 1e8;
     const move = sumYears(
       Object.keys(changes)
         .sort()
@@ -216,6 +267,12 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     ...(p.approximate_birth_date ? ["birth_year_midpoint_assumed"] : []),
     ...(value < 20 || value > 79 ? ["age_equivalent_outside_training_range"] : []),
     ...(ageAt(data, at, at).whole === 80 ? ["chronological_age_extrapolation"] : []),
+    ...(factors.some(
+      ([k]) => Object.hasOwn(model.coverage.factors, k) || Object.hasOwn(model.evidence.factors, k),
+    )
+      ? ["extension_age_effects_uncalibrated"]
+      : []),
+    ...(projectionWeight(age) ? ["historical_projection_research_only"] : []),
     ...(factors.some(
       ([k]) =>
         model.optional.includes(k) ||
@@ -237,6 +294,8 @@ export function score(data: MemberEvidence, at: string, period = 7) {
   return {
     flags,
     residual,
+    reasons,
+    reassessment,
     unrounded: value,
     sex,
     age,
@@ -276,8 +335,12 @@ export function fromRaw(member: Observation, at: string, history?: Observation) 
       flags: [],
       not_counted_yet: [],
       research_risk: null,
+      projection: null,
+      combine_context: {},
+      wearable_reassessment_years: null,
     };
   const factors = finishFactors(result.rows, result.parts, result.age, result.sex);
+  const riskRows = snapshot(data, at, result.age, result.sex, true);
   const ranks = Object.fromEntries(Object.entries(factors).map(([k, r]) => [k, r.percentile]));
   return {
     version: model.version,
@@ -304,14 +367,20 @@ export function fromRaw(member: Observation, at: string, history?: Observation) 
           : "reference_only",
     evidence_change_years: result.residual,
     flags: result.flags,
-    not_counted_yet: missingEvidence(data, at, result.rows),
-    research_risk: absoluteRisk(
-      result.unrounded,
-      result.sex,
-      Number(at.slice(0, 4)),
-      result.rows,
-      result.age,
-      labValues(data, at).non_hdl,
-    ),
+    wearable_reassessment_years: result.reassessment,
+    projection: projectionSummary(result.rows, result.age, result.sex),
+    combine_context: combineContext(data, at, result.age, result.sex),
+    not_counted_yet: missingEvidence(data, at, result.rows, result.reasons),
+    research_risk: {
+      scope: "current_r5_measurements",
+      ...absoluteRisk(
+        result.age + sumYears(Object.values(riskRows).map((r) => r.years)),
+        result.sex,
+        Number(at.slice(0, 4)),
+        riskRows,
+        result.age,
+        labValues(data, at).non_hdl,
+      ),
+    },
   };
 }

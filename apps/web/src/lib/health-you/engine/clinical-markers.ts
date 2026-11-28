@@ -1,3 +1,4 @@
+import { labDraw, latestDraw, type LabDraw } from "./lab-draws";
 import {
   between,
   dated,
@@ -60,17 +61,24 @@ function labNumber(r: Observation, key: string, at: string) {
     (["glucose", "insulin", "triglycerides", "fasting_glucose"].includes(key) && r.fasting !== true)
   )
     return null;
-  return number(r.value);
+  const candidate = lookup(model.candidates, key) ?? lookup(model.lipids, key);
+  const bounds = candidate
+    ? [candidate.min, candidate.max]
+    : lookup(
+        {
+          glucose: [30, 500],
+          insulin: [0.1, 250],
+          creatinine: [0.2, 20],
+          cystatin_c: [0.25, 10],
+          omega_3_index: [1, 18],
+          lpa: [0, model.lpa_molar.max],
+        },
+        key,
+      );
+  const v = number(r.value);
+  return bounds && between(v, bounds[0], bounds[1]) ? v : null;
 }
-function priority(a: Observation, b: Observation) {
-  return (
-    rowDay(a).localeCompare(rowDay(b)) ||
-    String(a.collected_at ?? "").localeCompare(String(b.collected_at ?? "")) ||
-    (number(a.revision) ?? 0) - (number(b.revision) ?? 0) ||
-    String(a.reported_at ?? "").localeCompare(String(b.reported_at ?? ""))
-  );
-}
-function filtration(age: number, sex: Sex, cr: number, cy?: number) {
+export function filtration(age: number, sex: Sex, cr: number, cy?: number) {
   if (!between(cr, 0.2, 20)) return null;
   const female = sex === "2",
     z = cr / (female ? 0.7 : 0.9);
@@ -95,7 +103,7 @@ function filtration(age: number, sex: Sex, cr: number, cy?: number) {
   );
 }
 function latestLabValues(data: MemberEvidence, at: string) {
-  const groups = new Map<string, Observation[]>();
+  const groups = new Map<string, LabDraw[]>();
   for (const row of data.labs ?? []) {
     const key = String(row.marker);
     if (
@@ -104,19 +112,17 @@ function latestLabValues(data: MemberEvidence, at: string) {
       !released(row, at)
     )
       continue;
-    const group = groups.get(key);
-    const order = group ? priority(row, group[0]) : 1;
-    if (order > 0) groups.set(key, [row]);
-    else if (!order) group!.push(row);
+    const group = groups.get(key) ?? [];
+    group.push(labDraw(row, labNumber(row, key, at)));
+    groups.set(key, group);
   }
   const values: Record<string, number> = {},
     draws: Record<string, string> = {};
-  for (const [key, rows] of groups) {
-    const v = unique(rows.map((r) => labNumber(r, key, at)));
-    const draw = rows.map((r) => r.panel_id || r.collected_at || null);
-    if (v === null || !draw.every((id) => id === draw[0])) continue;
-    values[key] = v;
-    if (draw[0]) draws[key] = JSON.stringify([rowDay(rows[0]), draw[0]]);
+  for (const [key, group] of groups) {
+    const row = latestDraw(group, true);
+    if (!row || row.value === null) continue;
+    values[key] = row.value;
+    if (row.specimen) draws[key] = JSON.stringify([row.date, row.specimen]);
   }
   return { values, draws };
 }
@@ -211,6 +217,7 @@ export function clinicalMarkers(
   sex: Sex,
   mult: number,
   nonHdl: number | null,
+  legacy = false,
 ) {
   const vals = collect(data, at, age, sex, nonHdl);
   const trend = leanChange(data, at);
@@ -312,7 +319,8 @@ export function clinicalMarkers(
   };
   for (const [group, budget] of Object.entries(model.caps)) {
     const keys = Object.keys(added).filter((k) => (lookup(model.candidates, k)?.group ?? "lipid") === group);
-    const used = owners[group].reduce((s, k) => s + Math.abs(core[k]?.years ?? 0), 0);
+    const used =
+      group === "body" && !legacy ? 0 : owners[group].reduce((s, k) => s + Math.abs(core[k]?.years ?? 0), 0);
     capFamily(added, keys, Math.max(0, mult * budget - used));
   }
   Object.assign(core, added);

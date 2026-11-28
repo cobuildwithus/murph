@@ -56,6 +56,9 @@ const bloodKeys = new Set([
   "omega_3_index",
 ]);
 const food = new Set([
+  "coffee_cups",
+  "tea_cups",
+  "olive_oil",
   ...model.overlap.absolute_log_caps.food.factors,
   "alcohol",
   "meal_fibre",
@@ -77,6 +80,9 @@ const fitness = new Set([
   "fev1",
 ]);
 const activities = new Set([
+  "zone_intensity",
+  "cycle_commute",
+  "usual_pace",
   "steps",
   "hip_minutes",
   "activity",
@@ -105,6 +111,18 @@ const actions: Record<string, string> = {
   meal_fibre: "Add beans, whole grains or fruit to a meal.",
 };
 const units: Record<string, string> = {
+  "K6 points": "points",
+  "correct/3": "of 3 words",
+  "1–5": "out of 5",
+  "1–4": "out of 4",
+  "whole cups/day": "cups a day",
+  "cups/day": "cups a day",
+  "events/hour": "times an hour",
+  "yes=1": "",
+  category: "",
+  "decimal acuity": "",
+  Agatston: "points",
+  "recorded moderate-equivalent min/day": "active min a day",
   "steps/day": "steps a day",
   "moderate-equivalent min/week": "active min a week",
   "estimated moderate-equivalent min/week": "active min a week",
@@ -458,7 +476,7 @@ export function buildViews(input: YouInputs): Bundle {
 function factorGroup(k: string): Factor["group"] {
   return fields[k]?.group === "blood" || bloodKeys.has(k) || k === "sbp"
     ? "blood"
-    : ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint"].includes(k)
+    : ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint", "ahi"].includes(k)
       ? "sleep"
       : fitness.has(k)
         ? "fitness"
@@ -469,6 +487,30 @@ function factorGroup(k: string): Factor["group"] {
             : food.has(k)
               ? "food"
               : "habits";
+}
+
+function categoryValue(r: Contribution, value: string) {
+  if (r.unit === "yes=1") value = r.value ? "Yes" : "No";
+  if (typeof r.value === "string" && r.unit === "category") {
+    const choices: Record<string, string> = {
+      daily_shared: "Daily, living with others",
+      daily_alone: "Daily, living alone",
+      never_shared: "Never, living with others",
+      never_alone: "Never, living alone",
+      never_tobacco: "Never used tobacco",
+      current_exclusive_smokeless: "Smokeless tobacco only",
+      current_daily_exclusive_cigar: "Cigars only, every day",
+      never_or_rare: "Rarely or never",
+      above_7_g_day: "More than 7 g a day",
+      car_or_public_transport: "Car or public transit",
+      cycle_only: "Bicycle",
+      brisk_or_fast: "Brisk or fast",
+      slow: "Slow",
+      average: "Average",
+    };
+    value = lookup(choices, r.value) ?? value;
+  }
+  return value;
 }
 
 function displayValue(k: string, r: Contribution) {
@@ -490,6 +532,7 @@ function displayValue(k: string, r: Contribution) {
     value = Math.floor(sleep / 60) + "h " + (sleep % 60) + "m";
     unit = null;
   }
+  value = categoryValue(r, value);
   if (k === "smoking") {
     value = Number(r.value) === 0 ? "Never" : Number(r.value) === 1 ? "Current" : "Former";
     unit = null;
@@ -536,14 +579,22 @@ function ageEvents(input: YouInputs) {
   const { evidence, asOf } = input;
   const events: NonNullable<Bundle["age"]>["events"] = [];
   const datesOf = (records: Observation[] = []) =>
-    [...new Set(records.filter(row => eligible(row, asOf)).map(rowDay))].sort();
+    [...new Set(records.filter((row) => eligible(row, asOf)).map(rowDay))].sort();
   const pressureDates = datesOf([...(evidence.bp ?? []), ...(evidence.pressure_components ?? [])]);
-  const firstSeries = pressureDates.find(date => bpValue(evidence, date));
+  const firstSeries = pressureDates.find((date) => bpValue(evidence, date));
   for (const [dates, kind, label] of [
-    [datesOf(evidence.labs), "bloodWork", "Blood work"],
+    [datesOf(evidence.labs?.filter((r) => r.status !== "pending")), "bloodWork", "Blood work"],
     [firstSeries ? [firstSeries] : [], "bloodPressure", "Blood pressure"],
-    [datesOf(evidence.fitness_tests?.filter(row => row.protocol === "murph-combine-v1" && !row.skipped && !row.pain_or_stop)), "combine", "Fitness Combine"],
-    [datesOf(evidence.food_weeks?.filter(row => row.complete === true)), "foodWeek", "Food week"],
+    [
+      datesOf(
+        evidence.fitness_tests?.filter(
+          (row) => row.protocol === "murph-combine-v1" && !row.skipped && !row.pain_or_stop,
+        ),
+      ),
+      "combine",
+      "Fitness Combine",
+    ],
+    [datesOf(evidence.food_weeks?.filter((row) => row.complete === true)), "foodWeek", "Food week"],
   ] as const) {
     const seen = new Set<string>();
     for (const date of dates) {

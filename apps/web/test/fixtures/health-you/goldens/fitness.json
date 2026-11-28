@@ -3,7 +3,7 @@
   "hero": {
     "value": "9,560",
     "unit": "steps a day",
-    "years": -0.5
+    "years": -1.7
   },
   "chart": null,
   "factors": [
@@ -17,9 +17,9 @@
       "target": {
         "text": "Aim for 8,000+ steps a day"
       },
-      "years": -0.5,
-      "yearsText": "−0.5",
-      "featured": false,
+      "years": -1.7,
+      "yearsText": "−1.7",
+      "featured": true,
       "whatItIs": "This counts the steps the device recorded each day.",
       "whatLowersIt": "Add a short walk to a part of your day when you usually sit.",
       "rank": null,

@@ -11,6 +11,7 @@ export interface MemberEvidence {
   workouts?: Observation[];
   feed_context?: Observation[];
   pressure_components?: Observation[];
+  extensions?: Observation[];
   daily?: Observation[];
   sleep_sessions?: Observation[];
   checkins?: Observation[];
@@ -34,6 +35,13 @@ export interface Contribution {
   reference: string;
   source: string;
   target_source: string;
+  current_years?: number;
+  projected_years?: number;
+  landmark_years?: number | null;
+  wear_confidence?: number;
+  wear_age_days?: number;
+  moderate_min_day?: number;
+  vigorous_min_day?: number;
   level?: number;
   confidence?: number;
   series?: string;
@@ -220,14 +228,40 @@ function transform(key: string, x: number) {
       return f.transform.startsWith("abs") ? Math.abs(v - Number(f.transform.slice(3))) : v;
   }
 }
-export function native(key: string, x: number, age: number, sex: Sex, quality = 1): Contribution | null {
-  const d = refs[key],
-    z = transform(key, x);
-  if (!d || z === null) return null;
-  const row = curveAt(age, d.ref[sex], (r) => [r.mu, ...r.q]);
-  if (!row) return null;
-  const [mu, ...qs] = row,
-    ys = qs.map((q) => transform(key, q)!);
+type DoseKey = keyof typeof model.dose_curves;
+export function dose(key: DoseKey, value: number) {
+  const c = model.dose_curves[key];
+  const rows = c.rows;
+  if (c.kind === "zero_bins" && value === 0) return Math.log(rows[0].ratio);
+  const i = Math.max(0, rows.filter((row) => Number(row.value) <= value).length - 1);
+  const left = rows[i],
+    right = rows[i + 1];
+  if (!right || value <= Number(left.value) || c.kind === "bins" || c.kind === "zero_bins")
+    return Math.log(left.ratio);
+  return (
+    Math.log(left.ratio) +
+    ((value - Number(left.value)) / (Number(right.value) - Number(left.value))) *
+      Math.log(right.ratio / left.ratio)
+  );
+}
+function nativeLog(key: string, value: number) {
+  if (key === "bmi")
+    return (
+      (value < 20 ? 0.3 : 0.85) *
+      interp(
+        value,
+        [16.75, 19.25, 21.25, 23.75, 26.25, 28.75, 32.5, 37.5, 42.5],
+        model.dose_curves.bmi.rows.map((r) => Math.log(r.ratio)),
+      )
+    );
+  if (key === "sbp") return (0.85 * -Math.log(0.87) * (Math.min(180, Math.max(110, value)) - 120)) / 10;
+  if (key === "waist") return (0.4 * Math.log(1.07) * (Math.min(140, Math.max(65, value)) - 85)) / 5;
+  if (key === "a1c") return 0.38 * dose("hba1c", value);
+  if (key === "crp") return 0.18 * dose("hs_crp", value);
+  return null;
+}
+function nativeRank(key: string, x: number, age: number, sex: Sex, qs: number[]) {
+  const ys = qs.map((q) => transform(key, q)!);
   const threshold = Math.min(...ys) + 0.2 * (Math.max(...ys) - Math.min(...ys));
   let target = qs
     .filter((_, i) => ys[i] <= threshold)
@@ -243,35 +277,88 @@ export function native(key: string, x: number, age: number, sex: Sex, quality = 
         )
       : null;
   }
+  return { target, rank };
+}
+
+function transferYears(key: string, x: number, qs: number[], age: number, quality: number) {
+  const log = nativeLog(key, x);
+  if (log === null) return null;
+  const center =
+    key === "bmi"
+      ? qs.reduce((sum, v, i) => sum + [0.175, 0.2, 0.25, 0.2, 0.175][i] * nativeLog(key, v)!, 0)
+      : nativeLog(key, qs[2])!;
+  return (log - center) * model.policy.years_per_published_log_unit * shrink(age) * model.strength * quality;
+}
+
+export function native(
+  key: string,
+  x: number,
+  age: number,
+  sex: Sex,
+  quality = 1,
+  legacy = false,
+): Contribution | null {
+  const d = refs[key],
+    z = transform(key, x);
+  if (!d || z === null) return null;
+  const row = curveAt(age, d.ref[sex], (r) => [r.mu, ...r.q]);
+  if (!row) return null;
+  let [mu, ...qs] = row;
+  if (!legacy) {
+    if (key === "non_hdl") qs = curveAt(age, model.clinical_ranks.non_hdl[sex], (r) => r) ?? qs;
+    if (fields[key]?.group === "blood") mu = transform(key, qs[2])!;
+  }
+  const transferred = legacy ? null : transferYears(key, x, qs, age, quality);
+  const { target, rank } = nativeRank(key, x, age, sex, qs);
   return {
     value: x,
     unit: fields[key]?.unit ?? "g/day",
-    years: (z - mu) * (coef[key] / d.sd) * shrink(age) * model.strength * quality,
+    years: transferred ?? (z - mu) * (coef[key] / d.sd) * shrink(age) * model.strength * quality,
     quality,
     target: coef[key] ? target : null,
     percentile: rank,
     grade: ["alcohol", "fibre"].includes(key) ? catalog[key].grade : "survey",
     reference: quality < 1 ? "survey proxy" : "survey",
-    source: ["alcohol", "fibre"].includes(key) ? "literature with NHANES centering" : "joint NHANES fit",
+    source:
+      transferred !== null
+        ? "Published dose centered at survey median"
+        : ["alcohol", "fibre"].includes(key)
+          ? "literature with NHANES centering"
+          : "joint NHANES fit",
     target_source: "Development NHANES age/sex comparison",
   };
 }
-export function device(key: string, x: number, age: number, sex: Sex): Contribution | null {
+export function device(key: string, x: number, age: number, sex: Sex, legacy = false): Contribution | null {
   const d = model.hip[key === "steps" ? "steps" : "minutes"];
   const row = curveAt(age, d.refs[sex], (r) => [r.center, ...r.quantiles]);
   if (!row) return null;
   const [center, ...qs] = row,
     b = Math.min(0, d.beta) / d.sd,
-    cap = model.policy.hip_absolute_log_cap;
+    cap = legacy ? model.policy.hip_absolute_log_cap : 0.75;
   const steps = key === "steps",
     settings = model.daily;
-  const quality = steps ? settings.step_quality : model.policy.watch_hip_reliability;
-  const dose = steps
+  const quality = legacy
+    ? steps
+      ? settings.step_quality
+      : model.policy.watch_hip_reliability
+    : steps
+      ? 0.76
+      : 0.58;
+  const originalDose = steps
     ? Math.log(
         Math.max(settings.step_floor, Math.min(x, settings.step_plateau[Number(age >= settings.step_age)])),
       )
     : Math.log1p(x);
-  const log = quality * b * (dose - center);
+  const log = legacy
+    ? quality * b * (originalDose - center)
+    : steps
+      ? quality *
+        (dose(
+          "steps",
+          Math.min(x, settings.step_plateau[Number(age >= settings.step_age)]) * settings.watch_count_ratio,
+        ) -
+          model.step_center)
+      : quality * (dose("mvpa_device", x) - dose("mvpa_device", qs[2]));
   return {
     value: x,
     unit: key === "steps" ? "steps/day" : "moderate-equivalent min/day",
@@ -285,7 +372,7 @@ export function device(key: string, x: number, age: number, sex: Sex): Contribut
     target: b ? qs[4] : null,
     grade: "survey bridge",
     reference: "hip monitor proxy",
-    source: "adjusted hip accelerometer fit",
+    source: legacy ? "adjusted hip accelerometer fit" : "Published device dose, hip age/sex reference",
     target_source: "Age/sex upper observed decile, research hip monitor",
   };
 }

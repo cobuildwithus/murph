@@ -148,6 +148,7 @@ function habitFactor(
   sex: Sex,
   core: Rows,
   mult: number,
+  legacy: boolean,
 ): [string, Contribution] | null {
   const restricted = restrictions(data.profile).restricted,
     q = config.habit_quality;
@@ -157,7 +158,7 @@ function habitFactor(
     !restricted &&
     !["steps", "activity", "hip_minutes", "aerobic"].some((k) => core[k])
   ) {
-    const rec = device("steps", sum / config.habit_days, age, sex);
+    const rec = device("steps", sum / config.habit_days, age, sex, legacy);
     if (rec)
       return [
         "steps",
@@ -230,6 +231,7 @@ export function verifiedHabits(
   sex: Sex,
   core: Rows,
   mult: number,
+  legacy = false,
 ) {
   const result: Rows = {};
   const streams = verifiedHabitDays(data, at);
@@ -252,6 +254,7 @@ export function verifiedHabits(
         sex,
         core,
         mult,
+        legacy,
       );
       if (!rec) {
         level = null;

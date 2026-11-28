@@ -3,7 +3,7 @@
   "label": "Alkaline phosphatase",
   "value": 66,
   "unit": "U/L",
-  "years": -0.1,
+  "years": null,
   "target": null,
   "history": [
     {
