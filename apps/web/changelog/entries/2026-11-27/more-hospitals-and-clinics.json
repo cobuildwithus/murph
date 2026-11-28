@@ -9,6 +9,6 @@
     "summary": "Search now finds more than 1,200 additional health systems and clinics, by name or near you, and you can connect their patient portals the same way.",
     "details": "You sign in on the hospital's own patient portal and approve access there. A first import from a very large record can take a little longer, and daily updates bring in what's new after that.",
     "relevanceTags": ["medical-records"],
-    "sourcePullRequests": [5391, 5404, 5448]
+    "sourcePullRequests": [5391, 5404, 5448, 5449]
   }
 }
