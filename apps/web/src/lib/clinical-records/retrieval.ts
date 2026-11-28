@@ -1010,15 +1010,16 @@ async function requireCurrentAccessToken(input: {
 
 // Only a capable caller and the Web-owned frozen slice can extend this request.
 function clinicalPageTiming(capable: boolean | undefined, sourceSystem: string, slice: ClinicalFhirRetrievalSlice) {
-  const ordinary = { maxClaimVersion: MAX_LOGICAL_REQUEST_CLAIM_VERSION, timeoutMs: FHIR_REQUEST_TIMEOUT_MS };
-  if (!isOracleLifetimeSearch(sourceSystem, slice)) return { ...ordinary, staleMs: PAGE_REQUEST_CLAIM_STALE_MS };
-  // A shorter-lived caller can encounter a claim held by a longer-lived caller.
-  if (!capable) return { ...ordinary, staleMs: ORACLE_LIFETIME_PAGE_CALLBACK_MS };
+  if (!isOracleLifetimeSearch(sourceSystem, slice)) {
+    return { maxClaimVersion: MAX_LOGICAL_REQUEST_CLAIM_VERSION, timeoutMs: FHIR_REQUEST_TIMEOUT_MS, staleMs: PAGE_REQUEST_CLAIM_STALE_MS };
+  }
+  // The saved slice alone sets the claim window and ceiling, so a caller rolled back mid-run
+  // cannot strand a page. A shorter-lived caller can encounter a claim held by a longer-lived one.
   // A foreground interruption costs a claim and a completion. Scale the ceiling with the
   // wider window so interruptions per second of provider wait stay within the ordinary budget.
   return {
     maxClaimVersion: Math.ceil(MAX_LOGICAL_REQUEST_CLAIM_VERSION * ORACLE_LIFETIME_SEARCH_TIMEOUT_MS / FHIR_REQUEST_TIMEOUT_MS),
-    timeoutMs: ORACLE_LIFETIME_SEARCH_TIMEOUT_MS,
+    timeoutMs: capable ? ORACLE_LIFETIME_SEARCH_TIMEOUT_MS : FHIR_REQUEST_TIMEOUT_MS,
     staleMs: ORACLE_LIFETIME_PAGE_CALLBACK_MS,
   };
 }

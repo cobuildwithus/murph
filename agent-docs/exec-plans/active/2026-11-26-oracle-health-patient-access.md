@@ -183,9 +183,10 @@ previous version. Only an end-to-end fetch-page capability hint and a saved
 Oracle whole-family search select the 65-second provider deadline. The Worker
 allows 100 seconds for that callback and the runner port 105, the same 5-second
 margin the Worker environment requires of the runner commit timeout. An older
-component keeps the 20-second provider path. A negotiated page's claim ceiling
-scales with its wider window, from 20 to 65, so foreground interruptions cost
-no more per second of provider wait. Retryable gateway errors resume through
+component keeps the 20-second provider path. A saved Oracle whole-family
+search's claim ceiling scales with its wider window, from 20 to 65, so
+foreground interruptions cost no more per second of provider wait. The saved
+slice sets it without the hint, so a caller rolled back mid-run keeps it. Retryable gateway errors resume through
 the existing checkpoint and mailbox delay. O4 adds no persistent format or rollback floor.
 Keep O3 Web and the signer once an Oracle session exists.
 

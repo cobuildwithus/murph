@@ -453,7 +453,8 @@ provider-directory tests. The importer is byte-deterministic for fixed source
 bytes and canonicalizes provider and facility order; the source hash remains
 an exact-byte hash, so a reordered source bundle correctly receives a different
 hash. The v2 parser rejects duplicate or unsorted ids, any entry field the
-importer does not write for that vendor, unknown policy/query
+importer does not write for that vendor, an Oracle `upstreamId` that is not an
+OID URN of at most 100 characters, unknown policy/query
 references, non-HTTPS URLs,
 credentials/query/fragment components, and private, loopback, link-local, or
 mapped-private IP literals. Only the v2 directory parser remains.

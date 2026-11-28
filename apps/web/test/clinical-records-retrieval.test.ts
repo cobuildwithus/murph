@@ -1769,7 +1769,8 @@ describe("Oracle runs at the Web retrieval boundary", () => {
   // A request row starts at claim version 1, so a ceiling of N allows N - 1 provider attempts.
   it.each([
     { label: "a negotiated lifetime page", capable: true, daily: false, ceiling: 65 },
-    { label: "a legacy caller on a lifetime page", capable: false, daily: false, ceiling: 20 },
+    // The saved slice, not the header, sets the ceiling: a rolled-back caller keeps it.
+    { label: "a saved lifetime page whose caller sends no hint", capable: false, daily: false, ceiling: 65 },
     { label: "a capable caller on a daily window", capable: true, daily: true, ceiling: 20 },
   ])("stops retrying a permanent gateway outage for $label at its claim ceiling", async ({ capable, daily, ceiling }) => {
     const families = ["Patient", "Procedure"];

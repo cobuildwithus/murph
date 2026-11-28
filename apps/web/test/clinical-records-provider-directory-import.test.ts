@@ -194,8 +194,11 @@ describe("Oracle directory refresh", () => {
       ({ resource: { resourceType: "Endpoint", id, status: "active", address: `${base}${tenant}/` } });
     const organization = (id: string, name: string | undefined, reference: string) => ({ resource: { resourceType: "Organization",
       id, name, endpoint: [{ reference: `Endpoint/${reference}` }], address: [{ city: "Cove", state: "GA", postalCode: "30309" }] } });
+    const kept = organization("org-1", "Kept Clinic", "kept");
+    // An identifier the parser would reject is left off rather than failing the refresh.
+    Object.assign(kept.resource, { identifier: [{ system: "urn:ietf:rfc:3986", value: "urn:oid:1.2.x" }] });
     const rows = [
-      endpoint("kept", "Kept"), organization("org-1", "Kept Clinic", "kept"),
+      endpoint("kept", "Kept"), kept,
       endpoint("unnamed", "Unnamed"), organization("org-2", undefined, "unnamed"),
       endpoint("long", "Long"), organization("org-3", "x".repeat(161), "long"),
       // Two organizations share one endpoint; two endpoints share one tenant.
@@ -213,6 +216,7 @@ describe("Oracle directory refresh", () => {
     const published = build(rows);
     expect(Object.fromEntries(published.map(row => [row.fhirBaseUrl.slice(base.length), row.brandName])))
       .toEqual({ Kept: "Kept Clinic", Shared: "Earlier Clinic", Twin: "Twin A" });
+    expect(published.every(row => row.upstreamId === undefined)).toBe(true);
     expect(JSON.stringify(build([...rows].reverse()))).toBe(JSON.stringify(published));
   });
   it("holds the bootstrap, pins the published entries and publishes new tenants only after review establishes the host", () => {

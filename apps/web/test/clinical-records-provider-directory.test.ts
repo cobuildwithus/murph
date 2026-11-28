@@ -381,6 +381,10 @@ describe("Clinical Records provider directory policy set", () => {
     ["an embedded client id", { clientId: "synthetic-registration" }, /integration is unsupported/u],
     ["an embedded client secret", { client_secret: "synthetic-secret" }, /integration is unsupported/u],
     ["any field the importer does not write", { redirectUri: "https://synthetic.example.test/callback" }, /integration is unsupported/u],
+    ["a free-text upstream id", { upstreamId: "synthetic note" }, /integration is unsupported/u],
+    ["a nested upstream id", { upstreamId: { value: "urn:oid:1.2.3" } }, /integration is unsupported/u],
+    ["a malformed upstream OID", { upstreamId: "urn:oid:1..2" }, /integration is unsupported/u],
+    ["an overlong upstream OID", { upstreamId: `urn:oid:1${".2".repeat(46)}` }, /integration is unsupported/u],
     ["no integration", { integration: undefined }, /integration is unsupported/u],
     ["another vendor's id", { id: "epic-synthetic-valley" }, /integration is unsupported|strictly sorted/u],
   ])("rejects an Oracle entry with %s", (_label, overrides, message) => {

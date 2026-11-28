@@ -169,7 +169,10 @@ test("the first server-registered tenant needs human review before the refresh c
   assert.throws(() => publication(mixed(first, { ...second, fhirBaseUrl: "https://other.example.test/r4/Test-B" })), /unsupported/u);
   assert.throws(() => publication(mixed(first), [{ kind: "addition", id: second.id, candidate: second.fhirBaseUrl,
     brandName: second.brandName, clientIdEnvironmentKey: null }]), /does not match/u);
-  for (const extra of [{ client_secret: "synthetic-secret" }, { redirectUri: "https://synthetic.example.test/callback" }]) {
+  assert.match(checkPullRequest({ authorType: "User", baseText: mixed(first), headText: mixed({ ...first, upstreamId: "urn:oid:1.2.3" }) }),
+    /keeps its connection/u);
+  for (const extra of [{ client_secret: "synthetic-secret" }, { redirectUri: "https://synthetic.example.test/callback" },
+    { upstreamId: "synthetic note" }, { upstreamId: { value: "urn:oid:1.2.3" } }]) {
     assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: mixed(first), headText: mixed({ ...first, ...extra }) }),
       /integration is unsupported/u);
     assert.throws(() => publication(mixed(first, { ...second, ...extra })), /integration is unsupported/u);

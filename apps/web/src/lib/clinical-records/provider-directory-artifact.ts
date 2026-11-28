@@ -255,6 +255,7 @@ function parseDirectoryEntry(
   if (owned.policy.sourceSystem === "cerner-fhir") {
     // Oracle registration is server-owned; an entry cannot name a client or carry any other field.
     if (!owned.integration || record.integration !== owned.integration || !hasOnlyEntryKeys(record, ORACLE_ENTRY_KEYS)
+      || (record.upstreamId !== undefined && !isOracleUpstreamId(record.upstreamId))
       || !/^oracle-[a-f0-9]{20}$/u.test(shared.id) || !oracleFhirTenant(fhirBaseUrl)) {
       throw new TypeError(`Clinical provider directory entry ${index} integration is unsupported.`);
     }
@@ -279,6 +280,11 @@ const ORACLE_ENTRY_KEYS: ReadonlySet<string> = new Set([...SHARED_ENTRY_KEYS, "i
 
 function hasOnlyEntryKeys(record: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   return Object.keys(record).every(key => record[key] === undefined || allowed.has(key));
+}
+
+/** The organization OID the importer may copy onto an Oracle entry. */
+export function isOracleUpstreamId(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 100 && /^urn:oid:[0-9]+(?:\.[0-9]+)*$/u.test(value);
 }
 
 // Four-field tuples predate street lines; seven-field tuples add street lines, aliases and a coordinate.

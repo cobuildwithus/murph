@@ -18,6 +18,7 @@ import {
 import {
   assertDirectoryRefreshCounts,
   holdDirectoryChangesForReview,
+  isOracleUpstreamId,
   oracleFhirTenant,
   type HeldDirectoryChange,
 } from "../src/lib/clinical-records/provider-directory-artifact";
@@ -148,7 +149,7 @@ export function appendOracleDirectory(artifact: ProviderDirectoryArtifactV2, { b
       artifact.entries.push({
         aliases: [], brandName, fhirBaseUrl: endpoint.base, id,
         integration: ORACLE_INTEGRATION_ID, locations: readLocations(resource),
-        policyId: ORACLE_ACQUISITION_POLICY.id, ...(oid?.startsWith("urn:oid:") ? { upstreamId: oid } : {}),
+        policyId: ORACLE_ACQUISITION_POLICY.id, ...(isOracleUpstreamId(oid) ? { upstreamId: oid } : {}),
       });
     }
   }
