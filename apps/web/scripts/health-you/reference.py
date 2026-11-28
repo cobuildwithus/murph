@@ -42,11 +42,13 @@ model.update(display_weights=age.doses.EXTRA, step_center=age.doses.STEP_LOG_CEN
 model["policy"]["protocol"]["member_entered_home_cuff_assumed_validated"] = True
 write(web / "src/lib/health-you/engine/model.json", model)
 # The canonical action and the scorer share a frozen, versioned closed-choice vocabulary.
-questions_path = web.parents[1] / "packages/contracts/src/habit-questions-v1.ts"
-questions_path.write_text("// Generated from the frozen version-one form by the age reference importer.\n"
-                          + "export const habitQuestionsV1 = "
-                          + json.dumps(age.evidence_inputs.QUESTIONS, ensure_ascii=False, indent=2)
-                          + " as const;\n")
+action_contract = web.parents[1] / "packages/contracts/src/member-action.ts"
+source = action_contract.read_text()
+begin = "// BEGIN generated version-one habit questions\n"
+start = source.index(begin) + len(begin)
+end = source.index("// END generated version-one habit questions", start)
+choices = json.dumps(age.evidence_inputs.QUESTIONS, ensure_ascii=False, indent=2)
+action_contract.write_text(source[:start] + "export const habitQuestionsV1 = " + choices + " as const;\n" + source[end:])
 cases = [row for path in sorted((study / "golden").glob("*.json")) for row in json.loads(path.read_text())]
 assert model["version"] == "r17.0" and all(row["history"] for row in cases)
 assert len({row["case"] for row in cases}) == len(cases) == 1071
