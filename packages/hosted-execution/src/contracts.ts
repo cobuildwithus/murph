@@ -1165,6 +1165,8 @@ export type HostedRuntimeTimerTriggerKind =
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
 export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 20_000;
 export const HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
+// The runner waits at least this much longer than the Worker's Web-control call it is waiting on.
+export const HOSTED_EXECUTION_RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;
 export const HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER =

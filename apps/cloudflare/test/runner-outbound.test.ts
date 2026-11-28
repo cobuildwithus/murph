@@ -1,3 +1,4 @@
+import { ORACLE_LIFETIME_PAGE_CALLBACK_MS, ORACLE_LIFETIME_PAGE_HEADER } from "@murphai/hosted-execution/clinical-records-boundary";
 import { createPlatform as createSnapshotPlatform, createHostedWorkspaceRuntimeBridgeJobOptions, createWorkspaceReadResponse } from "./hosted-checkpoint-platform-fixture.ts";
 import { createCloudflareWorkspaceSnapshotPort } from "../src/runtime-platform/workspace-snapshot-port.ts";
 import { createAssistantOutboxIntent } from "@murphai/assistant-engine/assistant-outbox";
@@ -848,9 +849,14 @@ describe("handleRunnerOutboundRequest", () => {
     },
   );
 
-  it.each(ALLOWLISTED_WEB_CONTROL_CASES)(
-    "proxies allowlisted hosted web-control path: $name",
-    async ({ body, path }) => {
+  it.each([
+    ...ALLOWLISTED_WEB_CONTROL_CASES.map(entry => ({ ...entry, lifetimeHint: false })),
+    ...ALLOWLISTED_WEB_CONTROL_CASES.filter(entry => [HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH,
+      HOSTED_CLINICAL_RECORDS_RUNTIME_READ_RUN_PATH].some(path => path === entry.path))
+      .map(entry => ({ ...entry, lifetimeHint: true })),
+  ])(
+    "proxies allowlisted hosted web-control path: $name (lifetime hint $lifetimeHint)",
+    async ({ body, path, lifetimeHint }) => {
       expect(isAllowedHostedRunnerWebControlRequest({
         method: "POST",
         path,
@@ -887,6 +893,7 @@ describe("handleRunnerOutboundRequest", () => {
         new Request(`http://web-control.worker${path}`, {
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           headers: createRunnerWriteFenceProxyHeaders({
+            ...(lifetimeHint && { [ORACLE_LIFETIME_PAGE_HEADER]: "1" }),
             ...(body === undefined
               ? {}
               : {
@@ -959,7 +966,9 @@ describe("handleRunnerOutboundRequest", () => {
         expect(headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
         expect(headers.get("x-hosted-runtime-lease-generation")).toBe("9");
       }
-      expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+      const extended = lifetimeHint && path === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH;
+      expect(headers.get(ORACLE_LIFETIME_PAGE_HEADER)).toBe(extended ? "1" : null);
+      expect(timeoutSpy).toHaveBeenCalledWith(extended ? ORACLE_LIFETIME_PAGE_CALLBACK_MS : 45_000);
     },
   );
 

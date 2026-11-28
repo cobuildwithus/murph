@@ -627,7 +627,7 @@ export interface HostedRuntimeClinicalRecordsPort {
   ): Promise<HostedClinicalRecordsFetchDocumentResponse>;
   fetchPage(
     request: HostedClinicalRecordsFetchPageRequest,
-    options?: { signal?: AbortSignal | null },
+    options?: { oracleLifetimeSearch?: boolean; signal?: AbortSignal | null },
   ): Promise<HostedClinicalRecordsFetchPageResponse>;
   readRun(
     request: HostedClinicalRecordsReadRunRequest,
