@@ -129,11 +129,13 @@ function labMove(latest: LabDraw, prior: LabDraw[], rule: LabRule) {
   return { values, baseline, delta, effect: latest.analyte === "hdl" ? delta : -delta, step: rule.step, fastingKnown };
 }
 
-function labChange(latest: LabDraw, move: NonNullable<ReturnType<typeof labMove>>, rule: LabRule, dateLabel: string): Candidate | undefined {
+type LabMove = NonNullable<ReturnType<typeof labMove>>;
+
+function labChange(latest: LabDraw, move: LabMove | undefined, rule: LabRule, dateLabel: string): Candidate | undefined {
+  if (!move || move.effect < move.step) return;
   const { values, baseline, delta, effect, step, fastingKnown } = move;
-  if (effect < step) return;
   return {
-    date: latest.date, effect, noise: Math.max(rule.step, mad(values)),
+    date: latest.date, effect, noise: Math.max(step, mad(values)),
     achievement: { kind: "lab_change", subject: latest.analyte, period: latest.date },
     card: {
       id: `lab-change-${latest.analyte}-${cardDateKey(latest.date)}`, kind: "lab_change", filter: "Labs", measure: latest.analyte,
@@ -143,6 +145,12 @@ function labChange(latest: LabDraw, move: NonNullable<ReturnType<typeof labMove>
       chart: { type: "lab_trend", unit: latest.unit, baseline: { value: baseline, draws: values.length }, latest: { date: latest.date, value: latest.value } },
     },
   };
+}
+
+/** A gauge stands in when there's no change or percentile, never for a draw at least a step worse than the
+ * usual, however near the range's edge it still sits. See yours draws one privately either way. */
+function rangeOffered(mode: "fallback" | "independent" | undefined, other: unknown, move: LabMove | undefined) {
+  return mode === "independent" || (!other && !(move && move.effect <= -move.step));
 }
 
 export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
@@ -163,10 +171,8 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
     const dateLabel = formatWinDate(latest.date, input.member.today);
     const displayValue = formatLabValue(latest.value, latest.unit);
     const move = labMove(latest, prior, rule);
-    const change = move && labChange(latest, move, rule, dateLabel);
+    const change = labChange(latest, move, rule, dateLabel);
     if (change) candidates.push(change);
-    // A draw at least a step worse than the usual is no win, however near the range's edge it still sits.
-    const worse = move !== undefined && move.effect <= -move.step;
     const percentile = rule.rankMetric && percentileCandidate({
       rank: rank(rule.rankMetric, latest.value, { member: input.member, unit: latest.unit, fasting: latest.fasting }),
       value: latest.value,
@@ -176,7 +182,7 @@ export function labCandidates(input: HealthWinsInput, rank: HealthWinRank,
     if (percentile) candidates.push({
       ...percentile, achievement: { kind: "lab_percentile", subject: analyte, period: latest.date },
     });
-    if ((options.rangeMode === "independent" || (!change && !percentile && !worse)) && interval && within) candidates.push({
+    if (interval && within && rangeOffered(options.rangeMode, change ?? percentile, move)) candidates.push({
       date: latest.date, effect: 0, noise: 1,
       card: {
         id: `lab-range-${analyte}-${cardDateKey(latest.date)}`, kind: "lab_range", filter: "Labs", measure: analyte,
