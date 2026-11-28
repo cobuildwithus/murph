@@ -57,6 +57,8 @@ describe("See yours detection", () => {
     expect(generateHealthWins(input).some(card => card.kind === "trend_change")).toBe(false);
     const trend = seeYoursCard(input, "steps", "trend_change");
     expect(trend).toMatchObject({ kind: "trend_change", measure: "steps", chart: { baseline: 5800, delta } });
+    // A flat month reads "0", never "+0".
+    expect(trend?.title.number).toBe(delta === 0 ? "0" : "−1,300");
     expect(chooseSeeYours(input, "steps", "percentile", true)).toEqual({ card: trend });
     for (const incomplete of [daily.slice(0, -1), daily.filter(row => !row.date.startsWith("2038-06"))]) {
       expect(chooseSeeYours({ ...input, daily: incomplete }, "steps", "trend_change", true))
@@ -69,7 +71,7 @@ describe("See yours detection", () => {
     const input = { member, daily };
     expect(generateHealthWins(input)).toEqual([]);
     const card = seeYoursCard(input, "floors", "trend_change");
-    expect(card).toMatchObject({ kind: "trend_change", measure: "floors", chart: { delta: 0 } });
+    expect(card).toMatchObject({ kind: "trend_change", measure: "floors", title: { number: "0" }, chart: { delta: 0 } });
     expect(chooseSeeYours(input, "floors", "best_month", true)).toEqual({ card });
   });
 
