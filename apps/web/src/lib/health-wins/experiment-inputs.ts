@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import type { ExperimentOutcome } from "@murphai/contracts";
+import { experimentRunPlanSchema, isStrictIsoDate, type ExperimentOutcome, type ExperimentRunPlan } from "@murphai/contracts";
 import { normalizeMetricValue } from "@murphai/health-metrics";
-import { resolveExperimentMetricIdentity, type BrowserVaultEntity } from "@murphai/query/browser-replica-client";
+import {
+  resolveExperimentAdherenceRollupTarget, resolveExperimentAdherenceTargets, resolveExperimentMetricIdentity, type BrowserVaultEntity,
+} from "@murphai/query/browser-replica-client";
 import type { Experiment, Metric } from "./engine";
 import { WIN_METRIC_KEYS } from "./wearable-inputs";
 
@@ -17,24 +19,61 @@ const PUBLIC_MODALITIES: ReadonlyMap<string, string> = new Map([
 ]);
 const metricByKey = new Map(Object.entries(WIN_METRIC_KEYS).map(([metric, key]) => [key, metric as Metric]));
 
-function publicTitle(outcome: ExperimentOutcome, runPlan: unknown) {
+function publicTitle(outcome: ExperimentOutcome, runPlan: ExperimentRunPlan) {
   const key = outcome.commonsProtocolRef?.key;
   if (key) {
     const protocol = /^(?:protocol|protocol_variant):([a-z0-9-]+)(?:\/[a-z0-9-]+)?$/u.exec(key)?.[1];
     return protocol ? PUBLIC_MODALITIES.get(protocol) : undefined;
   }
-  const modality = outcome.effectiveProtocolSnapshot?.modality ??
-    (runPlan && typeof runPlan === "object" && "modality" in runPlan ? runPlan.modality : null);
+  const modality = outcome.effectiveProtocolSnapshot?.modality ?? runPlan.modality;
   return typeof modality === "string" ? PUBLIC_MODALITIES.get(modality.trim().toLowerCase().replace(/[ _]+/gu, "-")) : undefined;
 }
 
-function cardsFromOutcome(outcome: ExperimentOutcome, today: string, runPlan: unknown): Experiment[] {
+function loggedInWindow(session: BrowserVaultEntity, { interventionStart, interventionEnd }: ExperimentOutcome["windows"]) {
+  const { sessionStatus, source, sessionLocalDate, scheduledLocalDate } = session.attributes;
+  // Older explicit session records can omit status, which the experiment reader treats as completed.
+  if (source === "derived" || (sessionStatus !== undefined && sessionStatus !== "completed")) return false;
+  const date = sessionLocalDate ?? scheduledLocalDate ?? session.date ?? session.occurredAt?.slice(0, 10);
+  if (typeof date !== "string" || !isStrictIsoDate(date)) return null;
+  return interventionStart !== null && interventionEnd !== null && date >= interventionStart && date <= interventionEnd;
+}
+
+function countLoggedSessions(outcomes: readonly ExperimentOutcome[], sessions: readonly BrowserVaultEntity[]) {
+  const byId = new Map(outcomes.map(o => [o.experiment.id, o]));
+  const bySlug = new Map(outcomes.map(o => [o.experiment.slug, o]));
+  const counts = new Map<string, number | null>(outcomes.map(o => [o.experiment.id, 0]));
+  for (const session of sessions) {
+    const slug = session.attributes.experimentSlug ?? session.experimentSlug;
+    const id = session.attributes.experimentId;
+    const outcome = typeof id === "string" ? byId.get(id) : typeof slug === "string" ? bySlug.get(slug) : undefined;
+    if (!outcome || (slug != null && slug !== outcome.experiment.slug)) continue;
+    const experimentId = outcome.experiment.id;
+    const logged = loggedInWindow(session, outcome.windows);
+    const count = counts.get(experimentId);
+    if (logged === null) counts.set(experimentId, null);
+    else if (logged && count != null) counts.set(experimentId, count + 1);
+  }
+  return counts;
+}
+
+function usesActivitySessions(outcome: ExperimentOutcome, runPlan: ExperimentRunPlan, title: string) {
+  const snapshot = outcome.effectiveProtocolSnapshot;
+  const target = resolveExperimentAdherenceRollupTarget(resolveExperimentAdherenceTargets({
+    explicitTargets: runPlan.adherenceTargets, protocolKey: outcome.commonsProtocolRef?.key,
+    protocolActivitySessionEvidence: snapshot?.activitySessionEvidence, protocolSessionsPerDay: snapshot?.frequency?.sessionsPerDay,
+    runPlan: { ...runPlan, modality: runPlan.modality ?? snapshot?.modality ?? title },
+  }));
+  return target?.evidence.kind === "linkedEventCount" && target.evidence.eventKind === "activity_session";
+}
+
+function cardsFromOutcome(outcome: ExperimentOutcome, today: string, runPlan: ExperimentRunPlan, loggedSessions: number | null): Experiment[] {
   const title = publicTitle(outcome, runPlan);
   const { baselineStart, baselineEnd, interventionStart, interventionEnd } = outcome.windows;
   if (!title || outcome.experiment.status !== "completed" || !baselineStart || !baselineEnd || !interventionStart
     || !interventionEnd || interventionEnd > today || interventionEnd > outcome.asOf || baselineEnd >= interventionStart) return [];
-  const { completedSessions, targetSessions } = outcome.adherenceSummary;
-  if (targetSessions === null || outcome.structuredReview) return [];
+  const { targetSessions, completedSessions } = outcome.adherenceSummary;
+  const done = usesActivitySessions(outcome, runPlan, title) ? completedSessions : loggedSessions;
+  if (done === null || targetSessions === null || outcome.structuredReview) return [];
   if (outcome.metricResults.some(result => !metricByKey.has(resolveExperimentMetricIdentity(result.biomarkerKey).metricKey))) return [];
   const slug = createHash("sha256").update(outcome.experiment.id).digest("base64url").slice(0, 22);
   return outcome.metricResults.flatMap(result => {
@@ -49,7 +88,7 @@ function cardsFromOutcome(outcome: ExperimentOutcome, today: string, runPlan: un
     if (baselineMean === null || interventionMean === null) return [];
     return [{ slug, title, metric, baseline: { start: baselineStart, end: baselineEnd },
       intervention: { start: interventionStart, end: interventionEnd }, baselineMean, interventionMean,
-      expectedDirection: result.expectedDirection, adherence: { done: completedSessions, target: targetSessions } }];
+      expectedDirection: result.expectedDirection, adherence: { done, target: targetSessions } }];
   });
 }
 
@@ -86,12 +125,17 @@ function shareableGroups(periods: Iterable<Period>, byId: ReadonlyMap<string, Ex
   return eligible;
 }
 
-/** Read canonical bank summaries only. Projected schedules identify concurrent, possibly unfinished interventions. */
+/** Projected schedules identify concurrent, possibly unfinished interventions. */
 export function readHealthWinExperiments(
-  outcomes: readonly ExperimentOutcome[], entities: readonly BrowserVaultEntity[], today: string,
+  outcomes: readonly ExperimentOutcome[], entities: readonly BrowserVaultEntity[], sessions: readonly BrowserVaultEntity[] | null, today: string,
 ): Experiment[] {
   const plans = new Map(entities.map(entity => [entity.id, entity.attributes.runPlan]));
-  const byId = new Map(outcomes.map(o => [o.experiment.id, cardsFromOutcome(o, today, plans.get(o.experiment.id))]));
+  const counts = sessions && countLoggedSessions(outcomes, sessions);
+  const byId = new Map(outcomes.map(outcome => {
+    const { id } = outcome.experiment;
+    const plan = experimentRunPlanSchema.safeParse(plans.get(id) ?? {});
+    return [id, plan.success ? cardsFromOutcome(outcome, today, plan.data, counts?.get(id) ?? null) : []];
+  }));
   const periods = new Map<string, Period>();
   for (const { experiment, windows } of outcomes) {
     if (windows.interventionStart && experiment.status !== "planned") {

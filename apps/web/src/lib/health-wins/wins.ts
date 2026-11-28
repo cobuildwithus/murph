@@ -25,7 +25,7 @@ import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v7";
+const DETECTOR_VERSION = "v8";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 
 const staleSet = () => hostedOnboardingError({
