@@ -41,7 +41,7 @@ function trackedContext(data: MemberEvidence, at: string) {
 }
 function countedEvidence(rows: Rows) {
   const counted = new Set(Object.keys(rows));
-  if (rows.aerobic || rows.lifting || rows.sauna) {
+  if (rows.zone_intensity || rows.aerobic || rows.lifting || rows.sauna) {
     counted.add("workouts");
     counted.add("workout_minutes");
   }
@@ -56,7 +56,12 @@ function countedEvidence(rows: Rows) {
   if (rows.hrv) counted.add("hrv-rmssd");
   return counted;
 }
-export function missingEvidence(data: MemberEvidence, at: string, rows: Rows) {
+export function missingEvidence(
+  data: MemberEvidence,
+  at: string,
+  rows: Rows,
+  reasons: Record<string, string> = {},
+) {
   const missing = [...new Set([...Object.keys(coef), ...model.optional, "steps", "hip_minutes"])]
     .filter((k) => !rows[k] && coef[k] !== 0)
     .sort()
@@ -94,6 +99,7 @@ export function missingEvidence(data: MemberEvidence, at: string, rows: Rows) {
           "Tracked separately. A matched measurement protocol and reference would allow an age comparison.",
       });
   }
+  for (const key of Object.keys(reasons).sort()) if (!rows[key]) missing.push({ key, unlock: reasons[key] });
   const counted = countedEvidence(rows);
   const remaining = missing.filter(
     ({ key }) =>
@@ -157,13 +163,19 @@ function rankFactor(k: string, r: Omit<Rows[string], "grade">, age: number, sex:
     r.target_source = "Survey median, descriptive only";
   }
 }
-function targetStatus(key: string, row: Pick<Contribution, "source" | "target">) {
+function targetStatus(key: string, row: Pick<Contribution, "source" | "target" | "years">) {
+  if (Object.hasOwn(model.evidence.factors, key) || Object.hasOwn(model.coverage.factors, key))
+    return "study comparison";
+  if (["lifting", "activity", "aerobic"].includes(key)) return "adult guideline";
   if (key === "meal_density") return "no individual intake target";
   if (["lean_change", "hrv", "alcohol_peak", "alcohol_timing", "caffeine_timing"].includes(key))
     return "descriptive trend only";
-  if (row.source === "Development NHANES examination cohorts" && lookup(model.clinical_fit.coefficients, key) === 0)
+  if (
+    row.source === "Development NHANES examination cohorts" &&
+    lookup(model.clinical_fit.coefficients, key) === 0
+  )
     return "descriptive only; fitted residual is zero";
-  if (coef[key] === 0) return "descriptive median; no independent fitted effect";
+  if (coef[key] === 0 && !row.years) return "descriptive median; no independent fitted effect";
   return row.target !== null ? "reference comparison" : "no independent fitted effect";
 }
 export function finishFactors(rows: Rows, parts: Record<string, number>, age: number, sex: Sex) {
@@ -171,6 +183,16 @@ export function finishFactors(rows: Rows, parts: Record<string, number>, age: nu
     Object.entries(rows).map(([k, row]) => {
       const { grade, series: _series, level: _level, confidence: _confidence, quit, ...r } = row;
       rankFactor(k, r, age, sex);
+      if (["activity", "aerobic"].includes(k))
+        Object.assign(r, {
+          target: 150,
+          target_source: "Adult guideline, 150–300 moderate-equivalent minutes per week",
+        });
+      if (k === "lifting")
+        Object.assign(r, {
+          target: typeof r.value === "string" ? "2/week" : 2,
+          target_source: "Adult guideline, strength training on two days each week",
+        });
       if (k === "balance" && r.value === "pass") r.target = "pass";
       if (["disease", "diabetes", "health", "phq9"].includes(k))
         r.target_source = "Descriptive reference category";

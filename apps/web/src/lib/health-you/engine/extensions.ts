@@ -1,3 +1,4 @@
+import { stepCapacity } from "./combine";
 import {
   between,
   catalog,
@@ -6,6 +7,7 @@ import {
   dated,
   distance,
   model,
+  lookup,
   number,
   percentile,
   pick,
@@ -78,7 +80,8 @@ function performance(
     ["floor_rise", "floor_rise", "points"],
     ["one_leg_balance", "balance", "s"],
   ]) {
-    if (tests.some((r) => r.verified === "self" && r.test === test)) proxy[key] = model.feeds.self_test_quality;
+    if (tests.some((r) => r.verified === "self" && r.test === test))
+      proxy[key] = model.feeds.self_test_quality;
     const v = number(
       pick(
         tests.filter((r) => r.test === test && r.unit === u),
@@ -97,7 +100,11 @@ function performance(
   );
   const qs = curveAt(age, model.grip_ref[sex], (r) => r);
   if (grip !== null && qs) {
-    if (tests.some((r) => r.verified === "self" && ["grip", "grip_max", "grip_strength"].includes(String(r.test))))
+    if (
+      tests.some(
+        (r) => r.verified === "self" && ["grip", "grip_max", "grip_strength"].includes(String(r.test)),
+      )
+    )
       proxy.grip = model.feeds.self_test_quality;
     inputs.grip = grip - qs[2];
     return { grip, qs };
@@ -105,7 +112,12 @@ function performance(
   return null;
 }
 
-function publishedCurves(age: number, inputs: Record<string, unknown>, excluded: Set<string>) {
+function publishedCurves(
+  age: number,
+  inputs: Record<string, unknown>,
+  excluded: Set<string>,
+  legacy: boolean,
+) {
   const result: Rows = {};
   for (const k of model.optional) {
     const f = catalog[k],
@@ -124,11 +136,12 @@ function publishedCurves(age: number, inputs: Record<string, unknown>, excluded:
     let target: Scalar;
     if (f.curve.bounds) target = f.curve.bounds.slice().sort((a, b) => contrast(f, a)! - contrast(f, b)!)[0];
     else target = f.curve.rows!.reduce((a, b) => (a.ratio <= b.ratio ? a : b)).value;
+    const shrinkage = (!legacy && lookup(model.display_weights, k)) || f.shrinkage;
     result[k] = {
       value: v,
       unit: f.unit,
-      years: f.shrinkage * weight * Math.max(f.log_floor ?? -Infinity, log),
-      quality: f.shrinkage,
+      years: shrinkage * weight * Math.max(f.log_floor ?? -Infinity, log),
+      quality: shrinkage,
       percentile: null,
       target,
       grade: f.grade,
@@ -180,6 +193,49 @@ function questionnaireInputs(
   }
   for (const k of ["nonexerciser", "traditional_sauna", "stable_ldl"]) inputs[k] = pick(ci, k);
 }
+function addStepCapacity(
+  data: MemberEvidence,
+  at: string,
+  age: number,
+  sex: Sex,
+  inputs: Record<string, unknown>,
+  core: Rows,
+  limited: boolean,
+) {
+  if (!limited && !restrictions(data.profile).pulse && inputs.vo2_peak == null && !core.vo2) {
+    const value = stepCapacity(data, at, age, sex);
+    if (value !== null) {
+      inputs.vo2_peak = value / model.policy.protocol.met_oxygen;
+      inputs.vo2_method = "step";
+    }
+  }
+}
+
+function centerPublishedLipids(result: Rows, age: number, sex: Sex) {
+  for (const k of ["ldl_c", "lpa"] as const) {
+    const row = result[k];
+    if (!row) continue;
+    const median = curveAt(age, model.extra_ranks[k][sex], (r) => [r[2]])?.[0];
+    const ref = median !== undefined ? contrast(catalog[k], median) : null;
+    if (ref !== null) row.years = row.quality * (contrast(catalog[k], row.value)! - ref);
+  }
+}
+
+function describeCapacity(result: Rows, inputs: Record<string, unknown>, age: number, sex: Sex) {
+  const vo = result.vo2_peak;
+  if (vo && inputs.vo2_method === "step")
+    Object.assign(vo, {
+      grade: "C, checked recovery-pulse estimate",
+      source: "https://doi.org/10.3390/app12031371",
+      quality: vo.quality * model.projection.step_vo2.quality,
+    });
+  const qs = vo && curveAt(age, refs.vo2.ref[sex], (r) => r.q);
+  if (qs) {
+    vo.percentile = percentile(Number(vo.value) * 3.5, qs);
+    vo.reference = "NHANES eligible submaximal treadmill estimate, measurement proxy";
+  }
+}
+
 export function published(
   data: MemberEvidence,
   at: string,
@@ -188,36 +244,34 @@ export function published(
   core: Rows,
   ci: Observation[],
   labs: Record<string, number | null>,
+  legacy = false,
 ) {
   const inputs: Record<string, unknown> = { sex: sex === "1" ? "male" : "female" };
   const proxy: Record<string, number> = {};
   questionnaireInputs(data, at, ci, inputs, proxy);
   const { absolute_log_caps: caps } = model.overlap;
-  const limited = restrictions(data.profile).restricted;
+  const limited = Boolean(restrictions(data.profile).restricted);
   const grip = limited ? null : performance(data, at, age, sex, inputs, proxy);
   if (limited) for (const k of caps.conditioning.factors) delete inputs[k];
   if (core.running || core.lifting) delete inputs.lifting;
   if (core.vo2) delete inputs.vo2_peak;
   if (between(labs.ldl, 0, 700)) inputs.ldl_c = labs.ldl;
   if (between(labs.lpa, 0, 700)) inputs.lpa = labs.lpa;
+  if (!legacy) addStepCapacity(data, at, age, sex, inputs, core, limited);
   const excluded = coreExclusions(core);
   const multiplier = model.policy.years_per_published_log_unit * shrink(age) * model.strength;
-  const result = publishedCurves(age, inputs, excluded);
-  limitOverlap(result, {}, multiplier);
+  const result = publishedCurves(age, inputs, excluded, legacy);
+  limitOverlap(result, {}, multiplier, legacy);
+  if (!legacy) centerPublishedLipids(result, age, sex);
   for (const [k, q] of Object.entries(proxy))
     if (result[k]) {
       result[k].years *= q;
       result[k].quality *= q;
       result[k].reference += "; member-reported proxy";
     }
-  limitOverlap(result, core, multiplier);
+  limitOverlap(result, core, multiplier, legacy);
   for (const row of Object.values(result)) row.years *= multiplier;
-  const vo = result.vo2_peak;
-  const qs = vo && curveAt(age, refs.vo2.ref[sex], (r) => r.q);
-  if (qs) {
-    vo.percentile = percentile(Number(vo.value) * 3.5, qs);
-    vo.reference = "NHANES eligible submaximal treadmill estimate, measurement proxy";
-  }
+  describeCapacity(result, inputs, age, sex);
   if (result.grip && grip)
     Object.assign(result.grip, {
       value: grip.grip,
@@ -230,11 +284,12 @@ export function published(
   return result;
 }
 
-function limitOverlap(result: Rows, core: Rows, multiplier: number) {
+function limitOverlap(result: Rows, core: Rows, multiplier: number, legacy: boolean) {
   const { absolute_log_caps: caps, priority_groups: groups, suppresses } = model.overlap;
   for (const family of Object.values(groups))
     for (const k of family.filter((k) => result[k]).slice(1)) delete result[k];
-  for (const [owner, keys] of Object.entries(suppresses)) if (result[owner]) keys.forEach((k) => delete result[k]);
+  for (const [owner, keys] of Object.entries(suppresses))
+    if (result[owner]) keys.forEach((k) => delete result[k]);
   const retained = {
     conditioning: ["activity", "pulse", "hip_minutes", "steps", "knee", "gait", "vo2", "running", "lifting"],
     food: ["fibre"],
@@ -244,7 +299,8 @@ function limitOverlap(result: Rows, core: Rows, multiplier: number) {
     const cap = caps[family],
       remaining = Math.max(
         0,
-        cap.max_abs_log - retained[family].reduce((s, k) => s + Math.abs(core[k]?.years ?? 0) / multiplier, 0),
+        (family === "conditioning" && !legacy ? 0.9 : cap.max_abs_log) -
+          retained[family].reduce((s, k) => s + Math.abs(core[k]?.years ?? 0) / multiplier, 0),
       );
     const used = cap.factors.reduce((s, k) => s + Math.abs(result[k]?.years ?? 0), 0);
     if (used > remaining) for (const k of cap.factors) if (result[k]) result[k].years *= remaining / used;

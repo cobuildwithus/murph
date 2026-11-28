@@ -428,6 +428,8 @@ then Web, the companion client and finally the allowlist.
 
 Round four adds provider-qualified bedtime regularity, aerobic workout minutes, weekly food patterns, verified game habits and additional lab comparisons. Round five counts fibre per 1,000 logged calories when portions include both nutrients on at least three dates in nine. Confirmed whole days use daily fibre instead. Ordinary wearable variation has less effect on the weekly estimate, and the estimated range reflects the measurements available from the reference examination panel.
 
+Round seven holds an established wearable level through up to fourteen missing days and widens the estimated range. A later pending or unusable lab draw leaves the most recent usable draw available. Corrections replace the result from the same draw.
+
 The private You view uses completed sleep nights and finalized draws. Blood and marker detail include qualifying imports from before signup. Reconstructed age history starts at signup or the first date with a complete contributing workout window, whichever is later. A dated pregnancy or postpartum answer pauses the estimate. A newer answer can end the pause. Postpartum answers expire after 180 days.
 
 A blood pressure check-in accepts an optional setting of `clinic` or `home`. A member-entered home cuff is assumed validated for this model. Clinic readings require pairs on two days. Home readings require morning and evening pairs at least six hours apart on three days and retain the round 3 bridge weight of 0.75. Each pair is one to five minutes apart. An incomplete series or unknown setting gets a `recorded` receipt with a short next step. A reading in a qualifying series gets an `accepted` receipt.

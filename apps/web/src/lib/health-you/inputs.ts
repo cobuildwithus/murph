@@ -15,6 +15,8 @@ import type {
 import type { BrowserVaultLabResultRow } from "@murphai/query/browser-replica";
 import { isRecord } from "../primitives";
 import { loadPublishedCompanionMetricReplica } from "../device-sync/companion-numbers";
+import { resolvedDraws, labDraw, type LabDraw } from "./engine/lab-draws";
+import { WEARABLE_FRESH_DAYS } from "./engine/daily";
 import { adapt } from "./engine/feeds";
 import {
   day,
@@ -78,7 +80,7 @@ export function projectYouInputs(
       recordMetric(metrics, minutes, row, key, from, asOf, timeZone);
     }
   }
-  readLabs(client.labResults.list({ from, to: asOf }), from, asOf, labRows, markers);
+  readLabs(client.labResults.list({ from, to: asOf }), from, asOf, timeZone, labRows, markers);
   const assessments = assessmentInputs(
     client.entities.list({ families: ["assessment"], to: offset(asOf, 1) }),
     from,
@@ -277,9 +279,19 @@ function validMetric(row: BrowserVaultMetricRow, from: string, asOf: string) {
   const value = normalized.canonicalValue;
   return value !== null && Number.isFinite(value) ? normalized : null;
 }
-function hasWearableData(metrics: Observation[], activeMinuteDays: number, timing: readonly { date: string }[] | undefined, asOf: string) {
-  return activeMinuteDays > 0 || Boolean(timing?.some(night => night.date <= asOf)) || metrics.some(row =>
-    row.provider && Object.hasOwn(model.feeds.daily, String(row.key)) && released(row, asOf));
+function hasWearableData(
+  metrics: Observation[],
+  activeMinuteDays: number,
+  timing: readonly { date: string }[] | undefined,
+  asOf: string,
+) {
+  return (
+    activeMinuteDays > 0 ||
+    Boolean(timing?.some((night) => night.date <= asOf)) ||
+    metrics.some(
+      (row) => row.provider && Object.hasOwn(model.feeds.daily, String(row.key)) && released(row, asOf),
+    )
+  );
 }
 
 // Only an identified original measuring device can establish a wearable series.
@@ -350,7 +362,9 @@ function recordMetric(
 
 // Source-unit catalog entries may retain an arbitrary reporting unit. Only publish known physical units.
 const sourceLabUnits = new Set([
-  ...Object.values(fields).filter(f => f.group === "blood").map(f => normalizeUnit(f.unit)),
+  ...Object.values(fields)
+    .filter((f) => f.group === "blood")
+    .map((f) => normalizeUnit(f.unit)),
   ...[
     "mg/dL",
     "nmol/L",
@@ -396,42 +410,109 @@ function labFactorKey(marker: string, unit: string | null, row: BrowserVaultLabR
         : marker)
   );
 }
+function labObservation(
+  row: BrowserVaultLabResultRow,
+  marker: string,
+  unit: string | null,
+  timeZone: string,
+) {
+  const researchUnit = labs[marker]?.[1] ?? lookup(model.candidates, marker)?.unit;
+  const pending = row.parentResultStatus === "pending";
+  const release = row.reportedAt;
+  const instant = release && /(?:Z|[+-]\d\d:\d\d)$/i.test(release) ? Date.parse(release) : NaN;
+  const releaseDate = Number.isFinite(instant) ? toLocalDayKey(instant, timeZone) : release;
+  const observation = {
+    date: row.date,
+    marker,
+    value: row.normalizedValue,
+    unit: researchUnit && normalizeUnit(researchUnit) === unit ? researchUnit : unit,
+    draw_id: row.drawId,
+    collected_at: row.collectedAt,
+    reported_at: releaseDate,
+    report_timestamp: Number.isFinite(instant) ? new Date(instant).toISOString() : release,
+    status: pending ? "pending" : "final",
+    fasting: row.fastingStatus === "fasting" ? true : row.fastingStatus === "non_fasting" ? false : undefined,
+    comparator: row.comparator,
+    source: "normalized-lab",
+  };
+  return observation;
+}
+
+function displayReading(
+  row: BrowserVaultLabResultRow,
+  modelKey: string,
+  unit: string | null,
+  canonical: string | null,
+) {
+  const bounds = fields[modelKey] ?? lookup(model.candidates, modelKey) ?? lookup(model.lipids, modelKey);
+  const reading = row.parentResultStatus !== "pending" && markerReading(row, unit, canonical);
+  const valid =
+    reading &&
+    !(
+      bounds &&
+      normalizeUnit("unit" in bounds ? bounds.unit : "mg/dL") === unit &&
+      (reading.value < bounds.min || reading.value > bounds.max)
+    );
+  return valid ? reading : null;
+}
+
+function appendLatestMarkers(
+  byMarker: Map<string, LabDraw[]>,
+  display: Map<LabDraw, MarkerInput>,
+  markers: MarkerInput[],
+) {
+  for (const group of byMarker.values()) {
+    const days = new Map<string, LabDraw[]>();
+    for (const draw of resolvedDraws(group)) {
+      const sameDay = days.get(draw.date) ?? [];
+      sameDay.push(draw);
+      days.set(draw.date, sameDay);
+    }
+    for (const draws of days.values()) {
+      const latest = draws
+        .map((r) => r.collected)
+        .sort()
+        .at(-1);
+      for (const draw of draws) if (draw.collected === latest) markers.push(display.get(draw)!);
+    }
+  }
+}
+
 function readLabs(
   rows: BrowserVaultLabResultRow[],
   from: string,
   asOf: string,
+  timeZone: string,
   labRows: Observation[],
   markers: MarkerInput[],
 ) {
+  const byMarker = new Map<string, LabDraw[]>();
+  const display = new Map<LabDraw, MarkerInput>();
   for (const row of rows) {
     const def = resolveLabResultMetricDefinition(row.metricKey);
-    if (row.parentResultStatus === "pending" || !def || !day(row.date) || row.date < from || row.date > asOf)
-      continue;
+    if (!def || !day(row.date) || row.date < from || row.date > asOf) continue;
     const marker = labAliases[def.key] ?? def.key.replaceAll("-", "_");
     const unit = normalizeUnit(row.normalizedUnit);
-    const researchUnit = labs[marker]?.[1] ?? lookup(model.candidates, marker)?.unit;
-    labRows.push({
-      date: row.date,
-      marker,
-      value: row.normalizedValue,
-      unit: researchUnit && normalizeUnit(researchUnit) === unit ? researchUnit : unit,
-      draw_id: row.drawId,
-      fasting:
-        row.fastingStatus === "fasting" ? true : row.fastingStatus === "non_fasting" ? false : undefined,
-      comparator: row.comparator,
-      source: "normalized-lab",
-    });
-    const reading = markerReading(row, unit, def.canonicalUnit ?? null);
+    const observation = labObservation(row, marker, unit, timeZone);
+    if (!released(observation, asOf)) continue;
+    labRows.push(observation);
+    const modelKey = labFactorKey(marker, unit, row);
+    const reading = displayReading(row, modelKey, unit, def.canonicalUnit ?? null);
+    const draw = labDraw({ ...observation, panel_id: row.drawId }, reading ? reading.value : null);
+    const group = byMarker.get(def.key) ?? [];
+    group.push(draw);
+    byMarker.set(def.key, group);
     if (!reading) continue;
-    markers.push({
+    display.set(draw, {
       date: row.date,
       key: def.key,
       label: youLabel(marker) ?? youLabel(def.key)!,
       ...reading,
       system: markerSystem(marker),
-      modelKey: labFactorKey(marker, unit, row),
+      modelKey,
     });
   }
+  appendLatestMarkers(byMarker, display, markers);
 }
 
 function inputAvailability(evidence: MemberEvidence, asOf: string, markers: MarkerInput[]) {
@@ -460,7 +541,7 @@ function inputAvailability(evidence: MemberEvidence, asOf: string, markers: Mark
     availability[k] = inputState(
       (rows ?? []).filter((r) => r[field] != null).map(rowDay),
       asOf,
-      k === "vo2_peak" ? 42 : ["bmi", "waist"].includes(k) ? 180 : model.daily.fresh,
+      k === "vo2_peak" ? 42 : ["bmi", "waist"].includes(k) ? 180 : WEARABLE_FRESH_DAYS,
     );
   }
   for (const [k, f] of Object.entries(fields))

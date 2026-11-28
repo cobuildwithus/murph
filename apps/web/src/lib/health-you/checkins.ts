@@ -137,8 +137,10 @@ function submittedTests(input: unknown[], event: Observation): Observation[] {
       single_leg_10s: ["one_leg_balance", "s"],
       grip_strength: ["grip_strength", "kg"],
       broad_jump: ["standing_broad_jump", "cm"],
-      chair_stand_30s: ["chair_stands", "count"],
-      squats_max: ["squats", "count"],
+      chair_stand_30s: ["chair_stands", "reps"],
+      pushups_max: ["pushups_max", "reps"],
+      pullups_max: ["pullups_max", "reps"],
+      squats_max: ["squats", "reps"],
       step_3min: ["step_recovery", "bpm"],
       march_2min: ["march_recovery", "count"],
     };

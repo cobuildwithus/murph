@@ -1,3 +1,4 @@
+import { labDraw, latestDraw, type LabDraw as Candidate } from "./lab-draws";
 import {
   between,
   interp,
@@ -155,7 +156,7 @@ export function recentSleepNights(data: MemberEvidence, at: string) {
   return last && distance(at, last) <= model.daily.fresh ? count : 0;
 }
 
-function wearableFactor(key: Stream, value: number, source: string, age: number, sex: Sex) {
+function wearableFactor(key: Stream, value: number, source: string, age: number, sex: Sex, legacy: boolean) {
   const d = model.daily,
     mult = model.policy.years_per_published_log_unit * scale(age);
   const [vendor, method] = source.split("|");
@@ -166,6 +167,7 @@ function wearableFactor(key: Stream, value: number, source: string, age: number,
       steps && vendor !== "research_hip" ? value / d.watch_count_ratio : value,
       age,
       sex,
+      legacy,
     );
     if (!rec) return null;
     if (key === "step_proxy") {
@@ -220,15 +222,16 @@ function wearableFactor(key: Stream, value: number, source: string, age: number,
       : model.policy.protocol.wear_proxy_quality[key],
   );
 }
-export function habits(data: MemberEvidence, at: string, age: number, sex: Sex) {
+export function habits(data: MemberEvidence, at: string, age: number, sex: Sex, legacy = false) {
   const result: Rows = {};
   for (const [key, dates] of observedStreams(data, at)) {
     const r = replay(
       key,
       dates,
       at,
-      (v, src) => wearableFactor(key, v, src, age, sex),
+      (v, src) => wearableFactor(key, v, src, age, sex, legacy),
       data.profile.preferred_source,
+      !legacy,
     );
     if (r) result[key] = r;
   }
@@ -248,21 +251,8 @@ function unit(x: unknown) {
     .replace(/[µμ]/g, "u")
     .replaceAll(" ", "");
 }
-type Candidate = {
-  date: string;
-  collected: string;
-  revision: number;
-  reported: string;
-  value: number | null;
-};
 function last(rows: Candidate[]) {
-  const cmp = (a: Candidate, b: Candidate) =>
-    a.date.localeCompare(b.date) ||
-    a.collected.localeCompare(b.collected) ||
-    a.revision - b.revision ||
-    a.reported.localeCompare(b.reported);
-  const latest = rows.sort(cmp).at(-1)!;
-  return unique(rows.filter((r) => cmp(r, latest) === 0).map((r) => r.value));
+  return latestDraw(rows)?.value ?? null;
 }
 function validLabValue(key: string, v: number, profile: Observation) {
   if (key === "crp") return v <= model.policy.protocol.crp_max;
@@ -271,14 +261,7 @@ function validLabValue(key: string, v: number, profile: Observation) {
   if (["ldl", "lpa"].includes(key)) return v <= model.policy.protocol.max_lipid;
   return !(key === "a1c" && profile.unreliable_a1c);
 }
-function labCandidate(
-  r: Observation,
-  key: string,
-  expected: string,
-  data: MemberEvidence,
-  at: string,
-  date: string,
-) {
+function labCandidate(r: Observation, key: string, expected: string, data: MemberEvidence, at: string) {
   const v = number(r.value),
     f = fields[key],
     u = unit(r.unit);
@@ -290,13 +273,7 @@ function labCandidate(
     validUnit &&
     between(v, f?.min ?? 0, f?.max ?? 799.999) &&
     validLabValue(key, v, data.profile);
-  return {
-    date,
-    collected: String(r.collected_at ?? ""),
-    revision: number(r.revision) ?? 0,
-    reported: String(r.reported_at ?? ""),
-    value: valid ? v : null,
-  };
+  return labDraw(r, valid ? v : null);
 }
 function lipidPairs(draws: Map<string, Map<string, Candidate[]>>, labs: Map<string, Candidate[]>) {
   for (const draw of draws.values()) {
@@ -315,18 +292,11 @@ export function labValues(data: MemberEvidence, at: string) {
     const marker = String(r.marker),
       date = rowDay(r),
       age = distance(at, date);
-    if (
-      r.status === "pending" ||
-      !date ||
-      age < 0 ||
-      age > (marker === "lpa" ? 36500 : 365) ||
-      !released(r, at)
-    )
-      continue;
+    if (!date || age < 0 || age > (marker === "lpa" ? 36500 : 365) || !released(r, at)) continue;
     if (!Object.hasOwn(labFields, marker) && !["hdl", "total_cholesterol", "ldl", "lpa"].includes(marker))
       continue;
     const [key, expected] = labFields[marker] ?? [marker, "mg/dL"];
-    const candidate = labCandidate(r, key, expected, data, at, date);
+    const candidate = labCandidate(r, key, expected, data, at);
     const rows = labs.get(key) ?? [];
     rows.push(candidate);
     labs.set(key, rows);
@@ -518,7 +488,7 @@ function habitualFactors(
       });
   }
 }
-export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex) {
+export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex, legacy = false) {
   const history = dated(data, "checkins", at, 3650).map((r) =>
     typeof r.topic === "string" ? { ...r, [r.topic]: r.answer } : r,
   );
@@ -529,7 +499,7 @@ export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex
     limit = restrictions(data.profile);
   function add(k: string, x: unknown, q = 1) {
     const v = number(x),
-      rec = v === null ? null : native(k, v, age, sex, q);
+      rec = v === null ? null : native(k, v, age, sex, q, legacy);
     if (rec) result[k] = rec;
   }
   for (const [k, v] of Object.entries(labs)) add(k, v);

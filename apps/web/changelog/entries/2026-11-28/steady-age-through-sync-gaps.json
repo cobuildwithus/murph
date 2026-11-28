@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-28",
+  "order": 100,
+  "item": {
+    "id": "steady-age-through-sync-gaps",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "A steadier age estimate when your watch stops syncing",
+    "summary": "In the private You preview, a short gap in watch readings widens the range around your age estimate. Your established activity and sleep levels still count.",
+    "details": "If a repeat blood test is pending or has an unusable value, your earlier usable result still counts. Once the repeat is ready, your estimate can use it.",
+    "relevanceTags": ["health", "measurements"],
+    "sourcePullRequests": []
+  }
+}

@@ -179,7 +179,11 @@ describe("dated private replica projections", () => {
     ];
     const result = buildViews(read(r));
     expect(result.you.factors).toContainEqual(expect.objectContaining({ key: "rdw", unit: "%" }));
-    expect(result.markers["red-cell-distribution-width"]).toMatchObject({ value: 13, unit: "%", label: "Red cell size range" });
+    expect(result.markers["red-cell-distribution-width"]).toMatchObject({
+      value: 13,
+      unit: "%",
+      label: "Red cell size range",
+    });
     expect(JSON.stringify(result)).not.toContain("synthetic");
     const prior = r.labResultRows[0];
     prior.date = offset(today, -4);
@@ -200,9 +204,33 @@ describe("dated private replica projections", () => {
     };
     r.labResultRows.push(repeat);
     expect(project()).toEqual(baseline);
-    r.labResultRows[1] = { ...repeat, parentResultStatus: "abnormal" };
+    const projectedValue = () => score(read(r).evidence, today)!.rows.rdw.value;
+    expect(projectedValue()).toBe(17);
+    // A finalized but impossible repeat cannot displace the earlier usable draw.
+    r.labResultRows[1] = { ...repeat, parentResultStatus: "abnormal", normalizedValue: -8 };
+    expect(projectedValue()).toBe(17);
+    expect(project().markers[prior.metricKey!].value).toBe(17);
+    // Each replica is the current publication of this draw, including corrections.
+    r.labResultRows[1] = { ...repeat, parentResultStatus: "normal", normalizedValue: 12 };
+    expect(projectedValue()).toBe(12);
     expect(project().markers[prior.metricKey!].history).toHaveLength(2);
-    expect(project().you.age).toEqual(baseline.you.age);
+    r.labResultRows[1] = { ...repeat, parentResultStatus: "pending", normalizedValue: 15 };
+    expect(projectedValue()).toBe(17);
+    r.labResultRows[1] = {
+      ...repeat,
+      parentResultStatus: "abnormal",
+      normalizedValue: 15,
+      reportedAt: offset(today, 1) + "T16:00:00Z",
+    };
+    expect(projectedValue()).toBe(17);
+    r.labResultRows[1].reportedAt = today + "T18:00:00Z";
+    expect(projectedValue()).toBe(15);
+    expect(project().markers[prior.metricKey!].value).toBe(15);
+    // Tied copies can agree on the measurement but disagree on its display flag.
+    const final = r.labResultRows[1];
+    r.labResultRows.push({ ...final, id: "synthetic-tied-result", flag: "low" });
+    expect(projectedValue()).toBe(15);
+    expect(project().markers[prior.metricKey!]).toBeUndefined();
   });
   it("derives insulin resistance only from explicitly fasting results with the same draw", () => {
     const r = replica();
@@ -262,6 +290,31 @@ describe("dated private replica projections", () => {
     expect(buildViews(read(r)).you.factors.map((f) => f.key)).not.toContain("sleepTime");
     third.context = { sleepType: "main_sleep" };
     expect(buildViews(read(r)).you.factors.map((f) => f.key)).toContain("sleepTime");
+  });
+  it("keeps the headline through four missing wear days and replays a late reading on its release day", () => {
+    const r = addPulse(replica());
+    for (const row of r.metricRows) row.value = row.metricKey === "total-sleep-minutes" ? 318 : 83;
+    const before = buildViews(read(r)).you.age!;
+    const last = offset(today, -4);
+    const late = r.metricRows.find(
+      (row) => row.date === offset(today, -2) && row.metricKey === "resting-heart-rate",
+    )!;
+    r.metricRows = r.metricRows.filter((row) => row.date <= last);
+    const gap = read(r);
+    expect(gap.evidence.daily?.every((row) => String(row.date) <= last)).toBe(true);
+    expect(gap.evidence.sleep_sessions?.every((row) => String(row.date) <= last)).toBe(true);
+    const after = buildViews(gap).you.age!;
+    expect(after.value).toBe(before.value);
+    expect(after.high - after.low).toBeGreaterThan(before.high - before.low);
+    r.metricRows.push({ ...late, value: 57, context: { recordedAt: clock.toISOString() } });
+    const filled = read(r);
+    expect(filled.evidence.daily).toContainEqual(
+      expect.objectContaining({ date: late.date, reported_at: today, rhr: 57 }),
+    );
+    const yesterday = offset(today, -1);
+    expect(score(filled.evidence, yesterday)).toEqual(score(gap.evidence, yesterday));
+    expect(score(filled.evidence, today)?.rows.pulse.wear_age_days).toBe(2);
+    expect(buildViews(filled).week?.saved).toBe(0);
   });
   it("keeps late pulse backfill out of the saved-days comparison", () => {
     const r = addPulse(replica());
@@ -344,7 +397,7 @@ describe("dated private replica projections", () => {
     const missing = read({ ...r, metricRows: [] });
     expect(buildViews(missing).you).toMatchObject({ state: "building" });
     expect(buildViews(missing).you.age).toBeUndefined();
-    const old = read({ ...r, metricRows: r.metricRows.slice(8) });
+    const old = read({ ...r, metricRows: r.metricRows.map(row => ({ ...row, date: offset(row.date, -18) })) });
     expect(old.availability.sleep).toBe("stale");
     expect(buildViews(old).you).toMatchObject({ state: "building", building: { have: 0 } });
     const partial = read({ ...r, metricRows: r.metricRows.slice(0, 2) });
@@ -665,12 +718,12 @@ describe("private age views", () => {
     });
     expect(views.you.age).toBeUndefined();
   });
-  it("keeps an established sleep estimate steady within the tolerance band", () => {
+  it("gives a small sustained sleep change a small weekly effect", () => {
     const r = replica();
     for (const row of r.metricRows) row.value = row.date > offset(today, -7) ? 400 : 390;
     const input = read(r);
-    expect(score(input.evidence, today)?.changes.sleep).toBe(0);
-    expect(buildViews(input).you.week).toMatchObject({ daysAged: 7, basis: "observed" });
+    expect(score(input.evidence, today)?.changes.sleep).toBeCloseTo(-0.000134, 8);
+    expect(buildViews(input).you.week).toMatchObject({ daysAged: 6.95, basis: "observed" });
   });
   it.each([-1, 1])("omits tiny observed weekly movements in direction %i", direction => {
     const r = replica();
