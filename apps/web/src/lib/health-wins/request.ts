@@ -98,8 +98,7 @@ const ordinaryCommentBody = z.strictObject({
 });
 export const commentBody = z.union([
   ordinaryCommentBody,
-  ordinaryCommentBody.extend({ replyTo: uuid, visibility: z.unknown().optional() })
-    .transform(({ id, body, replyTo }) => ({ id, body, replyTo })),
+  ordinaryCommentBody.extend({ replyTo: uuid, visibility: z.unknown().optional() }),
 ]);
 export const changeWinBody = z.strictObject({ setRevision: uuid, option });
 const winsQuery = z.strictObject({ refresh: z.enum(["0", "1"]).optional() });

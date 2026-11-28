@@ -41,8 +41,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @murphai/clinical-records... run build
+      - name: Download the pinned public patient endpoint list
+        id: oracle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          commit=$(gh api repos/oracle-samples/ignite-endpoints/commits/HEAD --jq .sha)
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          curl --proto '=https' --fail --silent --show-error --max-time 300 --max-filesize 33554432 \
+            "https://raw.githubusercontent.com/oracle-samples/ignite-endpoints/$commit/oracle_health_fhir_endpoints/millennium_patient_r4_endpoints.json" \
+            -o "$RUNNER_TEMP/oracle.json"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
       - name: Build and validate the public directory
         id: build
+        env:
+          ORACLE_COMMIT: ${{ steps.oracle.outputs.commit }}
         run: |
           set -euo pipefail
           git ls-files --error-unmatch -- "$DIRECTORY"
@@ -56,6 +70,7 @@ jobs:
           count_drop=()
           if [[ "$MURPH_DIRECTORY_ALLOW_COUNT_DROP" == true ]]; then count_drop=(--allow-count-drop); fi
           pnpm --dir apps/web clinical-records:providers:import -- --input "$input" --output "$GITHUB_WORKSPACE/$DIRECTORY" \
+            --oracle-input "$RUNNER_TEMP/oracle.json" --oracle-commit "$ORACLE_COMMIT" \
             --held-output "$candidate/held-changes.json" "${count_drop[@]}"
           test -s "$DIRECTORY" || { echo "::error::Tracked directory output is missing or empty: $DIRECTORY"; exit 1; }
           cp "$DIRECTORY" "$candidate/provider-directory.v2.json"

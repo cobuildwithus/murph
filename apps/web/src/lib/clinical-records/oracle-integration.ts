@@ -1,5 +1,7 @@
 import "server-only";
 
+import { oracleFhirTenant } from "./provider-directory-artifact";
+
 import * as z from "@murphai/contracts/zod-runtime";
 import productionSet from "../../../public/.well-known/oracle/production.jwks.json";
 import sandboxSet from "../../../public/.well-known/oracle/sandbox.jwks.json";
@@ -15,7 +17,6 @@ import type { SmartEndpointTrust } from "./smart";
 
 const ORACLE_AUTHORIZATION_ORIGIN = "https://authorization.cerner.com";
 const ORACLE_FHIR_HOST = "fhir-myrecord.cerner.com";
-const ORACLE_FHIR_BASE_PATH = /^\/r4\/([A-Za-z0-9-]{1,64})$/u;
 
 export const ORACLE_SANDBOX_ENTRY = {
   id: "oracle-sandbox", integration: ORACLE_INTEGRATION_ID, policyId: ORACLE_ACQUISITION_POLICY_ID,
@@ -83,9 +84,8 @@ export function readOracleQueryGate(queryScopeId: string): { code: string; retry
  * Each role must equal its exact template for the FHIR base's own tenant and host.
  */
 export function requireOracleSmartEndpoint(role: "authorization" | "token", value: unknown, fhirBase: URL): string {
-  const tenant = ORACLE_FHIR_BASE_PATH.exec(fhirBase.pathname)?.[1];
-  if (!tenant || fhirBase.href !== `https://${ORACLE_FHIR_HOST}/r4/${tenant}`
-    || typeof value !== "string" || value.length > 2_048) {
+  const tenant = oracleFhirTenant(fhirBase.href);
+  if (!tenant || typeof value !== "string" || value.length > 2_048) {
     throw untrustedEndpoint();
   }
   const path = role === "authorization"
@@ -119,8 +119,7 @@ type OracleGrant = { redirectUri: string; clientId?: string } | { grant: "refres
 
 /** The one FHIR base shape Oracle patient access uses: its host and a single tenant segment, written exactly. */
 export function isOracleFhirBaseUrl(value: string): boolean {
-  const tenant = ORACLE_FHIR_BASE_PATH.exec(URL.parse(value)?.pathname ?? "")?.[1];
-  return Boolean(tenant) && value === `https://${ORACLE_FHIR_HOST}/r4/${tenant}`;
+  return oracleFhirTenant(value) !== undefined;
 }
 
 function registrationMatches(profile: OracleProfile, provider: { id: string; fhirBaseUrl: string }, grant: OracleGrant) {

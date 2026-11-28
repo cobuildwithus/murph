@@ -47,6 +47,11 @@ export interface OracleProviderDirectoryEntry extends ClinicalProviderDirectoryE
 
 export type ClinicalProviderDirectoryEntry = EpicProviderDirectoryEntry | OracleProviderDirectoryEntry;
 
+// Match exactly the patient tenant grammar supported by the SMART registration.
+export function oracleFhirTenant(base: string): string | undefined {
+  return /^https:\/\/fhir-myrecord\.cerner\.com\/r4\/([A-Za-z0-9-]{1,64})$/u.exec(base)?.[1];
+}
+
 export interface ClinicalProviderDirectory {
   entries: readonly ClinicalProviderDirectoryEntry[];
   generatedAt: string;
@@ -79,6 +84,7 @@ export type HeldDirectoryChange =
   | { kind: "addition"; id: string; brandName: string; candidate: string; clientIdEnvironmentKey: string | null };
 
 interface DirectoryRefreshEntry {
+  integration?: string;
   brandName: string;
   clientIdEnvironmentKey?: string;
   fhirBaseUrl: string;
@@ -137,6 +143,13 @@ export function assertDirectoryRefreshCounts(previous: ClinicalProviderDirectory
   }
 }
 
+// Trust is scoped to a published production registration and policy on this origin.
+function productionRegistration(entry: DirectoryRefreshEntry): string | null {
+  const registration = entry.clientIdEnvironmentKey ?? entry.integration;
+  if (registration !== PRODUCTION_CLIENT_KEY && registration !== "oracle-millennium-r4") return null;
+  return JSON.stringify([entry.policyId, registration, new URL(entry.fhirBaseUrl).origin]);
+}
+
 /**
  * The one rule for automatic directory refreshes. Names, aliases and facilities publish. A member's
  * connection is bound to its entry's connection fields, so an existing entry keeps them and is never
@@ -151,8 +164,7 @@ export function holdDirectoryChangesForReview<Entry extends DirectoryRefreshEntr
 ): { entries: Entry[]; held: HeldDirectoryChange[] } {
   const upstreamById = new Map(upstream.entries.map(entry => [entry.id, entry]));
   const currentIds = new Set(current.entries.map(entry => entry.id));
-  const productionHosts = new Set(current.entries.filter(entry => entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY)
-    .map(entry => new URL(entry.fhirBaseUrl).origin));
+  const known = new Set(current.entries.map(productionRegistration).filter(Boolean));
   const held: HeldDirectoryChange[] = [];
   const entries = current.entries.map(entry => {
     const next = upstreamById.get(entry.id);
@@ -165,12 +177,12 @@ export function holdDirectoryChangesForReview<Entry extends DirectoryRefreshEntr
       held.push({ kind: "connection", id: entry.id, field, current: entry[field] ?? null, candidate: next[field] ?? null });
     }
     return {
-      ...next, clientIdEnvironmentKey: entry.clientIdEnvironmentKey, fhirBaseUrl: entry.fhirBaseUrl, policyId: entry.policyId,
+      ...next, integration: entry.integration, clientIdEnvironmentKey: entry.clientIdEnvironmentKey, fhirBaseUrl: entry.fhirBaseUrl, policyId: entry.policyId,
     };
   });
   for (const entry of upstream.entries) {
     if (currentIds.has(entry.id)) continue;
-    if (entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY && productionHosts.has(new URL(entry.fhirBaseUrl).origin)) {
+    if (known.has(productionRegistration(entry))) {
       entries.push(entry);
     } else {
       held.push({
@@ -241,12 +253,16 @@ function parseDirectoryEntry(
     resourceTypes: owned.resourceTypes,
   };
   if (owned.policy.sourceSystem === "cerner-fhir") {
-    // Oracle registration is server-owned; an entry cannot name a client.
-    if (!owned.integration || record.integration !== owned.integration || record.clientIdEnvironmentKey !== undefined
-      || !shared.id.startsWith("oracle-")) {
+    // Oracle registration is server-owned; an entry cannot name a client or carry any other field.
+    if (!owned.integration || record.integration !== owned.integration || !hasOnlyEntryKeys(record, ORACLE_ENTRY_KEYS)
+      || (record.upstreamId !== undefined && !isOracleUpstreamId(record.upstreamId))
+      || !/^oracle-[a-f0-9]{20}$/u.test(shared.id) || !oracleFhirTenant(fhirBaseUrl)) {
       throw new TypeError(`Clinical provider directory entry ${index} integration is unsupported.`);
     }
     return { ...shared, integration: owned.integration, sourceSystem: "cerner-fhir" };
+  }
+  if (!hasOnlyEntryKeys(record, EPIC_ENTRY_KEYS)) {
+    throw new TypeError(`Clinical provider directory entry ${index} has an unsupported field.`);
   }
   if (
     record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
@@ -255,6 +271,20 @@ function parseDirectoryEntry(
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
   return { ...shared, clientIdEnvironmentKey: record.clientIdEnvironmentKey, sourceSystem: "epic-fhir" };
+}
+
+// Exactly what the importer writes for each vendor. An undefined field is absent once serialized.
+const SHARED_ENTRY_KEYS = ["aliases", "brandName", "fhirBaseUrl", "id", "locations", "policyId"];
+const EPIC_ENTRY_KEYS: ReadonlySet<string> = new Set([...SHARED_ENTRY_KEYS, "clientIdEnvironmentKey"]);
+const ORACLE_ENTRY_KEYS: ReadonlySet<string> = new Set([...SHARED_ENTRY_KEYS, "integration", "upstreamId"]);
+
+function hasOnlyEntryKeys(record: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(record).every(key => record[key] === undefined || allowed.has(key));
+}
+
+/** The organization OID the importer may copy onto an Oracle entry. */
+export function isOracleUpstreamId(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 100 && /^urn:oid:[0-9]+(?:\.[0-9]+)*$/u.test(value);
 }
 
 // Four-field tuples predate street lines; seven-field tuples add street lines, aliases and a coordinate.

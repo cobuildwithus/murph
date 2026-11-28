@@ -13,6 +13,7 @@ import {
   DIRECTORY_CONNECTION_FIELDS,
   holdDirectoryChangesForReview,
   parseProviderDirectoryArtifact,
+  oracleFhirTenant,
 } from "../apps/web/src/lib/clinical-records/provider-directory-artifact.ts";
 
 export const DIRECTORY = "apps/web/src/lib/clinical-records/provider-directory.v2.json";
@@ -69,6 +70,8 @@ function parseHeldReport(value, current, candidate) {
   const directories = {
     candidateById: new Map(candidate.entries.map(entry => [entry.id, entry])),
     currentById: new Map(current.entries.map(entry => [entry.id, entry])),
+    oracleHosts: new Set(current.entries.filter(entry => entry.sourceSystem === "cerner-fhir")
+      .map(entry => new URL(entry.fhirBaseUrl).origin)),
     productionHosts: new Set(current.entries.filter(entry => entry.clientIdEnvironmentKey === PRODUCTION_CLIENT_KEY)
       .map(entry => new URL(entry.fhirBaseUrl).origin)),
   };
@@ -115,9 +118,11 @@ function parseRemoval({ candidate, current, id }, directories) {
 function parseAddition({ brandName, candidate: upstream, clientIdEnvironmentKey: key, id }, directories) {
   const url = plainHttpsUrl(upstream);
   const leftOut = isEntryId(id) && !directories.currentById.has(id) && !directories.candidateById.has(id);
+  const oracle = key === null && /^oracle-[a-f0-9]{20}$/u.test(id) && url && oracleFhirTenant(upstream);
+  const hosts = oracle ? directories.oracleHosts : directories.productionHosts;
   const reasons = [
-    ...(url && !directories.productionHosts.has(url.origin) ? ["on a new host"] : []),
-    ...(key !== PRODUCTION_CLIENT_KEY ? [`using ${key ?? "no Epic client"}`] : []),
+    ...(url && !hosts.has(url.origin) ? ["on a new host"] : []),
+    ...(!oracle && key !== PRODUCTION_CLIENT_KEY ? [`using ${key ?? "no Epic client"}`] : []),
   ];
   const described = typeof brandName === "string" && brandName.length <= 160 && (key === null || CLIENT_KEYS.has(key));
   return leftOut && url && described && reasons.length
@@ -147,7 +152,7 @@ function renderHeldReport(held) {
   };
   const header = [
     "The weekly refresh held these directory changes. A member's connection is bound to its entry's endpoint, client key and policy, so only a person may change those on an existing entry, remove an entry, or add an entry outside a known production host and client.",
-    "Upstream values and new entries come from the refresh job and are unverified: re-check each one against open.epic.com before applying it.",
+    "Upstream values and new entries come from the refresh job and are unverified: re-check each one against open.epic.com or the pinned public patient endpoint list before applying it.",
     "Confirm each change with the health system, then make it in a reviewed pull request. Until then the directory keeps the published entry and leaves held new entries out.",
     "",
     "| Entry | Brand | Held change | Published | Upstream |",
