@@ -879,8 +879,10 @@ Epic documents `jku` as optional for registered JWK Set URLs. Web omits it and s
 
 ## Secure patient sandbox
 
-The hidden `oracle-sandbox` entry resolves only for a member in
-`CLINICAL_RECORDS_ORACLE_MEMBER_IDS` with `CLINICAL_RECORDS_ORACLE_STARTS=1`.
+The hidden `oracle-sandbox` entry resolves only for a member listed by exact ID in
+`CLINICAL_RECORDS_ORACLE_MEMBER_IDS` with `CLINICAL_RECORDS_ORACLE_STARTS=1`; the
+general-rollout value `*` admits every member to production Oracle starts but never
+to the sandbox entry.
 New Oracle sessions also require `CLINICAL_RECORDS_WRITE_GRANT_PROFILES=1`.
 Switching either writer flag off preserves outstanding callbacks and refreshes.
 Keep compatible readers, the sandbox signer and its public keys available for

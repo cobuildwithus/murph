@@ -68,6 +68,9 @@ describe("Clinical Records provider directory", () => {
       expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "other")).toBeNull();
       expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")?.sourceSystem).toBe("cerner-fhir");
       expect(readClinicalProviderDirectory().entries.some(entry => entry.id === "oracle-sandbox")).toBe(false);
+      vi.stubEnv("CLINICAL_RECORDS_ORACLE_MEMBER_IDS", "*");
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "sandbox-member")).toBeNull();
+      expect(resolveClinicalProviderDirectoryEntry("oracle-sandbox", "any-member")).toBeNull();
     } finally { vi.unstubAllEnvs(); }
   });
 

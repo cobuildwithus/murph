@@ -4,7 +4,7 @@ import type { LocationCell } from "./directory-geography";
 import { createHash } from "node:crypto";
 import { getPrisma } from "../prisma";
 import { epicPortalAccessRank } from "./epic-import-config";
-import { oracleSearchEnabled, oracleStartsEnabledFor, ORACLE_SANDBOX_ENTRY } from "./oracle-integration";
+import { oracleSandboxEnabledFor, oracleSearchEnabled, ORACLE_SANDBOX_ENTRY } from "./oracle-integration";
 import { countedSourceFilter } from "./source-state";
 import directoryArtifact from "./provider-directory.v2.json";
 import {
@@ -28,7 +28,7 @@ export function resolveClinicalProviderDirectoryEntry(
 ): ClinicalProviderDirectoryEntry | null {
   const normalizedId = normalizeClinicalProviderDirectoryEntryId(entryId);
   if (normalizedId === ORACLE_SANDBOX_ENTRY.id) {
-    return memberId && oracleStartsEnabledFor(memberId) ? ORACLE_SANDBOX_ENTRY : null;
+    return memberId && oracleSandboxEnabledFor(memberId) ? ORACLE_SANDBOX_ENTRY : null;
   }
   if (!normalizedId) return null;
   return readClinicalProviderDirectory().entries.find((entry) => entry.id === normalizedId) ?? null;

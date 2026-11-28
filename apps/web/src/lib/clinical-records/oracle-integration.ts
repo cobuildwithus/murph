@@ -63,11 +63,23 @@ export function oracleSearchEnabled(): boolean {
   return process.env.CLINICAL_RECORDS_ORACLE_SEARCH === "1" && !oracleEgressDisabled();
 }
 
-/** New Oracle starts need the flag and an exact opaque member ID from the allowlist. */
+function oracleStartAllowlist(): string[] | null {
+  if (process.env.CLINICAL_RECORDS_ORACLE_STARTS !== "1" || oracleEgressDisabled()) return null;
+  return (process.env.CLINICAL_RECORDS_ORACLE_MEMBER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+}
+
+/**
+ * New production Oracle starts need the flag and either an exact opaque member ID
+ * from the allowlist or the single value `*`, which admits every member.
+ */
 export function oracleStartsEnabledFor(memberId: string): boolean {
-  return process.env.CLINICAL_RECORDS_ORACLE_STARTS === "1" && !oracleEgressDisabled()
-    && (process.env.CLINICAL_RECORDS_ORACLE_MEMBER_IDS ?? "").split(",").map((id) => id.trim())
-      .filter(Boolean).includes(memberId);
+  const allowed = oracleStartAllowlist();
+  return !!allowed && ((allowed.length === 1 && allowed[0] === "*") || allowed.includes(memberId));
+}
+
+/** The hidden sandbox entry never follows `*`: it needs an exact listed member ID. */
+export function oracleSandboxEnabledFor(memberId: string): boolean {
+  return !!oracleStartAllowlist()?.includes(memberId);
 }
 
 /**
@@ -108,9 +120,11 @@ export const ORACLE_SMART_ENDPOINT_TRUST: SmartEndpointTrust = {
 };
 
 export function resolveOracleStart(provider: OracleProviderDirectoryEntry, memberId: string, redirectUri: string) {
-  if (!oracleStartsEnabledFor(memberId) || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES !== "1") throw notConfigured();
+  const sandbox = provider.id === ORACLE_SANDBOX_ENTRY.id;
+  const allowed = sandbox ? oracleSandboxEnabledFor(memberId) : oracleStartsEnabledFor(memberId);
+  if (!allowed || process.env.CLINICAL_RECORDS_WRITE_GRANT_PROFILES !== "1") throw notConfigured();
   const profile: OracleProfile = { integration: provider.integration, method: "private_key_jwt",
-    environment: provider.id === ORACLE_SANDBOX_ENTRY.id ? "sandbox" : "production" };
+    environment: sandbox ? "sandbox" : "production" };
   return { profile, auth: resolveOracleClientAuth(profile, provider, { redirectUri }),
     resourceTypes: ORACLE_RESOURCE_TYPES, endpointTrust: ORACLE_SMART_ENDPOINT_TRUST, permissionVersion: "v1" as const };
 }

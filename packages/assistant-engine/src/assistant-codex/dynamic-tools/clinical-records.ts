@@ -11,7 +11,7 @@ export const MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL = {
   namespace: 'murph',
   name: 'create_clinical_records_connect_link',
   description: [
-    'Create a Murph link for the current user to connect Epic or MyChart clinical records.',
+    'Create a Murph link for the current user to connect their hospital or clinic patient-portal records.',
     'Use it in a private conversation when the user asks to connect or import their provider records, or on a scheduled occurrence whose saved instructions ask for the link.',
     'Put the returned connectUrl in the reply unchanged.',
     'Each link is single-use and expires quickly, so create a new one each time and never reuse an earlier link.',
