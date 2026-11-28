@@ -1,4 +1,5 @@
 export { resolveExperimentMetricIdentity } from "./experiment-metrics.ts";
+export { resolveExperimentAdherenceRollupTarget, resolveExperimentAdherenceTargets } from "./experiment-adherence.ts";
 export {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,

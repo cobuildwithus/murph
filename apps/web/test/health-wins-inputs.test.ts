@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BrowserVaultLabResultRow } from "@murphai/query/browser";
-import type { BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
+import { createBrowserVaultQueryClient, type BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import type { ExperimentOutcome } from "@murphai/contracts";
 import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -28,6 +28,7 @@ import { generateHealthWins } from "../src/lib/health-wins/engine";
 import { chooseSeeYours } from "../src/lib/health-wins/engine/see-yours";
 import { mapKey } from "../src/lib/game/progress/place-art-make";
 import { artPath } from "../src/lib/game/progress/place-art";
+import { experimentReplica } from "./support/health-win-experiment-replica";
 
 const today = "2026-09-24";
 const signal = new AbortController().signal;
@@ -92,13 +93,34 @@ it("excludes workout rollups that may include cycling from on-foot distance", ()
 it("adapts canonical means, overlap windows and adherence, withholding private concurrent interventions", () => {
   const first = outcome("exp_first", "Walking");
   const second = outcome("exp_second", "Sauna");
-  const result = readHealthWinExperiments([first, second], [], today);
+  const result = readHealthWinExperiments([first, second], [], [], today);
   expect(result).toHaveLength(2);
   expect(result[0]).toMatchObject({ title: "Walking", baselineMean: 62, interventionMean: 60,
     adherence: { done: 2, target: 8 }, intervention: { start: "2026-07-05", end: "2026-07-12" } });
   expect(JSON.stringify(result)).not.toContain("custom-slug");
-  expect(readHealthWinExperiments([first, outcome("exp_unknown", "Unclassified")], [], today)).toEqual([]);
-  expect(readHealthWinExperiments([{ ...first, metricResults: [{ ...first.metricResults[0]!, statistic: "sum" }] }], [], today)).toEqual([]);
+  expect(readHealthWinExperiments([first, outcome("exp_unknown", "Unclassified")], [], [], today)).toEqual([]);
+  expect(readHealthWinExperiments([{ ...first, metricResults: [{ ...first.metricResults[0]!, statistic: "sum" }] }], [], [], today)).toEqual([]);
+});
+
+it("counts only completed, linked logs in the manual intervention window and keeps the activity-backed run total", async () => {
+  const replica = await experimentReplica();
+  expect(replica.experimentOutcomes?.map(o => o.adherenceSummary.completedSessions)).toEqual([19, 11]);
+  const read = async (source: typeof replica) => {
+    mock.session.mockResolvedValue({ state: "ready", client: createBrowserVaultQueryClient(source) });
+    return (await readHealthWinInputs(memberId, mock.authority, today, signal)).input.experiments;
+  };
+  expect(await read(replica)).toMatchObject([
+    { title: "Meditation", adherence: { done: 13, target: 10 } }, { title: "Running", adherence: { done: 11, target: 15 } },
+  ]);
+  const empty = { ...replica, entities: replica.entities.filter(e => e.kind !== "intervention_session") };
+  expect(await read(empty)).toMatchObject([
+    { title: "Meditation", adherence: { done: 0, target: 10 } }, { title: "Running", adherence: { done: 11, target: 15 } },
+  ]);
+  const unavailable = { ...empty, policy: { ...replica.policy, includedFamilies: ["experiment"] } };
+  expect(await read(unavailable)).toMatchObject([{ title: "Running", adherence: { done: 11, target: 15 } }]);
+  const undated = { ...replica, entities: replica.entities.map(e => e.attributes.sessionLocalDate === "2025-04-23"
+    ? { ...e, attributes: { ...e.attributes, sessionLocalDate: undefined }, date: null, occurredAt: null } : e) };
+  expect(await read(undated)).toMatchObject([{ title: "Running", adherence: { done: 11, target: 15 } }]);
 });
 
 it.each([
@@ -108,8 +130,9 @@ it.each([
   const trial = outcome("exp_circuit", null);
   const { interventionStart, interventionEnd } = trial.windows;
   mock.session.mockResolvedValue({ state: "ready", client: {
-    replica: { source: { dataVersion: "custom-plan" }, meals: { timeZone: "UTC" }, experimentOutcomes: [trial] },
-    entities: { list: () => [{ id: trial.experiment.id, status: "completed",
+    replica: { source: { dataVersion: "custom-plan" }, meals: { timeZone: "UTC" }, experimentOutcomes: [trial],
+      policy: { includedFamilies: ["experiment", "event"] } },
+    entities: { list: ({ families }: { families: string[] }) => families.includes("event") ? [] : [{ id: trial.experiment.id, status: "completed",
       attributes: { runPlan: { modality, interventionStart, interventionEnd } } }] },
     metrics: { series: () => [] }, labResults: { list: () => [] },
   } });
@@ -122,7 +145,7 @@ it("uses canonical experiment aliases and percentage units for sleep efficiency"
   const trial = outcome("exp_evening", "Meditation");
   const metric = { ...trial.metricResults[0]!, biomarkerKey: "biomarker:sleep-efficiency-percent",
     unit: "%", baselineMean: 88, interventionMean: 91 };
-  const [read] = readHealthWinExperiments([{ ...trial, metricResults: [metric] }], [], today);
+  const [read] = readHealthWinExperiments([{ ...trial, metricResults: [metric] }], [], [], today);
   expect(read).toMatchObject({ metric: "sleep_efficiency", baselineMean: 88, interventionMean: 91 });
   const daily = { ...hr(today, "Oura", 87), metricKey: "sleep-efficiency", unit: "percent" };
   expect(retainedDailySamples("sleep_efficiency", [daily])).toEqual([
@@ -137,7 +160,7 @@ it("builds each experiment card from its own recorded metric and comparison", ()
     ...heart, biomarkerKey: "biomarker:sleep-efficiency-percent", label: "Sleep efficiency",
     unit: "%", baselineMean: 86, interventionMean: 90, expectedDirection: "increase", deltaAbs: 4,
   };
-  const experiments = readHealthWinExperiments([{ ...trial, metricResults: [efficiency, heart] }], [], today);
+  const experiments = readHealthWinExperiments([{ ...trial, metricResults: [efficiency, heart] }], [], [], today);
   const cards = generateHealthWins({ member: { today, age: null, sex: null, wearableProvider: null }, experiments });
   expect(cards).toHaveLength(2);
   expect(cards).toEqual(expect.arrayContaining([
