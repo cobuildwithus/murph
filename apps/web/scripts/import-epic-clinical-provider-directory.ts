@@ -126,16 +126,27 @@ export function appendOracleDirectory(artifact: ProviderDirectoryArtifactV2, { b
   const resources = requireArray(bundle.entry, "Oracle entries").map(entry =>
     requireRecord(requireRecord(entry, "Oracle entry").resource, "Oracle resource"));
   const endpoints = indexActiveOracleEndpoints(resources);
-  for (const resource of resources) {
-    if (resource.resourceType !== "Organization" || resource.active === false || !Array.isArray(resource.endpoint)) continue;
-    for (const link of resource.endpoint) {
+  // Like Epic, an unusable row is skipped. A tenant publishes once: the organization with the lowest id wins.
+  const organizationId = (resource: JsonRecord) => (typeof resource.id === "string" ? resource.id : "");
+  const organizations = resources
+    .filter(resource => resource.resourceType === "Organization" && resource.active !== false && Array.isArray(resource.endpoint))
+    .sort((left, right) => {
+      const [a, b] = [organizationId(left), organizationId(right)];
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  const ids = new Set<string>();
+  for (const resource of organizations) {
+    const brandName = optionalString(resource.name, 160);
+    if (!brandName) continue;
+    for (const link of resource.endpoint as unknown[]) {
       const endpoint = endpoints.get(readReference(link) ?? "");
       if (!endpoint) continue;
-      const brandName = requireString(resource.name, "Oracle organization name", 160);
+      const id = "oracle-" + createHash("sha256").update(endpoint.tenant).digest("hex").slice(0, 20);
+      if (ids.has(id)) continue;
+      ids.add(id);
       const oid = readIdentifier(resource.identifier, "urn:ietf:rfc:3986");
       artifact.entries.push({
-        aliases: [], brandName, fhirBaseUrl: endpoint.base,
-        id: "oracle-" + createHash("sha256").update(endpoint.tenant).digest("hex").slice(0, 20),
+        aliases: [], brandName, fhirBaseUrl: endpoint.base, id,
         integration: ORACLE_INTEGRATION_ID, locations: readLocations(resource),
         policyId: ORACLE_ACQUISITION_POLICY.id, ...(oid?.startsWith("urn:oid:") ? { upstreamId: oid } : {}),
       });
@@ -150,17 +161,18 @@ export function appendOracleDirectory(artifact: ProviderDirectoryArtifactV2, { b
 }
 
 function indexActiveOracleEndpoints(resources: JsonRecord[]) {
-  const endpoints = new Map<string, { base: string; tenant: string }>();
+  const endpoints = new Map<string, { base: string; tenant: string } | null>();
   for (const resource of resources) {
     if (resource.resourceType !== "Endpoint" || resource.status !== "active") continue;
     const address = resource.address;
-    if (typeof address !== "string" || !address.endsWith("/")) continue;
+    const id = optionalString(resource.id, 100);
+    if (!id || typeof address !== "string" || !address.endsWith("/")) continue;
     const base = address.slice(0, -1);
     const tenant = oracleFhirTenant(base);
     if (!tenant) continue;
-    const reference = `Endpoint/${requireString(resource.id, "Oracle endpoint id", 100)}`;
-    if (endpoints.has(reference)) throw new TypeError("Duplicate Oracle endpoint reference.");
-    endpoints.set(reference, { base, tenant });
+    // Two endpoints with one id make the reference ambiguous, so neither publishes.
+    const reference = `Endpoint/${id}`;
+    endpoints.set(reference, endpoints.has(reference) ? null : { base, tenant });
   }
   return endpoints;
 }

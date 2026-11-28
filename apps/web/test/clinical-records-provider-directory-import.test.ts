@@ -186,9 +186,34 @@ describe("Oracle directory refresh", () => {
       expect(result.providers.map(row => row.id).sort()).toEqual(expected);
       expect(result.providers[0]?.matchedFacility?.street).toEqual(["4 Cove Lane"]);
     }
-    expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), source([base + "dup/", base + "dup/"]))).toThrow(/duplicate/u);
     expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), { ...input, commit: "main" })).toThrow(/pinned/u);
     expect(() => appendOracleDirectory(buildEpicProviderDirectoryArtifact(epic), { ...input, bytes: new Uint8Array(32 * 1024 * 1024 + 1) })).toThrow(/32 MiB/u);
+  });
+  it("skips unusable rows and publishes each tenant once, from the lowest organization id", () => {
+    const endpoint = (id: string | undefined, tenant: string) =>
+      ({ resource: { resourceType: "Endpoint", id, status: "active", address: `${base}${tenant}/` } });
+    const organization = (id: string, name: string | undefined, reference: string) => ({ resource: { resourceType: "Organization",
+      id, name, endpoint: [{ reference: `Endpoint/${reference}` }], address: [{ city: "Cove", state: "GA", postalCode: "30309" }] } });
+    const rows = [
+      endpoint("kept", "Kept"), organization("org-1", "Kept Clinic", "kept"),
+      endpoint("unnamed", "Unnamed"), organization("org-2", undefined, "unnamed"),
+      endpoint("long", "Long"), organization("org-3", "x".repeat(161), "long"),
+      // Two organizations share one endpoint; two endpoints share one tenant.
+      endpoint("shared", "Shared"), organization("org-9", "Later Clinic", "shared"), organization("org-4", "Earlier Clinic", "shared"),
+      endpoint("twin-b", "Twin"), endpoint("twin-a", "Twin"), organization("org-8", "Twin B", "twin-b"), organization("org-5", "Twin A", "twin-a"),
+      // One endpoint id names two addresses, so its reference is ambiguous.
+      endpoint("ambiguous", "First"), endpoint("ambiguous", "Second"), organization("org-6", "Ambiguous Clinic", "ambiguous"),
+      endpoint(undefined, "Anonymous"), organization("org-7", "Anonymous Clinic", "undefined"),
+    ];
+    const build = (entry: unknown[]) => {
+      const artifact = buildEpicProviderDirectoryArtifact(epic);
+      appendOracleDirectory(artifact, { bytes: Buffer.from(JSON.stringify({ resourceType: "Bundle", type: "collection", entry })), commit: "b".repeat(40) });
+      return artifact.entries.filter(row => row.integration);
+    };
+    const published = build(rows);
+    expect(Object.fromEntries(published.map(row => [row.fhirBaseUrl.slice(base.length), row.brandName])))
+      .toEqual({ Kept: "Kept Clinic", Shared: "Earlier Clinic", Twin: "Twin A" });
+    expect(JSON.stringify(build([...rows].reverse()))).toBe(JSON.stringify(published));
   });
   it("holds the bootstrap, pins the published entries and publishes new tenants only after review establishes the host", () => {
     const first = source([base + "original/"]);

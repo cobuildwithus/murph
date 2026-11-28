@@ -253,13 +253,15 @@ function parseDirectoryEntry(
     resourceTypes: owned.resourceTypes,
   };
   if (owned.policy.sourceSystem === "cerner-fhir") {
-    // Oracle registration is server-owned; an entry cannot name a client.
-    if (!owned.integration || record.integration !== owned.integration || record.clientIdEnvironmentKey !== undefined
-      || record.clientId !== undefined || record.client_id !== undefined
+    // Oracle registration is server-owned; an entry cannot name a client or carry any other field.
+    if (!owned.integration || record.integration !== owned.integration || !hasOnlyEntryKeys(record, ORACLE_ENTRY_KEYS)
       || !/^oracle-[a-f0-9]{20}$/u.test(shared.id) || !oracleFhirTenant(fhirBaseUrl)) {
       throw new TypeError(`Clinical provider directory entry ${index} integration is unsupported.`);
     }
     return { ...shared, integration: owned.integration, sourceSystem: "cerner-fhir" };
+  }
+  if (!hasOnlyEntryKeys(record, EPIC_ENTRY_KEYS)) {
+    throw new TypeError(`Clinical provider directory entry ${index} has an unsupported field.`);
   }
   if (
     record.clientIdEnvironmentKey !== "EPIC_SMART_CLIENT_ID"
@@ -268,6 +270,15 @@ function parseDirectoryEntry(
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
   return { ...shared, clientIdEnvironmentKey: record.clientIdEnvironmentKey, sourceSystem: "epic-fhir" };
+}
+
+// Exactly what the importer writes for each vendor. An undefined field is absent once serialized.
+const SHARED_ENTRY_KEYS = ["aliases", "brandName", "fhirBaseUrl", "id", "locations", "policyId"];
+const EPIC_ENTRY_KEYS: ReadonlySet<string> = new Set([...SHARED_ENTRY_KEYS, "clientIdEnvironmentKey"]);
+const ORACLE_ENTRY_KEYS: ReadonlySet<string> = new Set([...SHARED_ENTRY_KEYS, "integration", "upstreamId"]);
+
+function hasOnlyEntryKeys(record: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
+  return Object.keys(record).every(key => record[key] === undefined || allowed.has(key));
 }
 
 // Four-field tuples predate street lines; seven-field tuples add street lines, aliases and a coordinate.

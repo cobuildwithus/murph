@@ -386,7 +386,10 @@ origin, policy and registration. For Epic the registration is
 production entries and policy require a human-reviewed directory PR. The
 weekly importer reads the public patient endpoint bundle at the commit in
 `sources`, matches the O3 tenant template and maps ZIPs with the same offline
-ZCTA table used for Epic. The sandbox host does
+ZCTA table used for Epic. Like the Epic import, it skips a row it cannot use:
+an organization without a name of at most 160 characters, an endpoint without
+an id, or an endpoint id shared by two addresses. A tenant publishes once, from
+the linked organization with the lowest id. The sandbox host does
 not count as a production host. A run that holds changes opens or updates the
 oldest open GitHub issue “Clinical directory changes need review” listing every
 held change, even when the directory itself is unchanged, and closes newer
@@ -449,7 +452,8 @@ Review the official source provenance and generated diff, then rerun the
 provider-directory tests. The importer is byte-deterministic for fixed source
 bytes and canonicalizes provider and facility order; the source hash remains
 an exact-byte hash, so a reordered source bundle correctly receives a different
-hash. The v2 parser rejects duplicate or unsorted ids, unknown policy/query
+hash. The v2 parser rejects duplicate or unsorted ids, any entry field the
+importer does not write for that vendor, unknown policy/query
 references, non-HTTPS URLs,
 credentials/query/fragment components, and private, loopback, link-local, or
 mapped-private IP literals. Only the v2 directory parser remains.

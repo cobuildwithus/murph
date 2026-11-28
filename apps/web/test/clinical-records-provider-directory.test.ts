@@ -379,10 +379,21 @@ describe("Clinical Records provider directory policy set", () => {
   it.each([
     ["a registration key", { clientIdEnvironmentKey: "EPIC_SMART_CLIENT_ID" }, /integration is unsupported/u],
     ["an embedded client id", { clientId: "synthetic-registration" }, /integration is unsupported/u],
+    ["an embedded client secret", { client_secret: "synthetic-secret" }, /integration is unsupported/u],
+    ["any field the importer does not write", { redirectUri: "https://synthetic.example.test/callback" }, /integration is unsupported/u],
     ["no integration", { integration: undefined }, /integration is unsupported/u],
     ["another vendor's id", { id: "epic-synthetic-valley" }, /integration is unsupported|strictly sorted/u],
   ])("rejects an Oracle entry with %s", (_label, overrides, message) => {
     expect(() => parseClinicalProviderDirectory(expanded(overrides))).toThrow(message);
+  });
+
+  it("accepts exactly the fields the importer writes and rejects any other on an Epic entry", () => {
+    expect(parseClinicalProviderDirectory(expanded({ upstreamId: "urn:oid:1.2.3" })).entries).toHaveLength(2);
+    const epic = makeDirectory({});
+    for (const extra of [{ client_secret: "synthetic-secret" }, { integration: "oracle-millennium-r4" }, { upstreamId: "urn:oid:1.2.3" }]) {
+      expect(() => parseClinicalProviderDirectory({ ...epic, entries: [{ ...epic.entries[0], ...extra }] }))
+        .toThrow(/unsupported field/u);
+    }
   });
 
   it("rejects missing, duplicate, altered or extra policies", () => {

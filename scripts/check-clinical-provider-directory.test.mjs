@@ -169,4 +169,15 @@ test("the first server-registered tenant needs human review before the refresh c
   assert.throws(() => publication(mixed(first, { ...second, fhirBaseUrl: "https://other.example.test/r4/Test-B" })), /unsupported/u);
   assert.throws(() => publication(mixed(first), [{ kind: "addition", id: second.id, candidate: second.fhirBaseUrl,
     brandName: second.brandName, clientIdEnvironmentKey: null }]), /does not match/u);
+  for (const extra of [{ client_secret: "synthetic-secret" }, { redirectUri: "https://synthetic.example.test/callback" }]) {
+    assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: mixed(first), headText: mixed({ ...first, ...extra }) }),
+      /integration is unsupported/u);
+    assert.throws(() => publication(mixed(first, { ...second, ...extra })), /integration is unsupported/u);
+  }
+});
+
+test("a pull request cannot add a field the importer does not write to an Epic entry", () => {
+  const head = JSON.parse(current);
+  head.entries[0].client_secret = "synthetic-secret";
+  assert.throws(() => checkPullRequest({ authorType: "Bot", baseText: current, headText: JSON.stringify(head) }), /unsupported field/u);
 });

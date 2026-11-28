@@ -287,6 +287,7 @@ export async function fetchClinicalRetrievalPage(input: {
   const timing = clinicalPageTiming(input.oracleLifetimeSearch, run.connection.sourceSystem, retrievalSlice);
   const claimed = await claimRetrievalPageRequest({
     staleMs: timing.staleMs,
+    maxClaimVersion: timing.maxClaimVersion,
     requiresProcessorApprovals: run.connection.requiresProcessorApprovals,
     firstStart: run.startedAt === null,
     connectionId: run.connection.id,
@@ -1009,12 +1010,15 @@ async function requireCurrentAccessToken(input: {
 
 // Only a capable caller and the Web-owned frozen slice can extend this request.
 function clinicalPageTiming(capable: boolean | undefined, sourceSystem: string, slice: ClinicalFhirRetrievalSlice) {
-  if (!isOracleLifetimeSearch(sourceSystem, slice)) {
-    return { timeoutMs: FHIR_REQUEST_TIMEOUT_MS, staleMs: PAGE_REQUEST_CLAIM_STALE_MS };
-  }
+  const ordinary = { maxClaimVersion: MAX_LOGICAL_REQUEST_CLAIM_VERSION, timeoutMs: FHIR_REQUEST_TIMEOUT_MS };
+  if (!isOracleLifetimeSearch(sourceSystem, slice)) return { ...ordinary, staleMs: PAGE_REQUEST_CLAIM_STALE_MS };
   // A shorter-lived caller can encounter a claim held by a longer-lived caller.
+  if (!capable) return { ...ordinary, staleMs: ORACLE_LIFETIME_PAGE_CALLBACK_MS };
+  // A foreground interruption costs a claim and a completion. Scale the ceiling with the
+  // wider window so interruptions per second of provider wait stay within the ordinary budget.
   return {
-    timeoutMs: capable ? ORACLE_LIFETIME_SEARCH_TIMEOUT_MS : FHIR_REQUEST_TIMEOUT_MS,
+    maxClaimVersion: Math.ceil(MAX_LOGICAL_REQUEST_CLAIM_VERSION * ORACLE_LIFETIME_SEARCH_TIMEOUT_MS / FHIR_REQUEST_TIMEOUT_MS),
+    timeoutMs: ORACLE_LIFETIME_SEARCH_TIMEOUT_MS,
     staleMs: ORACLE_LIFETIME_PAGE_CALLBACK_MS,
   };
 }
@@ -1174,6 +1178,7 @@ function hasSurroundingAsciiWhitespace(value: string): boolean {
 
 async function claimRetrievalPageRequest(input: {
   staleMs?: number;
+  maxClaimVersion?: number;
   requiresProcessorApprovals: boolean | null;
   firstStart: boolean;
   reservationBytes?: number;
@@ -1224,7 +1229,7 @@ async function claimRetrievalPageRequest(input: {
     || record.queryScopeId !== (input.queryScopeId ?? null)
     || record.sliceId !== (input.sliceId ?? null)
   ) return { claimed: false, errorCode: "request-page-conflict", retryable: false };
-  if (record.claimVersion >= MAX_LOGICAL_REQUEST_CLAIM_VERSION) {
+  if (record.claimVersion >= (input.maxClaimVersion ?? MAX_LOGICAL_REQUEST_CLAIM_VERSION)) {
     return { claimed: false, errorCode: "request-retry-limit-reached", retryable: false };
   }
   const isFirstCompletion = record.responseBytes === null;

@@ -1765,25 +1765,45 @@ describe("Oracle runs at the Web retrieval boundary", () => {
     } finally { deadlines.mockRestore(); vi.useRealTimers(); }
   });
 
-  it("stops retrying a permanent gateway outage at the existing page claim limit", async () => {
-    const harness = oracleHarness(["Patient", "Condition"]);
-    const portal = createClinicalVendorSimulator(oracleWireProfile, {}, "access-token");
-    const page = request(slice(harness, "conditions"), "gateway-outage");
-    const runPage = () => fetchClinicalRetrievalPage({
-      memberId: MEMBER_ID, oracleLifetimeSearch: true, fetchImpl: portal.fetchImpl, request: page,
-    });
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      portal.onNext("search", () => new Response(null, { status: 504 }));
-      const result = await runPage();
-      if (result.status === "unavailable" && !result.retryable) break;
-      expect(result).toMatchObject({ status: "unavailable", retryable: true });
+  // 65 = 20 claims scaled from the ordinary 20-second page window to the 65-second negotiated one.
+  // A request row starts at claim version 1, so a ceiling of N allows N - 1 provider attempts.
+  it.each([
+    { label: "a negotiated lifetime page", capable: true, daily: false, ceiling: 65 },
+    { label: "a legacy caller on a lifetime page", capable: false, daily: false, ceiling: 20 },
+    { label: "a capable caller on a daily window", capable: true, daily: true, ceiling: 20 },
+  ])("stops retrying a permanent gateway outage for $label at its claim ceiling", async ({ capable, daily, ceiling }) => {
+    const families = ["Patient", "Procedure"];
+    const harness = oracleHarness(families);
+    if (daily) {
+      harness.state.run.retrievalPlanJson = buildOracleDailyRetrievalPlan({
+        previous: buildOracleRetrievalPlan({ resourceTypes: families }), generation: 2, now: new Date(),
+      });
     }
-    const egressCount = portal.requests.length;
+    const portal = createClinicalVendorSimulator(oracleWireProfile, {}, "access-token");
+    const page = request(slice(harness, "procedures"), "gateway-outage");
+    const runPage = () => fetchClinicalRetrievalPage({
+      memberId: MEMBER_ID, oracleLifetimeSearch: capable, fetchImpl: portal.fetchImpl, request: page,
+    });
+    for (let attempt = 1; attempt < ceiling; attempt += 1) {
+      portal.onNext("search", () => new Response(null, { status: 504 }));
+      await expect(runPage()).resolves.toMatchObject({ status: "unavailable", retryable: true });
+    }
     await expect(runPage()).resolves.toMatchObject({ errorCode: "request-retry-limit-reached", retryable: false });
-    expect(egressCount).toBeGreaterThan(1);
-    expect(egressCount).toBeLessThanOrEqual(20);
-    expect(portal.requests).toHaveLength(egressCount);
+    expect(portal.requests).toHaveLength(ceiling - 1);
     expect(harness.state.run.pageCount).toBe(0);
+  });
+
+  it("keeps the ordinary claim ceiling for Epic even with a capable caller", async () => {
+    vi.stubEnv("EPIC_SMART_HOSPITAL_APPROVED_PROVIDER_IDS", "epic-test");
+    createHarness(["Patient", "Observation"]);
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 504 }));
+    const page = pageRequest({ requestId: "gateway-outage", resourceType: "Observation" });
+    const runPage = () => fetchClinicalRetrievalPage({ memberId: MEMBER_ID, oracleLifetimeSearch: true, fetchImpl, request: page });
+    for (let attempt = 1; attempt < 20; attempt += 1) {
+      await expect(runPage()).resolves.toMatchObject({ status: "unavailable", retryable: true });
+    }
+    await expect(runPage()).resolves.toMatchObject({ errorCode: "request-retry-limit-reached", retryable: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(19);
   });
 
   it("keeps the ordinary deadline for a daily window and a Patient read with a capable caller", async () => {

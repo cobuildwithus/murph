@@ -180,10 +180,13 @@ revision, 96 addresses contain underscores and remain outside that grammar.
 Keep starts and search off during deployment. Deploy Web and then the manually
 released Cloudflare Worker, port and runner image. Each can run against the
 previous version. Only an end-to-end fetch-page capability hint and a saved
-Oracle whole-family search select the 65-second provider deadline. The port and
-Worker allow 100 seconds for that callback. An older component keeps the
-20-second provider path. Retryable gateway errors resume through the existing
-checkpoint and mailbox delay. O4 adds no persistent format or rollback floor.
+Oracle whole-family search select the 65-second provider deadline. The Worker
+allows 100 seconds for that callback and the runner port 105, the same 5-second
+margin the Worker environment requires of the runner commit timeout. An older
+component keeps the 20-second provider path. A negotiated page's claim ceiling
+scales with its wider window, from 20 to 65, so foreground interruptions cost
+no more per second of provider wait. Retryable gateway errors resume through
+the existing checkpoint and mailbox delay. O4 adds no persistent format or rollback floor.
 Keep O3 Web and the signer once an Oracle session exists.
 
 ## Verification
