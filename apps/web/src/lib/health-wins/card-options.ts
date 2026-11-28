@@ -17,7 +17,7 @@ const labels: Record<Option, string> = {
 };
 
 const hiddenTitles = {
-  Sleep: "Sleep milestone", Heart: "Heart health milestone", Fitness: "Fitness milestone",
+  milestones: "Milestone", Sleep: "Sleep milestone", Heart: "Heart health milestone", Fitness: "Fitness milestone",
   Challenges: "Challenge milestone", Experiments: "Finished an experiment", Labs: "Lab milestone", Diet: "Diet milestone",
 } satisfies Record<CardSpec["filter"], string>;
 
@@ -81,6 +81,8 @@ export interface CachedHealthCandidate extends CandidateDisplay {
   miles?: CandidateDisplay;
   kilometers?: CandidateDisplay;
   meters?: CandidateDisplay;
+  /** First offer in consecutive composer sets, shared by all unit variants. */
+  readyAt?: string;
   /** Private detector evidence on the sealed wrapper, independent of its units or variants. */
   achievement?: HealthWinAchievement;
   sourceComplete?: boolean;
@@ -94,6 +96,15 @@ export function healthCandidateDisplay(candidate: CachedHealthCandidate, units: 
 
 function alternateId(system: string, id: string) {
   return createHash("sha256").update(`${system}:${id}`).digest("base64url");
+}
+
+/** Include the deterministic miles ID from older km-only sets without rendering a card for the badge. */
+export function healthCandidateDisplayIds(candidate: CachedHealthCandidate) {
+  const spec = candidate.variants[0].spec;
+  const legacyMiles = spec.kind === "trend_change" && spec.chart.type === "trend" && spec.chart.unit === "km"
+    && spec.chart.series.length > 0 ? alternateId("miles", candidate.id) : undefined;
+  return [candidate.id, candidate.meters?.id, candidate.kilometers?.id, candidate.miles?.id ?? legacyMiles]
+    .filter((id): id is string => id !== undefined);
 }
 
 /** Older sealed sets have only the km display. Derive their alternate ID and revisions consistently on read. */
@@ -118,7 +129,7 @@ function prepareDisplay(card: ShareableCard, revision: (spec: Variant["spec"]) =
 function prepareMemberCandidate(
   memberId: string, engineCard: CardSpec, revision: (spec: Variant["spec"]) => string, distanceArtUrl?: string | null,
 ): CachedHealthCandidate {
-  const id = createHostedOpaqueIdentifier("health-win-card", JSON.stringify([memberId, engineCard.id]))!;
+  const id = engineCard.kind === "milestone" ? engineCard.id : createHostedOpaqueIdentifier("health-win-card", JSON.stringify([memberId, engineCard.id]))!;
   const card = engineCard.kind === "cumulative" && distanceArtUrl
     ? { ...engineCard, id, chart: { ...engineCard.chart, art: { url: distanceArtUrl } } }
     : { ...engineCard, id };

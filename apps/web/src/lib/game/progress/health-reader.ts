@@ -20,29 +20,16 @@ import { attachRouteArt } from "./route-art";
 import { memberPlaceFixer } from "./place-fix";
 import { patchMeasureState, readMeasureStates, type MeasureState, type BeforeProgressMutation } from "./state";
 import { saveVaultRuns } from "./vault-runs";
-import { HEALTH, type Candidate } from "./registry";
+import { HEALTH } from "./registry";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
-import { heartRateWindowSource, type AgeProfile } from "./norms";
-import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
+import { heartRateWindowSource } from "./norms";
+import { healthBaseline, healthSums, progressHealthDays } from "./health";
 import { cumulativePoints } from "./series";
 import { readRouteGoals, routeLegs, routeProgressIncomplete, routeView, setRouteGoal } from "./routes";
-import { healthView, savedHealthView, type HealthMetricInput } from "./health-view";
+import { healthView, type HealthMetricInput } from "./health-view";
 import { healthJourneyMeasure, healthJourneys, healthJourneyView, healthJourneyViews } from "./health-journeys";
 
 const metricIds = Object.keys(HEALTH) as HealthMetric["id"][];
-
-async function readSavedHealth(auth: HostedNativeMemberAuth, joinedOn: string, today: string, timing: ProgressReadTiming) {
-  const db = getPrisma(), memberId = auth.member.id;
-  await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-  await timing.measure("auth", () => assertBrowserVaultMemberAuthority({ memberId, prisma: db }));
-  const states = await timing.measure("states", () => readMeasureStates(memberId, metricIds));
-  const awards = await timing.measure("awards", () => readAwards(memberId));
-  const metrics = metricIds.map(id => ({ id, ...HEALTH[id], daily: [], baseline: states.get(id)!.baseline?.value ?? null,
-    wins: awards.filter(award => award.measureId === id && ["health", "healthAge"].includes(award.kind)) }));
-  await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-  await timing.measure("auth", () => assertBrowserVaultMemberAuthority({ memberId, prisma: db }));
-  return timing.measure("render", () => savedHealthView(joinedOn, today, metrics));
-}
 
 /** Steps reads and writes: the member's session, and their vault's authority over health data. */
 export function healthAuthority(auth: HostedNativeMemberAuth): BeforeProgressMutation {
@@ -122,17 +109,18 @@ export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: A
     const timeZone = profile.timeZone;
     const now = new Date();
     const today = toLocalDayKey(now, timeZone), joinedOn = toLocalDayKey(profile.createdAt, timeZone);
-    // A failed live read returns saved presentation, never a baseline or award write.
+    // Older clients can still open the page while the numbers projection recovers.
     const snapshot = await timing.measure("ownReplica", () => readCompanionHealthSeries(auth, signal, metricIds)).catch(async error => {
       if (!isHostedOnboardingError(error) || error.code !== "NUMBERS_PROJECTION_UNAVAILABLE") throw error;
-      const health = await readSavedHealth(auth, joinedOn, today, timing);
-      throw hostedOnboardingError({ code: error.code, httpStatus: 503, retryable: true,
-        message: error.message, details: { health } });
+      return "unavailable" as const;
     });
+    if (snapshot === "unavailable") {
+      await healthAuthority(auth)(db);
+      return { joinedOn, today, state: "stale", savedAt: null, winCount: 0, metrics: [], sums: [], recs: [] };
+    }
     const states = await timing.measure("states", () => readMeasureStates(memberId, metricIds));
     const { models, journeys, ageProfile, previousAwards, attemptedInsert } = await settleProgressHealth(auth, snapshot, profile, states, now, timing);
     const awards = attemptedInsert ? await timing.measure("awards", () => readAwards(memberId)) : previousAwards;
-    for (const model of models) model.wins = awards.filter(award => award.measureId === model.id && ["health", "healthAge"].includes(award.kind));
     const sums = await timing.measure("render", () => healthJourneyViews(journeys, awards, today, units));
     // The Steps map and its places' posters: start what's missing, after the response.
     await timing.measure("art", () => attachRouteArt(sums, journeys.states, { memberId, beforeMutationTx: healthAuthority(auth) }));
@@ -203,24 +191,19 @@ async function settleProgressHealth(
   const ageProfile = { age: snapshot?.demographics?.birthYear === null || !snapshot?.demographics
     ? null : Number(today.slice(0, 4)) - snapshot.demographics.birthYear,
   sex: snapshot?.demographics?.biologicalSex ?? null };
-  // Award comparisons stay in the join-date age bracket; a birthday is not an improvement.
-  const awardProfile = { ...ageProfile, age: ageProfile.age === null ? null
-    : ageProfile.age - Number(today.slice(0, 4)) + Number(joinedOn.slice(0, 4)) };
   const beforeMutationTx = healthAuthority(auth);
   const previousAwards = await timing.measure("awards", () => readAwards(memberId));
   const models: HealthMetricInput[] = [];
-  const candidates: Candidate[] = [];
   for (const id of metricIds) {
     const daily = progressHealthDays(id, (snapshot?.numbers[id]?.daily ?? [])
       .filter(point => point.date >= addDaysToIsoDate(today, -364) && point.date <= today));
-    const result = await timing.measure("scoring", () => freezeAndScoreMetric({ memberId, id, daily, joinedOn, profile: awardProfile,
+    const result = await timing.measure("scoring", () => readMetricBaseline({ memberId, id, daily, joinedOn,
       state: states.get(id)!, beforeMutationTx }));
-    candidates.push(...result.candidates);
     models.push(result.model);
     states.set(id, result.state);
   }
   const journeys = await timing.measure("journeys", () => healthJourneys({ memberId, metrics: models, states, joinedOn, today, timeZone, beforeMutationTx, awards: previousAwards }));
-  const attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, [...candidates, ...journeys.candidates], beforeMutationTx, { awards: previousAwards, timeZone }));
+  const attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, journeys.candidates, beforeMutationTx, { awards: previousAwards, timeZone }));
   return { models, journeys, ageProfile, previousAwards, attemptedInsert };
 }
 
@@ -232,11 +215,11 @@ function healthValueRange(id: HealthMetric["id"]) {
   return (value: number) => value >= minValue * scale && value <= maxValue * scale;
 }
 
-async function freezeAndScoreMetric(input: {
-  memberId: string; id: HealthMetric["id"]; daily: RawHealthPoint[]; joinedOn: string; profile: AgeProfile;
+async function readMetricBaseline(input: {
+  memberId: string; id: HealthMetric["id"]; daily: RawHealthPoint[]; joinedOn: string;
   state: MeasureState; beforeMutationTx: BeforeProgressMutation;
 }) {
-  const { memberId, id, joinedOn, profile, beforeMutationTx } = input;
+  const { memberId, id, joinedOn, beforeMutationTx } = input;
   const inRange = healthValueRange(id);
   const daily = input.daily.filter(point => inRange(point.value));
   let state = input.state;
@@ -249,11 +232,5 @@ async function freezeAndScoreMetric(input: {
   const savedBaseline = state.baseline?.value ?? null;
   const baseline = savedBaseline !== null && inRange(savedBaseline) ? savedBaseline : null;
   const baselineSource = state.baseline?.source ?? null;
-  const model: HealthMetricInput = { id, daily, baseline, baselineSource, ...HEALTH[id], wins: [] };
-  if (baseline === null) return { model, state, candidates: [] };
-  const byDate = new Map(daily.map(point => [point.date, point]));
-  const means = healthMeans(daily).map(point => ({ ...byDate.get(point.date)!, value: point.value,
-    source: id === "restingHeartRate" ? heartRateWindowSource(daily, addDaysToIsoDate(point.date, -13), point.date) : null }));
-  const context = { metric: id, joinedOn, baseline, baselineSource, means, profile, ...HEALTH[id] };
-  return { model, state, candidates: [...healthSteps(context), ...healthAgeShare(context)] };
+  return { model: { id, daily, baseline, baselineSource, ...HEALTH[id] }, state };
 }

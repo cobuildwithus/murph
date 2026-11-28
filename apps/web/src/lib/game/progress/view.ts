@@ -18,7 +18,6 @@ import type { ClientUnits } from "../../companion/client-info";
 import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
-import { healthAgeTitle } from "./health";
 import { attachRouteArt } from "./route-art";
 
 // Charts start the day someone started the app, and Oct 1, 2026 for anyone on it before then.
@@ -78,7 +77,7 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits,
     detail = `${formatAmount(award.data.distanceM as number, "meters", "full", units).text} from ${award.data.from}`;
   } else {
     face = award.data.face as Medal["face"];
-    title = award.kind === "healthAge" ? healthAgeTitle(award.data.percentile as number) : award.data.title as string;
+    title = award.data.title as string;
     const label = award.kind === "friend" ? measures.find(measure => measure.id === award.measureId)?.label : undefined;
     detail = label ? `in ${label.toLowerCase()}, all time` : award.data.detail as string;
   }
@@ -111,8 +110,6 @@ function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: 
   }
   if (kind === "goal" || kind === "held") return { title, line: rungFor(first.data.rung as RungDefinition, 0, first.on, units).blurb };
   if (kind === "route") return { title, line: detail };
-  if (first.kind.startsWith("health")) return { title: `${title}${first.kind === "healthAge" && first.data.percentile === 50 ? " of" : ""} ${detail}`,
-    line: gold ? "Your best since you joined. It's your newest medal, so it's the gold one on Prizes." : "Your best since you joined." };
   return { title: `${title} ${detail}`, line: null };
 }
 

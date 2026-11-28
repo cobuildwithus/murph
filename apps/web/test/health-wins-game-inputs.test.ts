@@ -135,7 +135,7 @@ describe("game inputs for health wins", () => {
     const specified = read();
     expect(specified).not.toBe(original);
     awards.push({ id: "synthetic-award", kind: "days", key: "synthetic-key", on: today, createdAt: source.now,
-      seenAt: null, measureId: "burpees.reps", subjectMemberId: null, data: {} });
+      seenAt: null, measureId: "burpees.reps", subjectMemberId: null, data: { value: 5, noun: "practice", unit: "days" } });
     const earned = read();
     expect(earned).not.toBe(specified);
     source.state.entries[0].incomplete = true;

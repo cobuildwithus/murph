@@ -396,6 +396,14 @@ After consent withdrawal the author receives only `{id, createdAt, version}`
 for their own posts. A cumulative distance card’s map chart may contain
 `art: {url}`, a link to the painting selected when the card was prepared.
 
+## Notifications and milestone cards
+
+Under `api/game/v1/health`, `GET notifications` returns `{ unread, highlights, items }` for the signed-in feed member. It covers the last 30 days, with up to three personal highlights and 80 other items. Cheers on a post or Working on selection share one row per member-local day. A row carries up to two faces and a distinct actor count. Hidden, blocked and ineligible actors drop out of both the row and the badge. Older Working on cheers without a recorded date stay out.
+
+`GET notifications/unread` returns the count capped at 99. `POST notifications/seen` takes an ISO `through` timestamp and returns the remaining unread count. An older or repeated mark is safe.
+
+New post and pin candidates use `milestone:<award lookup>` for personal Prizes cards. The card’s medal chart carries the Prizes art key. The composer verifies the offered revision and a published pin freezes the selection and its local pin date. Prizes no longer grants baseline-improvement or age-percentile medals. Its Health response retains metrics, recommendations and journeys and returns empty metric wins.
+
 ## Rollout
 
 Deploy See yours on the existing feed allowlist before releasing a client

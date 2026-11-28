@@ -2303,6 +2303,10 @@ private. Scratch and keys are discarded on every exit. This mode does not call a
 model, wake a runtime, replay work, publish a checkpoint, acknowledge mailboxes,
 write billing state or send messages. Historical repair needs separate authority.
 
+## Native Health notifications
+
+The list, unread count and seen write use the authenticated member and Health feed allowlist. Reads check the native session and vault authority around private reads. Post and comment events inherit the feed audience, including private replies and game-scoped posts. Actor identities are batch-opened, then current social visibility is checked again. Invitations require an addressed seat. The read mark advances atomically and cannot move into the future. Age changes come from the owner’s current You cache. Friends’ private Prizes ledgers are outside the notification audience.
+
 ## Native Health profiles
 
 The You allowlist sits inside the Health feed gate. Profile extras require current session, health consent and profile audience. Cover uploads use game media ownership checks. Milestone picks bind to the offered set and display option through commit. Live selectors disclose only the chosen public card. Friend streaks require mutual active seats except for a deliberately published streak card, which omits partner identity. Shared progress reads the existing pair-board grants and the separate sleep-times scope. Selection writes never grant access. Settings approval authorizes export of retained profile choices and the member’s outgoing cheers.

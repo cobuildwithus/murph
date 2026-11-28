@@ -6,6 +6,8 @@ A directory of the durable docs. Find the row for your task and read that doc;
 `AGENTS.md` has the task router. Completed execution plans under
 `agent-docs/exec-plans/completed/` are history, not instructions.
 
+Health notification visibility, read marks and milestone publication are described in [Health wins](product-specs/health-wins.md#notifications-and-milestone-cards) and [Security](SECURITY.md#native-health-notifications).
+
 ## Canonical Docs
 
 | Path | Purpose | Source of truth | Criticality | Last verified |

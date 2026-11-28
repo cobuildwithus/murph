@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GET as notifications } from "../app/api/game/v1/health/notifications/route";
+import { GET as unread } from "../app/api/game/v1/health/notifications/unread/route";
+import { POST as seen } from "../app/api/game/v1/health/notifications/seen/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { POST as previewActivity } from "../app/api/game/v1/health/activities/cards/route";
 import { POST as activityKind } from "../app/api/game/v1/health/activities/kind/route";
@@ -21,11 +24,13 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const auth = { member: { id: "synthetic-reader" } };
 const service = vi.hoisted(() => ({
-  feed: vi.fn(), wins: vi.fn(), change: vi.fn(), readPost: vi.fn(), create: vi.fn(), patch: vi.fn(),
+  notifications: vi.fn(), mark: vi.fn(), feed: vi.fn(), wins: vi.fn(), change: vi.fn(), readPost: vi.fn(), create: vi.fn(), patch: vi.fn(),
   remove: vi.fn(), cheer: vi.fn(), comments: vi.fn(), comment: vi.fn(), removeComment: vi.fn(),
   profile: vi.fn(), hides: vi.fn(), hide: vi.fn(), photo: vi.fn(), readPhoto: vi.fn(), removePhoto: vi.fn(),
   previewActivity: vi.fn(), saveActivity: vi.fn(), seeYours: vi.fn(),
 }));
+vi.mock("../src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: async () => ({ allowed: true }) }) }));
+vi.mock("../src/lib/health-notifications/read", () => ({ readNotifications: service.notifications, advanceMark: service.mark }));
 vi.mock("../src/lib/health-wins/see-yours", () => ({ readSeeYours: service.seeYours }));
 vi.mock("../src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => auth }));
 vi.mock("../src/lib/health-wins/read", () => ({
@@ -64,12 +69,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("per-member route gate", () => {
+  it("rejects an invalid read timestamp before saving a mark", async () => {
+    expect((await seen(request("notifications/seen", "POST", { through: "yesterday" }))).status).toBe(400);
+    expect(service.mark).not.toHaveBeenCalled();
+  });
   it("returns private 404s before any service or body validation on every disabled route", async () => {
     vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", "synthetic-other");
     vi.stubEnv("MURPH_HEALTH_RECORD_MEMBER_IDS", auth.member.id);
     const invalid = request("posts", "POST", { unrelated: true });
     const responses = await Promise.all([
-      feed(invalid), wins(invalid), change(invalid, postContext), post(invalid),
+      notifications(invalid), unread(invalid), seen(invalid), feed(invalid), wins(invalid), change(invalid, postContext), post(invalid),
       readPost(invalid, postContext), patch(invalid, postContext), remove(invalid, postContext), seeYours(invalid, postContext),
       cheer(invalid, postContext), uncheer(invalid, postContext),
       comments(invalid, postContext), comment(invalid, postContext), removeComment(invalid, postContext),

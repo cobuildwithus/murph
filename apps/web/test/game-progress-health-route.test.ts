@@ -30,8 +30,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
 import { GET as goals } from "../app/api/game/v1/progress/goals/route";
 import { PUT } from "../app/api/game/v1/progress/measures/[id]/route";
-import { goalsSchema, healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
-import { healthAgeShare, healthSteps } from "@/src/lib/game/progress/health";
+import { goalsSchema, healthSchema } from "@/src/lib/game/progress/contract";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import { routeLegs } from "@/src/lib/game/progress/route-progress";
 import type { StoredAward } from "@/src/lib/game/progress/awards";
@@ -74,59 +73,25 @@ it("reads Health inside the request's root unwrap cache", async () => {
   expect(mocks.raw.mock.calls.map(call => call[2])).toEqual([["restingHeartRate", "steps", "sleep"]]);
 });
 
-it("a vault read failure is one retryable 503 with empty saved presentation and no writes", async () => {
+it("serves the legacy response with empty medals when the numbers projection is unavailable", async () => {
   mocks.raw.mockRejectedValueOnce(hostedOnboardingError({ code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503,
     retryable: true, message: "Numbers are temporarily unavailable." }));
   const response = await GET(request());
-  expect(response.status).toBe(503);
-  const body = await response.json();
-  expect(body).toMatchObject({ error: { code: "NUMBERS_PROJECTION_UNAVAILABLE", retryable: true } });
-  const saved = savedHealthSchema.parse(body.error.details.health);
-  expect(saved.winCount).toBe(0);
-  expect(saved.metrics.every(metric => metric.headline === null && metric.next === null && metric.wins.length === 0)).toBe(true);
-  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.status).toBe(200);
+  expect(healthSchema.parse(await response.json())).toMatchObject({ state: "stale", winCount: 0, metrics: [], sums: [] });
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(mocks.raw).toHaveBeenCalledTimes(1);
-  expect(mocks.measures).toHaveBeenCalledTimes(1);
+  expect(mocks.measures).not.toHaveBeenCalled();
   expect(mocks.patch).not.toHaveBeenCalled();
   expect(mocks.settle).not.toHaveBeenCalled();
-  expect(mocks.awards).toHaveBeenCalledTimes(1);
-});
-
-it("keeps the normal saved win tiles, headline and next target when the live read fails", async () => {
-  const context = { metric: "restingHeartRate" as const, joinedOn, baseline: 74, step: 1, direction: -1,
-    profile: { age: 35, sex: "female" as const }, means: snapshot().numbers.restingHeartRate.daily
-      .filter(point => point.date >= joinedOn).map(point => ({ ...point, value: 72 })) };
-  const wins: StoredAward[] = [...healthSteps(context), ...healthAgeShare({ ...context, baseline: 100, baselineSource: "Apple Watch",
-    means: context.means.map(point => ({ ...point, value: 20 })) })].map((award, index) => ({ ...award,
-    id: `saved-${index}`, createdAt: new Date(`${today}T12:00:00Z`), seenAt: null }));
-  mocks.measures.mockResolvedValue([{ lookup: "restingHeartRate", stateEncrypted: "synthetic-sealed" }]);
-  mocks.open.mockResolvedValue([{ baseline: { value: 74, from: "2026-09-23", to: "2026-10-20" } }]);
-  mocks.awards.mockResolvedValue(wins);
-  const normal = healthSchema.parse(await (await GET(request())).json()).metrics[0];
-  mocks.patch.mockClear(); mocks.settle.mockClear();
-  mocks.raw.mockRejectedValueOnce(hostedOnboardingError({ code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503,
-    retryable: true, message: "Numbers are temporarily unavailable." }));
-  const logs = vi.spyOn(console, "error").mockImplementation(() => {});
-  try {
-    const response = await GET(request());
-    expect(response.status).toBe(503);
-    const body = await response.json();
-    const saved = savedHealthSchema.parse(body.error.details.health);
-    expect(saved).toMatchObject({ joinedOn, today, winCount: wins.length });
-    expect(saved.metrics[0]).toMatchObject({ headline: "Down 2 bpm", wins: normal.wins, next: normal.next });
-    expect(saved.metrics[0].wins.map(win => win.on)).toEqual(wins.map(win => win.on));
-    expect(saved.metrics[0].wins.find(win => win.title === "Beat 1 in 3")).toMatchObject({ detail: "women your age" });
-    expect(JSON.stringify(logs.mock.calls)).not.toMatch(/Down 2|women your age|synthetic-sealed|saved-0/);
-    expect(mocks.patch).not.toHaveBeenCalled();
-    expect(mocks.settle).not.toHaveBeenCalled();
-  } finally { logs.mockRestore(); }
+  expect(mocks.awards).not.toHaveBeenCalled();
 });
 
 it.each(["session", "health"])("withholds saved health after %s authority is lost during decryption", async boundary => {
   mocks.raw.mockRejectedValueOnce(hostedOnboardingError({ code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503,
     retryable: true, message: "Numbers are temporarily unavailable." }));
   const check = boundary === "session" ? mocks.current : mocks.authority;
-  check.mockResolvedValueOnce(undefined).mockRejectedValueOnce(hostedOnboardingError({ code: "CONSENT_REQUIRED",
+  check.mockRejectedValueOnce(hostedOnboardingError({ code: "CONSENT_REQUIRED",
     httpStatus: 403, message: "Consent required." }));
   const response = await GET(request());
   expect(response.status).toBe(403);
@@ -142,20 +107,20 @@ it("does not turn a live authority denial into a saved-data response", async () 
   expect(mocks.awards).not.toHaveBeenCalled();
 });
 
-it("returns private uncached health with raw baseline and all crossed levels", async () => {
+it("returns private uncached health with its raw baseline and no retired medals", async () => {
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(healthSchema.parse(await response.json())).toMatchObject({ joinedOn, today,
     metrics: [expect.objectContaining({ id: "restingHeartRate", baseline: { value: 74, text: "74", unit: "bpm" },
-      next: { title: "Next win", detail: "73 bpm", face: { delta: { icon: "heart", text: "↓1" } } },
+      wins: [], next: null,
       age: expect.objectContaining({ typical: expect.objectContaining({ unit: "bpm", value: expect.any(Number) }) }) }),
       expect.any(Object), expect.any(Object)] });
   expect(mocks.patch).toHaveBeenCalledWith("ava", "restingHeartRate",
     { baseline: { value: 74, from: "2026-09-23", to: "2026-10-20", source: "Apple Watch" } }, expect.any(Function));
   const candidates = mocks.settle.mock.calls[0][1];
   expect(candidates.filter((award: { kind: string }) => award.kind === "health").map((award: { data: { level: number } }) => award.data.level))
-    .toEqual([1, 2, 3]);
+    .toEqual([]);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
 });
 
@@ -169,18 +134,14 @@ it("leaves VO2 max out of Progress Health", async () => {
 });
 
 it.each([100_000_074, Number.MAX_VALUE, -Number.MAX_VALUE])("ignores an extreme frozen baseline without rewriting it (%s)", async value => {
-  const wins: StoredAward[] = healthSteps({ metric: "restingHeartRate", joinedOn, baseline: 74, step: 1, direction: -1,
-    profile: { age: 35, sex: "female" }, means: snapshot().numbers.restingHeartRate.daily
-      .filter(point => point.date >= joinedOn) }).map((award, index) => ({ ...award,
-    id: `saved-${index}`, createdAt: new Date(`${today}T12:00:00Z`), seenAt: null }));
   mocks.measures.mockResolvedValue([{ lookup: "restingHeartRate", stateEncrypted: "synthetic-sealed" }]);
   mocks.open.mockResolvedValue([{ baseline: { value, from: "2026-09-23", to: "2026-10-20" } }]);
-  mocks.awards.mockResolvedValue(wins);
+  mocks.awards.mockResolvedValue([{ kind: "health", measureId: "restingHeartRate" }]);
   const response = await GET(request());
   expect(response.status).toBe(200);
   const metric = healthSchema.parse(await response.json()).metrics[0];
   expect(metric.baseline).toBeNull();
-  expect(metric.wins.map(win => [win.medalId, win.on])).toEqual(wins.map(win => [win.id, win.on]));
+  expect(metric.wins).toEqual([]);
   expect(mocks.patch).not.toHaveBeenCalled();
   expect(mocks.settle.mock.calls[0][1]).toEqual([]);
 });

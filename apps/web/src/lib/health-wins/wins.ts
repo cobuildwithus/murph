@@ -25,7 +25,7 @@ import { postedCardKeys } from "./posted-card-keys";
 
 export type { FrozenHealthCard, HealthCardSelection } from "./card-options";
 
-const DETECTOR_VERSION = "v7";
+const DETECTOR_VERSION = "v8";
 const CHECK_INTERVAL_MS = 60 * 60_000;
 
 const staleSet = () => hostedOnboardingError({
@@ -61,15 +61,19 @@ function cipherTarget(memberId: string, revision: string) {
   return { memberId, table: "health_win_set", rowId: revision, field: "candidates" } as const;
 }
 
-async function openSet(row: HealthWinSet, signal?: AbortSignal) {
+export async function openCachedHealthCandidates(row: HealthWinSet, signal?: AbortSignal) {
   const [opened] = await openHealthTexts([{ ...cipherTarget(row.memberId, row.revision), value: row.candidatesEncrypted }], signal);
   // The ciphertext is bound to the owner and the exact set revision.
-  return (JSON.parse(opened) as CachedHealthCandidate[]).map(withDistanceTrendUnits);
+  return JSON.parse(opened) as CachedHealthCandidate[];
 }
 
-interface WinReadOptions { signal: AbortSignal; refresh?: boolean; units?: ClientUnits }
+async function openSet(row: HealthWinSet, signal?: AbortSignal) {
+  return (await openCachedHealthCandidates(row, signal)).map(withDistanceTrendUnits);
+}
 
-async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal, units }: WinReadOptions) {
+interface WinReadOptions { signal: AbortSignal; refresh?: boolean; includePostedMilestones?: boolean; units?: ClientUnits }
+
+async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal, units, includePostedMilestones }: WinReadOptions) {
   signal.throwIfAborted();
   const cached = await openSet(row, signal);
   const memberId = auth.member.id;
@@ -101,7 +105,7 @@ async function present(auth: HostedNativeMemberAuth, row: HealthWinSet, { signal
   const shared = new Set(posted.map(card => card.key));
   const suggestions = candidates.filter(card => {
     const key = keys.get(card.id);
-    return key === undefined || !shared.has(key);
+    return (includePostedMilestones && card.kind === "milestone") || key === undefined || !shared.has(key);
   });
   return { day: row.day, setRevision: row.revision, candidates: suggestions };
 }
@@ -121,12 +125,25 @@ export async function assertHealthSetCurrent(
   if (current?.day !== day || current.revision !== setRevision) throw staleSet();
 }
 
+async function priorOfferTimes(previous: HealthWinSet | null, signal: AbortSignal) {
+  const times = new Map<string, string>();
+  if (previous) {
+    for (const item of await openCachedHealthCandidates(previous, signal)) {
+      times.set(item.id, item.readyAt ?? previous.createdAt.toISOString());
+    }
+  }
+  return times;
+}
+
 export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinReadOptions) {
   const db = getPrisma(), memberId = auth.member.id;
   const { today, row: observed } = await readCurrent(auth);
   const now = new Date();
   if (!options.refresh && observed?.day === today && now.getTime() - observed.checkedAt.getTime() < CHECK_INTERVAL_MS) {
-    return present(auth, observed, options);
+    const newerAward = await db.gameProgressAward.findFirst({ where: { memberId, subjectMemberId: null,
+      createdAt: { gt: observed.checkedAt }, earnedOn: { gte: new Date(now.getTime() - 31 * 86400000) } },
+      select: { lookup: true } });
+    if (!newerAward) return present(auth, observed, options);
   }
 
   const canRecompute = !options.refresh || (await hostedAuthRateLimitStorage(db).consume(
@@ -144,11 +161,15 @@ export async function readHealthWins(auth: HostedNativeMemberAuth, options: WinR
   let replacement: HealthWinSet | null = null;
   if (!keep) {
     const { selected, achievements } = source.detect();
-    if (!selected.length && !source.complete && observed) return present(auth, observed, options);
+    if (!selected.length && !source.milestones.length && !source.complete && observed) return present(auth, observed, options);
     await checkAuthority();
     const ranked = await rankHealthCards(selected, options.signal);
     const nudge = isHealthWinTextEnabled(memberId) ? { achievements, complete: source.complete } : undefined;
-    const candidates = prepareHealthCandidates(memberId, ranked, source.distanceArtUrl, nudge);
+    const milestones = source.milestones;
+    const readyAt = await priorOfferTimes(observed, options.signal);
+    const cards = [...ranked, ...milestones];
+    const candidates = prepareHealthCandidates(memberId, cards, source.distanceArtUrl, nudge)
+      .map(candidate => ({ ...candidate, readyAt: readyAt.get(candidate.id) ?? now.toISOString() }));
     const revision = randomUUID();
     const [candidatesEncrypted] = await sealHealthTexts([{ ...cipherTarget(memberId, revision), value: JSON.stringify(candidates) }], options.signal);
     replacement = { memberId, day: today, sourceRevision, revision, candidatesEncrypted, createdAt: now, checkedAt: now };

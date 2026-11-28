@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 import type { HostedNativeMemberAuth } from "../src/lib/better-auth/native-auth";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
-import { dependencyKey, readPrivateYou } from "../src/lib/health-you/read";
+import { cachedAgeChange, dependencyKey, readPrivateYou } from "../src/lib/health-you/read";
 import { buildViews } from "../src/lib/health-you/views";
 const mocks = vi.hoisted(() => ({
+  pointer: vi.fn(),
   proofs: vi.fn(),
   refresh: vi.fn(),
   vault: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("../src/lib/prisma", () => ({
   getPrisma: () => ({
     $transaction: (fn: (tx: object) => unknown) =>
       fn({ healthYouCache: { updateMany: async () => ({ count: 1 }) } }),
+    $queryRaw: mocks.pointer,
     healthYouCache: { findUnique: mocks.cache },
     gameProfile: { findUnique: async () => ({ timeZone: "UTC", firstNameEncrypted: "fixture" }) },
   }),
@@ -113,6 +115,35 @@ describe("private view authority and dependency lifecycle", () => {
     });
     mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: buildViews(snapshot) })]);
   }
+  it("requires a current private cache, You access and two consecutive weekly estimates for an age notification", async () => {
+    warm();
+    vi.stubEnv("MURPH_HEALTH_FEED_MEMBER_IDS", memberId);
+    vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", memberId);
+    try {
+      const views = buildViews(snapshot);
+      function history(date: string, age: number) {
+        mocks.decrypt.mockResolvedValue([JSON.stringify({ timeZone: "UTC", views: {
+          ...views, age: { ...views.age, history: [{ date, age: 41.4, real: 46 }, { date: asOf, age, real: 46 }] },
+        } })]);
+      }
+      mocks.pointer.mockResolvedValue([{ ref, dependency: dependencyKey(memberId, ref, "UTC", asOf) }]);
+      history("2031-04-05", 41.2);
+      expect(await cachedAgeChange(memberId, signal)).toEqual({ date: asOf, tenths: -2, timeZone: "UTC" });
+      history("2031-04-05", 41.5);
+      expect(await cachedAgeChange(memberId, signal)).toBeNull();
+      history("2031-03-29", 42);
+      expect(await cachedAgeChange(memberId, signal)).toBeNull();
+      history("2031-04-05", 42);
+      mocks.pointer.mockResolvedValue([]);
+      expect(await cachedAgeChange(memberId, signal)).toBeNull();
+      mocks.cache.mockClear();
+      vi.stubEnv("MURPH_HEALTH_YOU_MEMBER_IDS", "");
+      expect(await cachedAgeChange(memberId, signal)).toBeNull();
+      expect(mocks.cache).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it("rechecks both authorities after returning cached detail and reads live rows only on the main view", async () => {
     warm();
     await expect(readPrivateYou(auth, "age", signal)).resolves.toMatchObject({ real: 46 });

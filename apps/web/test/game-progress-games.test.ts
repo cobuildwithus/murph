@@ -322,24 +322,9 @@ describe("shared Progress numbers", () => {
 
 describe("moment words", () => {
   it.each([
-    [25, "Beat 1 in 4", "women your age"],
-    [100 / 3, "Beat 1 in 3", "women your age"],
-    [50, "Beat half", "men your age"],
-  ])("says the age audience once for saved and new %s-percent medals", (percentile, title, detail) => {
-    const full = `${title}${percentile === 50 ? " of" : ""} ${detail}`;
-    for (const savedTitle of [title, full]) {
-      const awards = stored([{ key: "age", kind: "healthAge", measureId: "restingHeartRate", subjectMemberId: null,
-        on: "2026-11-05", data: { percentile, title: savedTitle, detail, page: "health", face: { delta: { icon: "age", text: "1 in 3" } } } }]);
-      expect(momentsView(awards, [], "us")[0].title).toBe(full);
-      expect(medalView(awards[0], true, "us")).toMatchObject({ title, detail });
-      expect(awards[0].data.title).toBe(savedTitle);
-    }
-  });
-  it.each([
     ["landmark", "goal", { rung: { at: 1776, target: { kind: "height", id: "one-world-trade-center" } }, noun: "pushups" }, "One World Trade Center", BANK.find(entry => entry.id === "one-world-trade-center")!.blurb],
     ["time", "held", { rung: { at: 10800, target: { kind: "time", id: "concorde" } }, noun: "planked" }, "Concorde", BANK.find(entry => entry.id === "concorde" && entry.kind === "time")!.blurb],
     ["route", "route", { from: "San Diego", to: "San Francisco", distanceM: 501 * 1609.344 }, "San Francisco", "501 mi from San Diego"],
-    ["health", "medal", { title: "Heart rate", detail: "down 3 bpm", face: { delta: { icon: "heart", text: "3" } } }, "Heart rate down 3 bpm", "Your best since you joined. It's your newest medal, so it's the gold one on Prizes."],
     ["total", "medal", { value: 20000, unit: "reps", noun: "pushups" }, "20k pushups", null],
   ] as const)("renders %s drawer copy from earned facts", (kind, momentKind, data, title, line) => {
     const awards = stored([{ key: "one", kind, measureId: "pushups.reps", subjectMemberId: null, on: "2026-11-05", data: { ...data, page: "totals" } }]);
@@ -381,5 +366,5 @@ describe("Medal words and pages", () => {
 it("retires streaks, hours slept and anything VO2 max; keeps steps totals and sleep journeys", () => {
   expect(([["streak", null], ["total", "sleep"], ["health", "vo2Max"], ["healthAge", "vo2Max"],
     ["total", "steps"], ["time", "sleep"], ["health", "sleep"]] as const).map(([kind, measureId]) => retiredAward({ kind, measureId })))
-    .toEqual([true, true, true, true, false, false, false]);
+    .toEqual([true, true, true, true, false, false, true]);
 });

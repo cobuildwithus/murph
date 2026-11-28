@@ -19,7 +19,7 @@ export async function readHealthWinDetection({ memberId, today, checkAuthority, 
     const source = await readHealthWinInputs(memberId, checkAuthority, today, signal);
     requestSignal.throwIfAborted();
     if (deadline.aborted) return null;
-    return { complete: source.complete, sourceRevision: source.sourceRevision, distanceArtUrl: source.distanceArtUrl,
+    return { milestones: source.milestones ?? [], complete: source.complete, sourceRevision: source.sourceRevision, distanceArtUrl: source.distanceArtUrl,
       detect: () => detectHealthWins(source.input) };
   } catch (error) {
     if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) throw error;

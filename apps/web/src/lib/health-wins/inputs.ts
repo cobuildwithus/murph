@@ -91,17 +91,18 @@ export async function readHealthWinInputs(memberId: string, checkAuthority: () =
       : { inputs: { member: memberInputs(today) }, stepsThrough: null };
     // Older readable replicas can reuse Progress's matching run cache. A failed or missing replica cannot.
     const runs = client ? client.replica.runs ?? null : { days: [] };
-    const game = await source.read("game", () => readHealthWinGameInputs(memberId, today, runs, clock, signal));
-    if (game && !game.complete) source.missing.add("game");
-    const input: HealthWinsInput = { ...vault.inputs, games: game?.games ?? [], gameStreak: game?.gameStreak ?? null };
+    const game = await source.read("game", () => readHealthWinGameInputs(memberId, today, runs, clock, signal))
+      ?? { complete: false, games: [], gameStreak: null, sourceRevision: null, milestones: [] };
+    if (!game.complete) source.missing.add("game");
+    const input: HealthWinsInput = { ...vault.inputs, games: game.games, gameStreak: game.gameStreak ?? null };
     const distanceArtUrl = input.daily?.some(row => row.metric === "distance_km" && row.value > 0 && row.date.slice(0, 4) === today.slice(0, 4))
       ? await source.read("distanceArt", () => readPaintedRouteArt(memberId, ["steps", "walk.meters", "run.meters", "walk.steps", "run.steps"], signal))
       : null;
     const sourceRevision = createHash("sha256").update(JSON.stringify([
-      client?.replica.source.dataVersion ?? null, today, vault.stepsThrough, game?.sourceRevision ?? null, distanceArtUrl, dietEnabled, [...source.missing],
+      client?.replica.source.dataVersion ?? null, today, vault.stepsThrough, game.sourceRevision, distanceArtUrl, dietEnabled, [...source.missing],
     ])).digest("hex");
     signal.throwIfAborted();
-    return { input, distanceArtUrl, sourceRevision, complete: !source.missing.size };
+    return { input, milestones: game.milestones, distanceArtUrl, sourceRevision, complete: !source.missing.size };
   });
 }
 

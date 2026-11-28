@@ -217,7 +217,7 @@ describe.skipIf(!enabled)("Health profile publication", () => {
     const exportRows = await prepareHealthProfileExport(peer.member.id, async () => {});
     const exported = [];
     for await (const line of exportRows!()) exported.push(JSON.parse(line));
-    expect(exported.at(-1)).toEqual({ workingOnCheers: [{ ownerId: owner, factor: "steps" }] });
+    expect(exported.at(-1)).toEqual({ workingOnCheers: [{ ownerId: owner, factor: "steps", createdAt: expect.any(String) }] });
     await setWorking(auth, ["sleepTime"], signal);
     expect(await db.healthWorkingOnCheer.count({ where: { ownerId: owner } })).toBe(0);
     await cleanupGameFixtures(db, members);
