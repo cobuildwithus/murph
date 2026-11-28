@@ -102,7 +102,7 @@ export function projectYouInputs(
   });
   const lifts = completedLifts(trainingRows, asOf);
   const publication = toLocalDayKey(replica.generatedAt, timeZone);
-  const { sessions, training } = projectWorkouts(replica, trainingRows, publication, asOf);
+  const { sessions, training } = projectWorkouts(replica, trainingRows, publication, asOf, timeZone);
   const { timing, sleep_sessions } = sleepTimingEvidence(replica, from, asOf);
   const meals = client.replica.meals.days
     .filter((d) => d.date >= from && d.date <= asOf)
@@ -141,13 +141,15 @@ export function projectYouInputs(
 
   const historyFrom = [from, evidence.joined!].sort().at(-1)!;
 
+  const generation = replica.generation ?? 0;
   return {
     asOf,
     timeZone,
     evidence,
     bedtime,
     hasWearableData: hasWearableData(metrics, minutes.size, timing, asOf),
-    hasAnswerProjection: (replica.generation ?? 0) >= 21 && Array.isArray(timing),
+    hasAnswerProjection: generation >= 21 && Array.isArray(timing),
+    hasHabitQuestions: generation >= 22 && Array.isArray(timing),
     needsWhoopAnswer: Array.isArray(timing) && needsWhoopAnswer(evidence, asOf),
     availability,
     markers,
@@ -195,13 +197,19 @@ function projectWorkouts(
   trainingRows: BrowserVaultEntity[],
   publication: string,
   asOf: string,
+  timeZone: string,
 ) {
   const sessions = [
     ...("activitySessions" in replica ? (replica.activitySessions ?? []) : []),
     ...("detailedWorkouts" in replica ? (replica.detailedWorkouts ?? []) : []),
-  ].flatMap((r) => {
+  ].flatMap((r, index) => {
     const type = workoutType(r.type);
-    return type && r.date >= offset(publication, -62) && r.date <= asOf ? [{ ...r, type }] : [];
+    if (!type || r.date < offset(publication,-62) || r.date > asOf) return [];
+    const z = r.zones;
+    return [{date:r.date, minutes:r.minutes, type, id:String(index), ...(z && {
+      provider:z.provider, zone_min: z.first === 0 || (z.provider !== "whoop" && z.first===1) ? z.minutes : undefined,
+      reported_at:z.reportedAt ? toLocalDayKey(z.reportedAt,timeZone) : undefined,
+    })}];
   });
   const training = trainingRows.flatMap((r) => {
     const t = r.attributes.training;
@@ -234,11 +242,11 @@ function zoneOffset(instant: string, timeZone: string) {
 }
 
 function needsWhoopAnswer(evidence: MemberEvidence, asOf: string) {
-  const whoop = [...(evidence.daily ?? []), ...(evidence.sleep_sessions ?? [])].some(
-    (row) => row.source === "whoop" && distance(asOf, rowDay(row)) <= 42,
+  const whoop = [...(evidence.daily ?? []), ...(evidence.sleep_sessions ?? []), ...(evidence.workouts ?? [])].some(
+    (row) => (row.source === "whoop" || row.provider === "whoop") && distance(asOf, rowDay(row)) <= 42,
   );
   return (
-    whoop && !(evidence.checkins ?? []).some((row) => row.whoop_standard_zones != null && rowDay(row) <= asOf)
+    whoop && !(evidence.checkins ?? []).some((row) => (row.answerKey === "whoopZones" || row.whoop_standard_zones != null) && rowDay(row) <= asOf)
   );
 }
 

@@ -34,8 +34,8 @@ function compare(actual: unknown, expected: unknown, path: string) {
     for (const [k, v] of Object.entries(expected)) compare(actual[k], v, path + "." + k);
   } else expect(actual, path).toEqual(expected);
 }
-describe("round 7 scorer parity", () => {
-  it("contains the entire synthetic release", () => expect(new Set(cases.map((r) => r.case)).size).toBe(256));
+describe("round 17 scorer parity", () => {
+  it("contains the entire synthetic release", () => expect(new Set(cases.map((r) => r.case)).size).toBe(1071));
   for (const row of cases)
     it(row.case, () => {
       compare(fromRaw(row.member, row.as_of, row.history), row.expected, row.case);

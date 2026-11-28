@@ -1,3 +1,4 @@
+import { comparableWear, confirmedGain, weekComparison, type WearBySource } from "./wear-days";
 import {
   day,
   sumYears,
@@ -116,34 +117,6 @@ export function chooseSource(sources: Map<string, Set<number>>, preferred: unkno
   const good = [...sources.keys()].filter((k) => sources.get(k)!.size === 1).sort();
   return good.find((k) => k.split("|")[0] === preferred) ?? (good.includes(previous) ? previous : good[0]);
 }
-function weeklySignal(
-  history: Samples,
-  date: string,
-  timing: boolean,
-  tolerance: number,
-  make: (v: number) => Contribution | null,
-) {
-  const recent = history.filter((r) => distance(date, r.date) < 7);
-  const prior = history.slice(0, history.length - recent.length);
-  let signal = 0;
-  if (!timing && recent.length >= 3 && prior.length >= 7) {
-    const trimmedMean = (samples: Samples) => {
-      const values = samples
-        .map((r) => r.value)
-        .sort((a, b) => a - b)
-        .slice(1, -1);
-      return sumYears(values) / values.length;
-    };
-    const before = trimmedMean(prior),
-      after = trimmedMean(recent);
-    const first = make(before),
-      second = make(after);
-    if (first && second)
-      signal = (second.years - first.years) * Math.min(1, Math.abs(after - before) / tolerance);
-  }
-  return signal;
-}
-
 function replayResult(
   rec: Contribution | null,
   level: number | null,
@@ -201,6 +174,83 @@ function levelWithinBand(
   return updateLevel(level, nearest, config.wear_tau, config.wear_rate);
 }
 
+function wearSignal(
+  key: string,
+  history: Samples,
+  date: string,
+  source: string,
+  tolerance: number,
+  steps: boolean,
+  comparison: number[] | null,
+  make: (value: number) => Contribution | null,
+) {
+  let pace: number | undefined;
+  let signal = 0;
+  if (comparison) {
+    const [recent, prior] = comparison,
+      change = recent - prior;
+    const first = make(prior),
+      second = make(recent);
+    if (first && second) {
+      let direction = second.years - first.years;
+      signal = direction * Math.min(1, Math.abs(change) / tolerance);
+      if (steps || key === "pulse" || key === "sleep") {
+        let slope = Math.min(
+          1,
+          Math.abs(direction) / Math.max(0.0001, (Math.abs(change) / tolerance) * 0.07),
+        );
+        if (key === "steps") {
+          direction = -change;
+          slope = Math.max(slope, 0.65);
+        }
+        pace =
+          (direction < 0 ? -1 : 1) *
+          (key === "sleep" ? 0.18 : 0.48) *
+          Math.tanh(Math.abs(change) / tolerance) *
+          slope;
+        if (!steps) pace *= Math.min(1, Math.abs(change) / tolerance);
+        if (
+          key === "step_proxy" &&
+          change > 0 &&
+          ["garmin", "apple", "fitbit", "oura", "whoop"].includes(source.split("|")[0])
+        )
+          pace = Math.min(pace, confirmedGain(history, date, change, tolerance));
+      }
+    }
+  }
+  return { pace, signal };
+}
+
+function updateWearComparison(
+  key: string,
+  history: Samples,
+  date: string,
+  source: string,
+  tolerance: number,
+  level: number,
+  weeklyLevel: number | undefined,
+  rec: Contribution,
+  minutes: WearBySource | undefined,
+  make: (value: number) => Contribution | null,
+) {
+  const steps = key === "steps" || key === "step_proxy";
+  const original = key === "onset_sd" ? null : weekComparison(history, date, steps);
+  const { comparison, rematched } = comparableWear(history, date, minutes?.get(source), original);
+  if (original && !comparison) {
+    rec.wear_comparison_deferred = true;
+    return { level, weeklyLevel, pace: 0 };
+  }
+  const { pace, signal } = wearSignal(key, history, date, source, tolerance, steps, comparison, make);
+  if (rematched) rec.wear_comparison_matched = true;
+  const difference = rematched ? 0 : rec.years - level;
+  const delta = Math.sign(difference) * Math.max(0, Math.abs(difference) - 0.1);
+  const rate = Math.abs(signal) > 0.65 ? 0.00032 : 0.000055;
+  weeklyLevel =
+    (weeklyLevel ?? level) + clamp(delta / 2200, -0.000008, 0.000008) + clamp(signal / 240, -rate, rate);
+  level += clamp(delta * -Math.expm1(-1 / 42), -0.016, 0.016);
+  return { level, weeklyLevel, pace };
+}
+
 export function replay(
   key: string,
   dates: StreamDates,
@@ -208,6 +258,7 @@ export function replay(
   make: (v: number, source: string) => Contribution | null,
   preferred?: unknown,
   wearable = false,
+  minutes?: WearBySource,
 ) {
   let last = "",
     source = "",
@@ -217,7 +268,9 @@ export function replay(
   let window: Samples = [];
   let established = false;
   let history: Samples = [];
-  let weeklyLevel: number | undefined;
+  let weeklyLevel: number | undefined,
+    pace: number | undefined,
+    observations = 0;
   const freshness = wearable ? WEARABLE_FRESH_DAYS : config.fresh;
   const tolerance =
     (wearable ? lookup({ hip_minutes: 5, activity: 35, hrv: 5 }, key) : undefined) ??
@@ -233,14 +286,16 @@ export function replay(
       start = date;
       window = [];
       history = [];
-      weeklyLevel = undefined;
+      weeklyLevel = pace = undefined;
+      observations = 0;
     }
     source = next;
     last = date;
+    observations++;
     window = window.filter((r) => distance(date, r.date) < config.window);
     window.push({ date, value: [...sources.get(source)!][0] });
     if (wearable) {
-      history = history.filter((r) => distance(date, r.date) < 35);
+      history = history.filter((r) => distance(date, r.date) < 56);
       history.push(window[window.length - 1]);
     }
     if (window.length < config.minimum) continue;
@@ -255,15 +310,25 @@ export function replay(
       start = date;
       established = window.length >= config.full_dates;
     } else if (wearable) {
-      const signal = weeklySignal(history, date, timing, tolerance, (v) => make(v, source));
-      const rate = Math.abs(signal) > 0.65 ? 0.00032 : 0.000055;
-      weeklyLevel =
-        (weeklyLevel ?? level) +
-        (clamp((rec.years - level) / 2200, -0.000008, 0.000008) + clamp(signal / 240, -rate, rate));
-      level = updateLevel(level, rec.years, 42, 0.016);
+      ({ level, weeklyLevel, pace } = updateWearComparison(
+        key,
+        history,
+        date,
+        source,
+        tolerance,
+        level,
+        weeklyLevel,
+        rec,
+        minutes,
+        (v) => make(v, source),
+      ));
     } else {
       level = levelWithinBand(level, rec.years, value, tolerance, (v) => make(v, source));
     }
+  }
+  if (rec && wearable) {
+    rec.weekly_pace = pace;
+    rec.wear_observations = observations;
   }
   return replayResult(
     rec,

@@ -34,6 +34,7 @@ function observations(data: MemberEvidence, at: string) {
   const groups = new Map<string, Group>();
   for (const family of ["extensions", "checkins"] as const)
     for (const row of data[family] ?? []) {
+      if (typeof row.superseded_on === "string" && row.superseded_on <= at) continue;
       const rawKey = family === "extensions" ? row.key : row.topic;
       if (typeof rawKey !== "string") continue;
       const coverage = lookup(cov.factors, rawKey);
@@ -257,6 +258,20 @@ function resolveExclusiveStudies(terms: Terms, groups: Map<string, Group>, reaso
           ? undefined
           : current[0];
     }
+    if (terms[keys[0]].family === "oral") winner = keys[0];
+    if (terms[keys[0]].family === "social") {
+      let eligible = keys;
+      if (keys.includes("visits_household") && keys.includes("living_alone")) {
+        const joint = groups.get("visits_household")!.date,
+          solo = groups.get("living_alone")!.date;
+        if (
+          String(terms.visits_household.value).endsWith("_alone") !== (terms.living_alone.value === "yes") &&
+          solo >= joint
+        )
+          eligible = keys.filter((k) => k !== "visits_household" && (k !== "living_alone" || solo !== joint));
+      }
+      winner = eligible[0];
+    }
     for (const k of keys)
       if (k !== winner) {
         delete terms[k];
@@ -275,12 +290,21 @@ function studyExclusion(
   let reason = "";
   if (rows[k] || s.suppress.some((b) => rows[b])) reason = "An existing factor owns the comparison.";
   else if (age < s.ages[0] || age >= s.ages[1] + 1) reason = "Outside the research age window.";
+  else if ("sexes" in s && !s.sexes.some((sex) => sex === String(data.profile.sex).toLowerCase()))
+    reason = "The study did not show a clear comparison in this group.";
+  else if (
+    "exclude_conditions" in s &&
+    (s.exclude_conditions.some(
+      (c) => Array.isArray(data.profile.conditions) && data.profile.conditions.includes(c),
+    ) ||
+      rows.disease?.value === 1)
+  )
+    reason = "The study enrolled people without known heart disease or cancer.";
   else if (s.family === "tobacco" && rows.smoking && ![0, "never"].includes(rows.smoking.value))
     reason = "The cigarette history conflicts with an exclusive product history.";
   else if (
-    ["cycle_commute", "usual_pace"].includes(k) &&
-    (data.profile.wheelchair ||
-      data.profile.adapted_mobility ||
+    s.family === "motion" &&
+    (["wheelchair", "adapted_mobility", "pem", "exercise_restriction"].some((key) => data.profile[key]) ||
       (Array.isArray(data.profile.conditions) && data.profile.conditions.includes("wheelchair_user")))
   )
     reason = "The study lacks a matching adapted-mobility comparison.";
@@ -321,6 +345,25 @@ export function studyFactors(
   for (const [k, g] of groups) {
     const s = lookup(evidence.factors, k);
     if (!s) continue;
+    if (
+      "postmenopausal" in s.requires &&
+      s.requires.postmenopausal &&
+      (data.profile.postmenopausal === false ||
+        [...groups.entries()].some(([key, group]) => {
+          const spec = lookup(evidence.factors, key);
+          return (
+            spec &&
+            "postmenopausal" in spec.requires &&
+            group.date >= g.date &&
+            group.sources.some(
+              ({ row }) => row.postmenopausal === false && row.source === spec.source && matches(row, spec),
+            )
+          );
+        }))
+    ) {
+      reasons[k] = "This food comparison requires a consistent history of menopause.";
+      continue;
+    }
     const reason = studyExclusion(k, s, data, rows, age);
     const ratio = unique(g.sources.map((r) => studyRatio(r, s))),
       v = unique(g.sources.map((r) => r.value));
@@ -353,7 +396,7 @@ export function studyFactors(
         scale * t.log,
         s.weight,
         s.grade,
-        "https://pubmed.ncbi.nlm.nih.gov/" + s.pmid + "/",
+        "url" in s ? s.url : "https://pubmed.ncbi.nlm.nih.gov/" + s.pmid + "/",
       ),
       reference: s.reference,
     };

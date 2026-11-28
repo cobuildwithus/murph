@@ -1,4 +1,5 @@
-import { labDraw, latestDraw, type LabDraw as Candidate } from "./lab-draws";
+import { completeWear, durations, stepWear, type WearBySource, type WearDates } from "./wear-days";
+import { labDraw, latestDraw, resolvedDraws, type LabDraw as Candidate } from "./lab-draws";
 import {
   between,
   interp,
@@ -26,7 +27,7 @@ import {
   type Sex,
 } from "./model";
 
-import { chooseSource, clamp, factor, onset, replay, visibleRevisions } from "./daily";
+import { releasedGroups, chooseSource, clamp, factor, onset, replay, visibleRevisions } from "./daily";
 import { pressurePairs } from "./feeds";
 
 export function restrictions(p: Observation) {
@@ -51,7 +52,7 @@ export function restrictions(p: Observation) {
 }
 
 type Stream = "steps" | "step_proxy" | "sleep" | "pulse" | "hip_minutes" | "activity" | "onset_sd" | "hrv";
-type AddSample = (key: Stream, value: number | null, min: number, max: number) => void;
+type AddSample = (key: Stream, value: number | null, min: number, max: number, stream?: string) => void;
 function recordIntensity(r: Observation, source: string, add: AddSample) {
   const mod = number(r.moderate_min),
     vig = number(r.vigorous_min);
@@ -73,32 +74,56 @@ function recordIntensity(r: Observation, source: string, add: AddSample) {
       add("activity", 7 * (mod + 2 * vig), 0, 13440);
   }
 }
-function unknownWear(r: Observation) {
-  return r.projected && r.wear_complete == null && r.worn_min == null;
-}
 function recordDailyMetrics(
   r: Observation,
   source: string,
   limit: ReturnType<typeof restrictions>,
   add: AddSample,
+  separate: ReturnType<typeof durations>,
+  minutes: WearBySource,
+  legacy: boolean,
 ) {
   if (!limit.pulse) {
     add("pulse", number(r.rhr), 30, 180);
     if (["overnight", "sleeping", "slow_wave_sleep"].includes(String(r.series_method)))
       add("hrv", number(r.rmssd), 3, 300);
   }
-  if (!limit.restricted && unknownWear(r))
-    add("step_proxy", number(r.steps), model.policy.minimum_step_proxy, 65000);
-  if (
-    limit.restricted ||
-    !(r.wear_complete === true || (r.wear_complete == null && (number(r.worn_min) ?? 0) >= 1296))
+  if (limit.restricted) return;
+  const wear = stepWear(r, separate, legacy),
+    stream = wear.instrument ? source + "|" + r.device_id : source;
+  const steps = number(r.steps),
+    date = rowDay(r);
+  if (completeWear(wear.row)) {
+    add("steps", steps, 0, 65000, stream);
+    const duration = number(wear.row.worn_min);
+    if (steps !== null && duration !== null) {
+      const days = minutes.get(stream) ?? (new Map() as WearDates);
+      const old = days.get(date);
+      days.set(
+        date,
+        old === null || (old && (old.minutes !== duration || old.mask !== wear.mask))
+          ? null
+          : { minutes: duration, mask: wear.mask, flag: wear.row.wear_complete },
+      );
+      minutes.set(stream, days);
+    }
+  } else if (
+    wear.row.wear_complete == null &&
+    wear.row.worn_min == null &&
+    (r.projected ||
+      (!legacy && ["apple", "garmin", "whoop", "fitbit", "oura"].includes(source.split("|")[0])))
   )
-    return;
-  add("steps", number(r.steps), 0, 65000);
-  if (limit.rate) return;
+    add("step_proxy", steps, model.policy.minimum_step_proxy, 65000, stream);
+  if (limit.rate || !completeWear(r)) return;
   recordIntensity(r, source, add);
 }
-function observedStreams(data: MemberEvidence, at: string) {
+function observedStreams(
+  data: MemberEvidence,
+  at: string,
+  legacy = false,
+  minutes: WearBySource = new Map(),
+) {
+  const separate = legacy ? new Map() : durations(data, at);
   const limit = restrictions(data.profile);
   const streams = new Map<Stream, Map<string, Map<string, Set<number>>>>();
   for (const group of ["daily", "sleep_sessions"] as const) {
@@ -107,6 +132,7 @@ function observedStreams(data: MemberEvidence, at: string) {
       r.series_method,
       r.key || r.metric || "",
       r.type || "",
+      legacy ? "" : r.device_id || "",
     ])) {
       const vendor = typeof r.source === "string" ? r.source.trim().toLowerCase() : "";
       const source = r.series_method ? vendor + "|" + r.series_method : vendor,
@@ -118,13 +144,13 @@ function observedStreams(data: MemberEvidence, at: string) {
         ["partial", "off_body", "unfinished", "nap", "is_nap"].some((k) => r[k])
       )
         continue;
-      function add(key: Stream, value: number | null, lo: number, hi: number) {
+      function add(key: Stream, value: number | null, lo: number, hi: number, stream = source) {
         if (!between(value, lo, hi)) return;
         const dates = streams.get(key) ?? new Map<string, Map<string, Set<number>>>();
         const sources = dates.get(date) ?? new Map<string, Set<number>>();
-        const values = sources.get(String(source)) ?? new Set<number>();
+        const values = sources.get(String(stream)) ?? new Set<number>();
         values.add(value);
-        sources.set(String(source), values);
+        sources.set(String(stream), values);
         dates.set(date, sources);
         streams.set(key, dates);
       }
@@ -135,7 +161,7 @@ function observedStreams(data: MemberEvidence, at: string) {
         }
         continue;
       }
-      recordDailyMetrics(r, source, limit, add);
+      recordDailyMetrics(r, source, limit, add, separate, minutes, legacy);
     }
   }
   return streams;
@@ -220,11 +246,13 @@ function wearableFactor(key: Stream, value: number, source: string, age: number,
     key === "pulse" && !["seated", "daytime_resting"].includes(method)
       ? d.generic_pulse_quality
       : model.policy.protocol.wear_proxy_quality[key],
+    legacy,
   );
 }
 export function habits(data: MemberEvidence, at: string, age: number, sex: Sex, legacy = false) {
   const result: Rows = {};
-  for (const [key, dates] of observedStreams(data, at)) {
+  const minutes: WearBySource = new Map();
+  for (const [key, dates] of observedStreams(data, at, legacy, minutes)) {
     const r = replay(
       key,
       dates,
@@ -232,6 +260,7 @@ export function habits(data: MemberEvidence, at: string, age: number, sex: Sex, 
       (v, src) => wearableFactor(key, v, src, age, sex, legacy),
       data.profile.preferred_source,
       !legacy,
+      key === "steps" ? minutes : undefined,
     );
     if (r) result[key] = r;
   }
@@ -311,6 +340,30 @@ export function labValues(data: MemberEvidence, at: string) {
   lipidPairs(draws, labs);
   return Object.fromEntries([...labs].map(([k, rows]) => [k, last(rows)])) as Record<string, number | null>;
 }
+/** Freeze the selected specimen's reference at its first eligible disclosure, including after correction. */
+export function rdwDisclosure(data: MemberEvidence, at: string) {
+  const candidates = (data.labs ?? []).flatMap((row) => {
+    const field = labFields[String(row.marker)];
+    if (field?.[0] !== "rdw" || !between(distance(at, rowDay(row)), 0, 365) || !released(row, at)) return [];
+    return [
+      {
+        ...labCandidate(row, "rdw", field[1], data, at),
+        release: [rowDay(row), day(row.reported_at), day(row.received_at)].sort().at(-1)!,
+      },
+    ];
+  });
+  const winner = latestDraw(candidates);
+  if (!winner) return null;
+  const ids = new Set(
+    resolvedDraws(candidates)
+      .filter((r) => r.date === winner.date && r.collected === winner.collected)
+      .map((r) => r.specimen),
+  );
+  return candidates
+    .filter((r) => r.date === winner.date && ids.has(r.specimen) && r.value !== null)
+    .map((r) => r.release)
+    .sort()[0];
+}
 function bpReading(r: Observation) {
   const source =
     r.setting === "office" || r.setting === "clinic" ? "clinic" : r.setting === "home" ? "home" : r.source;
@@ -331,19 +384,37 @@ function bpReading(r: Observation) {
     !(source === "clinic" || (source === "home" && r.validated === true))
   )
     return null;
-  return { source, s, date, minute: Number(hm[1]) * 60 + Number(hm[2]) };
+  return { source, s, d, date, minute: Number(hm[1]) * 60 + Number(hm[2]) };
 }
 export function bpValue(data: MemberEvidence, at: string, submitted?: Observation) {
   const policy = model.policy.protocol;
   const target = submitted && bpReading(submitted);
-  const groups = new Map<string, Map<string, Map<number, number[]>>>();
-  for (const r of [...dated(data, "bp", at, policy.bp_days), ...pressurePairs(data, at)]) {
-    const reading = bpReading(r);
-    if (!reading) continue;
-    const { source, s, date, minute } = reading;
-    const days = groups.get(source) ?? new Map<string, Map<number, number[]>>();
-    const times = days.get(date) ?? new Map<number, number[]>();
-    times.set(minute, [...(times.get(minute) ?? []), s]);
+  type Reading = NonNullable<ReturnType<typeof bpReading>>;
+  const groups = new Map<string, Map<string, Map<number, Reading>>>();
+  const candidates: Observation[] = [...(data.bp ?? []), ...pressurePairs(data, at)];
+  const raw = candidates.filter(
+    (r) =>
+      between(distance(at, rowDay(r)), 0, policy.bp_days) &&
+      Number.isInteger(r.revision ?? 0) &&
+      Number(r.revision ?? 0) >= 0,
+  );
+  const sameMinute = (r: Observation) => [
+    r.setting === "office" || r.setting === "clinic" ? "clinic" : (r.setting ?? r.source),
+    String(r.measured_at ?? r.datetime ?? r.time ?? "").slice(0, 16),
+    r.setting === "home" ? r.validated : null,
+  ];
+  for (const revisions of releasedGroups(raw, at, sameMinute)) {
+    const readings = revisions.map((r) =>
+      eligible(r, at) && !r.partial && ["final", "amended", "corrected"].includes(String(r.status ?? "final"))
+        ? bpReading(r)
+        : null,
+    );
+    const reading = readings[0];
+    if (!reading || readings.some((r) => r?.s !== reading.s || r?.d !== reading.d)) continue;
+    const { source, date, minute } = reading;
+    const days = groups.get(source) ?? new Map<string, Map<number, Reading>>();
+    const times = days.get(date) ?? new Map<number, Reading>();
+    times.set(minute, reading);
     days.set(date, times);
     groups.set(source, days);
   }
@@ -351,14 +422,14 @@ export function bpValue(data: MemberEvidence, at: string, submitted?: Observatio
   for (const [source, dates] of groups) {
     const complete = [];
     for (const [date, times] of [...dates].sort()) {
-      const minutes = [...times.keys()].filter((t) => unique(times.get(t)!) !== null).sort((a, b) => a - b);
-      const pairs = minutes
-        .slice(1)
-        .flatMap((m, i) =>
-          m - minutes[i] <= policy.bp_max_pair_gap
-            ? [{ start: minutes[i], end: m, value: (times.get(m)![0] + times.get(minutes[i])![0]) / 2 }]
-            : [],
-        );
+      const minutes = [...times.keys()].sort((a, b) => a - b);
+      const pairs = minutes.slice(1).flatMap((end, i) => {
+        const start = minutes[i];
+        if (!between(end - start, policy.bp_min_pair_gap, policy.bp_max_pair_gap)) return [];
+        const a = times.get(start)!,
+          b = times.get(end)!;
+        return [{ start, end, value: (a.s + b.s) / 2, lower: (a.d + b.d) / 2 }];
+      });
       if (
         !pairs.length ||
         (source === "home" && pairs.at(-1)!.start - pairs[0].start < policy.bp_session_gap)
@@ -366,6 +437,7 @@ export function bpValue(data: MemberEvidence, at: string, submitted?: Observatio
         continue;
       complete.push({
         date,
+        lower: pairs.reduce((sum, pair) => sum + pair.lower, 0) / pairs.length,
         value: pairs.reduce((sum, pair) => sum + pair.value, 0) / pairs.length,
         includesSubmitted:
           target?.source === source &&
@@ -376,6 +448,7 @@ export function bpValue(data: MemberEvidence, at: string, submitted?: Observatio
     if (complete.length >= (source === "clinic" ? policy.clinic_days : policy.home_days)) {
       const last = complete.slice(-policy.bp_last_days);
       options.push({
+        lower: Math.max(...last.map((r) => r.lower)),
         date: last.at(-1)!.date,
         source,
         includesSubmitted: last.some((day) => day.includesSubmitted),
@@ -488,6 +561,36 @@ function habitualFactors(
       });
   }
 }
+function adjustDiastolic(result: Rows, bp: ReturnType<typeof bpValue>, age: number, data: MemberEvidence) {
+  const excluded = [
+    "mi",
+    "heart_attack",
+    "heart_disease",
+    "cardiovascular_disease",
+    "coronary_heart_disease",
+    "stroke",
+    "heart_failure",
+    "chf",
+    "angina",
+    "coronary_dx",
+  ];
+  if (
+    bp &&
+    result.sbp &&
+    age >= 45 &&
+    bp.value >= 120 &&
+    bp.lower < 60 &&
+    result.disease?.value !== 1 &&
+    !(Array.isArray(data.profile.conditions) && data.profile.conditions.some((c) => excluded.includes(c)))
+  ) {
+    const weight = 0.12 * Math.min(1, (60 - bp.lower) / 5);
+    result.sbp.years +=
+      result.sbp.quality * weight * Math.log(1.48) * scale(age) * model.policy.years_per_published_log_unit;
+    result.sbp.diastolic_comparison = "Repeated lower readings below 60 mmHg";
+    result.sbp.diastolic_source = "https://doi.org/10.1016/j.amjcard.2017.07.094";
+  }
+}
+
 export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex, legacy = false) {
   const history = dated(data, "checkins", at, 3650).map((r) =>
     typeof r.topic === "string" ? { ...r, [r.topic]: r.answer } : r,
@@ -534,5 +637,6 @@ export function clinical(data: MemberEvidence, at: string, age: number, sex: Sex
         ),
       );
   habitualFactors(ci, recent, at, age, sex, add, result);
+  if (!legacy) adjustDiastolic(result, bp, age, data);
   return { result, ci, labs };
 }

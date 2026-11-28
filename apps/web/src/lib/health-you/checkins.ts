@@ -1,4 +1,4 @@
-import { oneOffAnswerSchema, toLocalDayKey, type CheckInInstrument } from "@murphai/contracts";
+import { habitQuestionsV1, oneOffAnswerSchema, toLocalDayKey, type CheckInInstrument } from "@murphai/contracts";
 import type { BrowserVaultEntity, BrowserVaultMetricRow } from "@murphai/query/browser-replica-client";
 import { isRecord } from "../primitives";
 import { day, lookup, offset, model, type Observation } from "./engine/model";
@@ -35,7 +35,7 @@ function modelAnswer(answer: Answer): Observation {
     case "ageEligibility":
       return { pregnant: answer.value === "pregnant", postpartum: answer.value === "postpartum" };
     case "whoopZones":
-      return { whoop_standard_zones: answer.value };
+      return { whoop_standard_zones: answer.value === "notSure" ? null : answer.value === "yes" };
     case "smoking":
       return { smoking: answer.value };
     case "quitDate":
@@ -50,6 +50,8 @@ function modelAnswer(answer: Answer): Observation {
       };
     case "selfRatedHealth":
       return { health: answer.value === "veryGood" ? "very good" : answer.value };
+    default:
+      return { form: "murph-habits-v1", topic: answer.key, answer: answer.value };
   }
 }
 
@@ -107,7 +109,9 @@ export function assessmentInputs(rows: BrowserVaultEntity[], from: string, asOf:
     const expiry =
       answer.key === "ageEligibility" && answer.value === "postpartum"
         ? offset(date, model.policy.protocol.postpartum_days + 1)
-        : undefined;
+        : Object.hasOwn(habitQuestionsV1, answer.key)
+          ? offset(date, lookup(model.evidence.factors, answer.key)!.days + 1)
+          : undefined;
     const until =
       replacement && expiry ? (replacement < expiry ? replacement : expiry) : (replacement ?? expiry);
     checkins.push({

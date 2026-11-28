@@ -1,3 +1,4 @@
+import { completeness } from "./panel";
 import {
   coef,
   between,
@@ -167,6 +168,8 @@ function targetStatus(key: string, row: Pick<Contribution, "source" | "target" |
   if (Object.hasOwn(model.evidence.factors, key) || Object.hasOwn(model.coverage.factors, key))
     return "study comparison";
   if (["lifting", "activity", "aerobic"].includes(key)) return "adult guideline";
+  if (key === "display_limit") return "display range adjustment";
+  if (key === "waist_hip_ratio" || key === "thigh_cm") return "study comparison";
   if (key === "meal_density") return "no individual intake target";
   if (["lean_change", "hrv", "alcohol_peak", "alcohol_timing", "caffeine_timing"].includes(key))
     return "descriptive trend only";
@@ -178,28 +181,44 @@ function targetStatus(key: string, row: Pick<Contribution, "source" | "target" |
   if (coef[key] === 0 && !row.years) return "descriptive median; no independent fitted effect";
   return row.target !== null ? "reference comparison" : "no independent fitted effect";
 }
+function factorTarget(k: string, r: Pick<Contribution, "value" | "target" | "target_source">) {
+  if (["activity", "aerobic"].includes(k))
+    Object.assign(r, {
+      target: 150,
+      target_source: "Adult guideline, 150–300 moderate-equivalent minutes per week",
+    });
+  if (k === "lifting")
+    Object.assign(r, {
+      target: typeof r.value === "string" ? "2/week" : 2,
+      target_source: "Adult guideline, strength training on two days each week",
+    });
+  if (k === "balance" && r.value === "pass") r.target = "pass";
+  if (["disease", "diabetes", "health", "phq9"].includes(k))
+    r.target_source = "Descriptive reference category";
+  if (k === "alcohol" && r.target !== null) {
+    r.target = 0;
+    r.target_source = "Abstainer reference in the published alcohol curve";
+  }
+}
+
 export function finishFactors(rows: Rows, parts: Record<string, number>, age: number, sex: Sex) {
   return Object.fromEntries(
     Object.entries(rows).map(([k, row]) => {
-      const { grade, series: _series, level: _level, confidence: _confidence, quit, ...r } = row;
+      const {
+        grade,
+        series: _series,
+        level: _level,
+        confidence: _confidence,
+        session_pace: _sp,
+        weekly_pace: _wp,
+        wear_observations: _obs,
+        wear_comparison_matched: matched,
+        wear_comparison_deferred: deferred,
+        quit,
+        ...r
+      } = row;
       rankFactor(k, r, age, sex);
-      if (["activity", "aerobic"].includes(k))
-        Object.assign(r, {
-          target: 150,
-          target_source: "Adult guideline, 150–300 moderate-equivalent minutes per week",
-        });
-      if (k === "lifting")
-        Object.assign(r, {
-          target: typeof r.value === "string" ? "2/week" : 2,
-          target_source: "Adult guideline, strength training on two days each week",
-        });
-      if (k === "balance" && r.value === "pass") r.target = "pass";
-      if (["disease", "diabetes", "health", "phq9"].includes(k))
-        r.target_source = "Descriptive reference category";
-      if (k === "alcohol" && r.target !== null) {
-        r.target = 0;
-        r.target_source = "Abstainer reference in the published alcohol curve";
-      }
+      factorTarget(k, r);
       if (k === "smoking" && r.percentile === null && quit) {
         r.percentile = native(k, model.policy.protocol.smoking_codes.former, age, sex)?.percentile ?? null;
         r.reference = "former-smoking category; duration unranked";
@@ -215,6 +234,24 @@ export function finishFactors(rows: Rows, parts: Record<string, number>, age: nu
         {
           ...r,
           ...lookup(model.display, k)!,
+          ...(r.diastolic_comparison && {
+            what_it_is:
+              "This comparison includes the upper number and a small adjustment because the lower number stayed below 60 across measured days.",
+          }),
+          ...(rank_status === "lower-bound comparison" && {
+            what_it_is: "These are recorded steps. Shorter wearing time can also explain a lower count.",
+            what_helps: "Use the same watch during your usual waking hours so we can compare your walks.",
+          }),
+          ...(matched && {
+            what_it_is:
+              "Your watch covered different hours. This week’s step comparison uses days with similar recording times.",
+            what_helps: "Wear the same watch at similar times to update your usual walking level.",
+          }),
+          ...(deferred && {
+            what_it_is:
+              "Your watch covered different or unknown hours this week. We held your step comparison steady.",
+            what_helps: "Wear the same watch at similar times on the same weekdays to compare walking again.",
+          }),
           evidence_grade: grade,
           target_status: targetStatus(k, r),
           rank_status,
@@ -257,7 +294,9 @@ export function absoluteRisk(
     (1 - fraction) * integratedHazard(age, sex, year, years, shift) +
     (fraction ? fraction * integratedHazard(chronological, sex, year, years, 0) : 0);
   return {
-    probability: -Math.expm1(-hazard),
+    probability: -Math.expm1(
+      -hazard * (year >= 2015 ? Math.exp(model.panel.log_multiplier * completeness(rows)) : 1),
+    ),
     years,
     reference_year: Math.min(Math.max(year, t.years[0]), t.years.at(-1)!),
   };

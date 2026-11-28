@@ -1,9 +1,12 @@
+import { factor, clamp } from "./daily";
 import {
   between,
   day,
   distance,
   eligible,
   lookup,
+  interp,
+  type Rows,
   model,
   number,
   released,
@@ -122,4 +125,149 @@ export function combineContext(data: MemberEvidence, at: string, age: number, se
     results[k] = { value: v, unit, as_of: rowDay(rows[0]), comparison };
   }
   return results;
+}
+
+function tapeReadings(data: MemberEvidence, at: string, key: string) {
+  const candidates = (data.fitness_tests ?? []).filter(
+    (r) =>
+      r.test === key &&
+      r.protocol === "murph-combine-v1" &&
+      released(r, at) &&
+      between(distance(at, rowDay(r)), 0, 30) &&
+      Number.isInteger(r.revision ?? 0) &&
+      Number(r.revision ?? 0) >= 0,
+  );
+  const last = candidates.map(rowDay).sort().at(-1),
+    dated = candidates.filter((r) => rowDay(r) === last);
+  const revision = Math.max(...dated.map((r) => Number(r.revision ?? 0))),
+    current = dated.filter((r) => Number(r.revision ?? 0) === revision);
+  if (
+    !current.length ||
+    current.some(
+      (r) =>
+        !eligible(r, at) ||
+        r.unit !== "cm" ||
+        r.partial ||
+        r.pain_or_stop ||
+        !["final", "corrected", "amended"].includes(String(r.status ?? "final")),
+    )
+  )
+    return [];
+  return current;
+}
+
+function eligibleTape(p: Observation, rows: Rows, age: number) {
+  const restrictions = Array.isArray(p.conditions) ? p.conditions : [];
+  if (
+    !rows.bmi ||
+    ["edema", "eating_disorder", "wheelchair", "adapted_mobility", "unreliable_stature"].some(
+      (key) => p[key],
+    ) ||
+    restrictions.some((k) => ["edema", "eating_disorder", "wheelchair_user"].includes(k)) ||
+    rows.weight_loss ||
+    rows.lean_change
+  )
+    return null;
+  const key = rows.waist ? "thigh_cm" : "waist_hip_ratio";
+  const thigh = key === "thigh_cm";
+  if (
+    thigh
+      ? age < 35 ||
+        age >= 66 ||
+        p.pem ||
+        p.exercise_restriction ||
+        p.free_of_cvd_and_cancer === false ||
+        rows.disease?.value === 1 ||
+        [
+          "grip",
+          "knee",
+          "gait",
+          "gait_speed",
+          "floor_rise",
+          "pushups_max",
+          "balance",
+          "waist_hip_ratio",
+        ].some((k) => rows[k]) ||
+        restrictions.some((k) =>
+          [
+            "pem",
+            "exercise_restriction",
+            "heart_failure",
+            "heart_attack",
+            "mi",
+            "chf",
+            "stroke",
+            "cancer",
+            "ascvd",
+            "coronary_heart_disease",
+            "coronary_artery_disease",
+            "cardiovascular_disease",
+          ].includes(k),
+        )
+      : age < 25 || age >= 71 || rows.whtr
+  )
+    return null;
+  return key;
+}
+
+export function tapeFactors(
+  data: MemberEvidence,
+  at: string,
+  age: number,
+  sex: Sex,
+  rows: Rows,
+  mult: number,
+): Rows {
+  const key = eligibleTape(data.profile, rows, age);
+  if (!key) return {};
+  const thigh = key === "thigh_cm";
+  const current = tapeReadings(data, at, key);
+  if (!current.length) return {};
+  if (thigh) {
+    const value = unique(current.map((r) => number(r.value)));
+    if (
+      !between(value, 25, 100) ||
+      current.some((r) => r.free_of_cvd_and_cancer !== true || r.tape_method !== "right_below_gluteal_fold")
+    )
+      return {};
+    const spec = model.combine.thigh_cm,
+      site = spec.reference[sex],
+      q = spec.retained_log_fraction;
+    return {
+      [key]: factor(
+        key,
+        value,
+        "cm",
+        null,
+        mult * q * interp(value, site.cm, site.hr.map(Math.log)),
+        q,
+        "C, home tape at observed body size",
+        "https://doi.org/10.1136/bmj.b3292",
+      ),
+    };
+  }
+  const waist = unique(current.map((r) => number(r.waist_cm))),
+    hip = unique(current.map((r) => number(r.hip_cm)));
+  if (
+    !between(waist, 45, 180) ||
+    !between(hip, 55, 190) ||
+    !between(waist / hip, 0.5, 1.4) ||
+    current.some((r) => r.tape_method !== "standing_midwaist_maxhip")
+  )
+    return {};
+  const spec = model.combine.waist_hip_ratio,
+    [origin, rate] = spec.reference_and_rr[sex],
+    q = spec.retained_log_fraction;
+  return {
+    [key]: factor(
+      key,
+      waist / hip,
+      "waist / hip",
+      null,
+      mult * q * Math.log(rate) * clamp((waist / hip - origin) / 0.1, 0, 1),
+      q,
+      "C, home tape comparison at a given BMI",
+      "https://doi.org/10.1056/NEJMoa0801891",
+    ),
+  };
 }

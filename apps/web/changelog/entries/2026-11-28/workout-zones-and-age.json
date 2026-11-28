@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-28",
+  "order": 110,
+  "item": {
+    "id": "workout-zones-and-age",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Workout intensity counts toward your age estimate",
+    "summary": "In the private You preview, repeated workouts can contribute based on time spent in higher heart rate zones. For WHOOP workouts, confirm that you use the standard zones.",
+    "details": "You can also answer optional questions about habits such as walking pace. Your estimate may change as it takes these answers into account.",
+    "relevanceTags": ["health", "measurements"],
+    "sourcePullRequests": [5456]
+  }
+}

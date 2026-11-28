@@ -72,6 +72,7 @@ for (const [name, id] of [
       lifts: name === "complete" ? [asOf] : [],
       hasWearableData: name === "complete" || name === "wearable",
       hasAnswerProjection: true,
+      hasHabitQuestions: true,
       needsWhoopAnswer: name === "wearable",
       activeMinutes: name === "complete" ? [{ date: asOf, value: 28 }] : undefined,
       bedtime: name === "complete" ? [{ date: asOf, inTarget: true }] : undefined,

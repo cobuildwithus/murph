@@ -1,4 +1,4 @@
-"""Import only frozen aggregate parameters and invented parity cases from the R7 release."""
+"""Import only frozen aggregate parameters and invented parity cases from the R17 release."""
 import json
 import sys
 from pathlib import Path
@@ -38,10 +38,16 @@ model.update(display_weights=age.doses.EXTRA, step_center=age.doses.STEP_LOG_CEN
                          if k in ("bmi","hba1c","hs_crp","steps","mvpa_device","egfr","fasting_glucose")},
              landmark=age.projection.FIT, bootstrap=age.projection.BOOT, projection=age.projection.POL,
              coverage=age.coverage_inputs.PARAMS, evidence=age.evidence_inputs.PARAMS,
-             combine=age.combine_context.CFG)
+             panel=age.panel.FIT, standalone=age.panel.STANDALONE, combine=age.combine_context.CFG)
 model["policy"]["protocol"]["member_entered_home_cuff_assumed_validated"] = True
 write(web / "src/lib/health-you/engine/model.json", model)
+# The canonical action and the scorer share a frozen, versioned closed-choice vocabulary.
+questions_path = web.parents[1] / "packages/contracts/src/habit-questions-v1.ts"
+questions_path.write_text("// Generated from the frozen version-one form by the age reference importer.\n"
+                          + "export const habitQuestionsV1 = "
+                          + json.dumps(age.evidence_inputs.QUESTIONS, ensure_ascii=False, indent=2)
+                          + " as const;\n")
 cases = [row for path in sorted((study / "golden").glob("*.json")) for row in json.loads(path.read_text())]
-assert model["version"] == "r7.0" and all(row["history"] for row in cases)
-assert len({row["case"] for row in cases}) == len(cases) == 256
+assert model["version"] == "r17.0" and all(row["history"] for row in cases)
+assert len({row["case"] for row in cases}) == len(cases) == 1071
 write(web / "test/fixtures/health-you/reference.json", cases)

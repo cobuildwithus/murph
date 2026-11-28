@@ -1,7 +1,7 @@
 import "server-only";
 import {
   addDaysToIsoDate, bloodPressureFields, combineTestsSchema, foodWeekAnswersSchema, foodWeekDependencies, memberActionIdV1Schema,
-  oneOffAnswerSchema, projectedCheckInSchema, toLocalDayKey, type MemberActionV1, type CheckInInstrument,
+  habitQuestionsV1, oneOffAnswerSchema, projectedCheckInSchema, toLocalDayKey, type MemberActionV1, type CheckInInstrument,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
@@ -109,7 +109,9 @@ const answerRequest = z.strictObject({ id, key: z.string(), value: z.union([z.st
 export async function saveAnswer(request: Request, auth: HostedNativeMemberAuth) {
   const { id, ...fields } = validate(answerRequest, await body(request));
   const answer = validate(oneOffAnswerSchema, fields);
-  const { meals } = await checkInReplica(request, auth);
+  const { meals, replica } = await checkInReplica(request, auth);
+  if (Object.hasOwn(habitQuestionsV1, answer.key) && (replica.generation ?? 0) < 22)
+    throw error(503, "Your private health data is getting ready. Try again soon.");
   if (answer.key === "quitDate" && answer.value > toLocalDayKey(Date.now(), meals.timeZone))
     throw error(400, "Choose a quit date through today.");
   return submit(auth, id, { kind: "assessment.respond", version: 1, response: { instrument: "you-answer", instrumentVersion: 1, answer } });

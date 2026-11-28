@@ -13,6 +13,7 @@ export interface MemberEvidence {
   pressure_components?: Observation[];
   extensions?: Observation[];
   daily?: Observation[];
+  wear_days?: Observation[];
   sleep_sessions?: Observation[];
   checkins?: Observation[];
   labs?: Observation[];
@@ -35,6 +36,7 @@ export interface Contribution {
   reference: string;
   source: string;
   target_source: string;
+  what_it_is?: string;
   current_years?: number;
   projected_years?: number;
   landmark_years?: number | null;
@@ -45,6 +47,14 @@ export interface Contribution {
   level?: number;
   confidence?: number;
   series?: string;
+  session_pace?: number;
+  weekly_pace?: number;
+  wear_observations?: number;
+  wear_comparison_matched?: boolean;
+  wear_comparison_deferred?: boolean;
+  centering_reference?: string;
+  diastolic_comparison?: string;
+  diastolic_source?: string;
   quit?: string;
 }
 export const model = aggregate;
@@ -131,7 +141,7 @@ export function pick(rows: Observation[], field: string) {
 export function interp(x: number, knots: number[], values: number[]) {
   const i = knots.findIndex((k) => k >= x);
   if (i < 0) return values[values.length - 1];
-  if (!i) return values[0];
+  if (!i || x === knots[i]) return values[i];
   return values[i - 1] + ((values[i] - values[i - 1]) * (x - knots[i - 1])) / (knots[i] - knots[i - 1]);
 }
 export function curveAt<T>(age: number, rows: (T | null)[], values: (r: T) => number[]) {
@@ -290,6 +300,11 @@ function transferYears(key: string, x: number, qs: number[], age: number, qualit
   return (log - center) * model.policy.years_per_published_log_unit * shrink(age) * model.strength * quality;
 }
 
+function boundReference(key: string, value: number) {
+  const field = fields[key];
+  return field ? Math.max(field.min, Math.min(field.max, value)) : value;
+}
+
 export function native(
   key: string,
   x: number,
@@ -304,6 +319,7 @@ export function native(
   const row = curveAt(age, d.ref[sex], (r) => [r.mu, ...r.q]);
   if (!row) return null;
   let [mu, ...qs] = row;
+  qs = qs.map((v) => boundReference(key, v));
   if (!legacy) {
     if (key === "non_hdl") qs = curveAt(age, model.clinical_ranks.non_hdl[sex], (r) => r) ?? qs;
     if (fields[key]?.group === "blood") mu = transform(key, qs[2])!;
@@ -332,11 +348,21 @@ export function device(key: string, x: number, age: number, sex: Sex, legacy = f
   const d = model.hip[key === "steps" ? "steps" : "minutes"];
   const row = curveAt(age, d.refs[sex], (r) => [r.center, ...r.quantiles]);
   if (!row) return null;
-  const [center, ...qs] = row,
+  const [center, ...originalQs] = row,
     b = Math.min(0, d.beta) / d.sd,
     cap = legacy ? model.policy.hip_absolute_log_cap : 0.75;
   const steps = key === "steps",
     settings = model.daily;
+  const qs =
+    !legacy && steps
+      ? originalQs.map((_, i) =>
+          interp(
+            age,
+            model.knots,
+            settings.step_rank_quantiles[sex].map((r) => r[i]),
+          ),
+        )
+      : originalQs;
   const quality = legacy
     ? steps
       ? settings.step_quality

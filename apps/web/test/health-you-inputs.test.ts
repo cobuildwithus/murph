@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import * as corePort from "@murphai/core";
+import { importDeviceProviderSnapshot } from "@murphai/importers";
 import { initializeVault, saveMemberCheckIn } from "@murphai/core";
 import { buildMetricProjection, readVault } from "@murphai/query";
 import { describe, expect, it } from "vitest";
@@ -451,7 +453,7 @@ describe("canonical check-in and sleep timing projections", () => {
       experimentSlug: null,
     });
     const input = read(r);
-    expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_standard_zones: "notSure" });
+    expect(input.evidence.checkins?.[0]).toMatchObject({ whoop_standard_zones: null });
     expect(buildViews(input).you.questions).toEqual([]);
   });
   it("replays corrections at their reporting day and remembers even an old or unsure answer", () => {
@@ -511,6 +513,14 @@ describe("canonical check-in and sleep timing projections", () => {
     });
     expect(score(input.evidence, today)?.rows.diabetes).toBeUndefined();
     expect(nextQuestion(input, {})).toEqual([]);
+    Object.assign(r, { generation: 22 });
+    put("coffee_cups", "Three", yesterday, 12);
+    put("coffee_cups", "I'm not sure", today, 13);
+    const correctedHabit = read(r).evidence;
+    expect(score(correctedHabit, yesterday)?.rows.coffee_cups?.value).toBe(3);
+    expect(score(correctedHabit, today)?.rows.coffee_cups).toBeUndefined();
+    expect(correctedHabit.checkins?.find(row => row.answerKey === "coffee_cups" && row.date === today))
+      .toMatchObject({ superseded_on: offset(today, 91) });
     const corrected = structuredClone(r);
     const source = corrected.entities.find((e) => e.attributes.checkIn && e.id === "fixture-0")!;
     for (const [status, date] of [
@@ -566,6 +576,34 @@ describe("canonical check-in and sleep timing projections", () => {
       combineAgeEffect(input, "session", { ...submitted, tests: [{ key: "pullups_max", value: 6 }] }),
     ).toBeUndefined();
   });
+  it("counts confirmed high-zone workout minutes from the canonical import through the private view", async () => {
+    const vaultRoot=await mkdtemp(join(tmpdir(),"synthetic-zone-dose-"));
+    try {
+      await initializeVault({vaultRoot,timezone:"America/New_York",createdAt:offset(today,-60)+"T14:00:00Z"});
+      const confirmation=offset(today,-47)+"T15:00:00Z";
+      await saveMemberCheckIn(vaultRoot,{kind:"assessment.respond",version:1,response:{
+        instrument:"you-answer",instrumentVersion:1,answer:{key:"whoopZones",value:"yes"},
+      }},{actionId:randomUUID(),requestedAt:confirmation});
+      const workouts=Array.from({length:16},(_,i)=>{
+        const date=offset(today,-45+3*i);
+        return {id:"synthetic-ride-"+i,sport_name:"cycling",start:date+"T15:00:00Z",end:date+"T15:40:00Z",
+          updated_at:date+"T16:00:00Z",score_state:"SCORED",score:{zone_durations:{
+            zone_zero_milli:0,zone_one_milli:180000,zone_two_milli:420000,zone_three_milli:300000,
+            zone_four_milli:900000,zone_five_milli:600000,
+          }}};
+      });
+      await importDeviceProviderSnapshot({provider:"whoop",vaultRoot,snapshot:{workouts,importedAt:clock.toISOString()}},{corePort});
+      const vault=await readVault(vaultRoot);
+      const publication=await createBrowserVaultReplica({vault,generatedAt:clock.toISOString(),sourceBundleHash:"e".repeat(64),
+        demographics:replica().demographics,metricPoints:buildMetricProjection(vault).metricPoints});
+      expect(publication.detailedWorkouts?.[0]?.zones).toMatchObject({provider:"whoop",first:0,minutes:[0,3,7,5,15,10]});
+      const input=read(publication);
+      expect(score(input.evidence,today)?.rows.zone_intensity?.vigorous_min_day).toBeGreaterThan(0);
+      expect(buildViews(input).you.factors).toContainEqual(expect.objectContaining({key:"zone_intensity",label:"Workout intensity"}));
+      for (const session of publication.detailedWorkouts ?? []) delete session.zones;
+      expect(score(read(publication).evidence,today)?.rows.zone_intensity).toBeUndefined();
+    } finally { await rm(vaultRoot,{recursive:true,force:true}); }
+  },60_000);
   it.each(["home", "clinic"] as const)("scores a canonical %s series after publication", async (setting) => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "synthetic-pressure-"));
     try {
@@ -718,12 +756,49 @@ describe("private age views", () => {
     });
     expect(views.you.age).toBeUndefined();
   });
+  it("offers the first eligible habit, respects skips and retains the earlier replica contract", () => {
+    const input = read(replica());
+    input.hasAnswerProjection = false;
+    expect(nextQuestion(input, {})).toEqual([]);
+    input.hasHabitQuestions = true;
+    expect(nextQuestion(input, {}).map(q => q.key)).toEqual(["coffee_cups"]);
+    input.evidence.checkins = [{ date: offset(today, -1), answerKey: "coffee_cups" }];
+    expect(nextQuestion(input, {}).map(q => q.key)).toEqual(["tea_cups"]);
+    input.evidence.profile = { ...input.evidence.profile, birth_date: undefined, age: 58 };
+    expect(nextQuestion(input, {}).map(q => q.key)).toEqual(["usual_pace"]);
+    input.evidence.checkins.push({ date: today, reported_at: today, answerKey: "usual_pace" });
+    expect(nextQuestion(input, {})).toEqual([]);
+  });
+  it("offers the yogurt question only for its reference sex and omits the four research-only prompts", () => {
+    const input = read(replica());
+    input.hasAnswerProjection = false;
+    input.hasHabitQuestions = true;
+    input.evidence.profile = { ...input.evidence.profile, birth_date: undefined, age: 59 };
+    const offered = (sex: string) => {
+      input.evidence.profile = { ...input.evidence.profile, sex };
+      input.evidence.checkins = [];
+      const keys = new Set<string>();
+      for (let i = 0; i < 35; i++) {
+        const question = nextQuestion(input, {})[0];
+        if (!question) return keys;
+        expect(keys.has(question.key)).toBe(false);
+        keys.add(question.key);
+        input.evidence.checkins.push({ date: offset(today, -1), answerKey: question.key });
+      }
+      throw new Error("Question sequence did not finish");
+    };
+    expect(offered("male").has("yogurt_frequency")).toBe(false);
+    const female = offered("female");
+    expect(female.has("yogurt_frequency")).toBe(true);
+    for (const key of ["fried_chicken", "fried_seafood", "widespread_pain", "chewing_change"])
+      expect(female.has(key)).toBe(false);
+  });
   it("gives a small sustained sleep change a small weekly effect", () => {
     const r = replica();
     for (const row of r.metricRows) row.value = row.date > offset(today, -7) ? 400 : 390;
     const input = read(r);
-    expect(score(input.evidence, today)?.changes.sleep).toBeCloseTo(-0.000134, 8);
-    expect(buildViews(input).you.week).toMatchObject({ daysAged: 6.95, basis: "observed" });
+    expect(score(input.evidence, today)?.changes.sleep).toBeCloseTo(-0.00000349048, 10);
+    expect(buildViews(input).you.week).toMatchObject({ daysAged: 7, basis: "observed" });
   });
   it.each([-1, 1])("omits tiny observed weekly movements in direction %i", direction => {
     const r = replica();

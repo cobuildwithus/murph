@@ -1,3 +1,5 @@
+import { sensorRecord } from "./wear-days";
+import { habitQuestionsV1 } from "@murphai/contracts";
 import {
   between,
   day,
@@ -19,6 +21,7 @@ const config = model.feeds;
 const families = [
   "extensions",
   "daily",
+  "wear_days",
   "labs",
   "body",
   "bp",
@@ -46,12 +49,40 @@ function demographics(member: Observation) {
   return profile;
 }
 
+type HabitQuestion = {
+  options: Readonly<Record<string, string | number | null>>;
+  attests: Readonly<Record<string, boolean>>;
+};
+function closedChoice(row: Observation, key: unknown, answer: unknown) {
+  let r = { ...row };
+  const question = lookup<HabitQuestion>(habitQuestionsV1, key);
+  const spec = lookup(model.evidence.factors, key);
+  if (question && spec) {
+    r = {
+      ...question.attests,
+      ...r,
+      topic: key,
+      protocol: spec.protocol,
+      source: "questionnaire",
+      unit: spec.unit,
+      answer: lookup<string | number | null>(question.options, answer) ?? null,
+    };
+    if ("postmenopausal" in question.attests && answer === "I am not past menopause")
+      r.postmenopausal = false;
+  }
+  return r;
+}
+
 /** Combine dated collections only. Current demographics and join date own the replay anchor. */
 export function adapt(member: Observation, history: Observation = {}): MemberEvidence {
   const profile = demographics(member);
   const result: MemberEvidence = { profile, joined: day(member.joined) || undefined };
   for (const k of families) result[k] = [...records(history[k]), ...records(member[k])];
   const context = (r: Observation, key: string) => result.feed_context!.push({ ...r, context_key: key });
+  result.wear_days = result.wear_days!.filter(
+    (r) =>
+      sensorRecord(r) && (r.unit == null || ["min", "minutes"].includes(String(r.unit).toLowerCase().trim())),
+  );
   projectMetrics(member, history, result, context);
   result.labs = result.labs!.map((r) => {
     const key = r.marker || r.key;
@@ -63,7 +94,8 @@ export function adapt(member: Observation, history: Observation = {}): MemberEvi
   const sessions = [...records(history.combine), ...records(member.combine)];
   const weeks = [...records(history.food_weeks), ...records(member.food_weeks)];
   result.checkins = result.checkins!.map((row) => {
-    const r = { ...row };
+    let r = { ...row };
+    if (r.form === "murph-habits-v1") r = closedChoice(r, r.topic, r.answer);
     if (typeof r.topic === "string") r[r.topic] ??= r.answer;
     if (isObject(r.combine)) sessions.push({ ...r, ...r.combine });
     if (isObject(r.food_week)) weeks.push({ ...r, ...r.food_week });
@@ -96,6 +128,8 @@ export function adapt(member: Observation, history: Observation = {}): MemberEvi
     date: r.date ?? day(r.start),
     minutes: r.minutes ?? r.duration_min,
   }));
+  for (const group of ["daily", "sleep_sessions", "vo2"] as const)
+    result[group] = result[group]!.filter(sensorRecord);
   return result;
 }
 
@@ -127,7 +161,13 @@ export function pressurePairs(data: MemberEvidence, at: string) {
                 (number(r.revision) ?? 0) === (number(top.revision) ?? 0) &&
                 (r.reported_at ?? "") === (top.reported_at ?? ""),
             )
-            .map((r) => (eligible(r, at) && !r.partial ? number(r.value) : null)),
+            .map((r) =>
+              eligible(r, at) &&
+              !r.partial &&
+              ["final", "amended", "corrected"].includes(String(r.status ?? "final"))
+                ? number(r.value)
+                : null,
+            ),
         )
       );
     }
@@ -166,6 +206,28 @@ function wearableMetric(key: string, source: string, method: string) {
     !config.excluded_methods.includes(method)
   );
 }
+function projectDaily(
+  result: MemberEvidence,
+  context: Context,
+  r: Observation,
+  key: string,
+  value: unknown,
+  source: string,
+  method: string,
+) {
+  if (!lookup(config.daily, key) || !sensorRecord(r)) return;
+  if (watchEstimate(key, source, method)) {
+    result.vo2!.push({ ...r, source, method: "device_estimate", value });
+    return;
+  }
+  if (wearableMetric(key, source, method)) {
+    const row = { ...r, source, series_method: method };
+    if (key === "total-sleep-minutes")
+      result.sleep_sessions!.push({ ...row, asleep_min: value, type: "main" });
+    else result.daily!.push({ ...row, [lookup(config.daily, key)!]: value, projected: true });
+  } else context(r, key);
+}
+
 function project(result: MemberEvidence, context: Context, r: Observation, key: string, value: unknown) {
   const unit = String(r.unit ?? "")
     .toLowerCase()
@@ -181,6 +243,11 @@ function project(result: MemberEvidence, context: Context, r: Observation, key: 
   const method = String(r.method || "unspecified")
     .toLowerCase()
     .replaceAll("-", "_");
+  if (key === "worn-minutes") {
+    if (sensorRecord(r) && ["min", "minutes"].includes(unit) && method !== "unspecified")
+      result.wear_days!.push({ ...r, source, series_method: method, worn_min: value });
+    return;
+  }
   const body = lookup(config.body, key);
   if (body) {
     result.body!.push({ ...r, [body]: value });
@@ -200,17 +267,7 @@ function project(result: MemberEvidence, context: Context, r: Observation, key: 
     context(r, "blood_pressure_protocol");
     return;
   }
-  if (!lookup(config.daily, key)) return;
-  if (watchEstimate(key, source, method)) {
-    result.vo2!.push({ ...r, source, method: "device_estimate", value });
-    return;
-  }
-  if (wearableMetric(key, source, method)) {
-    const row = { ...r, source, series_method: method };
-    if (key === "total-sleep-minutes")
-      result.sleep_sessions!.push({ ...row, asleep_min: value, type: "main" });
-    else result.daily!.push({ ...row, [lookup(config.daily, key)!]: value, projected: true });
-  } else context(r, key);
+  projectDaily(result, context, r, key, value, source, method);
 }
 
 function projectMetrics(member: Observation, history: Observation, result: MemberEvidence, context: Context) {
@@ -228,6 +285,10 @@ function projectFood(weeks: Observation[], result: MemberEvidence, context: Cont
   for (const r of weeks) {
     const a = r.answers;
     if (!isObject(a) || ("week_end" in r && !between(distance(rowDay(r), day(r.week_end)), 1, 7))) continue;
+    if (r.form === "murph-habits-v1" && r.complete === true)
+      for (const [key, answer] of Object.entries(a))
+        if (lookup(model.evidence.factors, key)?.family === "food" && Object.hasOwn(habitQuestionsV1, key))
+          result.checkins!.push(closedChoice(r, key, answer));
     for (const key of config.food_questions) if (key in a) context(r, "food_week." + key);
     const valid = (key: string) => between(number(a[key]), 0, model.policy.protocol.food_portion_max);
     if (

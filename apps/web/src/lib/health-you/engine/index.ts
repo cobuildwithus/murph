@@ -1,8 +1,9 @@
 import { projectionSummary, projectionWeight, blend, centerClinical } from "./projection";
-import { combineContext } from "./combine";
+import { combineContext, tapeFactors } from "./combine";
 import { workoutZones } from "./workout-zones";
 import { studyFactors } from "./instruments";
-import { clinical, habits, labValues } from "./observations";
+import { centerPanel, comparisonValue, isolatedRdw } from "./panel";
+import { clinical, habits, labValues, rdwDisclosure } from "./observations";
 import { foodFactors } from "./food";
 import { capFamily, clinicalMarkers } from "./clinical-markers";
 import { workoutFactors, verifiedHabits } from "./workouts";
@@ -11,6 +12,7 @@ import { adapt } from "./feeds";
 import { published } from "./extensions";
 import {
   coef,
+  native,
   sumYears,
   dated,
   interp,
@@ -48,14 +50,31 @@ export function ageAt(data: MemberEvidence, date: string, anchor: string) {
   const age = n === null ? NaN : n + distance(date, day(p.age_as_of) || anchor) / YEAR;
   return { age, whole: Math.floor(age + 1e-8) };
 }
-export function snapshot(
+function firstDisclosureWasIsolated(
+  result: Rows,
   data: MemberEvidence,
+  intake: MemberEvidence,
   at: string,
   age: number,
   sex: Sex,
-  legacy = false,
-  reasons: Record<string, string> = {},
 ) {
+  const disclosure = result.rdw && rdwDisclosure(data, at);
+  return Boolean(
+    disclosure &&
+      disclosure >= "2015-01-01" &&
+      isolatedRdw(disclosure === at ? result : snapshot(intake, disclosure, age, sex, false, {}, true)),
+  );
+}
+
+function centerStandaloneWaist(result: Rows, year: number, age: number, sex: Sex) {
+  if (!result.bmi && result.waist && year >= 2015) {
+    const neutral = comparisonValue("waist", age, sex, Number(result.waist.value));
+    result.waist.years -= native("waist", neutral, age, sex)!.years;
+    result.waist.source = "Waist comparison centered on 2009–14 NHANES exams";
+  }
+}
+
+function withDatedConditions(data: MemberEvidence, at: string) {
   const conditions = dated(data, "checkins", at, model.policy.protocol.checkin_days).filter((r) =>
     Array.isArray(r.conditions),
   );
@@ -75,6 +94,20 @@ export function snapshot(
       },
     };
   }
+  return data;
+}
+
+export function snapshot(
+  data: MemberEvidence,
+  at: string,
+  age: number,
+  sex: Sex,
+  legacy = false,
+  reasons: Record<string, string> = {},
+  inventory = false,
+) {
+  const intake = data;
+  data = withDatedConditions(intake, at);
   const { result, ci, labs } = clinical(data, at, age, sex, legacy);
   if (["night", "rotating"].includes(String(pick(ci, "work_schedule"))))
     data = { ...data, profile: { ...data.profile, shift_worker: true } };
@@ -83,12 +116,15 @@ export function snapshot(
   Object.assign(result, wear);
   const mult = model.policy.years_per_published_log_unit * shrink(age) * model.strength;
   const workouts = workoutFactors(data, at, age, sex, result, mult);
-  const zones = !legacy && workoutZones(data, at, result, mult);
+  const zones = !legacy && workoutZones(data, at, wear, mult);
   if (zones) {
+    delete result.activity;
     delete workouts.aerobic;
     workouts.zone_intensity = zones;
   }
-  Object.assign(result, workouts, foodFactors(data, at, age, sex, ci, { ...result, ...workouts }, mult));
+  Object.assign(result, workouts);
+  if (zones) capFamily(result, ["steps", "zone_intensity"], 0.75 * mult);
+  Object.assign(result, foodFactors(data, at, age, sex, ci, result, mult));
   const caps = model.overlap.absolute_log_caps;
   Object.assign(
     result,
@@ -113,7 +149,7 @@ export function snapshot(
     model.daily.food_cap * mult,
   );
   capFamily(result, ["sleep", "onset_sd", "sleep_regularity", "l5_midpoint"], model.daily.sleep_cap * mult);
-  if ([wear, workouts, streaks].some((r) => Object.keys(r).length))
+  if (result.pushups_max || [wear, workouts, streaks].some((r) => Object.keys(r).length))
     capFamily(
       result,
       [
@@ -123,6 +159,7 @@ export function snapshot(
         "activity",
         "aerobic",
         "zone_intensity",
+        "pushups_max",
         "knee",
         "gait",
         "vo2",
@@ -131,48 +168,103 @@ export function snapshot(
     );
   clinicalMarkers(result, data, at, age, sex, mult, labs.non_hdl, legacy);
   if (!legacy) {
+    const year = Number(at.slice(0, 4));
+    centerStandaloneWaist(result, year, age, sex);
     centerClinical(result, age, sex, mult);
     studyFactors(data, at, result, age, sex, reasons);
+    if (inventory) return result;
+    Object.assign(result, tapeFactors(data, at, age, sex, result, mult));
     blend(result, age, sex);
+    const solo = firstDisclosureWasIsolated(result, data, intake, at, age, sex);
+    centerPanel(result, age, sex, year, solo);
   }
   return result;
 }
-export function comparableMovement(
-  data: MemberEvidence,
-  at: string,
-  cutoff: string,
-  current: Rows,
-  before: Rows,
-) {
-  const changes: Record<string, number> = {};
-  for (const [k, r] of Object.entries(current)) {
-    const old = before[k];
-    if (!old) continue;
-    if (
-      (r.series && r.series === old.series) ||
-      (k === "smoking" && r.quit && (r.quit === old.quit || old.value === 1))
-    )
-      changes[k] =
-        r.level !== undefined && old.level !== undefined
-          ? (r.level - old.level) * Math.min(r.confidence!, old.confidence!)
-          : r.years - old.years;
-  }
-  for (const [group, keys] of [
-    ["daily", ["pulse", "steps", "hip_minutes", "activity", "hrv"]],
-    ["sleep_sessions", ["sleep", "onset_sd"]],
-    ["workouts", ["aerobic", "zone_intensity", "lifting", "sauna"]],
-    ["meals", ["meal_fibre", "meal_density"]],
-    ["habits", ["steps", "lifting", "sauna", "alcohol"]],
-    ["checkins", ["smoking", "alcohol", "fibre", "meal_fibre", "meal_density"]],
+function timelyObservations(data: MemberEvidence, cutoff: string, at: string) {
+  let result = data;
+  for (const key of [
+    "daily",
+    "sleep_sessions",
+    "wear_days",
+    "workouts",
+    "checkins",
+    "meals",
+    "habits",
+    "fitness_tests",
+    "body",
+    "labs",
+    "bp",
+    "extensions",
+    "vo2",
+    "pressure_components",
+    "food_weeks",
   ] as const) {
+    const rows = data[key];
+    if (!rows) continue;
+    const sensor = key === "daily" || key === "sleep_sessions" || key === "wear_days";
+    let edited = false;
+    const aligned = rows.flatMap((row) => {
+      const acquired = rowDay(row);
+      const release = [day(row.reported_at), day(row.received_at)].sort()[1];
+      if (
+        !acquired ||
+        release <= cutoff ||
+        release > at ||
+        release <= acquired ||
+        (sensor && acquired > cutoff && distance(release, acquired) <= 1 && !row.revision)
+      )
+        return [row];
+      edited = true;
+      if (sensor && acquired <= cutoff) {
+        const { reported_at: _reported, received_at: _received, ...corrected } = row;
+        return [corrected];
+      }
+      return [];
+    });
+    if (edited) {
+      if (result === data) result = { ...data };
+      result[key] = aligned;
+    }
+  }
+  return result;
+}
+
+function comparableMovement(current: Rows, before: Rows, period: number) {
+  const changes: Record<string, number> = {};
+  const paced: string[] = [];
+  let wearMove = 0;
+  for (const [key, row] of Object.entries(current)) {
+    const old = before[key];
     if (
-      data[group]?.some((r) =>
-        [day(r.reported_at), day(r.received_at)].some((d) => d > cutoff && d <= at && d > rowDay(r)),
+      !old ||
+      !(
+        (row.series && row.series === old.series) ||
+        (key === "smoking" && row.quit && (row.quit === old.quit || old.value === 1))
       )
     )
-      keys.forEach((k) => delete changes[k]);
+      continue;
+    let delta = row.years - old.years;
+    if (row.level !== undefined && old.level !== undefined) {
+      const confidence = Math.min(row.confidence!, old.confidence!);
+      delta = (row.level - old.level) * confidence;
+      if (row.session_pace !== undefined) delta = (((row.session_pace * confidence) / YEAR) * period) / 7;
+      if (row.weekly_pace !== undefined) {
+        const observations = Math.max(0, Math.min(1, (row.wear_observations! - old.wear_observations!) / 5));
+        delta = (row.weekly_pace * observations * confidence) / YEAR;
+        paced.push(key);
+      }
+      if (row.wear_confidence !== undefined || old.wear_confidence !== undefined) wearMove += delta;
+    } else if (key === "smoking") {
+      const limit = (model.policy.cessation_week_limit_days * period) / 7;
+      delta = (limit * Math.tanh((delta * YEAR) / limit)) / YEAR;
+    }
+    changes[key] = delta;
   }
-  return changes;
+  const pace = YEAR * sumYears(paced.map((k) => changes[k]));
+  const bounded =
+    Math.sign(pace) * (0.43 * Math.tanh(Math.abs(pace) / 0.35) + 1.6 * Math.max(0, Math.abs(pace) - 0.82));
+  if (pace) for (const key of paced) changes[key] *= bounded / pace;
+  return { changes, wearMove: wearMove + (bounded - pace) / YEAR };
 }
 export function pauseReason(data: MemberEvidence, at: string, anchor: string) {
   const { whole } = ageAt(data, at, anchor),
@@ -239,20 +331,20 @@ export function score(data: MemberEvidence, at: string, period = 7) {
   let changes: Record<string, number> = {};
   let reassessment: number | null = null;
   if (!pauseReason(data, cutoff, at)) {
-    const fixed = snapshot(data, cutoff, age, sex);
-    changes = comparableMovement(data, at, cutoff, rows, fixed);
+    const observedFixed = snapshot(data, cutoff, age, sex);
+    const timely = timelyObservations(data, cutoff, at);
+    const tracking = timely === data ? rows : snapshot(timely, at, age, sex);
+    const fixed = timely === data ? observedFixed : snapshot(timely, cutoff, age, sex);
+    const movement = comparableMovement(tracking, fixed, period);
+    changes = movement.changes;
+    const wearable = [...new Set([...Object.keys(rows), ...Object.keys(observedFixed)])].filter(
+      (k) => rows[k]?.wear_confidence !== undefined || observedFixed[k]?.wear_confidence !== undefined,
+    );
     reassessment =
       roundEven(
-        sumYears(
-          Object.entries(changes)
-            .filter(
-              ([k]) =>
-                rows[k].wear_confidence !== undefined &&
-                rows[k].level !== undefined &&
-                fixed[k]?.level !== undefined,
-            )
-            .map(([k, move]) => rows[k].years - fixed[k].years - move),
-        ) * 1e8,
+        (sumYears(wearable.map((k) => (rows[k]?.years ?? 0) - (observedFixed[k]?.years ?? 0))) -
+          movement.wearMove) *
+          1e8,
       ) / 1e8;
     const move = sumYears(
       Object.keys(changes)
@@ -264,11 +356,16 @@ export function score(data: MemberEvidence, at: string, period = 7) {
     residual = roundEven((gap - sumYears(Object.values(before).map((r) => r.years)) - move) * 1e8) / 1e8;
   }
   const flags = [
+    ...(rows.display_limit ? ["display_gap_limited"] : []),
     ...(p.approximate_birth_date ? ["birth_year_midpoint_assumed"] : []),
     ...(value < 20 || value > 79 ? ["age_equivalent_outside_training_range"] : []),
     ...(ageAt(data, at, at).whole === 80 ? ["chronological_age_extrapolation"] : []),
     ...(factors.some(
-      ([k]) => Object.hasOwn(model.coverage.factors, k) || Object.hasOwn(model.evidence.factors, k),
+      ([k]) =>
+        k === "waist_hip_ratio" ||
+        k === "thigh_cm" ||
+        Object.hasOwn(model.coverage.factors, k) ||
+        Object.hasOwn(model.evidence.factors, k),
     )
       ? ["extension_age_effects_uncalibrated"]
       : []),

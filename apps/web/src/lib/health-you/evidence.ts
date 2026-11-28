@@ -23,6 +23,7 @@ export interface YouInputs {
   /** First reconstructed age with full contributing workout windows. */
   ageHistoryFrom?: string;
   hasWearableData: boolean;
+  hasHabitQuestions?: boolean;
   hasAnswerProjection?: boolean;
   needsWhoopAnswer?: boolean;
   lifts?: string[];
