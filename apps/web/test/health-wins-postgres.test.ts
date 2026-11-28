@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createBrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,6 +19,7 @@ import { POST as change } from "../app/api/game/v1/health/wins/[id]/change/route
 import { freezeHealthSelections, prepareHealthCandidates } from "../src/lib/health-wins/card-options";
 import { generateHealthWins, type HealthWinsInput } from "../src/lib/health-wins/engine";
 import * as inputs from "../src/lib/health-wins/inputs";
+import * as companion from "../src/lib/device-sync/companion-numbers";
 import { GET as profile } from "../app/api/game/v1/health/people/[memberId]/profile/route";
 import { GET as feed } from "../app/api/game/v1/health/feed/route";
 import { GET as photo } from "../app/api/game/v1/health/photos/[id]/route";
@@ -42,6 +44,7 @@ import * as crypto from "../src/lib/health-wins/crypto";
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from "../src/lib/legal/consent";
 import { getPrisma } from "../src/lib/prisma";
 import { issueHostedAppSession } from "./support/hosted-auth-session";
+import { experimentReplica } from "./support/health-win-experiment-replica";
 
 const deferred = vi.hoisted(() => [] as Array<() => Promise<void>>);
 const readPhotoObject = vi.hoisted(() => vi.fn());
@@ -316,6 +319,24 @@ describe.skipIf(!enabled)("health routes with native sessions and PostgreSQL", (
     await db.healthFeedHide.deleteMany({ where: { memberId: peer.id } });
     await revokeHostedConsentScope({ memberId: peer.id, scope: "launch.health-data", prisma: db });
     expect(await list()).toEqual({ unread: 0, items: [], highlights: [] });
+  });
+
+  it("serves the logged intervention and run counts from the stored win set", async () => {
+    const member = await person();
+    const client = createBrowserVaultQueryClient(await experimentReplica());
+    const load = vi.spyOn(companion, "loadPublishedCompanionMetricReplica").mockResolvedValue({ client, state: "ready", freshness: "fresh" });
+    for (let read = 0; read < 2; read++) {
+      const response = await wins(member.request("wins"));
+      expect(response.status).toBe(200);
+      const { candidates } = await response.json();
+      expect(candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "experiment_result", title: { number: "Meditation", measure: "" },
+          chart: expect.objectContaining({ adherence: { done: 13, target: 10 } }) }),
+        expect.objectContaining({ kind: "experiment_result", title: { number: "Running", measure: "" },
+          chart: expect.objectContaining({ adherence: { done: 11, target: 15 } }) }),
+      ]));
+    }
+    expect(load).toHaveBeenCalledOnce();
   });
 
   it("reads one viewer measure privately, leaving the viewer's suggestions and the post's interactions intact", async () => {

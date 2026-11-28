@@ -66,7 +66,10 @@ async function readReplicaInputs(client: BrowserVaultCoreCapableQueryClient, tod
   const labs = await source.read("labs", () => readHealthWinLabs(labRows(client, today), today));
   const experiments = await source.read("experiments", () => {
     if (!("experimentOutcomes" in client.replica)) throw Error("Missing experiment outcomes");
-    return readHealthWinExperiments(client.replica.experimentOutcomes, client.entities.list({ families: ["experiment"] }), today);
+    if (!client.replica.experimentOutcomes?.length) return [];
+    const sessions = client.replica.policy?.includedFamilies.includes("event")
+      ? client.entities.list({ families: ["event"], kinds: ["intervention_session"] }) : null;
+    return readHealthWinExperiments(client.replica.experimentOutcomes, client.entities.list({ families: ["experiment"] }), sessions, today);
   });
   const meals = dietEnabled ? await source.read("meals", () => readHealthWinMeals(client.replica.meals, today)) : null;
   return {
